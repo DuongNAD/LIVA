@@ -3,6 +3,11 @@ import { logger } from "../utils/logger";
 import { pack } from "msgpackr";
 import { serializeVoiceFrame, OP_MIC_IN, OP_WAKE_PROBE } from "../utils/voiceFrame";
 
+export function wakeConfidencePercent(score: unknown): string {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "0.0%";
+  return `${(Math.min(1, Math.max(0, score)) * 100).toFixed(1)}%`;
+}
+
 /**
  * Vì sao pipeline không lên được. Tách "môi trường không cho" (quyền mic bị chặn,
  * máy không có mic, webview thiếu getUserMedia) khỏi "hỏng thật": nhóm đầu là
@@ -418,7 +423,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
    */
   const onCoreMessage = (event: MessageEvent) => {
     if (typeof event.data !== 'string') return;
-    let parsed: { event?: string; payload?: { transcript?: string } };
+    let parsed: { event?: string; payload?: { transcript?: string; score?: number } };
     try {
       parsed = JSON.parse(event.data);
     } catch {
@@ -428,7 +433,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     if (parsed.event === 'wake_word_triggered') {
       logger.info('[WakeWord]', 'Core xác nhận cụm đánh thức:', parsed.payload?.transcript ?? '');
       if (diagnosticsPanelRef.value) {
-        diagnosticsPanelRef.value.style.setProperty('--confidence-level', '100%');
+        diagnosticsPanelRef.value.style.setProperty(
+          '--confidence-level',
+          wakeConfidencePercent(parsed.payload?.score),
+        );
       }
       detectedCallback?.();
     } else if (parsed.event === 'wake_probe_rejected') {
@@ -437,7 +445,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       // không biết core nghe ra cái gì.
       logger.info('[WakeWord]', 'Bỏ qua, không phải cụm đánh thức. Nghe ra:', parsed.payload?.transcript || '(không ra chữ)');
       if (diagnosticsPanelRef.value) {
-        diagnosticsPanelRef.value.style.setProperty('--confidence-level', '0%');
+        diagnosticsPanelRef.value.style.setProperty(
+          '--confidence-level',
+          wakeConfidencePercent(parsed.payload?.score),
+        );
       }
     }
   };

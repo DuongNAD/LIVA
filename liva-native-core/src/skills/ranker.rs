@@ -197,7 +197,11 @@ pub fn rank_skills_with_prior(
     // Thứ tự liên quan đã chốt ⇒ ghi lại thứ hạng TRƯỚC khi prior can thiệp.
     for (h, r) in ra.iter_mut().enumerate() {
         r.rank_lien_quan = h;
-        r.hinh_phat = hinh_phat.get(r.index).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        r.hinh_phat = hinh_phat
+            .get(r.index)
+            .copied()
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
     }
 
     // Chỉ sắp lại khi thật có tín hiệu. Không phải để tiết kiệm — mà để ca "sổ cái
@@ -257,9 +261,21 @@ mod tests {
 
     fn bo() -> Vec<LoadedSkill> {
         vec![
-            sk("git-review", "Review a pull request diff", "look at the diff, comment"),
-            sk("db-migrate", "Add a SQLite migration safely", "PRAGMA user_version, transaction"),
-            sk("voice-debug", "Debug the voice pipeline", "STT, TTS, VAD, barge-in"),
+            sk(
+                "git-review",
+                "Review a pull request diff",
+                "look at the diff, comment",
+            ),
+            sk(
+                "db-migrate",
+                "Add a SQLite migration safely",
+                "PRAGMA user_version, transaction",
+            ),
+            sk(
+                "voice-debug",
+                "Debug the voice pipeline",
+                "STT, TTS, VAD, barge-in",
+            ),
         ]
     }
 
@@ -321,8 +337,16 @@ mod tests {
     impl ToolEmbedder for EmbGia {
         fn embed_query_vec(&mut self, t: &str) -> Result<Vec<f32>, String> {
             Ok(vec![
-                if t.contains("thay đổi mã") { 1.0 } else { 0.0 },
-                if t.contains("chuyển đổi dữ liệu") { 1.0 } else { 0.0 },
+                if t.contains("thay đổi mã") {
+                    1.0
+                } else {
+                    0.0
+                },
+                if t.contains("chuyển đổi dữ liệu") {
+                    1.0
+                } else {
+                    0.0
+                },
             ])
         }
         fn embed_passage_vec(&mut self, t: &str) -> Result<Vec<f32>, String> {
@@ -367,7 +391,11 @@ mod tests {
     fn top_k_cat_dung_so_luong() {
         let s = bo();
         assert_eq!(rank_skills(&s, "diff", None, 1).len(), 1);
-        assert_eq!(rank_skills(&s, "diff", None, 99).len(), 3, "không vượt số skill");
+        assert_eq!(
+            rank_skills(&s, "diff", None, 99).len(),
+            3,
+            "không vượt số skill"
+        );
     }
 
     // ── G3: prior chất lượng ────────────────────────────────────────────────
@@ -451,7 +479,10 @@ mod tests {
         let s = bo();
         // Chỉ có dữ liệu cho skill 0; skill 1 và 2 thiếu hẳn.
         let r = rank_skills_with_prior(&s, "sqlite migration", None, 3, &[1.0]);
-        assert_eq!(s[r[0].index].name, "db-migrate", "skill 1 không bị phạt oan");
+        assert_eq!(
+            s[r[0].index].name, "db-migrate",
+            "skill 1 không bị phạt oan"
+        );
         assert!(r.iter().all(|x| x.hinh_phat == 0.0 || x.index == 0));
     }
 

@@ -321,9 +321,7 @@ fn vieneu_settings() -> (bool, Option<String>) {
 }
 
 /// Nạp engine VieNeu. **Nặng** (~500 MB, ~2 s) — gọi trong `spawn_blocking`.
-pub fn load_vieneu_engine(
-    voice: Option<&str>,
-) -> Result<Arc<Mutex<vieneu::VieNeuVoice>>, String> {
+pub fn load_vieneu_engine(voice: Option<&str>) -> Result<Arc<Mutex<vieneu::VieNeuVoice>>, String> {
     let v = vieneu::VieNeuVoice::load(&vieneu_model_dir(), voice)?;
     tracing::info!(
         "VieNeu-TTS premium tier enabled (voice '{}')",

@@ -75,8 +75,14 @@ fn boot_bo_khoa_mac_dinh_end_to_end() {
         let db = DatabasePool::new(&db_path).unwrap();
         let bk = resolve_and_rekey(&db, &db_path, false).unwrap();
 
-        assert!(bk.escrow_hex.is_some(), "lần đầu sinh khoá thiết bị → phải escrow");
-        assert_eq!(bk.rekeyed, 2, "2 fact khoá-mặc-định phải được chuyển sang khoá thật");
+        assert!(
+            bk.escrow_hex.is_some(),
+            "lần đầu sinh khoá thiết bị → phải escrow"
+        );
+        assert_eq!(
+            bk.rekeyed, 2,
+            "2 fact khoá-mặc-định phải được chuyển sang khoá thật"
+        );
         assert_eq!(bk.locked, 0, "không có bản khoá-chết");
         assert!(
             db_path.parent().unwrap().join(".device_key").exists(),
@@ -85,12 +91,28 @@ fn boot_bo_khoa_mac_dinh_end_to_end() {
 
         let conn = db.readers.get().unwrap();
         // Đọc được bằng khoá THẬT.
-        assert_eq!(db::get_fact(&conn, &bk.engine, "mèo").unwrap().unwrap().value, "tên Bún");
-        assert_eq!(db::get_fact(&conn, &bk.engine, "màu").unwrap().unwrap().value, "xanh dương");
+        assert_eq!(
+            db::get_fact(&conn, &bk.engine, "mèo")
+                .unwrap()
+                .unwrap()
+                .value,
+            "tên Bún"
+        );
+        assert_eq!(
+            db::get_fact(&conn, &bk.engine, "màu")
+                .unwrap()
+                .unwrap()
+                .value,
+            "xanh dương"
+        );
         // Khoá MẶC ĐỊNH KHÔNG còn mở được (đã rekey thật sự trên đĩa).
-        let raw: String =
-            conn.query_row("SELECT value FROM facts WHERE key='mèo'", [], |r| r.get(0)).unwrap();
-        assert!(default_engine.read_fact(&raw).is_locked(), "khoá mặc định phải hết mở được");
+        let raw: String = conn
+            .query_row("SELECT value FROM facts WHERE key='mèo'", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            default_engine.read_fact(&raw).is_locked(),
+            "khoá mặc định phải hết mở được"
+        );
 
         escrow_key = bk.escrow_hex.clone().unwrap();
     }
@@ -99,11 +121,20 @@ fn boot_bo_khoa_mac_dinh_end_to_end() {
     {
         let db = DatabasePool::new(&db_path).unwrap();
         let bk = resolve_and_rekey(&db, &db_path, false).unwrap();
-        assert!(bk.escrow_hex.is_none(), "reboot không sinh lại khoá → không escrow");
+        assert!(
+            bk.escrow_hex.is_none(),
+            "reboot không sinh lại khoá → không escrow"
+        );
         assert_eq!(bk.rekeyed, 0, "đã ở khoá thật → không rekey (idempotent)");
         assert_eq!(bk.source, "device-key");
         let conn = db.readers.get().unwrap();
-        assert_eq!(db::get_fact(&conn, &bk.engine, "mèo").unwrap().unwrap().value, "tên Bún");
+        assert_eq!(
+            db::get_fact(&conn, &bk.engine, "mèo")
+                .unwrap()
+                .unwrap()
+                .value,
+            "tên Bún"
+        );
     }
 
     // 4. KHÔI PHỤC sau "mất DPAPI": đặt LIVA_ENCRYPTION_KEY = khoá đã escrow.
@@ -115,10 +146,16 @@ fn boot_bo_khoa_mac_dinh_end_to_end() {
     {
         let db = DatabasePool::new(&db_path).unwrap();
         let bk = resolve_and_rekey(&db, &db_path, false).unwrap();
-        assert_eq!(bk.source, "env", "đặt env → dùng khoá env, không sinh khoá thiết bị");
+        assert_eq!(
+            bk.source, "env",
+            "đặt env → dùng khoá env, không sinh khoá thiết bị"
+        );
         let conn = db.readers.get().unwrap();
         assert_eq!(
-            db::get_fact(&conn, &bk.engine, "mèo").unwrap().unwrap().value,
+            db::get_fact(&conn, &bk.engine, "mèo")
+                .unwrap()
+                .unwrap()
+                .value,
             "tên Bún",
             "khôi phục dữ liệu qua LIVA_ENCRYPTION_KEY = khoá đã backup"
         );
@@ -165,10 +202,129 @@ fn boot_xoay_khoa_qua_key_old_end_to_end() {
         assert_eq!(bk.source, "env");
         assert_eq!(bk.rekeyed, 1, "fact khoá A phải được rekey sang B");
         let conn = db.readers.get().unwrap();
-        assert_eq!(db::get_fact(&conn, &bk.engine, "k").unwrap().unwrap().value, "giá trị dưới khoá A");
-        let raw: String =
-            conn.query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0)).unwrap();
-        assert!(engine_a.read_fact(&raw).is_locked(), "sau xoay, khoá cũ A phải hết mở được");
+        assert_eq!(
+            db::get_fact(&conn, &bk.engine, "k").unwrap().unwrap().value,
+            "giá trị dưới khoá A"
+        );
+        let raw: String = conn
+            .query_row("SELECT value FROM facts WHERE key='k'", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            engine_a.read_fact(&raw).is_locked(),
+            "sau xoay, khoá cũ A phải hết mở được"
+        );
+    }
+
+    unsafe {
+        std::env::remove_var("LIVA_ENCRYPTION_KEY");
+        std::env::remove_var("LIVA_ENCRYPTION_KEY_OLD");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn boot_migrate_checkpoint_conversation_va_xoa_plaintext_remnant() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe {
+        std::env::remove_var("LIVA_ENCRYPTION_KEY");
+        std::env::remove_var("LIVA_ENCRYPTION_KEY_OLD");
+    }
+
+    let dir = tmp_dir("personal-data");
+    let db_path = dir.join("mem.sqlite");
+    let key_old = "personal-data-old-key-32-bytes-";
+    let key_live = "personal-data-live-key-32-bytes";
+    let old = EncryptionEngine::new(key_old);
+    let checkpoint_canary = "CHECKPOINT-PLAINTEXT-CANARY-20260731";
+    let conversation_canary = "CONVERSATION-FTS-CANARY-20260731";
+
+    {
+        let db = DatabasePool::new(&db_path).unwrap();
+        let conn = db.writer.get().unwrap();
+        conn.execute(
+            "INSERT INTO agent_checkpoints (thread_id, state_json) VALUES ('thread-1', ?1)",
+            [format!(r#"{{"message":"{checkpoint_canary}"}}"#)],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO vectors_meta (
+                vec_id, type, content, domain, category, created_at
+             ) VALUES ('turn-1', 'conversation_turn', ?1, 'memory_owner:local',
+                       'conversation:default', 1)",
+            [old.encrypt(conversation_canary).unwrap()],
+        )
+        .unwrap();
+        let rowid: i64 = conn
+            .query_row(
+                "SELECT id FROM vectors_meta WHERE vec_id = 'turn-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute(
+            "INSERT INTO vectors_fts (rowid, content) VALUES (?1, ?2)",
+            (rowid, conversation_canary),
+        )
+        .unwrap();
+    }
+
+    unsafe {
+        std::env::set_var("LIVA_ENCRYPTION_KEY", key_live);
+        std::env::set_var("LIVA_ENCRYPTION_KEY_OLD", key_old);
+    }
+    {
+        let db = DatabasePool::new(&db_path).unwrap();
+        let boot = resolve_and_rekey(&db, &db_path, false).unwrap();
+        assert_eq!(boot.personal_data_rekeyed, 2);
+        assert_eq!(boot.personal_data_locked, 0);
+
+        let conn = db.readers.get().unwrap();
+        let checkpoint_raw: String = conn
+            .query_row(
+                "SELECT state_json FROM agent_checkpoints WHERE thread_id = 'thread-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let conversation_raw: String = conn
+            .query_row(
+                "SELECT content FROM vectors_meta WHERE vec_id = 'turn-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(checkpoint_raw.starts_with("v2:"));
+        assert!(conversation_raw.starts_with("v2:"));
+        assert!(
+            boot.engine
+                .try_decrypt(&checkpoint_raw)
+                .unwrap()
+                .contains(checkpoint_canary)
+        );
+        assert_eq!(
+            boot.engine.try_decrypt(&conversation_raw).unwrap(),
+            conversation_canary
+        );
+        let fts_count: i64 = conn
+            .query_row("SELECT count(*) FROM vectors_fts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fts_count, 0);
+    }
+
+    let db_bytes = std::fs::read(&db_path).unwrap();
+    assert!(
+        !db_bytes
+            .windows(checkpoint_canary.len())
+            .any(|window| window == checkpoint_canary.as_bytes())
+    );
+    assert!(
+        !db_bytes
+            .windows(conversation_canary.len())
+            .any(|window| window == conversation_canary.as_bytes())
+    );
+    let wal_path = db_path.with_extension("sqlite-wal");
+    if wal_path.exists() {
+        assert_eq!(std::fs::metadata(&wal_path).unwrap().len(), 0);
     }
 
     unsafe {

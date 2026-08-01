@@ -70,7 +70,12 @@ const VK_MEDIA_PLAY_PAUSE: u16 = 0xB3;
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum VolumeAction {
-    #[serde(alias = "louder", alias = "increase", alias = "raise", alias = "volume_up")]
+    #[serde(
+        alias = "louder",
+        alias = "increase",
+        alias = "raise",
+        alias = "volume_up"
+    )]
     Up,
     #[serde(
         alias = "quieter",

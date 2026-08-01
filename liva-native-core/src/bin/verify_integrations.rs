@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use liva_native_core::{AppState, crypto, db, handle_command, llm, stt, tts};
 use serde_json::json;
-use liva_native_core::{handle_command, AppState, db, crypto, stt, llm, tts};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -11,7 +11,10 @@ async fn main() {
     // Set up dummy environment variables for tests
     unsafe {
         std::env::set_var("LIVA_ENCRYPTION_KEY", "00000000000000000000000000000000");
-        std::env::set_var("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11");
+        std::env::set_var(
+            "TELEGRAM_BOT_TOKEN",
+            "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+        );
     }
 
     // Initialize mock application state
@@ -38,21 +41,26 @@ async fn main() {
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
         aec: tokio::sync::Mutex::new(None),
-        mcp_server: std::sync::Arc::new(liva_native_core::mcp::server::NativeMcpServer::new("test_vault")),
+        mcp_server: std::sync::Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
+            "test_vault",
+        )),
         embedder: tokio::sync::Mutex::new(None),
         vision: tokio::sync::Mutex::new(vision_manager),
     });
 
     // 1. Verify smart home direct execution and validation boundaries
     println!("\n[1] Testing Smart Home Validation Boundaries...");
-    
+
     // Test case 1.1: báo TRUNG THỰC (chưa có phần cứng → không thành công giả)
     let payload = json!({ "device": "light", "action": "on" });
     let res = liva_native_core::integrations::smart_home::execute(payload);
     assert!(res.is_ok());
     let msg = res.unwrap();
     assert!(
-        msg.contains("CHƯA") && msg.contains("light") && msg.contains("on") && !msg.contains("successfully"),
+        msg.contains("CHƯA")
+            && msg.contains("light")
+            && msg.contains("on")
+            && !msg.contains("successfully"),
         "smart_home phải báo trung thực, không thành công giả: {msg}"
     );
     println!("  -> Honest (not-connected) case passed!");
@@ -74,7 +82,14 @@ async fn main() {
     // 2. Verify handle_command for integration:smart_home_control
     println!("\n[2] Testing handle_command: integration:smart_home_control...");
     let payload = json!({ "device": "ac", "action": "off" });
-    let res = handle_command(state.clone(), "integration:smart_home_control", payload, None, None).await;
+    let res = handle_command(
+        state.clone(),
+        "integration:smart_home_control",
+        payload,
+        None,
+        None,
+    )
+    .await;
     assert!(res.is_ok());
     let val = res.unwrap();
     let result_str = val["result"].as_str().unwrap_or_default();

@@ -1,37 +1,14 @@
-//! Hộp chờ xác nhận: chặng bắt buộc giữa "LIVA hiểu ý" và "tin nhắn rời khỏi máy".
+//! Hộp chờ xác nhận bền vững giữa “LIVA hiểu ý” và “tin nhắn rời khỏi máy”.
 //!
-//! ## Vì sao tồn tại
-//!
-//! `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` ghi "bước xác nhận cho hành
-//! động vật lý vẫn CHƯA có". Gửi tin nhắn là **không hoàn tác được** — mạnh hơn
-//! bật đèn, vì cái sai không nằm ở máy mà nằm ở người khác đã đọc nó.
-//!
-//! Và cái sai ở đây không hiếm: bộ định tuyến chạy trên model 2B, đầu vào
-//! thường là STT tiếng Việt. Nghe "Hiến" thành "Hiền", nghe "bảo nó ngủ đi"
-//! thành "bảo nó ngu đi" — cả hai đều là câu hợp lệ, không có tín hiệu nào để
-//! máy tự biết mình sai. Người đọc lại một dòng chữ thì biết ngay.
-//!
-//! Nên module này giữ đúng một bất biến, và mọi thứ khác chỉ là hệ quả:
-//!
-//! > **Không có đường nào gửi tin mà không đi qua một [`take`] thành công.**
-//!
-//! Module này KHÔNG tự gửi gì. Nó chỉ giữ chữ. Người gửi là
-//! `messaging::send` — và nó chỉ nhận được [`Draft`] từ [`take`].
-//!
-//! ## Ba tính chất được test khoá lại
-//!
-//! 1. **Dùng một lần.** [`take`] lấy bản nháp ra khỏi hộp. Bấm xác nhận hai lần
-//!    (hoặc UI gửi trùng gói) thì lần thứ hai không có gì để gửi.
-//! 2. **Hết hạn.** Bản nháp quá [`TTL_SECS`] không lấy được nữa. Bấm xác nhận
-//!    cho một câu nói từ hai mươi phút trước là gần như chắc chắn nhầm ngữ cảnh.
-//! 3. **Có trần.** Hộp không giữ quá [`MAX_PENDING`] bản nháp; vượt thì bản cũ
-//!    nhất rơi ra. Một vòng lặp lỗi gọi `stage` liên tục không được phép ăn hết
-//!    RAM một tiến trình chạy nền cả ngày.
+//! Bản nháp nằm trong SQLite nên không mất khi tiến trình khởi động lại. Nội
+//! dung tin được mã hóa bằng cùng khóa dữ liệu của LIVA; metadata người nhận
+//! giữ nguyên để khớp với bảng `contacts`. Mọi thao tác thay đổi trạng thái dùng
+//! transaction `IMMEDIATE`, vì `take` phải là cửa tiêu thụ đúng một lần ngay cả
+//! khi hai yêu cầu xác nhận đến đồng thời.
 
+use crate::crypto::{EncryptionEngine, FactRead};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Serialize;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 use super::contacts::Platform;
 
@@ -45,326 +22,418 @@ pub const MAX_PENDING: usize = 32;
 pub struct Draft {
     pub draft_id: String,
     pub platform: Platform,
-    /// Tên hiển thị của người nhận — thứ người dùng ĐỌC trên thẻ xác nhận.
+    /// Tên hiển thị mà người dùng đọc trên thẻ xác nhận.
     pub display_name: String,
-    /// Địa chỉ đích thật — thứ máy DÙNG. Hiện cả hai trên thẻ là có chủ ý: tên
-    /// đúng mà số sai vẫn là gửi nhầm người.
+    /// Địa chỉ đích thật mà adapter gửi tin sử dụng.
     pub handle: String,
     pub text: String,
     pub created_at: u64,
-    /// Số thứ tự tăng đơn điệu trong tiến trình — thứ tự tạo, dùng ở CẢ hai chỗ
-    /// cần biết cái nào cũ/mới hơn: chọn bản bị đuổi trong [`stage`] và xếp
-    /// "mới nhất trước" trong [`pending`].
-    ///
-    /// Vì sao cần: `created_at` tính bằng **giây**, nên mọi bản nháp tạo trong
-    /// cùng một giây có `created_at` bằng nhau. Khi hộp đầy, `min_by_key` khi đó
-    /// rơi về so `draft_id` — vốn NGẪU NHIÊN — nên một bản nháp **vừa tạo xong**
-    /// có thể bị đuổi trước những bản thật sự cũ hơn. Với `seq`, thứ tự "cũ
-    /// nhất" là toàn phần và đúng nghĩa.
-    ///
-    /// `#[serde(skip)]`: đây là chi tiết nội bộ, không thuộc hợp đồng JSON với
-    /// client — thêm nó không đổi hình dạng dữ liệu bên ngoài.
-    #[serde(skip)]
-    seq: u64,
 }
 
-impl Draft {
-    fn het_han(&self, bay_gio: u64) -> bool {
-        bay_gio.saturating_sub(self.created_at) >= TTL_SECS
-    }
+#[derive(Debug, Clone)]
+struct StoredDraft {
+    draft_id: String,
+    platform: String,
+    display_name: String,
+    handle: String,
+    text_ciphertext: String,
+    created_at: i64,
 }
 
-fn bay_gio() -> u64 {
+/// Kết quả tiêu thụ bản nháp, tách rõ lý do để UI không nói dối rằng restart
+/// làm mất dữ liệu hoặc khuyến khích người dùng bấm lại một hành động đã gửi.
+#[derive(Debug, Clone)]
+pub enum TakeResult {
+    Taken(Draft),
+    Expired,
+    Missing,
+    /// Có hàng nhưng khóa hiện tại không giải mã được. Hàng được giữ nguyên để
+    /// có thể phục hồi bằng đúng khóa; tuyệt đối không gửi ciphertext.
+    Locked,
+}
+
+fn bay_gio() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs()
+        .as_secs() as i64
 }
 
-fn hop() -> &'static Mutex<HashMap<String, Draft>> {
-    static OUTBOX: OnceLock<Mutex<HashMap<String, Draft>>> = OnceLock::new();
-    OUTBOX.get_or_init(|| Mutex::new(HashMap::new()))
+fn het_han(created_at: i64, now: i64) -> bool {
+    now.saturating_sub(created_at) >= TTL_SECS as i64
 }
 
-/// Khoá hộp. `Mutex` bị poison nghĩa là một luồng đã panic khi đang giữ khoá;
-/// với một hộp chứa toàn dữ liệu bất biến thì nội dung vẫn đọc được, và từ chối
-/// phục vụ ở đây chỉ làm hỏng thêm — nên lấy lại ruột và đi tiếp.
-fn khoa() -> std::sync::MutexGuard<'static, HashMap<String, Draft>> {
-    hop().lock().unwrap_or_else(|e| e.into_inner())
+fn row_to_stored(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredDraft> {
+    Ok(StoredDraft {
+        draft_id: row.get(0)?,
+        platform: row.get(1)?,
+        display_name: row.get(2)?,
+        handle: row.get(3)?,
+        text_ciphertext: row.get(4)?,
+        created_at: row.get(5)?,
+    })
 }
 
-fn don_het_han(map: &mut HashMap<String, Draft>, bay_gio: u64) {
-    map.retain(|_, d| !d.het_han(bay_gio));
+fn decrypt_stored(stored: StoredDraft, crypto: &EncryptionEngine) -> Result<Option<Draft>, String> {
+    let text = match crypto.read_fact(&stored.text_ciphertext) {
+        FactRead::Ok(text) => text,
+        FactRead::Locked { .. } => return Ok(None),
+    };
+    let platform = Platform::parse(&stored.platform)?;
+    Ok(Some(Draft {
+        draft_id: stored.draft_id,
+        platform,
+        display_name: stored.display_name,
+        handle: stored.handle,
+        text,
+        created_at: stored.created_at.max(0) as u64,
+    }))
 }
 
-/// Đặt một bản nháp vào hộp, trả về `draft_id` để UI đính vào nút xác nhận.
-pub fn stage(platform: Platform, display_name: &str, handle: &str, text: &str) -> Draft {
+fn begin_immediate(conn: &Connection) -> Result<Transaction<'_>, String> {
+    Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+        .map_err(|e| format!("Không khóa được outbox để cập nhật: {e}"))
+}
+
+fn delete_expired(tx: &Transaction<'_>, now: i64) -> Result<usize, String> {
+    tx.execute(
+        "DELETE FROM message_outbox WHERE created_at <= ?1",
+        [now.saturating_sub(TTL_SECS as i64)],
+    )
+    .map_err(|e| format!("Không dọn được bản nháp hết hạn: {e}"))
+}
+
+/// Ghi một bản nháp mã hóa vào SQLite và trả dữ liệu rõ để UI xác nhận.
+pub fn stage(
+    conn: &Connection,
+    crypto: &EncryptionEngine,
+    platform: Platform,
+    display_name: &str,
+    handle: &str,
+    text: &str,
+) -> Result<Draft, String> {
     let now = bay_gio();
-    let draft = Draft {
-        draft_id: format!("dr_{}", rand::random::<u64>()),
+    let draft_id = format!("dr_{}", rand::random::<u64>());
+    let text_ciphertext = crypto
+        .encrypt(text)
+        .map_err(|e| format!("Không mã hóa được bản nháp: {e}"))?;
+    let tx = begin_immediate(conn)?;
+    delete_expired(&tx, now)?;
+
+    let count: i64 = tx
+        .query_row("SELECT COUNT(*) FROM message_outbox", [], |row| row.get(0))
+        .map_err(|e| format!("Không đếm được outbox: {e}"))?;
+    if count >= MAX_PENDING as i64 {
+        let excess = count - MAX_PENDING as i64 + 1;
+        tx.execute(
+            "DELETE FROM message_outbox
+             WHERE seq IN (
+                 SELECT seq FROM message_outbox
+                 ORDER BY created_at ASC, seq ASC
+                 LIMIT ?1
+             )",
+            [excess],
+        )
+        .map_err(|e| format!("Không giới hạn được outbox: {e}"))?;
+    }
+
+    tx.execute(
+        "INSERT INTO message_outbox
+         (draft_id, platform, display_name, handle, text_ciphertext, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            draft_id,
+            platform.as_str(),
+            display_name,
+            handle,
+            text_ciphertext,
+            now
+        ],
+    )
+    .map_err(|e| format!("Không ghi được bản nháp: {e}"))?;
+    tx.commit()
+        .map_err(|e| format!("Không commit được bản nháp: {e}"))?;
+
+    Ok(Draft {
+        draft_id,
         platform,
         display_name: display_name.to_string(),
         handle: handle.to_string(),
         text: text.to_string(),
-        created_at: now,
-        seq: {
-            static SEQ: AtomicU64 = AtomicU64::new(0);
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        },
+        created_at: now as u64,
+    })
+}
+
+/// Xem một bản nháp mà không tiêu nó.
+pub fn peek(
+    conn: &Connection,
+    crypto: &EncryptionEngine,
+    draft_id: &str,
+) -> Result<Option<Draft>, String> {
+    let now = bay_gio();
+    let tx = begin_immediate(conn)?;
+    delete_expired(&tx, now)?;
+    let stored = tx
+        .query_row(
+            "SELECT draft_id, platform, display_name, handle, text_ciphertext, created_at
+             FROM message_outbox WHERE draft_id = ?1",
+            [draft_id],
+            row_to_stored,
+        )
+        .optional()
+        .map_err(|e| format!("Không đọc được bản nháp: {e}"))?;
+    tx.commit()
+        .map_err(|e| format!("Không kết thúc được lượt đọc outbox: {e}"))?;
+    stored
+        .map(|row| decrypt_stored(row, crypto))
+        .transpose()
+        .map(Option::flatten)
+}
+
+/// Tiêu thụ bản nháp đúng một lần. Hàng được xóa trong transaction trước khi
+/// adapter gửi tin chạy; retry sau lỗi mạng vì thế không thể gửi trùng.
+pub fn take(
+    conn: &Connection,
+    crypto: &EncryptionEngine,
+    draft_id: &str,
+) -> Result<TakeResult, String> {
+    let now = bay_gio();
+    let tx = begin_immediate(conn)?;
+    let stored = tx
+        .query_row(
+            "SELECT draft_id, platform, display_name, handle, text_ciphertext, created_at
+             FROM message_outbox WHERE draft_id = ?1",
+            [draft_id],
+            row_to_stored,
+        )
+        .optional()
+        .map_err(|e| format!("Không đọc được bản nháp để xác nhận: {e}"))?;
+
+    let Some(stored) = stored else {
+        tx.commit()
+            .map_err(|e| format!("Không kết thúc được lượt xác nhận: {e}"))?;
+        return Ok(TakeResult::Missing);
     };
-
-    let mut map = khoa();
-    don_het_han(&mut map, now);
-
-    // Trần: bỏ bản cũ nhất. `>=` vì ta sắp chèn thêm một cái nữa.
-    //
-    // Xếp theo `(created_at, seq)`, KHÔNG theo `draft_id`. Bản trước dùng
-    // `draft_id` làm tie-break, mà id là ngẫu nhiên và `created_at` chỉ có độ
-    // phân giải GIÂY — nên khi hộp đầy, bản nháp vừa tạo xong có thể bị đuổi
-    // trước những bản thật sự cũ hơn. `seq` làm thứ tự trở thành toàn phần.
-    while map.len() >= MAX_PENDING {
-        let cu_nhat = map
-            .values()
-            .min_by_key(|d| (d.created_at, d.seq))
-            .map(|d| d.draft_id.clone());
-        match cu_nhat {
-            Some(id) => {
-                map.remove(&id);
-            }
-            None => break,
-        }
+    if het_han(stored.created_at, now) {
+        tx.execute("DELETE FROM message_outbox WHERE draft_id = ?1", [draft_id])
+            .map_err(|e| format!("Không dọn được bản nháp hết hạn: {e}"))?;
+        tx.commit()
+            .map_err(|e| format!("Không commit được việc dọn outbox: {e}"))?;
+        return Ok(TakeResult::Expired);
     }
 
-    map.insert(draft.draft_id.clone(), draft.clone());
-    draft
+    let Some(draft) = decrypt_stored(stored, crypto)? else {
+        tx.commit()
+            .map_err(|e| format!("Không kết thúc được lượt đọc outbox bị khóa: {e}"))?;
+        return Ok(TakeResult::Locked);
+    };
+    let deleted = tx
+        .execute("DELETE FROM message_outbox WHERE draft_id = ?1", [draft_id])
+        .map_err(|e| format!("Không tiêu được bản nháp: {e}"))?;
+    if deleted != 1 {
+        return Err("Outbox thay đổi ngoài transaction; từ chối gửi để tránh trùng".to_string());
+    }
+    tx.commit()
+        .map_err(|e| format!("Không commit được xác nhận bản nháp: {e}"))?;
+    Ok(TakeResult::Taken(draft))
 }
 
-/// Xem một bản nháp mà KHÔNG tiêu nó. Dùng để vẽ lại thẻ xác nhận.
-pub fn peek(draft_id: &str) -> Option<Draft> {
+/// Hủy một bản nháp mà không gửi.
+pub fn cancel(conn: &Connection, draft_id: &str) -> Result<bool, String> {
     let now = bay_gio();
-    let mut map = khoa();
-    don_het_han(&mut map, now);
-    map.get(draft_id).cloned()
+    let tx = begin_immediate(conn)?;
+    delete_expired(&tx, now)?;
+    let deleted = tx
+        .execute("DELETE FROM message_outbox WHERE draft_id = ?1", [draft_id])
+        .map_err(|e| format!("Không hủy được bản nháp: {e}"))?;
+    tx.commit()
+        .map_err(|e| format!("Không commit được việc hủy bản nháp: {e}"))?;
+    Ok(deleted == 1)
 }
 
-/// Lấy bản nháp ra để gửi. **Đây là cửa duy nhất** — sau lời gọi này bản nháp
-/// không còn trong hộp, nên không thể gửi lần hai.
-pub fn take(draft_id: &str) -> Option<Draft> {
+/// Liệt kê bản nháp còn chờ, mới nhất trước. Nếu có hàng không giải mã được,
+/// trả lỗi fail-closed thay vì đưa ciphertext lên UI hoặc âm thầm làm mất hàng.
+pub fn pending(conn: &Connection, crypto: &EncryptionEngine) -> Result<Vec<Draft>, String> {
     let now = bay_gio();
-    let mut map = khoa();
-    don_het_han(&mut map, now);
-    map.remove(draft_id)
-}
+    let tx = begin_immediate(conn)?;
+    delete_expired(&tx, now)?;
+    let stored = {
+        let mut statement = tx
+            .prepare(
+                "SELECT draft_id, platform, display_name, handle, text_ciphertext, created_at
+                 FROM message_outbox
+                 ORDER BY created_at DESC, seq DESC",
+            )
+            .map_err(|e| format!("Không chuẩn bị được truy vấn outbox: {e}"))?;
+        let rows = statement
+            .query_map([], row_to_stored)
+            .map_err(|e| format!("Không đọc được outbox: {e}"))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| format!("Không đọc được hàng outbox: {e}"))?
+    };
+    tx.commit()
+        .map_err(|e| format!("Không kết thúc được lượt liệt kê outbox: {e}"))?;
 
-/// Bỏ một bản nháp mà không gửi. `true` nếu nó còn ở đó để mà bỏ.
-pub fn cancel(draft_id: &str) -> bool {
-    let now = bay_gio();
-    let mut map = khoa();
-    don_het_han(&mut map, now);
-    map.remove(draft_id).is_some()
-}
-
-/// Các bản nháp còn chờ, mới nhất trước.
-///
-/// Tie-break bằng `seq` chứ KHÔNG bằng `draft_id`, cùng lý do đã ghi ở
-/// [`Draft::seq`]: `created_at` chỉ có độ phân giải giây, nên trong cùng một
-/// giây `draft_id` ngẫu nhiên sẽ xáo thứ tự và biến "mới nhất trước" thành một
-/// lời hứa sai. Danh sách này là thẻ xác nhận gửi tin — xếp sai ở đây là mời
-/// người dùng bấm nhầm bản nháp.
-pub fn pending() -> Vec<Draft> {
-    let now = bay_gio();
-    let mut map = khoa();
-    don_het_han(&mut map, now);
-    let mut v: Vec<Draft> = map.values().cloned().collect();
-    v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.seq.cmp(&a.seq)));
-    v
+    stored
+        .into_iter()
+        .map(|row| {
+            decrypt_stored(row, crypto)?.ok_or_else(|| {
+                "Outbox có bản nháp bị khóa bởi khóa mã hóa khác; từ chối trả ciphertext"
+                    .to_string()
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DatabasePool;
 
-    /// Hộp là toàn cục còn `cargo test` chạy song song trong CÙNG tiến trình,
-    /// nên các test ở đây dùng chung một trạng thái thật.
-    ///
-    /// Bản đầu chỉ dặn "mỗi test chỉ khẳng định về id của chính nó" và coi thế
-    /// là đủ. Không đủ: test trần `MAX_PENDING` vừa dọn sạch hộp vừa nạp 42 bản
-    /// nháp, mà cơ chế trần thì **đuổi bản cũ nhất** — đúng lúc đó bản nháp của
-    /// test khác biến mất và test kia đỏ. Nó đã đỏ thật, sau vài lần chạy xanh.
-    ///
-    /// Khoá này nối tiếp hoá chúng. Đây không phải "làm test bớt khó tính" — nó
-    /// loại một nguồn nhiễu do chính bộ test tạo ra, để lần sau một test đỏ có
-    /// nghĩa là mã hỏng.
-    static KHOA_TEST: Mutex<()> = Mutex::new(());
-
-    fn nam_khoa() -> std::sync::MutexGuard<'static, ()> {
-        KHOA_TEST.lock().unwrap_or_else(|e| e.into_inner())
+    fn fixture() -> (DatabasePool, EncryptionEngine) {
+        (
+            DatabasePool::new_in_memory().expect("create test database"),
+            EncryptionEngine::new("outbox-unit-test-key-32-bytes"),
+        )
     }
 
-    fn moi() -> Draft {
-        stage(Platform::Telegram, "Minh Hiến", "12345", "ngủ đi")
+    fn moi(conn: &Connection, crypto: &EncryptionEngine) -> Draft {
+        stage(
+            conn,
+            crypto,
+            Platform::Telegram,
+            "Minh Hiến",
+            "12345",
+            "ngủ đi",
+        )
+        .expect("stage draft")
     }
 
     #[test]
-    fn stage_roi_take_ra_dung_noi_dung() {
-        let _g = nam_khoa();
-        let d = moi();
-        let lay = take(&d.draft_id).expect("vua stage thi phai lay duoc");
-        assert_eq!(lay.text, "ngủ đi");
-        assert_eq!(lay.handle, "12345");
-        assert_eq!(lay.display_name, "Minh Hiến");
-    }
-
-    /// Tính chất 1 — bấm xác nhận hai lần không gửi hai tin.
-    #[test]
-    fn take_lan_hai_tra_none() {
-        let _g = nam_khoa();
-        let d = moi();
-        assert!(take(&d.draft_id).is_some());
-        assert!(take(&d.draft_id).is_none(), "ban nhap phai la dung-mot-lan");
+    fn stage_roi_take_ra_dung_noi_dung_va_dung_mot_lan() {
+        let (pool, crypto) = fixture();
+        let conn = pool.writer.get().unwrap();
+        let d = moi(&conn, &crypto);
+        let first = take(&conn, &crypto, &d.draft_id).unwrap();
+        assert!(matches!(
+            first,
+            TakeResult::Taken(ref value)
+                if value.text == "ngủ đi"
+                    && value.handle == "12345"
+                    && value.display_name == "Minh Hiến"
+        ));
+        assert!(matches!(
+            take(&conn, &crypto, &d.draft_id).unwrap(),
+            TakeResult::Missing
+        ));
     }
 
     #[test]
     fn peek_khong_tieu_ban_nhap() {
-        let _g = nam_khoa();
-        let d = moi();
-        assert!(peek(&d.draft_id).is_some());
-        assert!(peek(&d.draft_id).is_some(), "peek khong duoc tieu");
-        assert!(take(&d.draft_id).is_some(), "sau peek van phai take duoc");
+        let (pool, crypto) = fixture();
+        let conn = pool.writer.get().unwrap();
+        let d = moi(&conn, &crypto);
+        assert!(peek(&conn, &crypto, &d.draft_id).unwrap().is_some());
+        assert!(peek(&conn, &crypto, &d.draft_id).unwrap().is_some());
+        assert!(matches!(
+            take(&conn, &crypto, &d.draft_id).unwrap(),
+            TakeResult::Taken(_)
+        ));
     }
 
-    /// Tính chất 2 — quá hạn thì không lấy được nữa.
     #[test]
-    fn ban_nhap_het_han_khong_lay_duoc() {
-        let _g = nam_khoa();
-        let d = moi();
-        // Đẩy `created_at` lùi về quá khứ thay vì ngủ TTL_SECS giây.
-        {
-            let mut map = khoa();
-            if let Some(entry) = map.get_mut(&d.draft_id) {
-                entry.created_at = bay_gio().saturating_sub(TTL_SECS + 1);
-            }
-        }
-        assert!(take(&d.draft_id).is_none(), "qua han thi khong duoc gui");
-        assert!(peek(&d.draft_id).is_none());
+    fn ban_nhap_het_han_duoc_phan_loai_ro() {
+        let (pool, crypto) = fixture();
+        let conn = pool.writer.get().unwrap();
+        let d = moi(&conn, &crypto);
+        conn.execute(
+            "UPDATE message_outbox SET created_at = ?1 WHERE draft_id = ?2",
+            params![bay_gio() - TTL_SECS as i64 - 1, d.draft_id],
+        )
+        .unwrap();
+        assert!(matches!(
+            take(&conn, &crypto, &d.draft_id).unwrap(),
+            TakeResult::Expired
+        ));
     }
 
     #[test]
     fn cancel_bo_ban_nhap_va_bao_dung_su_that() {
-        let _g = nam_khoa();
-        let d = moi();
-        assert!(cancel(&d.draft_id));
-        assert!(!cancel(&d.draft_id), "huy lan hai phai la false");
-        assert!(take(&d.draft_id).is_none(), "da huy thi khong gui duoc");
+        let (pool, crypto) = fixture();
+        let conn = pool.writer.get().unwrap();
+        let d = moi(&conn, &crypto);
+        assert!(cancel(&conn, &d.draft_id).unwrap());
+        assert!(!cancel(&conn, &d.draft_id).unwrap());
     }
 
-    #[test]
-    fn pending_liet_ke_ban_nhap_cua_chinh_no() {
-        let _g = nam_khoa();
-        let a = moi();
-        let b = moi();
-        let ids: Vec<String> = pending().into_iter().map(|d| d.draft_id).collect();
-        assert!(ids.contains(&a.draft_id));
-        assert!(ids.contains(&b.draft_id));
-        take(&a.draft_id);
-        take(&b.draft_id);
-    }
-
-    /// HỒI QUY — `pending` phải xếp **mới nhất trước** THẬT, kể cả trong cùng
-    /// một giây.
-    ///
-    /// Cùng lớp lỗi với [`ban_nhap_vua_tao_khong_bi_duoi_khi_hop_day`], chỉ khác
-    /// chỗ: `stage` đã được vá bằng `seq`, còn `pending` thì chưa — nó vẫn
-    /// tie-break bằng `draft_id`, thứ NGẪU NHIÊN. Vì `created_at` chỉ có độ phân
-    /// giải GIÂY, mọi bản nháp tạo trong cùng một giây đều hoà ở khoá chính, nên
-    /// thứ tự trả ra là ngẫu nhiên trong khi doc-comment hứa "mới nhất trước".
-    ///
-    /// Vì sao đáng vá chứ không phải chuyện thẩm mỹ: `message:pending` trả đúng
-    /// danh sách này cho UI và cho LLM. Đây là **thẻ xác nhận gửi tin** — cả
-    /// module tồn tại để chặn gửi nhầm người. Một danh sách tự nhận là mới-nhất-
-    /// trước mà thật ra xếp ngẫu nhiên là đúng cách để người dùng bấm xác nhận
-    /// nhầm bản nháp. "Nhắn cho Hiến, và nhắn cho Nam luôn" là đủ để dính.
-    ///
-    /// Tất định hoá giống test anh em ở trên: dùng `MAX_PENDING` bản nháp trong
-    /// cùng một giây. Với tie-break ngẫu nhiên, xác suất cả loạt tình cờ ra đúng
-    /// thứ tự nghịch đảo là 1/32! ≈ 0.
     #[test]
     fn pending_xep_moi_nhat_truoc_ke_ca_trong_cung_mot_giay() {
-        let _g = nam_khoa();
-        {
-            let mut map = khoa();
-            map.clear();
-        }
-
-        let theo_thu_tu_tao: Vec<String> = (0..MAX_PENDING)
-            .map(|i| stage(Platform::Telegram, "Nam", "1", &format!("tin {i}")).draft_id)
+        let (pool, crypto) = fixture();
+        let conn = pool.writer.get().unwrap();
+        let ids: Vec<String> = (0..MAX_PENDING)
+            .map(|i| {
+                stage(
+                    &conn,
+                    &crypto,
+                    Platform::Telegram,
+                    "Nam",
+                    "1",
+                    &format!("tin {i}"),
+                )
+                .unwrap()
+                .draft_id
+            })
             .collect();
-
-        let tra_ve: Vec<String> = pending().into_iter().map(|d| d.draft_id).collect();
-        let mong_doi: Vec<String> = theo_thu_tu_tao.iter().rev().cloned().collect();
-
-        assert_eq!(
-            tra_ve, mong_doi,
-            "pending() phai la nghich dao thu tu stage — dang tie-break bang draft_id ngau nhien?"
-        );
+        let actual: Vec<String> = pending(&conn, &crypto)
+            .unwrap()
+            .into_iter()
+            .map(|draft| draft.draft_id)
+            .collect();
+        let expected: Vec<String> = ids.into_iter().rev().collect();
+        assert_eq!(actual, expected);
     }
 
-    /// HỒI QUY — bản nháp VỪA TẠO không được bị đuổi khi hộp đầy.
-    ///
-    /// Đây là lỗi thật đã làm `pending_liet_ke_ban_nhap_cua_chinh_no` đỏ:
-    /// `created_at` chỉ có độ phân giải GIÂY, nên mọi bản nháp tạo trong cùng
-    /// một giây bằng nhau, và tie-break cũ dùng `draft_id` NGẪU NHIÊN. Hệ quả:
-    /// `stage` có thể đuổi đúng bản mà người gọi vừa tạo — người dùng bấm gửi
-    /// thì nhận "bản nháp không còn", mà không có gì trong log giải thích.
-    ///
-    /// ⚠️ Phải stage NHIỀU lần sau khi lấp đầy, không phải một lần. `stage` đuổi
-    /// TRƯỚC khi chèn, nên bản vừa tạo không bao giờ là ứng viên bị đuổi bởi
-    /// chính lời gọi tạo ra nó — một test chỉ stage một lần sẽ xanh kể cả khi
-    /// lỗi còn nguyên (đã thử: nó xanh với tie-break cũ, tức vô dụng).
-    ///
-    /// Lỗi thật lộ ra ở lời gọi THỨ HAI: lúc đó bản của lời gọi thứ nhất đã nằm
-    /// trong hộp và trở thành ứng viên. Dùng `MAX_PENDING` bản mới để phép kiểm
-    /// tất định — với tie-break ngẫu nhiên, xác suất cả loạt sống sót là ~0.
     #[test]
-    fn ban_nhap_vua_tao_khong_bi_duoi_khi_hop_day() {
-        let _g = nam_khoa();
-        {
-            let mut map = khoa();
-            map.clear();
-        }
-        for i in 0..MAX_PENDING {
-            stage(Platform::Telegram, "Nam", "1", &format!("cu {i}"));
-        }
-        // Toàn bộ ở trên cùng một giây với loạt dưới đây — đúng điều kiện gây lỗi.
-        let moi: Vec<String> = (0..MAX_PENDING)
-            .map(|i| stage(Platform::Telegram, "Nam", "1", &format!("moi {i}")).draft_id)
+    fn hop_khong_phinh_qua_tran_va_giu_lo_moi_nhat() {
+        let (pool, crypto) = fixture();
+        let conn = pool.writer.get().unwrap();
+        let latest: Vec<String> = (0..(MAX_PENDING * 2))
+            .map(|i| {
+                stage(
+                    &conn,
+                    &crypto,
+                    Platform::Telegram,
+                    "Nam",
+                    "1",
+                    &format!("tin {i}"),
+                )
+                .unwrap()
+                .draft_id
+            })
+            .skip(MAX_PENDING)
             .collect();
-
-        let mat: Vec<&String> = moi.iter().filter(|id| peek(id).is_none()).collect();
-        assert!(
-            mat.is_empty(),
-            "{} ban nhap MOI bi duoi trong khi ban CU van con — tie-break dang dua vao id ngau nhien?",
-            mat.len()
-        );
+        let actual: Vec<String> = pending(&conn, &crypto)
+            .unwrap()
+            .into_iter()
+            .map(|draft| draft.draft_id)
+            .collect();
+        assert_eq!(actual.len(), MAX_PENDING);
+        assert!(latest.iter().all(|id| actual.contains(id)));
     }
 
-    /// Tính chất 3 — hộp có trần. Chạy trên hộp sạch: dọn sạch trước, và không
-    /// test nào khác được xen vào giữa (các test khác chỉ khẳng định về id của
-    /// riêng chúng, nên chúng chịu được việc bị test này dọn).
     #[test]
-    fn hop_khong_phinh_qua_tran() {
-        let _g = nam_khoa();
-        {
-            let mut map = khoa();
-            map.clear();
-        }
-        for i in 0..(MAX_PENDING + 10) {
-            stage(Platform::Telegram, "Nam", "1", &format!("tin {i}"));
-        }
-        let n = khoa().len();
-        assert!(
-            n <= MAX_PENDING,
-            "hop giu {n} ban nhap, vuot tran {MAX_PENDING}"
-        );
+    fn sai_khoa_khong_lam_lo_ciphertext_va_khong_tieu_hang() {
+        let (pool, crypto) = fixture();
+        let conn = pool.writer.get().unwrap();
+        let d = moi(&conn, &crypto);
+        let wrong = EncryptionEngine::new("wrong-outbox-key-32-bytes-long");
+        assert!(matches!(
+            take(&conn, &wrong, &d.draft_id).unwrap(),
+            TakeResult::Locked
+        ));
+        assert!(matches!(
+            take(&conn, &crypto, &d.draft_id).unwrap(),
+            TakeResult::Taken(_)
+        ));
     }
 }

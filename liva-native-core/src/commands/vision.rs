@@ -4,9 +4,7 @@
 //! **nguyên văn** — không sửa hành vi nào trong đợt này, để nếu có hồi quy thì
 //! biết chắc nó đến từ việc dời chứ không từ việc sửa.
 
-use crate::{
-    AppState, DiffEngine, Frame, RegionDiffResult, ScreenRegion, VisionConfig, llm,
-};
+use crate::{AppState, DiffEngine, Frame, RegionDiffResult, ScreenRegion, VisionConfig, llm};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -112,8 +110,8 @@ async fn get_changed_regions(state: Arc<AppState>) -> Result<Value, String> {
         )
     };
 
-    let (current_frame, results) = tokio::task::spawn_blocking(
-        move || -> Result<(Frame, Vec<RegionDiffResult>), String> {
+    let (current_frame, results) =
+        tokio::task::spawn_blocking(move || -> Result<(Frame, Vec<RegionDiffResult>), String> {
             let current_frame = capturer.capture().map_err(|e| e.to_string())?;
             let prev_frame = match &last_frame {
                 Some(f) => f,
@@ -138,10 +136,9 @@ async fn get_changed_regions(state: Arc<AppState>) -> Result<Value, String> {
                 results.push(res);
             }
             Ok((current_frame, results))
-        },
-    )
-    .await
-    .map_err(|e| format!("Join error: {}", e))??;
+        })
+        .await
+        .map_err(|e| format!("Join error: {}", e))??;
 
     {
         let mut vision = state.vision.lock().await;

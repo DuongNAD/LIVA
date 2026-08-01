@@ -30,8 +30,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
@@ -209,9 +209,9 @@ impl McpStdioClient {
         #[cfg(windows)]
         cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
 
-        let mut child = cmd.spawn().map_err(|e| {
-            format!("không spawn được MCP server '{name}' (lệnh: {program}): {e}")
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("không spawn được MCP server '{name}' (lệnh: {program}): {e}"))?;
 
         let stdin = child
             .stdin
@@ -241,11 +241,7 @@ impl McpStdioClient {
             timeout: request_timeout(),
             closed: Arc::clone(&closed),
             handshake: OnceLock::new(),
-            stderr_task: spawn_stderr_drain(
-                name.to_string(),
-                stderr,
-                Arc::clone(&recent_stderr),
-            ),
+            stderr_task: spawn_stderr_drain(name.to_string(), stderr, Arc::clone(&recent_stderr)),
             reader_task: spawn_reader(name.to_string(), stdout, pending, closed, recent_stderr),
         };
 
@@ -682,19 +678,16 @@ fn wire_id(value: &Value) -> Option<String> {
 /// lỗi" — đó là cách chắc chắn nhất để một lời gọi thất bại trông như thành
 /// công rỗng. Ca đó thành lỗi nội bộ, giữ nguyên JSON gốc trong `data`.
 fn to_response(id: String, value: &Value) -> JsonRpcResponse {
-    let error = value
-        .get("error")
-        .filter(|raw| !raw.is_null())
-        .map(|raw| {
-            serde_json::from_value::<JsonRpcError>(raw.clone()).unwrap_or_else(|_| JsonRpcError {
-                code: -32603,
-                message: format!(
-                    "error không đúng khuôn JSON-RPC: {}",
-                    truncate(&raw.to_string())
-                ),
-                data: Some(raw.clone()),
-            })
-        });
+    let error = value.get("error").filter(|raw| !raw.is_null()).map(|raw| {
+        serde_json::from_value::<JsonRpcError>(raw.clone()).unwrap_or_else(|_| JsonRpcError {
+            code: -32603,
+            message: format!(
+                "error không đúng khuôn JSON-RPC: {}",
+                truncate(&raw.to_string())
+            ),
+            data: Some(raw.clone()),
+        })
+    });
     JsonRpcResponse {
         jsonrpc: "2.0".to_string(),
         id,
@@ -999,8 +992,12 @@ mod tests {
             g.insert("1".to_string(), tx1);
             g.insert("2".to_string(), tx2);
         }
-        route_response("t", &pending, &json!({ "id": null, "error": { "code": -1, "message": "x" } }))
-            .await;
+        route_response(
+            "t",
+            &pending,
+            &json!({ "id": null, "error": { "code": -1, "message": "x" } }),
+        )
+        .await;
         assert_eq!(pending.lock().await.len(), 2);
     }
 
@@ -1113,8 +1110,7 @@ mod tests {
 
     #[test]
     fn file_thieu_thi_bao_loi_doc_duoc() {
-        let e = load_config(Path::new("khong-ton-tai-dau-mcp_config.json"))
-            .expect_err("phải lỗi");
+        let e = load_config(Path::new("khong-ton-tai-dau-mcp_config.json")).expect_err("phải lỗi");
         assert!(
             e.contains("mcp_config.example.json"),
             "lỗi phải chỉ ra cách sửa, nhận được: {e}"

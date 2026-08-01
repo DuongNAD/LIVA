@@ -17,3 +17,22 @@ opt-level = 3
 [profile.dev.package.llama-cpp-sys-2]
 opt-level = 3
 
+[profile.dev.package.rust-argon2]
+opt-level = 3
+
+# `rust-argon2` delegates its compression primitive to this crate. Optimizing
+# only the wrapper leaves the password KDF effectively at debug speed.
+[profile.dev.package.blake2b_simd]
+opt-level = 3
+
+[profile.test.package.rust-argon2]
+opt-level = 3
+
+[profile.test.package.blake2b_simd]
+opt-level = 3
+
+[patch.crates-io]
+# xcb 1.7.0 on crates.io still pins vulnerable quick-xml 0.30. Upstream
+# migrated its build parser to quick-xml 0.41 in this signed-off commit.
+# Remove this pin after xcb publishes a release containing ae3b2cd.
+xcb = { git = "https://github.com/rust-x-bindings/rust-xcb", rev = "ae3b2cd080e78173223038ccbebdc644eaf4a9ad" }

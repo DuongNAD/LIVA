@@ -100,6 +100,9 @@ mod tests {
         assert!(send_text(json!({ "chatId": "123" })).is_err());
         // chatId không phải số → Err có nêu lý do
         let err = send_text(json!({ "chatId": "abc", "text": "hi" })).unwrap_err();
-        assert!(err.contains("chatId"), "thông điệp phải nêu trường sai: {err}");
+        assert!(
+            err.contains("chatId"),
+            "thông điệp phải nêu trường sai: {err}"
+        );
     }
 }

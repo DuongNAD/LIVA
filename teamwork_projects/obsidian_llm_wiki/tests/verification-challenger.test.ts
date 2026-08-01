@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 import type { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import type { InMemoryTransport as McpInMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
@@ -10,10 +10,11 @@ import type { InMemoryTransport as McpInMemoryTransport } from '@modelcontextpro
   loopBPath: '',
 };
 
-// Mock the 'fs' module using Jest ESM unstable_mockModule
-jest.unstable_mockModule('fs', () => {
-  const orig = jest.requireActual('fs') as any;
-  const path = jest.requireActual('path') as any;
+// Mock the 'fs' module while preserving every real export except the two
+// symlink probes needed by the circular-link verification cases.
+vi.mock('fs', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('fs')>();
+  const path = await import('path');
   return {
     __esModule: true,
     ...orig,

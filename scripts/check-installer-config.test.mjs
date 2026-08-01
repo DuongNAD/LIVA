@@ -26,10 +26,14 @@ function repoGia(sua = () => {}) {
     fs.copyFileSync(path.join(REPO, rel), dich)
   }
   chep(CONF)
-  chep('liva-desktop/src-tauri/capabilities/default.json')
+  for (const name of ['widget', 'dashboard', 'setup']) {
+    chep(`liva-desktop/src-tauri/capabilities/${name}.json`)
+  }
   chep('data/models-manifest.json')
   chep('LICENSE')
   chep('liva-ui/public/setup.html')
+  chep('liva-ui/public/setup.css')
+  chep('liva-ui/public/setup.js')
   for (const ic of ['32x32.png', '128x128.png', '128x128@2x.png', 'icon.icns', 'icon.ico']) {
     chep(`liva-desktop/src-tauri/icons/${ic}`)
   }
@@ -121,12 +125,50 @@ test('bắt được frontendDist sai số cấp', () => {
 
 test('bắt được cửa sổ setup chưa được cấp quyền', () => {
   const goc = repoGia()
-  const p = path.join(goc, 'liva-desktop/src-tauri/capabilities/default.json')
+  const p = path.join(goc, 'liva-desktop/src-tauri/capabilities/setup.json')
   const cap = JSON.parse(fs.readFileSync(p, 'utf8'))
   cap.windows = cap.windows.filter((w) => w !== 'setup')
   fs.writeFileSync(p, JSON.stringify(cap, null, 2))
   const { loi } = kiemTra(goc)
   assert.ok(cham(loi, 'setup'), loi.join('\n'))
+})
+
+test('bắt được CSP cho phép inline script hoặc style', () => {
+  const { loi } = chay((c) => {
+    c.app.security.csp =
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+  })
+  assert.ok(cham(loi, 'unsafe-inline'), loi.join('\n'))
+})
+
+test('bắt được setup page chứa inline script hoặc style', () => {
+  const goc = repoGia()
+  const p = path.join(goc, 'liva-ui/public/setup.html')
+  fs.writeFileSync(
+    p,
+    '<!doctype html><html><head><style>body{display:block}</style></head>' +
+      '<body><script>window.inline = true</script></body></html>',
+  )
+  const { loi } = kiemTra(goc)
+  assert.ok(cham(loi, 'inline'), loi.join('\n'))
+})
+
+test('bắt được mọi public HTML khác chứa inline script hoặc style', () => {
+  const goc = repoGia()
+  const p = path.join(goc, 'liva-ui/public/diagnostic.html')
+  fs.writeFileSync(p, '<!doctype html><html><body><script>window.inline = true</script></body></html>')
+  const { loi } = kiemTra(goc)
+  assert.ok(cham(loi, 'diagnostic.html'), loi.join('\n'))
+})
+
+test('bắt được vec0 thiếu hash trong runtime trust manifest', () => {
+  const goc = repoGia()
+  const p = path.join(goc, 'data/models-manifest.json')
+  const m = JSON.parse(fs.readFileSync(p, 'utf8'))
+  delete m.runtimeArtifacts.vec0.sha256
+  fs.writeFileSync(p, JSON.stringify(m))
+  const { loi } = kiemTra(goc)
+  assert.ok(cham(loi, 'runtimeArtifacts.vec0.sha256'), loi.join('\n'))
 })
 
 test('bắt được beforeBuildCommand nối chuỗi bằng ||', () => {

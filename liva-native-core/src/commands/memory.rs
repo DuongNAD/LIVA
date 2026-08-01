@@ -30,6 +30,10 @@ const OWNED: &[&str] = &[
     "memory:set_fact",
     "memory:get_fact",
     "delete_memory_fact",
+    "memory:delete_conversation",
+    "memory:delete_subject",
+    "memory:sweep_retention",
+    "consolidate_memory",
     "reset_memory",
     "memory:search_hybrid",
     "memory:upsert_vector",
@@ -46,8 +50,8 @@ pub fn owns(command: &str) -> bool {
 
 pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Result<Value, String> {
     match command {
-    "get_memory_data" => {
-        let results = tokio::task::spawn_blocking(move || {
+        "get_memory_data" => {
+            let results = tokio::task::spawn_blocking(move || {
             let conn = state
                 .db
                 .readers
@@ -161,6 +165,7 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 "SELECT vec_id, type, content, domain, category, trace_keywords, created_at, source_event_ids FROM vectors_meta ORDER BY created_at DESC LIMIT 100"
             ).map_err(|e| format!("Prepare vectors failed: {}", e))?;
             let rows_vectors = stmt_vectors.query_map([], |row| {
+                let vec_id: String = row.get(0)?;
                 let trace_kw_str: Option<String> = row.get(5)?;
                 let src_event_ids_str: Option<String> = row.get(7)?;
 
@@ -172,7 +177,8 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                     .unwrap_or(serde_json::json!([]));
 
                 Ok(serde_json::json!({
-                    "id": row.get::<_, String>(0)?,
+                    "id": vec_id.clone(),
+                    "vecId": vec_id,
                     "type": row.get::<_, String>(1)?,
                     "content": row.get::<_, String>(2)?,
                     "domain": row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "General".to_string()),
@@ -199,267 +205,391 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         .await
         .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
-        Ok(results)
-    }
-    "memory:set_fact" => {
-        let fact: db::Fact = serde_json::from_value(payload)
-            .map_err(|e| format!("Invalid fact payload: {}", e))?;
-
-        tokio::task::spawn_blocking(move || {
-            let conn = state
-                .db
-                .writer
-                .get()
-                .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
-
-            db::set_fact(&conn, &state.crypto, &fact)
-                .map_err(|e| format!("Failed to set fact: {}", e))?;
-            Ok::<_, String>(())
-        })
-        .await
-        .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-        Ok(serde_json::json!({ "success": true }))
-    }
-    "memory:get_fact" => {
-        let key = payload["key"]
-            .as_str()
-            .ok_or_else(|| "Missing 'key' in payload".to_string())?
-            .to_string();
-
-        let fact = tokio::task::spawn_blocking(move || {
-            let conn = state
-                .db
-                .readers
-                .get()
-                .map_err(|e| format!("Failed to acquire read connection: {}", e))?;
-
-            db::get_fact(&conn, &state.crypto, &key)
-                .map_err(|e| format!("Failed to get fact: {}", e))
-        })
-        .await
-        .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-        match fact {
-            Some(f) => Ok(serde_json::to_value(f).unwrap()),
-            None => Ok(serde_json::Value::Null),
+            Ok(results)
         }
-    }
-    "delete_memory_fact" => {
-        let key = payload["key"]
-            .as_str()
-            .ok_or_else(|| "Missing 'key' in payload".to_string())?
-            .to_string();
+        "consolidate_memory" => {
+            let batch_size = payload
+                .get("batchSize")
+                .and_then(Value::as_u64)
+                .unwrap_or(25)
+                .clamp(1, 100) as usize;
+            let result =
+                crate::memory_consolidation::consume_pending_once(state.db.clone(), batch_size)
+                    .await?;
+            Ok(serde_json::json!({
+                "processed": result.processed,
+                "consolidated": result.consolidated,
+                "retried": result.retried,
+                "deadLettered": result.dead_lettered,
+            }))
+        }
+        "memory:set_fact" => {
+            let fact: db::Fact = serde_json::from_value(payload)
+                .map_err(|e| format!("Invalid fact payload: {}", e))?;
 
-        // FAIL-CLOSED (quyết định người dùng): backend TỪ CHỐI xoá một fact
-        // KHÔNG giải mã được (locked) — không cho xoá thứ mình không đọc được
-        // để biết nó là gì (có thể là dữ liệu quan trọng sau lưng khoá sai).
-        // Guard đặt ở TẦNG LỆNH, không dựa vào confirm() của UI, nên caller
-        // tự động (agent/pruning) cũng bị chặn.
-        tokio::task::spawn_blocking(move || {
-            use rusqlite::OptionalExtension;
-            let conn = state
-                .db
-                .writer
-                .get()
-                .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
+            tokio::task::spawn_blocking(move || {
+                let conn = state
+                    .db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
 
-            let existing: Option<String> = conn
-                .query_row("SELECT value FROM facts WHERE key = ?1", [&key], |r| {
-                    r.get(0)
-                })
-                .optional()
-                .map_err(|e| format!("Query fact failed: {}", e))?;
+                db::set_fact(&conn, &state.crypto, &fact)
+                    .map_err(|e| format!("Failed to set fact: {}", e))?;
+                Ok::<_, String>(())
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
-            match existing {
-                None => Ok(serde_json::json!({ "success": true, "note": "không tồn tại" })),
-                Some(v) if state.crypto.read_fact(&v).is_locked() => Err(format!(
-                    "Không xoá được ký ức '{key}' vì đang KHOÁ (không giải mã được bằng \
+            Ok(serde_json::json!({ "success": true }))
+        }
+        "memory:get_fact" => {
+            let key = payload["key"]
+                .as_str()
+                .ok_or_else(|| "Missing 'key' in payload".to_string())?
+                .to_string();
+
+            let fact = tokio::task::spawn_blocking(move || {
+                let conn = state
+                    .db
+                    .readers
+                    .get()
+                    .map_err(|e| format!("Failed to acquire read connection: {}", e))?;
+
+                db::get_fact(&conn, &state.crypto, &key)
+                    .map_err(|e| format!("Failed to get fact: {}", e))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+            match fact {
+                Some(f) => Ok(serde_json::to_value(f).unwrap()),
+                None => Ok(serde_json::Value::Null),
+            }
+        }
+        "delete_memory_fact" => {
+            let key = payload["key"]
+                .as_str()
+                .ok_or_else(|| "Missing 'key' in payload".to_string())?
+                .to_string();
+
+            // FAIL-CLOSED (quyết định người dùng): backend TỪ CHỐI xoá một fact
+            // KHÔNG giải mã được (locked) — không cho xoá thứ mình không đọc được
+            // để biết nó là gì (có thể là dữ liệu quan trọng sau lưng khoá sai).
+            // Guard đặt ở TẦNG LỆNH, không dựa vào confirm() của UI, nên caller
+            // tự động (agent/pruning) cũng bị chặn.
+            tokio::task::spawn_blocking(move || {
+                use rusqlite::OptionalExtension;
+                let conn = state
+                    .db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
+
+                let existing: Option<String> = conn
+                    .query_row("SELECT value FROM facts WHERE key = ?1", [&key], |r| {
+                        r.get(0)
+                    })
+                    .optional()
+                    .map_err(|e| format!("Query fact failed: {}", e))?;
+
+                match existing {
+                    None => Ok(serde_json::json!({ "success": true, "note": "không tồn tại" })),
+                    Some(v) if state.crypto.read_fact(&v).is_locked() => Err(format!(
+                        "Không xoá được ký ức '{key}' vì đang KHOÁ (không giải mã được bằng \
                      khoá hiện tại). Đặt đúng LIVA_ENCRYPTION_KEY để đọc/xoá, hoặc dữ liệu \
                      gốc vẫn còn nguyên."
-                )),
-                Some(_) => {
-                    conn.execute("DELETE FROM facts WHERE key = ?1", [&key])
-                        .map_err(|e| format!("Delete fact failed: {}", e))?;
-                    Ok(serde_json::json!({ "success": true }))
+                    )),
+                    Some(_) => {
+                        conn.execute("DELETE FROM facts WHERE key = ?1", [&key])
+                            .map_err(|e| format!("Delete fact failed: {}", e))?;
+                        Ok(serde_json::json!({ "success": true }))
+                    }
+                }
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))?
+        }
+        "memory:delete_conversation" => {
+            let conversation_id = payload["conversationId"]
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "Missing non-empty 'conversationId'".to_string())?
+                .to_string();
+            // Mặc định là dry-run. Thao tác phá hủy chỉ chạy khi caller gửi
+            // `dryRun: false` rõ ràng; owner bị khóa ở local vì command plane
+            // không có identity Telegram đủ tin cậy để xóa hộ dữ liệu kênh khác.
+            let dry_run = payload
+                .get("dryRun")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let report = tokio::task::spawn_blocking(move || {
+                let conn = state
+                    .db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Failed to acquire write connection: {e}"))?;
+                db::delete_conversation(&conn, "local", &conversation_id, dry_run)
+                    .map_err(|e| format!("Delete conversation failed: {e}"))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
+
+            Ok(serde_json::to_value(report)
+                .map_err(|e| format!("Serialize deletion report failed: {e}"))?)
+        }
+        "memory:delete_subject" => {
+            let dry_run = payload
+                .get("dryRun")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let report = tokio::task::spawn_blocking(move || {
+                let conn = state
+                    .db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Failed to acquire write connection: {e}"))?;
+                db::delete_subject(&conn, "local", dry_run)
+                    .map_err(|e| format!("Delete subject failed: {e}"))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
+
+            let success = !report.dry_run && report.wal_truncated;
+            let warning = (!report.dry_run && !report.wal_truncated).then_some(
+                "Logical deletion completed, but SQLite WAL is still held by a reader; \
+                 run maintenance/restart before claiming byte-level erasure.",
+            );
+            let mut value = serde_json::to_value(report)
+                .map_err(|e| format!("Serialize subject deletion report failed: {e}"))?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert("success".to_string(), Value::Bool(success));
+                if let Some(warning) = warning {
+                    object.insert("error".to_string(), Value::String(warning.to_string()));
                 }
             }
-        })
-        .await
-        .map_err(|e| format!("Blocking task panicked: {}", e))?
-    }
-    // Hai màn hình (SettingsView, SystemView) gửi lệnh này và chờ
-    // `{success, error}`, nhưng lõi chưa từng có nhánh nào cho nó — nên UI
-    // chỉ quay spinner rồi im lặng hết giờ. Trả lỗi RÕ RÀNG còn hơn im
-    // lặng: người dùng biết nút không làm gì, thay vì tưởng đã xoá xong.
-    //
-    // Cố ý CHƯA cài thật: xoá sạch ký ức là thao tác không hoàn tác được,
-    // trải trên 17 bảng (facts, vectors_meta, vec_idx, vectors_fts, events,
-    // turn_layer_nodes, l3_*, agent_checkpoints, facts_locked_backup…) và
-    // theo đúng nguyên tắc của dự án thì phải sao lưu + escrow trước. Đó là
-    // một quyết định về mất dữ liệu, không phải một mục dọn dẹp.
-    "reset_memory" => Err("`reset_memory` chưa được cài đặt ở lõi. Xoá từng ký ức bằng \
+            Ok(value)
+        }
+        "memory:sweep_retention" => {
+            let max_age_days = payload
+                .get("maxAgeDays")
+                .and_then(Value::as_u64)
+                .filter(|days| (1..=36_500).contains(days))
+                .ok_or_else(|| {
+                    "'maxAgeDays' must be an integer from 1 through 36500".to_string()
+                })?;
+            let batch_limit = payload
+                .get("batchLimit")
+                .and_then(Value::as_u64)
+                .unwrap_or(10)
+                .min(25) as usize;
+            let dry_run = payload
+                .get("dryRun")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| format!("System clock is before UNIX epoch: {e}"))?
+                .as_millis() as i64;
+            let age_ms = i64::try_from(max_age_days)
+                .ok()
+                .and_then(|days| days.checked_mul(86_400_000))
+                .ok_or_else(|| "Retention age overflows milliseconds".to_string())?;
+            let cutoff_ms = now_ms
+                .checked_sub(age_ms)
+                .ok_or_else(|| "Retention cutoff is before supported time range".to_string())?;
+            let report = tokio::task::spawn_blocking(move || {
+                let conn = state
+                    .db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Failed to acquire write connection: {e}"))?;
+                db::sweep_conversation_retention(&conn, "local", cutoff_ms, batch_limit, dry_run)
+                    .map_err(|e| format!("Retention sweep failed: {e}"))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
+
+            serde_json::to_value(report)
+                .map_err(|e| format!("Serialize retention report failed: {e}"))
+        }
+        // Hai màn hình (SettingsView, SystemView) gửi lệnh này và chờ
+        // `{success, error}`, nhưng lõi chưa từng có nhánh nào cho nó — nên UI
+        // chỉ quay spinner rồi im lặng hết giờ. Trả lỗi RÕ RÀNG còn hơn im
+        // lặng: người dùng biết nút không làm gì, thay vì tưởng đã xoá xong.
+        //
+        // Cố ý CHƯA cài thật: xoá sạch ký ức là thao tác không hoàn tác được,
+        // trải trên 17 bảng (facts, vectors_meta, vec_idx, vectors_fts, events,
+        // turn_layer_nodes, l3_*, agent_checkpoints, facts_locked_backup…) và
+        // theo đúng nguyên tắc của dự án thì phải sao lưu + escrow trước. Đó là
+        // một quyết định về mất dữ liệu, không phải một mục dọn dẹp.
+        "reset_memory" => Err(
+            "`reset_memory` chưa được cài đặt ở lõi. Xoá từng ký ức bằng \
          `delete_memory_fact` (Dashboard → Memory). Xoá toàn bộ cần thiết kế sao lưu \
          trước — chưa làm, không hoàn tác được."
-        .to_string()),
-    "memory:search_hybrid" => {
-        let query_text = payload["query_text"]
-            .as_str()
-            .ok_or_else(|| "Missing 'query_text'".to_string())?
-            .to_string();
+                .to_string(),
+        ),
+        "memory:search_hybrid" => {
+            let query_text = payload["query_text"]
+                .as_str()
+                .ok_or_else(|| "Missing 'query_text'".to_string())?
+                .to_string();
 
-        // Đây là command thô, chưa có identity đáng tin cậy phía server. Domain
-        // do client tự khai không thể được dùng làm ranh giới conversation memory.
-        let filter = parse_untrusted_memory_search_filter(&payload)?;
+            // Đây là command thô, chưa có identity đáng tin cậy phía server. Domain
+            // do client tự khai không thể được dùng làm ranh giới conversation memory.
+            let filter = parse_untrusted_memory_search_filter(&payload)?;
 
-        // `query_vector` là TUỲ CHỌN từ 22/07/2026. Bắt client tự cấp vector
-        // 384 chiều là lý do trực tiếp khiến không client nào gọi được lệnh
-        // này (UI không có embedder). Thiếu thì server tự embed query_text —
-        // cùng đường `embed_query` mà RAG dùng, nên kết quả nhất quán.
-        let query_vector = match payload["query_vector"].as_array() {
-            Some(arr) if !arr.is_empty() => {
-                let mut v = Vec::with_capacity(arr.len());
-                for x in arr {
-                    v.push(
-                        x.as_f64()
-                            .ok_or_else(|| "Invalid float in query_vector".to_string())?
-                            as f32,
-                    );
+            // `query_vector` là TUỲ CHỌN từ 22/07/2026. Bắt client tự cấp vector
+            // 384 chiều là lý do trực tiếp khiến không client nào gọi được lệnh
+            // này (UI không có embedder). Thiếu thì server tự embed query_text —
+            // cùng đường `embed_query` mà RAG dùng, nên kết quả nhất quán.
+            let query_vector = match payload["query_vector"].as_array() {
+                Some(arr) if !arr.is_empty() => {
+                    let mut v = Vec::with_capacity(arr.len());
+                    for x in arr {
+                        v.push(
+                            x.as_f64()
+                                .ok_or_else(|| "Invalid float in query_vector".to_string())?
+                                as f32,
+                        );
+                    }
+                    v
                 }
-                v
-            }
-            _ => {
-                let state_embed = state.clone();
-                let q = query_text.clone();
-                tokio::task::spawn_blocking(move || {
-                    let mut guard = state_embed.embedder.blocking_lock();
-                    let engine = guard.as_mut().ok_or_else(|| {
-                        "Thieu 'query_vector' va khong co model embedding de tu tinh. \
+                _ => {
+                    let state_embed = state.clone();
+                    let q = query_text.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let mut guard = state_embed.embedder.blocking_lock();
+                        let engine = guard.as_mut().ok_or_else(|| {
+                            "Thieu 'query_vector' va khong co model embedding de tu tinh. \
                          Tai model vao models/embedding/ (node scripts/fetch-embedding-model.mjs) \
                          hoac tu cap vector 384 chieu."
-                            .to_string()
-                    })?;
-                    engine.embed_query(&q)
-                })
-                .await
-                .map_err(|e| format!("Embedding task panicked: {}", e))??
-            }
-        };
+                                .to_string()
+                        })?;
+                        engine.embed_query(&q)
+                    })
+                    .await
+                    .map_err(|e| format!("Embedding task panicked: {}", e))??
+                }
+            };
 
-        let top_k = payload["top_k"].as_u64().unwrap_or(5) as usize;
+            let top_k = payload["top_k"].as_u64().unwrap_or(5) as usize;
 
-        let dense_weight = payload["dense_weight"].as_f64().unwrap_or(1.0);
-        let sparse_weight = payload["sparse_weight"].as_f64().unwrap_or(1.0);
+            let dense_weight = payload["dense_weight"].as_f64().unwrap_or(1.0);
+            let sparse_weight = payload["sparse_weight"].as_f64().unwrap_or(1.0);
 
-        let results = tokio::task::spawn_blocking(move || {
-            let conn = state
-                .db
-                .readers
-                .get()
-                .map_err(|e| format!("Failed to acquire read connection: {}", e))?;
+            let results = tokio::task::spawn_blocking(move || {
+                let conn = state
+                    .db
+                    .readers
+                    .get()
+                    .map_err(|e| format!("Failed to acquire read connection: {}", e))?;
 
-            db::search_hybrid_vectors(
-                &conn,
-                &query_text,
-                &query_vector,
-                top_k,
-                &filter,
-                dense_weight,
-                sparse_weight,
-            )
-            .map_err(|e| format!("Hybrid search failed: {}", e))
-        })
-        .await
-        .map_err(|e| format!("Blocking task panicked: {}", e))??;
+                db::search_hybrid_vectors(
+                    &conn,
+                    &state.crypto,
+                    &query_text,
+                    &query_vector,
+                    top_k,
+                    &filter,
+                    dense_weight,
+                    sparse_weight,
+                )
+                .map_err(|e| format!("Hybrid search failed: {}", e))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
-        Ok(serde_json::to_value(results).unwrap())
-    }
-    "memory:upsert_vector" => {
-        let vec_id = payload["vecId"]
-            .as_str()
-            .ok_or_else(|| "Missing 'vecId'".to_string())?
-            .to_string();
-        let r#type = payload["type"]
-            .as_str()
-            .ok_or_else(|| "Missing 'type'".to_string())?
-            .to_string();
-        let content = payload["content"]
-            .as_str()
-            .ok_or_else(|| "Missing 'content'".to_string())?
-            .to_string();
-
-        let vector_val = payload["vector"]
-            .as_array()
-            .ok_or_else(|| "Missing 'vector'".to_string())?;
-        let mut vector = Vec::with_capacity(vector_val.len());
-        for v in vector_val {
-            let f = v
-                .as_f64()
-                .ok_or_else(|| "Invalid float in vector".to_string())?
-                as f32;
-            vector.push(f);
+            Ok(serde_json::to_value(results).unwrap())
         }
+        "memory:upsert_vector" => {
+            let vec_id = payload["vecId"]
+                .as_str()
+                .ok_or_else(|| "Missing 'vecId'".to_string())?
+                .to_string();
+            let r#type = payload["type"]
+                .as_str()
+                .ok_or_else(|| "Missing 'type'".to_string())?
+                .to_string();
+            let content = payload["content"]
+                .as_str()
+                .ok_or_else(|| "Missing 'content'".to_string())?
+                .to_string();
 
-        let domain = payload
-            .get("domain")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let category = payload
-            .get("category")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            let vector_val = payload["vector"]
+                .as_array()
+                .ok_or_else(|| "Missing 'vector'".to_string())?;
+            let mut vector = Vec::with_capacity(vector_val.len());
+            for v in vector_val {
+                let f = v
+                    .as_f64()
+                    .ok_or_else(|| "Invalid float in vector".to_string())?
+                    as f32;
+                vector.push(f);
+            }
 
-        let trace_keywords_val = payload.get("traceKeywords").and_then(|v| v.as_array());
-        let mut trace_keywords = Vec::new();
-        if let Some(arr) = trace_keywords_val {
-            for v in arr {
-                if let Some(s) = v.as_str() {
-                    trace_keywords.push(s.to_string());
+            let domain = payload
+                .get("domain")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let category = payload
+                .get("category")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let trace_keywords_val = payload.get("traceKeywords").and_then(|v| v.as_array());
+            let mut trace_keywords = Vec::new();
+            if let Some(arr) = trace_keywords_val {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        trace_keywords.push(s.to_string());
+                    }
                 }
             }
-        }
 
-        let file_target = payload
-            .get("fileTarget")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            let file_target = payload
+                .get("fileTarget")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
-        let source_event_ids_val = payload.get("sourceEventIds").and_then(|v| v.as_array());
-        let mut source_event_ids = Vec::new();
-        if let Some(arr) = source_event_ids_val {
-            for v in arr {
-                if let Some(s) = v.as_str() {
-                    source_event_ids.push(s.to_string());
+            let source_event_ids_val = payload.get("sourceEventIds").and_then(|v| v.as_array());
+            let mut source_event_ids = Vec::new();
+            if let Some(arr) = source_event_ids_val {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        source_event_ids.push(s.to_string());
+                    }
                 }
             }
+
+            tokio::task::spawn_blocking(move || {
+                let conn = state
+                    .db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
+
+                db::upsert_vector(
+                    &conn,
+                    &state.crypto,
+                    &vec_id,
+                    &r#type,
+                    &content,
+                    &vector,
+                    domain.as_deref(),
+                    category.as_deref(),
+                    Some(&trace_keywords),
+                    file_target.as_deref(),
+                    Some(&source_event_ids),
+                )
+                .map_err(|e| format!("Failed to upsert vector: {}", e))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+            Ok(serde_json::json!({ "success": true }))
         }
-
-        tokio::task::spawn_blocking(move || {
-            let conn = state
-                .db
-                .writer
-                .get()
-                .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
-
-            db::upsert_vector(
-                &conn,
-                &vec_id,
-                &r#type,
-                &content,
-                &vector,
-                domain.as_deref(),
-                category.as_deref(),
-                Some(&trace_keywords),
-                file_target.as_deref(),
-                Some(&source_event_ids),
-            )
-            .map_err(|e| format!("Failed to upsert vector: {}", e))
-        })
-        .await
-        .map_err(|e| format!("Blocking task panicked: {}", e))??;
-
-        Ok(serde_json::json!({ "success": true }))
-    }
         _ => Err(format!("Unknown command: {command}")),
     }
 }
@@ -469,17 +599,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn owns_dung_bay_lenh_va_khong_om_lenh_khac() {
-        assert_eq!(OWNED.len(), 7);
+    fn owns_dung_tam_lenh_va_khong_om_lenh_khac() {
+        assert_eq!(OWNED.len(), 11);
         for name in OWNED {
             assert!(owns(name));
         }
-        // Ba tên phẳng KHÔNG có tiền tố `memory:` — `strip_prefix` sẽ bỏ sót:
+        // Bốn tên phẳng KHÔNG có tiền tố `memory:` — `strip_prefix` sẽ bỏ sót:
         assert!(owns("get_memory_data"));
         assert!(owns("delete_memory_fact"));
+        assert!(owns("memory:delete_conversation"));
+        assert!(owns("memory:delete_subject"));
+        assert!(owns("memory:sweep_retention"));
+        assert!(owns("consolidate_memory"));
         assert!(owns("reset_memory"));
         // Nhưng không ôm lệnh của miền khác:
-        assert!(!owns("consolidate_memory"), "chưa có arm nào cho lệnh này");
         assert!(!owns("get_tasks"));
     }
 }

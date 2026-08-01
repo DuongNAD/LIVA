@@ -33,7 +33,7 @@ pub use signals::{
     KIND_SKILL_SELECTION_NOT_INVOKED, KIND_TOOL_CALL_FAILED, KIND_TOOL_FAILURE_AFFECTS_SKILL,
     KIND_TOOL_SEMANTIC_ISSUE, SignalTally,
 };
-pub use store::{SkillRecord, SkillStore, SkillVersion, Signal};
+pub use store::{Signal, SkillRecord, SkillStore, SkillVersion};
 
 /// Tên file mang danh tính bền của một skill, đặt trong thư mục skill.
 pub const SKILL_ID_FILE: &str = ".skill_id";

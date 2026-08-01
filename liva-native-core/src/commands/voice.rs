@@ -95,7 +95,9 @@ async fn list_vieneu_voices(state: Arc<AppState>) -> Result<Value, String> {
         .map_err(|error| format!("Voice catalogue task failed: {error}"))??;
     let current = {
         let guard = state.tts.lock().await;
-        guard.as_ref().and_then(|manager| manager.vieneu_voice_name())
+        guard
+            .as_ref()
+            .and_then(|manager| manager.vieneu_voice_name())
     };
     Ok(json!({
         "enabled": current.is_some(),
@@ -181,7 +183,9 @@ async fn set_vieneu_voice(state: Arc<AppState>, payload: Value) -> Result<Value,
 
     let current = {
         let guard = state.tts.lock().await;
-        guard.as_ref().and_then(|manager| manager.vieneu_voice_name())
+        guard
+            .as_ref()
+            .and_then(|manager| manager.vieneu_voice_name())
     };
     Ok(json!({
         "success": true,

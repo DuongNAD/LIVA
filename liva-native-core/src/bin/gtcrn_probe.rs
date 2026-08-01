@@ -17,7 +17,8 @@ fn read_wav_pcm16_mono(path: &str) -> (u32, Vec<f32>) {
         let chunk_size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
         let body_start = pos + 8;
         if chunk_id == b"fmt " {
-            sample_rate = u32::from_le_bytes(bytes[body_start + 4..body_start + 8].try_into().unwrap());
+            sample_rate =
+                u32::from_le_bytes(bytes[body_start + 4..body_start + 8].try_into().unwrap());
         } else if chunk_id == b"data" {
             let body = &bytes[body_start..body_start + chunk_size];
             data = body
@@ -67,10 +68,18 @@ fn main() {
         eprintln!("Usage: gtcrn_probe <in.wav> [out.wav]");
         std::process::exit(1);
     }
-    let out_path = args.get(2).cloned().unwrap_or_else(|| "gtcrn_probe_out.wav".to_string());
+    let out_path = args
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "gtcrn_probe_out.wav".to_string());
 
     let (rate, samples) = read_wav_pcm16_mono(&args[1]);
-    println!("input: {} samples @ {} Hz, RMS {:.4}", samples.len(), rate, rms(&samples));
+    println!(
+        "input: {} samples @ {} Hz, RMS {:.4}",
+        samples.len(),
+        rate,
+        rms(&samples)
+    );
     assert_eq!(rate, 16000, "GTCRN model expects 16kHz mono input");
 
     let model_path = liva_native_core::webrtc::denoise::resolve_model_path();

@@ -154,6 +154,11 @@ data/skill_embeddings_cache.json
 # Audio samples / test fixtures — fetched out-of-band (see models/README.md)
 *.wav
 models/wake_fixtures/
+# Wake enrollment contains biometric voice data. Training work can also grow
+# to hundreds of GB; neither may enter Git even when individual extensions
+# are not covered by the generic model/audio rules above.
+data/wake-enrollment/
+tools/wakeword/work/
 docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/
 # VieNeu-TTS large weights (.onnx/.bin already covered above; these are not).
 # Fetched out-of-band — see models/README.md. The small config/tokenizer/voices

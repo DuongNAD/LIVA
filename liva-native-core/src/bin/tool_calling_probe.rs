@@ -28,8 +28,8 @@
 use liva_native_core::agent::graph::{Intent, route_intent};
 use liva_native_core::llm::embedder::{EmbeddingEngine, resolve_model_dir};
 use liva_native_core::llm::tool_calling::{
-    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, parse_selection, rank_tools,
-    compile_selection_prompt, rank_tools_scored, validate_arguments,
+    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, compile_selection_prompt,
+    parse_selection, rank_tools, rank_tools_scored, validate_arguments,
 };
 use liva_native_core::mcp::server::NativeMcpServer;
 use std::path::PathBuf;
@@ -237,7 +237,12 @@ fn main() {
         // Vẫn IN danh tính top-1 cho cả hai chiều để không che tín hiệu.
         println!("── Tầng 1: truy hồi (câu smart-home phải cho control_smarthome top-1) ──");
         for (cau, mong_doi) in CORPUS {
-            let top = rank_tools(&catalog, cau, embedder.as_mut().map(|e| e as _), DEFAULT_TOP_K);
+            let top = rank_tools(
+                &catalog,
+                cau,
+                embedder.as_mut().map(|e| e as _),
+                DEFAULT_TOP_K,
+            );
             let top1 = catalog.tools()[top[0]].name.as_str();
             match mong_doi {
                 Some(_) => {
@@ -274,12 +279,7 @@ fn main() {
         if !dat {
             truot += 1;
         }
-        println!(
-            "{} {:<26} {:?}",
-            if dat { "✅" } else { "❌" },
-            cau,
-            y
-        );
+        println!("{} {:<26} {:?}", if dat { "✅" } else { "❌" }, cau, y);
     }
     println!();
 
@@ -310,7 +310,12 @@ fn main() {
     let mut do_tre: Vec<u128> = Vec::new();
     let mut do_dai_prompt: Vec<usize> = Vec::new();
     for (cau, mong_doi) in CORPUS {
-        let top = rank_tools(&catalog, cau, embedder.as_mut().map(|e| e as _), DEFAULT_TOP_K);
+        let top = rank_tools(
+            &catalog,
+            cau,
+            embedder.as_mut().map(|e| e as _),
+            DEFAULT_TOP_K,
+        );
         let ung_vien: Vec<_> = top.iter().map(|&i| &catalog.tools()[i]).collect();
         // PHẢI qua chat template. Bản đầu của probe này truyền prompt thô và
         // gemma trả về chuỗi rỗng cho cả 13 câu — 0/13, trông y như "model không

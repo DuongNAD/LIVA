@@ -2,7 +2,7 @@
  * liva-common/src/types/websocket.ts — WebSocket Event Contract (SSOT)
  * =====================================================================
  * Defines all valid WebSocket event names and their payload shapes.
- * Used by both UIController (Gateway) and useGateway (UI) to ensure
+ * Used by the Rust command plane clients and useGateway (UI) to improve
  * compile-time safety across the communication boundary.
  */
 
@@ -44,11 +44,18 @@ export type WSClientEvent =
     | 'user_voice_command'
     | 'camera_frame'
     | 'wake_word_triggered'
-    // Env/Integrations
-    | 'get_env_config'
-    | 'save_env_config'
     // Memory
+    | 'get_memory_data'
+    | 'memory:set_fact'
+    | 'memory:get_fact'
+    | 'delete_memory_fact'
+    | 'memory:delete_conversation'
+    | 'memory:delete_subject'
+    | 'memory:sweep_retention'
+    | 'consolidate_memory'
     | 'reset_memory'
+    | 'memory:search_hybrid'
+    | 'memory:upsert_vector'
     // File Explorer
     | 'explorer_ls'
     | 'explorer_cat'

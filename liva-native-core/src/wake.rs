@@ -15,7 +15,7 @@
 //! - `LIVA_WAKE_PHRASES`      = CSV, default catches "liva" + common STT mis-hearings
 //! - `LIVA_WAKE_WINDOW_SECS`  = seconds the gate stays open (default 45)
 //! - `LIVA_WAKE_MODEL_PATHS`  = CSV of classifier .onnx paths (trained_model/hybrid)
-//! - `LIVA_WAKE_THRESHOLD`    = per-classifier confidence cutoff (default 0.68)
+//! - `LIVA_WAKE_THRESHOLD`    = per-classifier confidence cutoff (default 0.58)
 //!
 //! ## Hybrid (recommended for bilingual vi+en)
 //! `hybrid` combines both tiers with OR logic: the trained classifier scans
@@ -28,6 +28,7 @@
 //! contain "liva".
 
 use crate::wake_model::TrainedWakeDetector;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,10 +60,35 @@ pub struct WakeGate {
 }
 
 /// Classifier mặc định cho đường probe khi `LIVA_WAKE_MODEL_PATHS` để trống.
-/// CHỈ bản `en`: `models/README.md` đo `wake_liva_vi.onnx` ở FPPH 19,4 — bật
-/// mặc định là chuốc lấy đúng cái lỗi "tự nhảy" đang đi sửa. Ai cần thì thêm
-/// bằng env.
-const DEFAULT_PROBE_MODEL: &str = "wake_liva_en.onnx";
+/// Artifact v2 được gate trên 25,88 giờ validation; hash được pin trong
+/// `data/models-manifest.json` và kiểm tra trước khi ORT nạp model.
+const DEFAULT_PROBE_MODEL: &str = "wake_liva_en_v2.onnx";
+const DEFAULT_WAKE_THRESHOLD: f32 = 0.58;
+/// Product wake phrase. `LIVA_WAKE_PHRASES` remains an explicit operator
+/// override, but the shipped default intentionally exposes one phrase only.
+const DEFAULT_WAKE_PHRASES: &str = "hey liva";
+
+/// Verify a resolver-produced model path without weakening the shared
+/// traversal guard. Tauri dev may return `../../models/file.onnx`; the parent
+/// becomes the trust root and only the basename is resolved inside that root.
+fn verify_default_probe_candidate(
+    candidate: &Path,
+    expected_sha256: &str,
+) -> Result<PathBuf, String> {
+    let trust_root = candidate.parent().ok_or_else(|| {
+        format!(
+            "Wake classifier không có thư mục cha: {}",
+            candidate.display()
+        )
+    })?;
+    let file_name = candidate.file_name().ok_or_else(|| {
+        format!(
+            "Wake classifier không có tên file hợp lệ: {}",
+            candidate.display()
+        )
+    })?;
+    crate::artifact_trust::verify_trusted_file(trust_root, Path::new(file_name), expected_sha256)
+}
 
 impl WakeGate {
     pub fn from_env() -> Self {
@@ -76,19 +102,11 @@ impl WakeGate {
             "hybrid" | "both" => WakeMode::Hybrid,
             _ => WakeMode::Off,
         };
-        // Default phrases include how Vietnamese STT commonly mis-hears the
-        // foreign name "liva" (all diacritic-folded + de-spaced before match,
-        // so e.g. "li vào" → "livao" already contains "liva"). Extend via
-        // LIVA_WAKE_PHRASES if your voice trips a different spelling.
-        // `li vơ` thêm 2026-07-27: đo qua đường probe thật, "Này Liva ơi, bật
-        // nhạc lên giúp tôi" được Nemotron nghe thành "Này Li Vơ oi …" ⇒ chuẩn
-        // hoá ra `livo`, không chứa `liva`, nên câu đó bị vứt. Bằng chứng mới ở
-        // mức giọng Piper tổng hợp; giọng người thật có thể lệch kiểu khác —
-        // xem transcript trong sự kiện `wake_probe_rejected` rồi bổ sung qua
-        // LIVA_WAKE_PHRASES.
-        let phrases_raw = std::env::var("LIVA_WAKE_PHRASES").unwrap_or_else(|_| {
-            "liva,hey liva,ê liva,này liva,liva ơi,laiva,leva,lyva,li goa,li vơ".to_string()
-        });
+        // Product chỉ quảng bá và bật mặc định đúng một phrase: “Hey Liva”.
+        // Operator vẫn có thể override bằng `LIVA_WAKE_PHRASES`, nhưng biến thể
+        // đó không phải hành vi mặc định và phải tự chịu gate false-positive.
+        let phrases_raw =
+            std::env::var("LIVA_WAKE_PHRASES").unwrap_or_else(|_| DEFAULT_WAKE_PHRASES.to_string());
         let phrases = phrases_raw
             .split(',')
             .map(|p| normalize_for_match(p).replace(' ', ""))
@@ -119,7 +137,7 @@ impl WakeGate {
         }
     }
 
-    /// Ngưỡng confidence của classifier (`LIVA_WAKE_THRESHOLD`, mặc định 0,68).
+    /// Ngưỡng confidence của classifier (`LIVA_WAKE_THRESHOLD`, mặc định 0,58).
     pub fn model_threshold(&self) -> f32 {
         self.model_threshold
     }
@@ -128,7 +146,7 @@ impl WakeGate {
         std::env::var("LIVA_WAKE_THRESHOLD")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(0.68f32)
+            .unwrap_or(DEFAULT_WAKE_THRESHOLD)
     }
 
     /// Nạp classifier theo `LIVA_WAKE_MODEL_PATHS`; để trống thì thử
@@ -149,7 +167,18 @@ impl WakeGate {
             let candidate =
                 crate::resolve_resource_path(&format!("models/{}", DEFAULT_PROBE_MODEL));
             if candidate.exists() {
-                paths.push(candidate.to_string_lossy().into_owned());
+                let manifest_path = format!("models/{DEFAULT_PROBE_MODEL}");
+                let verified = crate::artifact_trust::embedded_file_hash(&manifest_path).and_then(
+                    |expected_hash| verify_default_probe_candidate(&candidate, &expected_hash),
+                );
+                match verified {
+                    Ok(path) => paths.push(path.to_string_lossy().into_owned()),
+                    Err(error) => tracing::error!(
+                        "Từ chối wake classifier mặc định không đáng tin cậy {}: {}",
+                        candidate.display(),
+                        error
+                    ),
+                }
             }
         }
 
@@ -291,7 +320,7 @@ impl WakeGate {
     ///
     /// Tách khỏi [`Self::try_wake`] cho đường `OP_WAKE_PROBE`: widget trình duyệt
     /// tự giữ trạng thái thức/ngủ của nó, chỉ hỏi core đúng một câu "câu này có
-    /// chứa cụm đánh thức không?". Nếu dùng `try_wake` ở đó thì một lần widget
+    /// bắt đầu bằng cụm đánh thức không?". Nếu dùng `try_wake` ở đó thì một lần widget
     /// đánh thức sẽ mở luôn gate phía server 45 giây — biến mọi tiếng nói kế tiếp
     /// trong phòng thành lượt hội thoại thật, đúng cái lỗi đang đi sửa.
     ///
@@ -299,12 +328,28 @@ impl WakeGate {
     /// phụ thuộc mode.
     pub fn matches_phrase(&self, transcript: &str) -> bool {
         let normalized = normalize_for_match(transcript);
-        let head: String = normalized
-            .split_whitespace()
-            .take(8)
-            .collect::<Vec<_>>()
-            .join("");
-        self.phrases.iter().any(|p| head.contains(p.as_str()))
+        let words: Vec<_> = normalized.split_whitespace().take(8).collect();
+        let starts = [0, usize::from(words.first() == Some(&"hey"))];
+
+        for start in starts {
+            let mut prefix = String::new();
+            for word in words.iter().skip(start) {
+                prefix.push_str(word);
+                if self.phrases.iter().any(|phrase| {
+                    prefix.as_str() == phrase || prefix.as_str() == format!("{phrase}o")
+                }) {
+                    return true;
+                }
+
+                let can_still_match = self.phrases.iter().any(|phrase| {
+                    phrase.starts_with(&prefix) || format!("{phrase}o").starts_with(&prefix)
+                });
+                if !can_still_match {
+                    break;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -347,6 +392,8 @@ fn fold_vietnamese_char(c: char) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
+    use std::fs;
 
     fn gate(phrases: &str) -> WakeGate {
         WakeGate {
@@ -472,5 +519,50 @@ mod tests {
         let mut g = gate_mode(WakeMode::Hybrid);
         assert!(g.try_wake("li vào hôm nay thời tiết thế nào"));
         assert!(g.is_awake());
+    }
+
+    #[test]
+    fn default_product_phrase_is_only_hey_liva() {
+        let g = gate(DEFAULT_WAKE_PHRASES);
+
+        assert!(g.matches_phrase("Hey Liva"));
+        assert!(g.matches_phrase("Hey Liva bật nhạc"));
+        assert!(g.matches_phrase("Hey, Lì Va bật nhạc"));
+        assert!(!g.matches_phrase("Liva ơi bật nhạc"));
+        assert!(!g.matches_phrase("Này Liva bật nhạc"));
+        assert!(!g.matches_phrase("Tôi nghĩ Hey Liva đang bị gọi nhầm"));
+        assert!(!g.matches_phrase("Hey livable systems"));
+        assert!(!g.matches_phrase("Liva"));
+    }
+
+    #[test]
+    fn default_classifier_uses_evaluated_v2_release() {
+        assert_eq!(DEFAULT_PROBE_MODEL, "wake_liva_en_v2.onnx");
+        assert!((DEFAULT_WAKE_THRESHOLD - 0.58).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn default_probe_accepts_resolver_path_after_scoping_to_parent() {
+        let root = std::env::temp_dir().join(format!(
+            "liva_wake_resolver_path_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("nested")).unwrap();
+        let model = root.join(DEFAULT_PROBE_MODEL);
+        fs::write(&model, b"trusted-wake-model").unwrap();
+        let resolver_style = root.join("nested").join("..").join(DEFAULT_PROBE_MODEL);
+        let expected_hash = Sha256::digest(b"trusted-wake-model")
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+
+        let verified = verify_default_probe_candidate(&resolver_style, &expected_hash).unwrap();
+
+        assert_eq!(verified, model.canonicalize().unwrap());
+        fs::remove_dir_all(root).unwrap();
     }
 }

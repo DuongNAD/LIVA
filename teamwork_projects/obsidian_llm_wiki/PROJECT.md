@@ -47,7 +47,7 @@ The system consists of an Obsidian Vault containing structured markdown files an
   - `mcp-server.test.ts` - Automated Jest tests verifying the server's operations and path validation constraint.
 - `package.json` - Node dependencies and scripts.
 - `tsconfig.json` - TypeScript compilation options.
-- `jest.config.js` - Jest configuration.
+- `vitest.config.ts` - Vitest configuration.
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |

@@ -4,11 +4,11 @@
 //! nhanh lên đáng kể.
 #![cfg(feature = "experimental")]
 
-use std::sync::{Arc, Mutex};
+use liva_native_core::agent::dispatcher::{AgentDispatcher, AgentMessage, AgentRole, SwarmAgent};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-use liva_native_core::agent::dispatcher::{AgentDispatcher, AgentMessage, AgentRole, SwarmAgent};
 
 #[tokio::test]
 async fn test_swarm_stress_shared_dispatcher() {
@@ -21,19 +21,23 @@ async fn test_swarm_stress_shared_dispatcher() {
     let (code_tx, code_rx) = mpsc::channel(1000);
 
     // Register with dispatcher
-    dispatcher.register_agent(AgentRole::Orchestrator, orch_tx).await;
+    dispatcher
+        .register_agent(AgentRole::Orchestrator, orch_tx)
+        .await;
     dispatcher.register_agent(AgentRole::Research, res_tx).await;
     dispatcher.register_agent(AgentRole::Code, code_tx).await;
 
     // Start agents
     let research_agent = SwarmAgent::new(AgentRole::Research, dispatcher.clone(), res_rx);
     let code_agent = SwarmAgent::new(AgentRole::Code, dispatcher.clone(), code_rx);
-    
+
     let research_handle = research_agent.start();
     let code_handle = code_agent.start();
 
     // Coordinator for matching Orchestrator's incoming replies to oneshot senders
-    let pending_replies = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<AgentMessage>>::new()));
+    let pending_replies = Arc::new(Mutex::new(
+        HashMap::<String, oneshot::Sender<AgentMessage>>::new(),
+    ));
     let pending_replies_clone = Arc::clone(&pending_replies);
 
     // Spawn a worker to read from orch_rx and forward to oneshot senders
@@ -54,7 +58,7 @@ async fn test_swarm_stress_shared_dispatcher() {
     for i in 0..num_requests {
         let dispatcher_clone = dispatcher.clone();
         let pending_replies_clone = Arc::clone(&pending_replies);
-        
+
         let handle = tokio::spawn(async move {
             let trace_id = format!("trace-shared-{}", i);
             let request_id = format!("req-shared-{}", i);
@@ -114,13 +118,15 @@ async fn test_swarm_stress_multiple_independent_dispatchers() {
             let (res_tx, res_rx) = mpsc::channel(100);
             let (code_tx, code_rx) = mpsc::channel(100);
 
-            dispatcher.register_agent(AgentRole::Orchestrator, orch_tx).await;
+            dispatcher
+                .register_agent(AgentRole::Orchestrator, orch_tx)
+                .await;
             dispatcher.register_agent(AgentRole::Research, res_tx).await;
             dispatcher.register_agent(AgentRole::Code, code_tx).await;
 
             let research_agent = SwarmAgent::new(AgentRole::Research, dispatcher.clone(), res_rx);
             let code_agent = SwarmAgent::new(AgentRole::Code, dispatcher.clone(), code_rx);
-            
+
             let research_handle = research_agent.start();
             let code_handle = code_agent.start();
 

@@ -56,7 +56,11 @@ impl Muc {
 
 /// Tìm một chương trình trên `PATH` (thêm `.exe` trên Windows).
 fn tren_path(ten: &str) -> Option<PathBuf> {
-    let exts: &[&str] = if cfg!(windows) { &["exe", "cmd", "bat"] } else { &[""] };
+    let exts: &[&str] = if cfg!(windows) {
+        &["exe", "cmd", "bat"]
+    } else {
+        &[""]
+    };
     let path = std::env::var_os("PATH")?;
     for thu_muc in std::env::split_paths(&path) {
         for ext in exts {
@@ -111,10 +115,9 @@ fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) ->
         );
     }
     if !co_cuda {
-        return Muc::moi(TEN, Some(false), "release nhưng build KHÔNG có CUDA").vi(
-            "~80 s mỗi lượt trên CPU. Build lại với `--features cuda` \
-             (ghim `CUDAARCHS` cho GPU của bạn để binary không phình 202 MB).",
-        );
+        return Muc::moi(TEN, Some(false), "release nhưng build KHÔNG có CUDA")
+            .vi("~80 s mỗi lượt trên CPU. Build lại với `--features cuda` \
+             (ghim `CUDAARCHS` cho GPU của bạn để binary không phình 202 MB).");
     }
     if !co_gpu {
         return Muc::moi(TEN, Some(false), "có CUDA nhưng KHÔNG thấy GPU").vi(
@@ -158,8 +161,8 @@ fn thu_thap() -> Vec<Muc> {
         },
     );
     if cfg!(debug_assertions) {
-        profile = profile
-            .vi("Debug đủ cho mọi thứ TRỪ vision. Đường thoại/LLM/bộ nhớ chạy bình thường.");
+        profile =
+            profile.vi("Debug đủ cho mọi thứ TRỪ vision. Đường thoại/LLM/bộ nhớ chạy bình thường.");
     }
     muc.push(profile);
 
@@ -212,16 +215,14 @@ fn thu_thap() -> Vec<Muc> {
 
     muc.push(match tren_path("ffmpeg") {
         Some(p) => Muc::moi("ffmpeg (voice Telegram)", Some(true), gon(&p)),
-        None => Muc::moi("ffmpeg (voice Telegram)", Some(false), "không thấy").vi(
-            "Chỉ ảnh hưởng tin nhắn THOẠI qua Telegram; chat chữ vẫn chạy.",
-        ),
+        None => Muc::moi("ffmpeg (voice Telegram)", Some(false), "không thấy")
+            .vi("Chỉ ảnh hưởng tin nhắn THOẠI qua Telegram; chat chữ vẫn chạy."),
     });
 
     // ── vec0: thứ duy nhất CHẶN BOOT ────────────────────────────────────
     let exe_dir = std::env::current_exe().ok();
-    let ung_vien = liva_native_core::db::vec0_candidate_paths(
-        exe_dir.as_deref().and_then(|p| p.parent()),
-    );
+    let ung_vien =
+        liva_native_core::db::vec0_candidate_paths(exe_dir.as_deref().and_then(|p| p.parent()));
     let vec0_thay = ung_vien.iter().find(|c| Path::new(c).is_file());
     muc.push(match vec0_thay {
         Some(p) => Muc::moi("sqlite-vec (vec0)", Some(true), gon(Path::new(p))),
@@ -239,17 +240,24 @@ fn thu_thap() -> Vec<Muc> {
     // ── Khoá mã hoá ─────────────────────────────────────────────────────
     let khoa = std::env::var("LIVA_ENCRYPTION_KEY").ok();
     muc.push(match khoa.as_deref() {
-        None => Muc::moi("Khoá mã hoá facts", None, "không đặt qua env").vi(
+        None => Muc::moi("Khoá mã hoá dữ liệu cá nhân", None, "không đặt qua env").vi(
             "Sẽ dùng khoá thiết bị (DPAPI) khi khởi động thật. Preflight không \
              mở keystore nên không kết luận thay được.",
         ),
         Some(k) if k == liva_native_core::crypto::DEFAULT_ENCRYPTION_KEY => Muc::moi(
-            "Khoá mã hoá facts",
+            "Khoá mã hoá dữ liệu cá nhân",
             Some(false),
             "đang dùng KHOÁ MẶC ĐỊNH (công khai trong source)",
         )
-        .vi("Mã hoá `facts` gần như không bảo vệ gì — ai đọc được file DB cũng giải mã được."),
-        Some(_) => Muc::moi("Khoá mã hoá facts", Some(true), "khoá riêng từ env"),
+        .vi(
+            "Mã hoá facts, transcript, checkpoint và outbox gần như không bảo vệ gì — \
+             ai đọc được file DB cũng giải mã được.",
+        ),
+        Some(_) => Muc::moi(
+            "Khoá mã hoá dữ liệu cá nhân",
+            Some(true),
+            "khoá riêng từ env",
+        ),
     });
 
     // ── Cấu hình: phải đứng TRƯỚC hai dòng model, vì nếu không tìm thấy thì
@@ -282,9 +290,8 @@ fn thu_thap() -> Vec<Muc> {
         Some(p) if p.is_file() => Muc::moi("Model chat (router GGUF)", Some(true), gon(&p)),
         Some(p) => Muc::moi("Model chat (router GGUF)", Some(false), gon(&p))
             .vi("Không có file ⇒ không có não: `chat:completion` và cả vision đều lỗi."),
-        None => Muc::moi("Model chat (router GGUF)", Some(false), "chưa cấu hình").vi(
-            "Đặt `ai.localModelsDir` + `ai.routerModel` trong `data/liva-config.json`.",
-        ),
+        None => Muc::moi("Model chat (router GGUF)", Some(false), "chưa cấu hình")
+            .vi("Đặt `ai.localModelsDir` + `ai.routerModel` trong `data/liva-config.json`."),
     });
 
     let mmproj = liva_native_core::configured_mmproj_path();
@@ -307,7 +314,12 @@ fn thu_thap() -> Vec<Muc> {
         .count();
     muc.push(match (token.is_some(), allow) {
         (false, _) => Muc::moi("Bot Telegram", None, "không đặt token — bot sẽ không chạy"),
-        (true, 0) => Muc::moi("Bot Telegram", Some(false), "có token nhưng allow-list RỖNG").vi(
+        (true, 0) => Muc::moi(
+            "Bot Telegram",
+            Some(false),
+            "có token nhưng allow-list RỖNG",
+        )
+        .vi(
             "Allow-list là fail-closed: rỗng nghĩa là bot TỪ CHỐI mọi người, kể cả bạn. \
              Đặt `TELEGRAM_ALLOWED_IDS`.",
         ),
@@ -330,7 +342,11 @@ pub fn chay() -> i32 {
     println!("LIVA preflight — môi trường chạy trên máy này");
     println!();
 
-    let rong = muc.iter().map(|m| m.ten.chars().count()).max().unwrap_or(24);
+    let rong = muc
+        .iter()
+        .map(|m| m.ten.chars().count())
+        .max()
+        .unwrap_or(24);
     let mut mat = 0usize;
     let mut khong_ro = 0usize;
 
@@ -359,7 +375,14 @@ pub fn chay() -> i32 {
     if mat == 0 {
         println!("  Không thiếu gì trong phạm vi preflight.");
     } else {
-        println!("  {mat} hạng mục mất năng lực{}.", if khong_ro > 0 { format!(", {khong_ro} không kết luận được") } else { String::new() });
+        println!(
+            "  {mat} hạng mục mất năng lực{}.",
+            if khong_ro > 0 {
+                format!(", {khong_ro} không kết luận được")
+            } else {
+                String::new()
+            }
+        );
     }
     println!("  Model trên đĩa (11 năng lực, kèm lệnh tải):  npm run doctor");
     println!();

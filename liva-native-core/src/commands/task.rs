@@ -235,6 +235,9 @@ mod tests {
         let p = json!({ "id": "abc" });
         assert_eq!(chuoi_bat_buoc(&p, "id").unwrap(), "abc");
         let err = chuoi_bat_buoc(&p, "title").unwrap_err();
-        assert!(err.contains("title"), "thông điệp phải nêu tên trường: {err}");
+        assert!(
+            err.contains("title"),
+            "thông điệp phải nêu tên trường: {err}"
+        );
     }
 }

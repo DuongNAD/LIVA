@@ -31,9 +31,14 @@ async fn main() {
     let mmproj = std::env::var("LIVA_QWENVL_MMPROJ")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(&dir).join("mmproj-F16.gguf"));
-    let ngl: u32 = std::env::var("LIVA_QWENVL_NGL").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
-    let n_ctx: usize =
-        std::env::var("LIVA_QWENVL_NCTX").ok().and_then(|s| s.parse().ok()).unwrap_or(8192);
+    let ngl: u32 = std::env::var("LIVA_QWENVL_NGL")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let n_ctx: usize = std::env::var("LIVA_QWENVL_NCTX")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8192);
     let skip_vision = std::env::var("LIVA_QWENVL_SKIP_VISION").as_deref() == Ok("1");
 
     if !lm.exists() {
@@ -48,14 +53,23 @@ async fn main() {
         .await
         .expect("swap_model");
     mgr.set_mmproj_path(Some(mmproj));
-    eprintln!("[step] model ready in {:.2}s (CHATML auto-detected)", t0.elapsed().as_secs_f32());
+    eprintln!(
+        "[step] model ready in {:.2}s (CHATML auto-detected)",
+        t0.elapsed().as_secs_f32()
+    );
 
     // ── (1) TEXT via the production compile_prompt + generate_completion ────
     println!("\n=== TEXT (compile_prompt → ChatML → generate) ===");
     let text_q = "Bạn là ai, và giúp được gì khi tôi đang bận chơi game?";
     let messages = vec![
-        ChatMessage { role: "system".to_string(), content: persona::PERSONA_LIVA.to_string() },
-        ChatMessage { role: "user".to_string(), content: text_q.to_string() },
+        ChatMessage {
+            role: "system".to_string(),
+            content: persona::PERSONA_LIVA.to_string(),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: text_q.to_string(),
+        },
     ];
     let prompt = compile_prompt(&messages).expect("compile_prompt");
     println!("User: {text_q}\nLIVA: ");
@@ -86,14 +100,20 @@ async fn main() {
         let bytes = std::fs::read(path).expect("read image file");
         mgr.answer_with_image(vis_q, VisionImage::Encoded(&bytes), 0.7, 0.8, stream_print)
     } else {
-        eprintln!("[step] context-aware capture (LIVA_VISION_REGION={}) ...",
-            std::env::var("LIVA_VISION_REGION").unwrap_or_else(|_| "auto".into()));
-        let (vw, vh, rgb) = liva_native_core::vision::capture::capture_for_vision()
-            .expect("capture_for_vision");
+        eprintln!(
+            "[step] context-aware capture (LIVA_VISION_REGION={}) ...",
+            std::env::var("LIVA_VISION_REGION").unwrap_or_else(|_| "auto".into())
+        );
+        let (vw, vh, rgb) =
+            liva_native_core::vision::capture::capture_for_vision().expect("capture_for_vision");
         eprintln!("[step] captured region {}x{}", vw, vh);
         mgr.answer_with_image(
             vis_q,
-            VisionImage::Rgb { width: vw, height: vh, data: &rgb },
+            VisionImage::Rgb {
+                width: vw,
+                height: vh,
+                data: &rgb,
+            },
             0.7,
             0.8,
             stream_print,
@@ -108,5 +128,7 @@ async fn main() {
         vout.completion_tokens as f32 / vdt.max(0.001)
     );
 
-    println!("\nPoC done: production path — swap_model + compile_prompt (text) + answer_with_image (vision).");
+    println!(
+        "\nPoC done: production path — swap_model + compile_prompt (text) + answer_with_image (vision)."
+    );
 }

@@ -11,6 +11,7 @@ import type { ModelFormat } from "../../composables/use3DModel";
 import type { AIProvider } from "liva-common";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
+import { detectPlatform } from "../../platform";
 
 // Props from parent (DashboardApp passes currentModelFormat)
 const props = defineProps<{
@@ -26,6 +27,7 @@ const provider = ref<AIProvider>('local');
 // Cloud Settings
 const cloudBaseUrl = ref('');
 const cloudApiKey = ref('');
+const cloudApiKeyConfigured = ref(false);
 const cloudModel = ref('');
 const showApiKey = ref(false);
 
@@ -90,13 +92,13 @@ const onFileSelected = (e: Event) => {
 
 const gateway = useGateway();
 const { t } = useI18n();
+const platform = detectPlatform();
 
 // Watch for external config updates (e.g. from backend on initial load)
 watch(() => gateway.configData.value, (newVal) => {
   if (newVal && newVal.ai) {
     provider.value = newVal.ai.provider || 'local';
     cloudBaseUrl.value = newVal.ai.cloudBaseUrl || '';
-    cloudApiKey.value = newVal.ai.cloudApiKey || '';
     cloudModel.value = newVal.ai.cloudModel || '';
     localModelsDir.value = newVal.ai.localModelsDir || 'E:\\AI_Models';
     routerModel.value = newVal.ai.routerModel || 'gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf';
@@ -112,32 +114,39 @@ const saveConfig = async () => {
   isSaving.value = true;
   saveMessage.value = '';
 
-  const config = {
-    ai: {
-      provider: provider.value,
-      cloudBaseUrl: cloudBaseUrl.value,
-      cloudApiKey: cloudApiKey.value,
-      cloudModel: cloudModel.value,
-      localModelsDir: localModelsDir.value,
-      routerModel: routerModel.value,
-      expertModel: expertModel.value,
-      temperature: temperature.value,
-      maxTokens: maxTokens.value,
-      topP: topP.value,
+  try {
+    if (cloudApiKey.value) {
+      await platform.storeVaultSecret('ai/cloud_api_key', cloudApiKey.value);
+      cloudApiKey.value = '';
+      cloudApiKeyConfigured.value = true;
     }
-  };
 
-  // Push to Gateway
-  gateway.updateConfig(config);
+    gateway.updateConfig({
+      ai: {
+        provider: provider.value,
+        cloudBaseUrl: cloudBaseUrl.value,
+        cloudModel: cloudModel.value,
+        localModelsDir: localModelsDir.value,
+        routerModel: routerModel.value,
+        expertModel: expertModel.value,
+        temperature: temperature.value,
+        maxTokens: maxTokens.value,
+        topP: topP.value,
+      }
+    });
 
-  // Simulate save delay for UX
-  await new Promise(r => setTimeout(r, 500));
-  isSaving.value = false;
-  saveMessage.value = t('ai_saved');
-  setTimeout(() => { saveMessage.value = ''; }, 3000);
+    saveMessage.value = t('ai_saved');
+    setTimeout(() => { saveMessage.value = ''; }, 3000);
+  } catch (error) {
+    saveMessage.value = `Không thể lưu secret: ${String(error)}`;
+  } finally {
+    isSaving.value = false;
+  }
 };
 
-onMounted(() => {
+onMounted(async () => {
+  cloudApiKeyConfigured.value =
+    await platform.hasVaultSecret('ai/cloud_api_key');
   // If config isn't loaded yet, request it
   if (!gateway.configData.value || Object.keys(gateway.configData.value).length === 0) {
     gateway.sendMsg('get_config');
@@ -193,12 +202,13 @@ onMounted(() => {
             v-model="cloudApiKey"
             :type="showApiKey ? 'text' : 'password'"
             class="input"
-            placeholder="sk-..."
+            :placeholder="cloudApiKeyConfigured ? 'Đã cấu hình — nhập để thay thế' : 'sk-...'"
           />
           <button class="btn btn-ghost toggle-visibility" @click="showApiKey = !showApiKey">
             {{ showApiKey ? '🙈' : '👁️' }}
           </button>
         </div>
+        <span v-if="cloudApiKeyConfigured" class="form-help">Secret đang được bảo vệ trong Stronghold.</span>
       </div>
 
       <div class="form-group">

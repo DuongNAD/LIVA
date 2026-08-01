@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-ipc-call-stream"
+description = "Enables the native_ipc_call_stream command without any pre-configured scope."
+commands.allow = ["native_ipc_call_stream"]
+
+[[permission]]
+identifier = "deny-native-ipc-call-stream"
+description = "Denies the native_ipc_call_stream command without any pre-configured scope."
+commands.deny = ["native_ipc_call_stream"]

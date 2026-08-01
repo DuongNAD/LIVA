@@ -62,11 +62,14 @@ describe("Platform Adapters", () => {
       expect(closeSpy).toHaveBeenCalled();
     });
 
-    it("should read and write vault keys using localStorage", async () => {
+    it("should expose only secret presence and never persist plaintext in localStorage", async () => {
       const adapter = new MockWebAdapter();
-      await adapter.writeVaultKey("test_key", "secret_value");
-      const value = await adapter.readVaultKey("test_key");
-      expect(value).toBe("secret_value");
+      await adapter.storeVaultSecret("ai/cloud_api_key", "secret_value");
+      expect(await adapter.hasVaultSecret("ai/cloud_api_key")).toBe(true);
+      expect(localStorage.getItem("liva_vault_ai/cloud_api_key")).toBeNull();
+
+      await adapter.deleteVaultSecret("ai/cloud_api_key");
+      expect(await adapter.hasVaultSecret("ai/cloud_api_key")).toBe(false);
     });
 
     it("should trigger gateway ready callback after timeout", () => {
@@ -134,31 +137,45 @@ describe("Platform Adapters", () => {
       await expect(adapter.quitApp()).resolves.not.toThrow();
     });
 
-    it("should read vault key from invoke", async () => {
+    it("should query vault secret presence without reading plaintext", async () => {
       const adapter = new TauriAdapter();
-      mockInvoke.mockResolvedValue("mocked_secret");
-      const key = await adapter.readVaultKey("my_key");
-      expect(mockInvoke).toHaveBeenCalledWith("read_vault_key", { key: "my_key" });
-      expect(key).toBe("mocked_secret");
+      mockInvoke.mockResolvedValue(true);
+      const present = await adapter.hasVaultSecret("ai/cloud_api_key");
+      expect(mockInvoke).toHaveBeenCalledWith("vault_secret_present", {
+        key: "ai/cloud_api_key",
+      });
+      expect(present).toBe(true);
     });
 
-    it("should handle error in readVaultKey gracefully", async () => {
+    it("should report missing presence when Stronghold cannot be queried", async () => {
       const adapter = new TauriAdapter();
       mockInvoke.mockRejectedValueOnce(new Error("Read vault error"));
-      const key = await adapter.readVaultKey("my_key");
-      expect(key).toBeNull();
+      expect(await adapter.hasVaultSecret("ai/cloud_api_key")).toBe(false);
     });
 
-    it("should write vault key using invoke", async () => {
+    it("should store vault secret using the write-only command", async () => {
       const adapter = new TauriAdapter();
-      await adapter.writeVaultKey("my_key", "my_val");
-      expect(mockInvoke).toHaveBeenCalledWith("write_vault_key", { key: "my_key", value: "my_val" });
+      await adapter.storeVaultSecret("ai/cloud_api_key", "my_val");
+      expect(mockInvoke).toHaveBeenCalledWith("store_vault_secret", {
+        key: "ai/cloud_api_key",
+        value: "my_val",
+      });
     });
 
-    it("should handle error in writeVaultKey gracefully", async () => {
+    it("should propagate vault write failures so UI cannot claim false success", async () => {
       const adapter = new TauriAdapter();
       mockInvoke.mockRejectedValueOnce(new Error("Write vault error"));
-      await expect(adapter.writeVaultKey("my_key", "my_val")).resolves.not.toThrow();
+      await expect(
+        adapter.storeVaultSecret("ai/cloud_api_key", "my_val"),
+      ).rejects.toThrow("Write vault error");
+    });
+
+    it("should delete vault secret using the dedicated command", async () => {
+      const adapter = new TauriAdapter();
+      await adapter.deleteVaultSecret("ai/cloud_api_key");
+      expect(mockInvoke).toHaveBeenCalledWith("delete_vault_secret", {
+        key: "ai/cloud_api_key",
+      });
     });
 
     it("should call invokeBackend via invoke", async () => {

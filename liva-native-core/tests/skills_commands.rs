@@ -178,30 +178,26 @@ async fn nam_lenh_skills_da_noi_vao_dispatch() {
     let state = state_test();
 
     // ── sync: đọc đĩa → DB ─────────────────────────────────────────────────
-    let s = handle_command(
-        Arc::clone(&state),
-        "skills:sync",
-        json!({}),
-        None,
-        None,
-    )
-    .await
-    .expect("skills:sync phải chạy");
-    assert_eq!(s["skills"], json!(2), "2 skill hợp lệ, skill hỏng bị bỏ qua");
+    let s = handle_command(Arc::clone(&state), "skills:sync", json!({}), None, None)
+        .await
+        .expect("skills:sync phải chạy");
+    assert_eq!(
+        s["skills"],
+        json!(2),
+        "2 skill hợp lệ, skill hỏng bị bỏ qua"
+    );
     assert_eq!(s["newVersions"], json!(2), "lần đầu ⇒ 2 version gốc");
 
     // Sync lại: KHÔNG được sinh version mới. Đây là ca thường gặp nhất.
-    let s2 = handle_command(
-        Arc::clone(&state),
-        "skills:sync",
-        json!({}),
-        None,
-        None,
-    )
-    .await
-    .expect("sync lần hai");
+    let s2 = handle_command(Arc::clone(&state), "skills:sync", json!({}), None, None)
+        .await
+        .expect("sync lần hai");
     assert_eq!(s2["skills"], json!(2));
-    assert_eq!(s2["newVersions"], json!(0), "nội dung không đổi ⇒ 0 version mới");
+    assert_eq!(
+        s2["newVersions"],
+        json!(0),
+        "nội dung không đổi ⇒ 0 version mới"
+    );
 
     // ── list ───────────────────────────────────────────────────────────────
     let l = handle_command(Arc::clone(&state), "skills:list", json!({}), None, None)
@@ -234,7 +230,8 @@ async fn nam_lenh_skills_da_noi_vao_dispatch() {
     assert_eq!(r["results"][0]["name"], json!("migrate-db"));
     // `AppState.embedder` là None trong test ⇒ không rerank, và lệnh phải NÓI RA.
     assert_eq!(
-        r["reranked"], json!(false),
+        r["reranked"],
+        json!(false),
         "thiếu model embedding thì phải báo chưa rerank, không im lặng"
     );
 
@@ -249,36 +246,27 @@ async fn nam_lenh_skills_da_noi_vao_dispatch() {
     .await
     .expect("skills:history");
     assert_eq!(h["versions"].as_array().unwrap().len(), 1);
-    assert!(h["versions"][0]["parentId"].is_null(), "version gốc không có cha");
+    assert!(
+        h["versions"][0]["parentId"].is_null(),
+        "version gốc không có cha"
+    );
 
     // ── pin_ids: hành động GHI ĐĨA ──────────────────────────────────────────
     assert!(
         !goc.join("review-diff/.skill_id").exists(),
         "trước khi pin thì KHÔNG được có .skill_id — sync/search/list phải thuần đọc"
     );
-    let pin = handle_command(
-        Arc::clone(&state),
-        "skills:pin_ids",
-        json!({}),
-        None,
-        None,
-    )
-    .await
-    .expect("skills:pin_ids");
+    let pin = handle_command(Arc::clone(&state), "skills:pin_ids", json!({}), None, None)
+        .await
+        .expect("skills:pin_ids");
     assert_eq!(pin["pinned"], json!(2));
     assert_eq!(pin["skipped"], json!(0));
     assert!(goc.join("review-diff/.skill_id").is_file());
 
     // Pin lần hai: không đụng file đã có.
-    let pin2 = handle_command(
-        Arc::clone(&state),
-        "skills:pin_ids",
-        json!({}),
-        None,
-        None,
-    )
-    .await
-    .expect("pin lần hai");
+    let pin2 = handle_command(Arc::clone(&state), "skills:pin_ids", json!({}), None, None)
+        .await
+        .expect("pin lần hai");
     assert_eq!(pin2["pinned"], json!(0));
     assert_eq!(pin2["skipped"], json!(2));
 
@@ -318,7 +306,11 @@ async fn tin_hieu_chat_luong_dich_chuyen_thu_tu_truy_hoi() {
     };
     let nen = tim(Arc::clone(&state)).await;
     assert_eq!(nen["results"][0]["name"], json!("migrate-db"), "tiền đề");
-    assert_eq!(nen["priorApplied"], json!(false), "sổ cái rỗng ⇒ prior không tác động");
+    assert_eq!(
+        nen["priorApplied"],
+        json!(false),
+        "sổ cái rỗng ⇒ prior không tác động"
+    );
     assert_eq!(nen["results"][0]["qualityPenalty"], json!(0.0));
 
     let id_migrate = nen["results"][0]["skillId"].as_str().unwrap().to_string();
@@ -472,7 +464,10 @@ async fn hai_lenh_g3_thieu_tham_so_thi_bao_loi_chi_duong() {
     )
     .await
     .expect_err("thiếu kind phải lỗi");
-    assert!(e.contains("tool_failure_affects_skill"), "phải liệt kê loại: {e}");
+    assert!(
+        e.contains("tool_failure_affects_skill"),
+        "phải liệt kê loại: {e}"
+    );
 
     let e = handle_command(Arc::clone(&state), "skills:signals", json!({}), None, None)
         .await
@@ -496,7 +491,10 @@ async fn thieu_tham_so_thi_bao_loi_chi_duong() {
     let e = handle_command(Arc::clone(&state), "skills:history", json!({}), None, None)
         .await
         .expect_err("thiếu skillId phải lỗi");
-    assert!(e.contains("skills:list"), "lỗi phải chỉ cách xem danh sách: {e}");
+    assert!(
+        e.contains("skills:list"),
+        "lỗi phải chỉ cách xem danh sách: {e}"
+    );
 }
 
 /// Thư mục skill không tồn tại phải báo lỗi đọc được, không panic.
@@ -504,15 +502,9 @@ async fn thieu_tham_so_thi_bao_loi_chi_duong() {
 async fn thu_muc_khong_ton_tai_thi_bao_loi_doc_duoc() {
     let _kho = KhoTam::moi("khong-ton-tai-dau-g2-xxx");
     let state = state_test();
-    let e = handle_command(
-        Arc::clone(&state),
-        "skills:sync",
-        json!({}),
-        None,
-        None,
-    )
-    .await
-    .expect_err("phải lỗi");
+    let e = handle_command(Arc::clone(&state), "skills:sync", json!({}), None, None)
+        .await
+        .expect_err("phải lỗi");
     assert!(e.contains("không phải thư mục"), "{e}");
 }
 

@@ -149,23 +149,84 @@ export function kiemTra(root = ROOT) {
     )
   }
 
-  // ── 8. Màn hình chuẩn bị model phải tồn tại và được cấp quyền ────────────
+  // ── 8. Ba cửa sổ phải dùng ba capability tách biệt ──────────────────────
   if (!fs.existsSync(G('liva-ui/public/setup.html'))) {
     loi.push('thiếu liva-ui/public/setup.html — cửa sổ chuẩn bị model sẽ trắng trơn')
   }
-  try {
-    const cap = doc(G('liva-desktop/src-tauri/capabilities/default.json'))
-    if (!(cap.windows ?? []).includes('setup')) {
-      loi.push(
-        'capabilities/default.json chưa cấp quyền cho cửa sổ "setup" — cửa sổ mở được ' +
-          'nhưng mọi lời gọi invoke bên trong bị từ chối',
-      )
+  const capabilityNames = ['widget', 'dashboard', 'setup']
+  const enabledCapabilities = conf.app?.security?.capabilities
+  if (
+    !Array.isArray(enabledCapabilities) ||
+    enabledCapabilities.length !== capabilityNames.length ||
+    capabilityNames.some((name) => !enabledCapabilities.includes(name))
+  ) {
+    loi.push(
+      `app.security.capabilities phải bật đúng ${JSON.stringify(capabilityNames)} — ` +
+        `nhận ${JSON.stringify(enabledCapabilities)}`,
+    )
+  }
+  for (const name of capabilityNames) {
+    const rel = `liva-desktop/src-tauri/capabilities/${name}.json`
+    try {
+      const cap = doc(G(rel))
+      if (cap.identifier !== name || JSON.stringify(cap.windows) !== JSON.stringify([name])) {
+        loi.push(`${rel} phải chỉ gán đúng cửa sổ "${name}"`)
+      }
+      if (name === 'setup') {
+        for (const permission of [
+          'allow-native-ipc-call',
+          'allow-native-ipc-call-stream',
+          'allow-open-dashboard',
+          'core:window:allow-close',
+        ]) {
+          if (!(cap.permissions ?? []).includes(permission)) {
+            loi.push(`${rel} thiếu ${permission}`)
+          }
+        }
+      }
+    } catch (e) {
+      loi.push(`không đọc được ${rel}: ${e.message}`)
     }
-  } catch (e) {
-    loi.push(`không đọc được capabilities/default.json: ${e.message}`)
   }
 
-  // ── 9. Manifest model + cổng chuỗi cung ứng ─────────────────────────────
+  // ── 9. CSP + tài nguyên setup tĩnh ──────────────────────────────────────
+  const csp = conf.app?.security?.csp ?? ''
+  if (csp.includes("'unsafe-inline'")) {
+    loi.push("app.security.csp KHÔNG được chứa 'unsafe-inline'")
+  }
+  for (const directive of ["script-src 'self'", "style-src 'self'", "object-src 'none'"]) {
+    if (!csp.includes(directive)) {
+      loi.push(`app.security.csp thiếu chỉ thị bắt buộc: ${directive}`)
+    }
+  }
+  const publicDir = G('liva-ui/public')
+  for (const name of fs.readdirSync(publicDir).filter((entry) => entry.endsWith('.html'))) {
+    const rel = `liva-ui/public/${name}`
+    try {
+      const html = fs.readFileSync(G(rel), 'utf8')
+      if (
+        /<style(?:\s|>)/i.test(html) ||
+        /<script(?![^>]*\bsrc\s*=)[^>]*>/i.test(html) ||
+        /\sstyle\s*=/i.test(html)
+      ) {
+        loi.push(`${rel} KHÔNG được chứa inline script hoặc style`)
+      }
+    } catch (e) {
+      loi.push(`không đọc được ${rel}: ${e.message}`)
+    }
+  }
+  const setupRel = 'liva-ui/public/setup.html'
+  try {
+    for (const asset of ['setup.css', 'setup.js']) {
+      if (!fs.existsSync(G(`liva-ui/public/${asset}`))) {
+        loi.push(`${setupRel} tham chiếu tài nguyên không tồn tại: ${asset}`)
+      }
+    }
+  } catch (e) {
+    loi.push(`không đọc được ${setupRel}: ${e.message}`)
+  }
+
+  // ── 10. Manifest model + cổng chuỗi cung ứng ────────────────────────────
   //
   // Fail closed: thiếu hoặc sai `sha256` là LỖI, không phải cảnh báo. Kích thước
   // không phải bằng chứng về nội dung — ngày 28/07/2026 có bốn file trên máy dev
@@ -174,6 +235,9 @@ export function kiemTra(root = ROOT) {
     const m = doc(G('data/models-manifest.json'))
     if (!m.files?.length) loi.push('data/models-manifest.json không có file nào')
     const laHex = (s) => typeof s === 'string' && /^[0-9a-fA-F]{64}$/.test(s)
+    if (!laHex(m.runtimeArtifacts?.vec0?.sha256)) {
+      loi.push('manifest: runtimeArtifacts.vec0.sha256 phải là SHA-256 64 hex')
+    }
     for (const f of m.files ?? []) {
       if (!m.groups?.[f.group]) loi.push(`manifest: ${f.dest} thuộc nhóm "${f.group}" chưa khai báo`)
       if (!f.url && !f.manual) loi.push(`manifest: ${f.dest} không có url thì phải có "manual"`)

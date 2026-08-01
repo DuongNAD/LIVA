@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-eco-mode"
+description = "Enables the set_eco_mode command without any pre-configured scope."
+commands.allow = ["set_eco_mode"]
+
+[[permission]]
+identifier = "deny-set-eco-mode"
+description = "Denies the set_eco_mode command without any pre-configured scope."
+commands.deny = ["set_eco_mode"]

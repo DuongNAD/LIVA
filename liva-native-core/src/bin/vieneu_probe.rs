@@ -21,7 +21,8 @@ use std::time::Instant;
 use liva_native_core::tts::vieneu::VieNeuVoice;
 
 fn resolve_dir() -> PathBuf {
-    let rel = std::env::var("LIVA_VIENEU_MODEL_DIR").unwrap_or_else(|_| "models/vieneu".to_string());
+    let rel =
+        std::env::var("LIVA_VIENEU_MODEL_DIR").unwrap_or_else(|_| "models/vieneu".to_string());
     for prefix in ["", "..", "../.."] {
         let p = PathBuf::from(prefix).join(&rel);
         if p.join("config.json").exists() {

@@ -5,7 +5,7 @@ use aes_gcm::{
 };
 use hkdf::Hkdf;
 use rand::RngCore;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 type Aes256Gcm16 = AesGcm<aes_gcm::aes::Aes256, U16>;
 
@@ -33,6 +33,7 @@ const SALT_LEN: usize = 16;
 /// `encrypt` luôn sinh **v2**. `decrypt`/`try_decrypt` đọc được cả hai. Dữ liệu
 /// v1 cũ được nâng cấp lên v2 bởi [`crate::db::migrate_facts_encryption`] khi
 /// khởi động (giải mã bằng khoá v1 rồi mã hoá lại bằng KDF v2 — không mất gì).
+#[derive(Clone)]
 pub struct EncryptionEngine {
     /// Khoá v1: bytes passphrase pad `0x00` (chỉ để giải mã dữ liệu cũ).
     legacy_key: [u8; 32],
@@ -107,6 +108,18 @@ impl EncryptionEngine {
             legacy_key,
             passphrase: bytes.to_vec(),
         }
+    }
+
+    /// Fingerprint không bí mật để ràng buộc backup với đúng khóa mã hóa.
+    ///
+    /// Không ghi passphrase vào manifest. 16 byte SHA-256 có domain separation đủ
+    /// để phát hiện nhầm khóa với xác suất va chạm không đáng kể; khóa thực vẫn phải
+    /// có entropy cao vì mọi fingerprint xác định đều là oracle cho passphrase yếu.
+    pub fn key_id(&self) -> String {
+        let mut digest = Sha256::new();
+        digest.update(b"liva-data-key-id-v1\0");
+        digest.update(&self.passphrase);
+        hex::encode(&digest.finalize()[..16])
     }
 
     /// Dẫn xuất khoá 32 byte từ passphrase + salt qua HKDF-SHA256. Không bao
@@ -311,6 +324,19 @@ mod tests {
 
         let decrypted = engine.decrypt(&encrypted);
         assert_eq!(plain, decrypted);
+    }
+
+    #[test]
+    fn key_id_on_dinh_khong_lo_khoa_va_phan_biet_khoa() {
+        let key_a = "backup-key-a-32-bytes-long-value";
+        let a1 = EncryptionEngine::new(key_a);
+        let a2 = EncryptionEngine::new(key_a);
+        let b = EncryptionEngine::new("backup-key-b-32-bytes-long-value");
+
+        assert_eq!(a1.key_id(), a2.key_id());
+        assert_ne!(a1.key_id(), b.key_id());
+        assert_eq!(a1.key_id().len(), 32);
+        assert!(!a1.key_id().contains(key_a));
     }
 
     /// Hai plaintext GIỐNG NHAU phải ra ciphertext KHÁC NHAU (salt riêng mỗi

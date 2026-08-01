@@ -3,7 +3,7 @@ title: "commands_reference"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-07-28T00:00:00+07:00"
+last_update: "2026-07-31T07:35:00+07:00"
 ---
 
 # Knowledge: Commands Reference
@@ -29,8 +29,12 @@ Run commands from the repository root unless a command includes `-w` or an expli
 | `npm run test:coverage -w liva-ui` | Run Vue tests with coverage |
 | `cargo test --manifest-path liva-native-core/Cargo.toml` | Run native-core Rust tests |
 | `cargo check --all-targets --manifest-path liva-native-core/Cargo.toml` | Compile-check native-core targets |
+| `cargo fmt --all -- --check` | Reject Rust formatting drift across the workspace |
+| `cargo audit` | Reject known Rust vulnerabilities in `Cargo.lock` |
+| `npm audit --audit-level=high` | Reject vulnerable npm production and development tooling |
+| `npm audit --omit=dev --audit-level=high` | Verify the shipped npm runtime dependency subset independently |
 | `npm run typecheck -w obsidian-llm-wiki` | Type-check the Obsidian MCP server |
-| `npm run test -w obsidian-llm-wiki` | Run Obsidian MCP tests |
+| `npm run test -w obsidian-llm-wiki` | Run Obsidian MCP Vitest tests |
 | `npm run validate -w obsidian-llm-wiki` | Validate vault frontmatter and structure |
 | `npm run test:skills` | Run negative and positive tests for skill governance |
 | `npm run skills:audit` | Audit Claude/Codex skills and active vault knowledge |

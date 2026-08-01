@@ -78,7 +78,7 @@ pub struct Boot {
     /// sao lưu đúng một lần. Gateway in ra stderr, app desktop mở hộp thoại —
     /// đó là khác biệt có thật, nên để vỏ quyết.
     pub escrow_hex: Option<String>,
-    /// Nguồn khoá + số fact đã rekey, để vỏ log.
+    /// Nguồn khóa + tổng số bản ghi nhạy cảm đã rekey/khóa-chết, để vỏ log.
     pub crypto_source: &'static str,
     pub crypto_rekeyed: usize,
     pub crypto_locked: usize,
@@ -163,13 +163,15 @@ pub fn build_app_state() -> Result<Boot, BootError> {
             (None, None)
         }
     };
-    let sink = audio_handle.as_ref().and_then(|h| match rodio::Sink::try_new(h) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            error!("Không tạo được rodio Sink: {e}. LIVA sẽ không phát tiếng.");
-            None
-        }
-    });
+    let sink = audio_handle
+        .as_ref()
+        .and_then(|h| match rodio::Sink::try_new(h) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                error!("Không tạo được rodio Sink: {e}. LIVA sẽ không phát tiếng.");
+                None
+            }
+        });
 
     // Đường dẫn model tương đối phải resolve theo gốc repo THẬT: gateway chạy
     // từ repo root hoặc liva-native-core, còn Tauri chạy với cwd =
@@ -212,11 +214,8 @@ pub fn build_app_state() -> Result<Boot, BootError> {
     // Mặc định KHÔNG còn là đường dẫn tuyệt đối của máy dev: xem
     // `crate::default_vault_path`. Trên máy người dùng, `E:\Project\LIVA\...` là
     // một ổ đĩa không tồn tại, nên MCP khởi tạo xong là trỏ vào hư không.
-    let vault_path = std::env::var("LIVA_VAULT_PATH").unwrap_or_else(|_| {
-        crate::default_vault_path()
-            .to_string_lossy()
-            .into_owned()
-    });
+    let vault_path = std::env::var("LIVA_VAULT_PATH")
+        .unwrap_or_else(|_| crate::default_vault_path().to_string_lossy().into_owned());
     let mcp_server = Arc::new(crate::mcp::server::NativeMcpServer::new(&vault_path));
 
     let vision_manager = crate::vision::VisionManager::new(
@@ -262,8 +261,8 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         state,
         escrow_hex: boot_crypto.escrow_hex,
         crypto_source: boot_crypto.source,
-        crypto_rekeyed: boot_crypto.rekeyed,
-        crypto_locked: boot_crypto.locked,
+        crypto_rekeyed: boot_crypto.rekeyed + boot_crypto.personal_data_rekeyed,
+        crypto_locked: boot_crypto.locked + boot_crypto.personal_data_locked,
         audio_stream,
         llm_n_gpu_layers,
     })
@@ -277,6 +276,10 @@ pub struct ServiceOptions {
     /// Gọi ngay sau khi WebSocket bind xong. App desktop dùng để emit
     /// `gateway-ready` cho cửa sổ; gateway không cần gì.
     pub on_gateway_ready: Option<Box<dyn Fn(std::net::SocketAddr) + Send + Sync>>,
+    /// Trao session authority cho vỏ tin cậy sau khi WebSocket bind xong.
+    /// Gateway độc lập không có WebView đặc quyền nên để `None`.
+    pub on_websocket_sessions_ready:
+        Option<Box<dyn Fn(crate::websocket::WebSocketSessionAuthority) + Send + Sync>>,
     /// Số lớp GPU ở chế độ thường — lấy từ [`Boot::llm_n_gpu_layers`].
     pub llm_n_gpu_layers: u32,
 }
@@ -286,6 +289,7 @@ impl ServiceOptions {
         Self {
             ipc_tx: None,
             on_gateway_ready: None,
+            on_websocket_sessions_ready: None,
             llm_n_gpu_layers,
         }
     }
@@ -307,7 +311,15 @@ pub fn spawn_background_services(
         state.db.clone(),
     ));
 
-    // 2. Tự nạp model router đã cấu hình, để chat dùng được mà không phải gọi
+    // 2. Retention chỉ chạy khi có policy opt-in. Mặc định không tự xóa dữ liệu.
+    if let Some(policy) = crate::memory_retention::RetentionPolicy::from_env() {
+        tasks.push(crate::memory_retention::spawn_retention_sweeper(
+            state.db.clone(),
+            policy,
+        ));
+    }
+
+    // 3. Tự nạp model router đã cấu hình, để chat dùng được mà không phải gọi
     //    `llm:swap_model` bằng tay.
     {
         let state = state.clone();
@@ -316,7 +328,7 @@ pub fn spawn_background_services(
         }));
     }
 
-    // 3. Hạ lớp GPU khi có game chạy: trả VRAM lại cho game, khôi phục khi
+    // 4. Hạ lớp GPU khi có game chạy: trả VRAM lại cho game, khôi phục khi
     //    thoát. Chỉ nạp lại khi trạng thái game ĐỔI (nạp lại rất đắt).
     {
         let state = state.clone();
@@ -345,13 +357,17 @@ pub fn spawn_background_services(
         }));
     }
 
-    // 4. Máy chủ WebSocket (thoại + IPC).
+    // 5. Máy chủ WebSocket (thoại + IPC).
     {
         let state = state.clone();
         let on_ready = opts.on_gateway_ready;
+        let on_sessions_ready = opts.on_websocket_sessions_ready;
         tasks.push(tokio::spawn(async move {
             match crate::websocket::WebSocketServer::bind_from_env().await {
                 Ok(server) => {
+                    if let Some(cb) = on_sessions_ready {
+                        cb(server.session_authority());
+                    }
                     if let Some(cb) = on_ready {
                         cb(server.local_addr());
                     }
@@ -364,7 +380,7 @@ pub fn spawn_background_services(
         }));
     }
 
-    // 5. Giải phóng session TTS khi rảnh 5 phút.
+    // 6. Giải phóng session TTS khi rảnh 5 phút.
     //
     //    Trước 26/07/2026 việc này CHỈ có ở gateway. App desktop — thứ người
     //    dùng thật sự chạy, và chạy cả ngày — không bao giờ trả lại session
@@ -382,7 +398,7 @@ pub fn spawn_background_services(
         }));
     }
 
-    // 6. Bot Telegram khi có token.
+    // 7. Bot Telegram khi có token.
     //
     //    Cũng chỉ có ở gateway trước đây: đặt `TELEGRAM_BOT_TOKEN` rồi mở app
     //    desktop thì bot **không chạy và không báo gì**. Nay hễ có token là bot
@@ -392,13 +408,12 @@ pub fn spawn_background_services(
         .ok()
         .filter(|t| !t.trim().is_empty())
     {
-        let allowed_ids: std::collections::HashSet<String> =
-            std::env::var("TELEGRAM_ALLOWED_IDS")
-                .unwrap_or_default()
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+        let allowed_ids: std::collections::HashSet<String> = std::env::var("TELEGRAM_ALLOWED_IDS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
         let state = state.clone();
         let ipc_tx = opts.ipc_tx;
         tasks.push(tokio::spawn(async move {
@@ -413,7 +428,7 @@ pub fn spawn_background_services(
         }));
     }
 
-    // 7. Governor ưu tiên CPU: hạ tiến trình xuống BELOW_NORMAL khi có game.
+    // 8. Governor ưu tiên CPU: hạ tiến trình xuống BELOW_NORMAL khi có game.
     //
     //    Là `std::thread` chứ không phải task tokio vì `SetPriorityClass` tác
     //    động lên tiến trình và vòng lặp chỉ ngủ — không cần runtime async, và
@@ -470,6 +485,7 @@ mod tests {
         let o = ServiceOptions::new(0);
         assert!(o.ipc_tx.is_none());
         assert!(o.on_gateway_ready.is_none());
+        assert!(o.on_websocket_sessions_ready.is_none());
         assert_eq!(o.llm_n_gpu_layers, 0);
     }
 

@@ -96,3 +96,36 @@ test('đường dẫn gõ nhầm NGOÀI gitlink vẫn phải báo hỏng', () =>
   assert.equal(ket.length, 1, 'đường dẫn không tồn tại ngoài gitlink phải bị bắt')
   assert.equal(ket[0].loai, 'file-khong-ton-tai')
 })
+
+test('citation checker bỏ qua đúng snapshot FREEZE từ document inventory', () => {
+  const raw = execFileSync('node', ['scripts/docs-citations.mjs', '--json'], {
+    cwd: REPO,
+    encoding: 'utf8',
+  })
+  const report = JSON.parse(raw)
+
+  assert.ok(
+    report.frozenDocsSkipped.includes('docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md'),
+    'snapshot khảo sát gốc phải được lấy từ disposition FREEZE',
+  )
+  assert.ok(
+    report.frozenDocsSkipped.includes('docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md'),
+    'đề xuất OpenSpace đã FREEZE không được so citation với HEAD',
+  )
+  assert.ok(
+    report.frozenDocsSkipped.includes('docs/01-ban-ve/03-duong-ong-thoai.md'),
+    'khảo sát voice cũ đã hoàn tất di trú phải được bỏ qua như snapshot FREEZE',
+  )
+  assert.ok(
+    !report.frozenDocsSkipped.includes('docs/03-he-thong-con/voice.md'),
+    'tài liệu voice canonical KEEP phải tiếp tục được quét',
+  )
+  assert.ok(
+    report.frozenDocsSkipped.includes('docs/01-ban-ve/05-agent-bo-nho-va-tien-hoa.md'),
+    'khảo sát agent/memory/evolution cũ phải được bỏ qua như snapshot FREEZE',
+  )
+  assert.ok(
+    !report.frozenDocsSkipped.includes('docs/03-he-thong-con/agent-tools.md'),
+    'tài liệu agent/tools canonical KEEP phải tiếp tục được quét',
+  )
+})

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "widget",
+  "description": "LIVA widget: conversational IPC and widget window controls only",
+  "windows": ["widget"],
+  "permissions": [
+    "allow-native-ipc-call",
+    "allow-native-ipc-call-stream",
+    "allow-issue-websocket-session",
+    "allow-toggle-ghost-mode",
+    "allow-update-interactive-zones",
+    "allow-open-dashboard",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

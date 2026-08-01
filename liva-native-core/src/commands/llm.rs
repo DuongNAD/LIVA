@@ -20,7 +20,7 @@
 
 use crate::{
     AppState, agent, configured_models_dir, handle_chat_completion_scoped, llm,
-    validate_model_path,
+    verify_model_artifact,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -70,8 +70,8 @@ async fn swap_model(state: Arc<AppState>, payload: Value) -> Result<Value, Strin
     let model_path = std::path::Path::new(model_path_str);
     // C2: chỉ cho nạp .gguf trong thư mục model đã cấu hình — không phải
     // đường dẫn tuỳ ý vào parser C++ của llama.cpp.
-    validate_model_path(model_path, &configured_models_dir())?;
-    let model_path = &configured_models_dir().join(model_path);
+    let models_dir = configured_models_dir();
+    let model_path = verify_model_artifact(&models_dir, model_path)?;
 
     let n_ctx = payload["n_ctx"].as_u64().map(|v| v as usize);
     let n_gpu_layers = payload["n_gpu_layers"].as_u64().map(|v| v as u32);
@@ -79,7 +79,7 @@ async fn swap_model(state: Arc<AppState>, payload: Value) -> Result<Value, Strin
 
     let mut llm_manager = state.llm.lock().await;
     llm_manager
-        .swap_model(model_path, n_ctx, n_gpu_layers, vocab_only)
+        .swap_model(&model_path, n_ctx, n_gpu_layers, vocab_only)
         .await?;
 
     Ok(json!({ "success": true }))

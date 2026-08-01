@@ -90,9 +90,7 @@ fn in_cau_hinh_may(duong_dan_model: &std::path::Path, n_ctx: usize, n_gpu_layers
         "CPU (không có feature GPU nào được bật lúc build)"
     };
     println!("│ Build            : {profile} · backend {backend}");
-    println!(
-        "│ n_ctx            : {n_ctx}   (LIVA_LLM_N_CTX, mặc định 4096 như boot.rs)"
-    );
+    println!("│ n_ctx            : {n_ctx}   (LIVA_LLM_N_CTX, mặc định 4096 như boot.rs)");
     println!(
         "│ n_gpu_layers     : {n_gpu_layers}   (LIVA_LLM_N_GPU_LAYERS, mặc định 0 — \
          0 nghĩa là CHẠY CPU dù build có CUDA)"
@@ -358,11 +356,7 @@ mod tests {
         let b = dung(2);
         assert_ne!(a, b, "hai lượt phải ra prompt khác nhau");
 
-        let chung = a
-            .bytes()
-            .zip(b.bytes())
-            .take_while(|(x, y)| x == y)
-            .count();
+        let chung = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
         assert!(
             chung < 40,
             "tiền tố chung {chung} byte là quá dài — nhãn phiên đã trôi khỏi đầu prompt, \

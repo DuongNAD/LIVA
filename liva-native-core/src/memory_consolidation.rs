@@ -207,7 +207,12 @@ fn unix_time_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use crate::crypto::EncryptionEngine;
     use crate::db::{DatabasePool, MEMORY_VECTOR_DIM, persist_conversation_event_vector};
+
+    fn test_crypto() -> EncryptionEngine {
+        EncryptionEngine::new("consolidation-test-key-32-bytes")
+    }
 
     #[test]
     fn event_hop_le_duoc_finalize_cung_checkpoint() {
@@ -215,6 +220,7 @@ mod tests {
         let conn = pool.writer.get().expect("writer");
         persist_conversation_event_vector(
             &conn,
+            &test_crypto(),
             "turn_consumer_1",
             "Người dùng: nhớ ORION-7\nLIVA: đã nhớ.",
             &vec![0.2; MEMORY_VECTOR_DIM],
@@ -336,6 +342,7 @@ mod tests {
         let conn = pool.writer.get().expect("writer");
         persist_conversation_event_vector(
             &conn,
+            &test_crypto(),
             "turn_atomic_consumer",
             "Người dùng: nhớ atomic\nLIVA: đã nhớ.",
             &vec![0.2; MEMORY_VECTOR_DIM],
@@ -367,6 +374,7 @@ mod tests {
             let conn = pool.writer.get().expect("writer");
             persist_conversation_event_vector(
                 &conn,
+                &test_crypto(),
                 "turn_async_consumer",
                 "Người dùng: nhớ async\nLIVA: đã nhớ.",
                 &vec![0.2; MEMORY_VECTOR_DIM],
@@ -400,6 +408,7 @@ mod tests {
             let conn = pool.writer.get().expect("writer");
             persist_conversation_event_vector(
                 &conn,
+                &test_crypto(),
                 "turn_background_consumer",
                 "Người dùng: nhớ background\nLIVA: đã nhớ.",
                 &vec![0.2; MEMORY_VECTOR_DIM],
@@ -445,6 +454,7 @@ mod tests {
             let conn = pool.writer.get().expect("writer");
             persist_conversation_event_vector(
                 &conn,
+                &test_crypto(),
                 "turn_spawn_consumer",
                 "Người dùng: nhớ spawn\nLIVA: đã nhớ.",
                 &vec![0.2; MEMORY_VECTOR_DIM],

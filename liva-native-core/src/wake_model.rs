@@ -198,6 +198,24 @@ impl TrainedWakeDetector {
     /// `threshold` on a periodic check (not necessarily every call — see
     /// module docs).
     pub fn push_and_check(&mut self, samples: &[f32]) -> Option<(String, f32)> {
+        match self.push_scores(samples) {
+            Ok(Some(scores)) => scores
+                .into_iter()
+                .filter(|(_, score)| *score > self.threshold)
+                .max_by(|a, b| a.1.total_cmp(&b.1)),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::error!("Wake-word predict failed: {}", e);
+                None
+            }
+        }
+    }
+
+    /// Feed streaming audio and expose raw classifier scores at the normal
+    /// inference cadence. Production detection remains in [`Self::push_and_check`];
+    /// this threshold-free path exists so the corpus benchmark can sweep a
+    /// threshold and calculate recall/FPPH without duplicating the ring logic.
+    pub fn push_scores(&mut self, samples: &[f32]) -> Result<Option<HashMap<String, f32>>, String> {
         for &s in samples {
             self.ring.push_back(s.clamp(-1.0, 1.0));
             if self.ring.len() > RING_LEN {
@@ -206,20 +224,10 @@ impl TrainedWakeDetector {
         }
         self.since_last_predict += samples.len();
         if self.since_last_predict < PREDICT_INTERVAL_SAMPLES || self.classifiers.is_empty() {
-            return None;
+            return Ok(None);
         }
         self.since_last_predict = 0;
-
-        match self.predict() {
-            Ok(scores) => scores
-                .into_iter()
-                .filter(|(_, score)| *score > self.threshold)
-                .max_by(|a, b| a.1.total_cmp(&b.1)),
-            Err(e) => {
-                tracing::error!("Wake-word predict failed: {}", e);
-                None
-            }
-        }
+        self.predict().map(Some)
     }
 
     fn predict(&mut self) -> Result<HashMap<String, f32>, String> {
@@ -362,5 +370,29 @@ mod tests {
             scores.is_empty(),
             "sub-minimum-duration audio should yield no scores"
         );
+    }
+
+    #[test]
+    fn streaming_scores_are_available_for_benchmarking_without_thresholding() {
+        let Some(dir) = fixtures_dir() else {
+            eprintln!("skip: models/wake_fixtures not present");
+            return;
+        };
+        let classifier = dir.join("hey_livekit.onnx");
+        let mut detector =
+            TrainedWakeDetector::new(&[&classifier], 0.5).expect("load hey_livekit classifier");
+        let positive = read_wav_pcm16_mono(&dir.join("positive.wav"));
+
+        let mut best = 0.0f32;
+        for frame in positive.chunks(PREDICT_INTERVAL_SAMPLES) {
+            if let Some(scores) = detector
+                .push_scores(frame)
+                .expect("streaming score should not fail")
+            {
+                best = best.max(scores.get("hey_livekit").copied().unwrap_or(0.0));
+            }
+        }
+
+        assert!(best >= 0.5, "positive fixture best streaming score={best}");
     }
 }

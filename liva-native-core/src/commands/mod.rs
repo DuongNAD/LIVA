@@ -46,6 +46,7 @@ pub mod llm;
 pub mod memory;
 pub mod messaging;
 pub mod setup;
+pub mod skill_store;
 pub mod task;
 pub mod vision;
 pub mod voice;

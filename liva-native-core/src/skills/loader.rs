@@ -173,7 +173,11 @@ pub fn pin_skill_ids(root: &Path) -> Result<(usize, usize), String> {
                 ghim += 1;
             }
             Err(e) => {
-                tracing::warn!("không ghim được {} ({e}); skill '{}' vẫn dùng id dẫn xuất từ `name`", tep.display(), s.name);
+                tracing::warn!(
+                    "không ghim được {} ({e}); skill '{}' vẫn dùng id dẫn xuất từ `name`",
+                    tep.display(),
+                    s.name
+                );
                 bo_qua += 1;
             }
         }
@@ -347,7 +351,10 @@ mod tests {
         viet_skill(&d, "---\nname: g\nkhong dong\n");
         assert!(load_skill_dir(&d).is_err());
 
-        viet_skill(&d, "---\ndescription: co mo ta nhung khong ten\n---\nthân\n");
+        viet_skill(
+            &d,
+            "---\ndescription: co mo ta nhung khong ten\n---\nthân\n",
+        );
         let e = load_skill_dir(&d).expect_err("thiếu name phải lỗi");
         assert!(e.contains("name"), "{e}");
         let _ = std::fs::remove_dir_all(&d);
@@ -387,13 +394,24 @@ mod tests {
         assert_eq!(load_skill_dir(&d).unwrap().skill_id, id1);
 
         // Đổi `name:` — id phải giữ nguyên.
-        viet_skill(&d, "---\nname: ten-hoan-toan-khac\ndescription: d\n---\nthân\n");
-        assert_eq!(load_skill_dir(&d).unwrap().skill_id, id1, "đổi name không đổi id");
+        viet_skill(
+            &d,
+            "---\nname: ten-hoan-toan-khac\ndescription: d\n---\nthân\n",
+        );
+        assert_eq!(
+            load_skill_dir(&d).unwrap().skill_id,
+            id1,
+            "đổi name không đổi id"
+        );
 
         // Đổi tên thư mục — id phải giữ nguyên.
         let d2 = d.with_extension("da-doi-ten");
         std::fs::rename(&d, &d2).unwrap();
-        assert_eq!(load_skill_dir(&d2).unwrap().skill_id, id1, "đổi thư mục không đổi id");
+        assert_eq!(
+            load_skill_dir(&d2).unwrap().skill_id,
+            id1,
+            "đổi thư mục không đổi id"
+        );
         let _ = std::fs::remove_dir_all(&d2);
     }
 
@@ -424,7 +442,10 @@ mod tests {
         viet_skill(&b, "---\nname: bbb\ndescription: d\n---\nthân b\n");
         viet_skill(&hong, "khong co front matter\n");
         // SKILL.md lồng trong skill a: KHÔNG được tính là skill riêng.
-        viet_skill(&long, "---\nname: khong-duoc-tinh\ndescription: d\n---\nx\n");
+        viet_skill(
+            &long,
+            "---\nname: khong-duoc-tinh\ndescription: d\n---\nx\n",
+        );
 
         let ds = load_skill_tree(&goc).expect("quét được");
         let ten: Vec<&str> = ds.iter().map(|s| s.name.as_str()).collect();
@@ -446,7 +467,10 @@ mod tests {
     fn doc_duoc_skill_that_cua_repo() {
         let goc = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.claude/skills");
         if !goc.is_dir() {
-            eprintln!("!!! BỎ QUA: không thấy {} — không kiểm được ca dữ liệu thật", goc.display());
+            eprintln!(
+                "!!! BỎ QUA: không thấy {} — không kiểm được ca dữ liệu thật",
+                goc.display()
+            );
             return;
         }
         let ds = load_skill_tree(&goc).expect("quét được cây skill của repo");

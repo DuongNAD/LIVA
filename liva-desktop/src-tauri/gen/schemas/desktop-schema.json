@@ -345,6 +345,138 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the delete_vault_secret command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-vault-secret",
+          "markdownDescription": "Enables the delete_vault_secret command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the issue_websocket_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-issue-websocket-session",
+          "markdownDescription": "Enables the issue_websocket_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_ipc_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-ipc-call",
+          "markdownDescription": "Enables the native_ipc_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_ipc_call_stream command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-ipc-call-stream",
+          "markdownDescription": "Enables the native_ipc_call_stream command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_dashboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-dashboard",
+          "markdownDescription": "Enables the open_dashboard command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_setup command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-setup",
+          "markdownDescription": "Enables the open_setup command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_eco_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-eco-mode",
+          "markdownDescription": "Enables the set_eco_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the store_vault_secret command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-store-vault-secret",
+          "markdownDescription": "Enables the store_vault_secret command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the toggle_ghost_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-toggle-ghost-mode",
+          "markdownDescription": "Enables the toggle_ghost_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_interactive_zones command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-interactive-zones",
+          "markdownDescription": "Enables the update_interactive_zones command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the vault_secret_present command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-vault-secret-present",
+          "markdownDescription": "Enables the vault_secret_present command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_vault_secret command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-vault-secret",
+          "markdownDescription": "Denies the delete_vault_secret command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the issue_websocket_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-issue-websocket-session",
+          "markdownDescription": "Denies the issue_websocket_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_ipc_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-ipc-call",
+          "markdownDescription": "Denies the native_ipc_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_ipc_call_stream command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-ipc-call-stream",
+          "markdownDescription": "Denies the native_ipc_call_stream command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_dashboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-dashboard",
+          "markdownDescription": "Denies the open_dashboard command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_setup command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-setup",
+          "markdownDescription": "Denies the open_setup command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_eco_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-eco-mode",
+          "markdownDescription": "Denies the set_eco_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the store_vault_secret command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-store-vault-secret",
+          "markdownDescription": "Denies the store_vault_secret command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the toggle_ghost_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-toggle-ghost-mode",
+          "markdownDescription": "Denies the toggle_ghost_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_interactive_zones command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-interactive-zones",
+          "markdownDescription": "Denies the update_interactive_zones command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the vault_secret_present command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-vault-secret-present",
+          "markdownDescription": "Denies the vault_secret_present command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

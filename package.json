@@ -24,10 +24,23 @@
     "check:installer": "node scripts/check-installer-config.mjs",
     "test:installer": "node --test scripts/check-installer-config.test.mjs",
     "installer:windows": "npm run check:installer && npm run build:ui && cd liva-desktop && npx tauri build",
-    "docs:check": "node scripts/docs-check.mjs",
-    "docs:cite": "node scripts/docs-citations.mjs",
+    "docs:check": "node --test scripts/docs-capabilities.test.mjs scripts/docs-inventory.test.mjs scripts/docs-citations.test.mjs scripts/wake-ux-copy.test.mjs scripts/wake-training.test.mjs scripts/wake-enrollment.test.mjs && node scripts/docs-capabilities.mjs --check && node scripts/docs-inventory.mjs --check && node scripts/docs-check.mjs",
+    "docs:capabilities": "node scripts/docs-capabilities.mjs",
+    "docs:capabilities:check": "node scripts/docs-capabilities.mjs --check",
+    "test:docs-capabilities": "node --test scripts/docs-capabilities.test.mjs",
+    "docs:inventory": "node scripts/docs-inventory.mjs",
+    "docs:inventory:check": "node scripts/docs-inventory.mjs --check",
+    "test:docs-inventory": "node --test scripts/docs-inventory.test.mjs",
+    "docs:cite": "node scripts/docs-citations.mjs --max-unchecked=207",
     "docs:cite:suggest": "node scripts/docs-citations.mjs --suggest",
     "docs:map": "node scripts/docs-check.mjs --map",
+    "test:wake-ux": "node --test scripts/wake-ux-copy.test.mjs",
+    "test:wake-training": "node --test scripts/wake-training.test.mjs",
+    "test:wake-enrollment": "node --test scripts/wake-enrollment.test.mjs",
+    "wake:train:check": "node scripts/wake-training-check.mjs",
+    "wake:train": "powershell -ExecutionPolicy Bypass -File scripts/train-wakeword.ps1 -Action Train",
+    "wake:benchmark": "cargo run -p liva-native-core --bin wakeword_benchmark --",
+    "devkit:lint": "ai-devkit lint",
     "skills:audit": "node scripts/audit-liva-skills.mjs",
     "test:skills": "node --test scripts/audit-liva-skills.test.mjs",
     "gitnexus:index": "node .gitnexus/run.cjs analyze --force --pdg --embeddings",
@@ -39,6 +52,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "ai-devkit": "0.47.0",
     "eslint": "^10.4.0",
     "eslint-plugin-vue": "^10.10.0",
     "gitnexus": "1.6.9",
@@ -54,7 +68,10 @@
   },
   "overrides": {
     "@hono/node-server": "2.0.11",
+    "adm-zip": "0.6.0",
     "esbuild": "0.28.1",
-    "gh-pages": "6.3.0"
+    "gh-pages": "6.3.0",
+    "sharp": "0.35.3",
+    "tar": "7.5.22"
   }
 }

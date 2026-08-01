@@ -310,8 +310,10 @@ impl WebRTCActor {
         let event_tx_llm = event_tx.clone();
         let active_session_id_llm_task = Arc::clone(&active_session_id_llm);
         let llm_handle = tokio::spawn(async move {
-            let checkpointer =
-                crate::agent::memory::SqliteCheckpointer::new(Arc::new(state_llm.db.clone()));
+            let checkpointer = crate::agent::memory::SqliteCheckpointer::new(
+                Arc::new(state_llm.db.clone()),
+                state_llm.crypto.clone(),
+            );
             // Khoá là conversation_id, KHÔNG phải session_id: session_id tăng ở
             // mỗi sự kiện VAD nên dùng nó thì không bao giờ đọc lại được gì.
             let thread_id = conversation_id;

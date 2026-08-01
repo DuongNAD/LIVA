@@ -4,10 +4,9 @@ name: LIVA Release Build
 # Nó chạy `cargo test` (debug) và `cargo check -p liva-desktop` — không có bước
 # nào tạo ra binary release hay bộ cài Tauri. Hai hệ quả:
 #
-#   1. `vision:ask` CHỈ chạy được ở build release (ở debug nó fail-fast vì
-#      assertion CRT trong bộ nạp mmproj). Nghĩa là cấu hình duy nhất mà tính
-#      năng mũi nhọn hoạt động lại là cấu hình chưa quy trình tự động nào từng
-#      dựng.
+#   1. Gateway release phải được khởi động và kiểm tra qua socket thật. Principal
+#      remote cố ý không có quyền gọi `vision:ask`; suy luận vision cần một phiên
+#      Tauri đặc quyền cùng model weights và thuộc một gate tích hợp riêng.
 #   2. Vỏ Tauri chỉ được compile-check. Đường liên kết, đóng gói, và bundle
 #      NSIS/MSI — thứ người dùng thật sự cài — không ai kiểm.
 #
@@ -83,14 +82,10 @@ jobs:
       working-directory: liva-native-core
       run: cargo build --release
 
-    # ĐÂY là lý do chính của workflow: cho `vision:ask` đi qua đường release
-    # thật, trên một socket thật. Ở debug mục này luôn trả lỗi "requires a
-    # release build" — bộ kiểm vẫn xanh vì nó chỉ đòi CÓ HỒI ÂM, nên khoảng
-    # trống chưa bao giờ được đóng.
-    #
-    # Không cần model weights: đo lại 26/07/2026, gateway khởi động và trả lời
-    # đủ 8 mục với mọi đường dẫn model trỏ vào chỗ không tồn tại. Thứ duy nhất
-    # thật sự cần là `vec0`, do npm `sqlite-vec` cung cấp ⇒ `npm ci` đã đủ.
+    # Gate này chứng minh binary release khởi động và thực thi đúng giao thức,
+    # origin policy cùng authorization trên socket thật. Principal remote phải
+    # bị từ chối `vision:ask`; vì vậy đây không phải bằng chứng suy luận vision.
+    # Gate vision đầy đủ cần phiên Tauri đặc quyền và model weights riêng.
     - name: E2E gateway over a real socket (release binary)
       run: node scripts/e2e-gateway-ci.mjs --release
 

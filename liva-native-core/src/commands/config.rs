@@ -19,12 +19,82 @@
 //! cần khi làm.
 
 use crate::{
-    AppState, DEFAULT_EXPERT_MODEL, DEFAULT_ROUTER_MODEL, config_file_path,
-    integrations, load_configured_router_model, resolve_resource_path, system_status,
-    update_config_file_at,
+    AppState, DEFAULT_EXPERT_MODEL, DEFAULT_ROUTER_MODEL, config_file_path, integrations,
+    load_configured_router_model, resolve_resource_path, system_status, update_config_file_at,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
+
+const CONFIG_SECRET_FIELDS: &[&str] = &[
+    "apiKey",
+    "cloudApiKey",
+    "tavilyApiKey",
+    "weatherApiKey",
+    "telegramBotToken",
+    "zaloAccessToken",
+    "zaloAppSecret",
+    "emailPassword",
+    "googleClientSecret",
+];
+
+fn redact_config_secrets(mut value: Value) -> Value {
+    fn redact(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                for key in CONFIG_SECRET_FIELDS {
+                    object.remove(*key);
+                }
+                for child in object.values_mut() {
+                    redact(child);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    redact(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    redact(&mut value);
+    value
+}
+
+fn ensure_config_patch_has_no_secrets(value: &Value) -> Result<(), String> {
+    fn find_secret(value: &Value, path: &str) -> Option<String> {
+        match value {
+            Value::Object(object) => {
+                for (key, child) in object {
+                    let child_path = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    if CONFIG_SECRET_FIELDS.contains(&key.as_str()) {
+                        return Some(child_path);
+                    }
+                    if let Some(found) = find_secret(child, &child_path) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .find_map(|(index, item)| find_secret(item, &format!("{path}[{index}]"))),
+            _ => None,
+        }
+    }
+
+    if let Some(path) = find_secret(value, "") {
+        return Err(format!(
+            "Secret field '{path}' is not allowed in JSON config; store it in Stronghold"
+        ));
+    }
+    Ok(())
+}
 
 /// Tên lệnh thuộc miền này. Giữ nguyên tên phẳng do UI đặt — xem ghi chú đầu module.
 const OWNED: &[&str] = &[
@@ -100,7 +170,9 @@ fn get_config() -> Result<Value, String> {
     if path.exists() {
         let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("Failed to read config file: {}", e))?;
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config file: {}", e))
+        let parsed = serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+        Ok(redact_config_secrets(parsed))
     } else {
         Ok(json!({
             "avatar": {
@@ -142,7 +214,6 @@ fn mac_dinh_ai() -> Value {
     json!({
         "provider": "local",
         "cloudBaseUrl": "",
-        "cloudApiKey": "",
         "cloudModel": "",
         // KHÔNG phải `DEFAULT_MODELS_DIR` (`E:\AI_Models`): đây là giá trị UI
         // hiển thị rồi lưu lại khi người dùng bấm Lưu, nên một ổ đĩa của máy dev
@@ -165,10 +236,13 @@ fn get_ai_config() -> Result<Value, String> {
         std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config file: {}", e))?;
     let val: Value =
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
-    Ok(val.get("ai").cloned().unwrap_or_else(|| json!({})))
+    Ok(redact_config_secrets(
+        val.get("ai").cloned().unwrap_or_else(|| json!({})),
+    ))
 }
 
 async fn update_config(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+    ensure_config_patch_has_no_secrets(&payload)?;
     let path = config_file_path();
     let reload_ai = payload.get("ai").is_some();
     tokio::task::spawn_blocking(move || update_config_file_at(&path, &payload))
@@ -242,11 +316,18 @@ mod tests {
     fn owns_va_handle_khong_lech_nhau() {
         // `handle` không liệt kê được bằng phản chiếu, nên khoá bằng số lượng:
         // thêm nhánh vào `handle` mà quên `OWNED` sẽ làm test này đỏ.
-        assert_eq!(OWNED.len(), 12, "đổi số nhánh thì cập nhật cả OWNED lẫn test");
+        assert_eq!(
+            OWNED.len(),
+            12,
+            "đổi số nhánh thì cập nhật cả OWNED lẫn test"
+        );
         for name in OWNED {
             assert!(owns(name), "OWNED chứa {name} nhưng owns() trả false");
         }
-        assert!(!owns("vision:capture"), "không được nhận lệnh của miền khác");
+        assert!(
+            !owns("vision:capture"),
+            "không được nhận lệnh của miền khác"
+        );
         assert!(!owns("get_tasks"), "get_tasks thuộc miền task, chưa tách");
     }
 
@@ -274,5 +355,38 @@ mod tests {
             "mặc định gửi cho UI không được là ổ đĩa của máy dev"
         );
         assert_eq!(ai["expertModel"], DEFAULT_EXPERT_MODEL);
+        assert!(
+            ai.get("cloudApiKey").is_none(),
+            "secret không được xuất hiện trong config mặc định"
+        );
+    }
+
+    #[test]
+    fn config_public_loai_bo_secret_legacy_truoc_khi_tra_ve_ui() {
+        let public = redact_config_secrets(json!({
+            "ai": {
+                "provider": "cloud",
+                "cloudApiKey": "legacy-secret",
+                "cloudModel": "gpt"
+            }
+        }));
+
+        assert_eq!(public["ai"]["provider"], "cloud");
+        assert_eq!(public["ai"]["cloudModel"], "gpt");
+        assert!(public["ai"].get("cloudApiKey").is_none());
+    }
+
+    #[test]
+    fn config_writer_tu_choi_secret_thay_vi_ghi_xuong_json() {
+        let error = ensure_config_patch_has_no_secrets(&json!({
+            "ai": { "cloudApiKey": "must-not-persist" }
+        }))
+        .unwrap_err();
+
+        assert!(error.contains("Stronghold"));
+        ensure_config_patch_has_no_secrets(&json!({
+            "ai": { "cloudBaseUrl": "https://example.test" }
+        }))
+        .unwrap();
     }
 }

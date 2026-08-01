@@ -215,7 +215,6 @@ let _skillCheckResultCallback: ((payload: unknown) => void) | null = null;
 let _allSkillsCheckCompleteCallback: ((payload: unknown) => void) | null = null;
 
 // Env Config Data — callback registry
-let _envConfigDataCallback: ((payload: unknown) => void) | null = null;
 
 // Memory Reset Result — callback registry
 let _memoryResetResultCallback: ((payload: unknown) => void) | null = null;
@@ -284,6 +283,9 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
         memoryData.value.facts = memoryData.value.facts.filter((f) => f.key !== (payload as { key: string }).key);
       }
       break;
+    case 'consolidate_memory':
+      if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+      break;
     case 'task_plan_chat':
       if (_taskPlanReplyCallback) _taskPlanReplyCallback(res as TaskPlanReplyPayload);
       break;
@@ -293,10 +295,8 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
     case 'test_all_skills':
       if (_allSkillsCheckCompleteCallback) _allSkillsCheckCompleteCallback(res);
       break;
-    case 'get_env_config':
-      if (_envConfigDataCallback) _envConfigDataCallback(res);
-      break;
     case 'reset_memory':
+    case 'memory:delete_subject':
       if (_memoryResetResultCallback) _memoryResetResultCallback(res);
       break;
     case 'memory_updated':
@@ -309,6 +309,51 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
 };
 
 const isTauri = typeof window !== "undefined" && (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ !== undefined;
+
+export type GatewayPrincipal = 'widget' | 'dashboard' | 'remote';
+
+const WIDGET_BOOTSTRAP_COMMANDS = [
+  'get_config',
+  'get_ai_config',
+  'get_voice_status',
+  'get_voice_profiles',
+  'get_system_status',
+  'get_user_profile',
+  'get_avatar_models',
+] as const;
+
+const DASHBOARD_BOOTSTRAP_COMMANDS = [
+  ...WIDGET_BOOTSTRAP_COMMANDS,
+  'get_skills_list',
+  'get_tasks',
+  'get_memory_data',
+] as const;
+
+export const gatewayPrincipalForPath = (pathname: string): GatewayPrincipal => {
+  const normalized = pathname.replace(/\/+$/, '');
+  const entry = normalized.split('/').pop() ?? '';
+  if (entry === '' || entry === 'widget.html') return 'widget';
+  if (entry === 'dashboard.html') return 'dashboard';
+  return 'remote';
+};
+
+export const bootstrapCommandsForPrincipal = (
+  principal: GatewayPrincipal,
+): readonly string[] => {
+  if (principal === 'widget') return WIDGET_BOOTSTRAP_COMMANDS;
+  if (principal === 'dashboard') return DASHBOARD_BOOTSTRAP_COMMANDS;
+  return [];
+};
+
+const gatewayPrincipal: GatewayPrincipal = isTauri
+  ? gatewayPrincipalForPath(typeof window === 'undefined' ? '' : window.location.pathname)
+  : 'remote';
+
+const requestBootstrapData = () => {
+  for (const command of bootstrapCommandsForPrincipal(gatewayPrincipal)) {
+    sendMsg(command);
+  }
+};
 
 // Gửi message
 const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean => {
@@ -376,16 +421,7 @@ const connect = () => {
   if (isTauri) {
     isConnected.value = true;
     isProfileLoading.value = false;
-    sendMsg('get_config');
-    sendMsg('get_ai_config');
-    sendMsg('get_voice_status');
-    sendMsg('get_voice_profiles');
-    sendMsg('get_system_status');
-    sendMsg('get_skills_list');
-    sendMsg('get_user_profile');
-    sendMsg('get_tasks');
-    sendMsg('get_avatar_models');
-    sendMsg('get_memory_data');
+    requestBootstrapData();
     return;
   }
 
@@ -411,16 +447,7 @@ const connect = () => {
     }
 
     // Yêu cầu đẩy dữ liệu khởi tạo
-    sendMsg('get_config');
-    sendMsg('get_ai_config');
-    sendMsg('get_voice_status');
-    sendMsg('get_voice_profiles');
-    sendMsg('get_system_status');
-    sendMsg('get_skills_list');
-    sendMsg('get_user_profile');
-    sendMsg('get_tasks');
-    sendMsg('get_avatar_models');
-    sendMsg('get_memory_data');
+    requestBootstrapData();
 
     if (profileTimeout) clearTimeout(profileTimeout);
     profileTimeout = setTimeout(() => {
@@ -540,6 +567,9 @@ const connect = () => {
         case 'memory_data':
           memoryData.value = data.payload || { l0: [], l0_5: "", facts: [], events: [], vectors: [] };
           break;
+        case 'consolidate_memory_response':
+          if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+          break;
         case 'fact_deleted':
           if (data.payload?.success) {
             memoryData.value.facts = memoryData.value.facts.filter((f) => f.key !== data.payload.key);
@@ -553,9 +583,6 @@ const connect = () => {
           break;
         case 'all_skills_check_complete':
           if (_allSkillsCheckCompleteCallback) _allSkillsCheckCompleteCallback(data.payload);
-          break;
-        case 'env_config_data':
-          if (_envConfigDataCallback) _envConfigDataCallback(data.payload);
           break;
         case 'memory_reset_result':
           if (_memoryResetResultCallback) _memoryResetResultCallback(data.payload);
@@ -746,14 +773,6 @@ export function useGateway() {
     _allSkillsCheckCompleteCallback = null;
   };
 
-  const onEnvConfigData = (cb: (payload: unknown) => void) => {
-    _envConfigDataCallback = cb;
-  };
-
-  const offEnvConfigData = () => {
-    _envConfigDataCallback = null;
-  };
-
   const onMemoryResetResult = (cb: (payload: unknown) => void) => {
     _memoryResetResultCallback = cb;
   };
@@ -812,8 +831,6 @@ export function useGateway() {
     offSkillCheckResult,
     onAllSkillsCheckComplete,
     offAllSkillsCheckComplete,
-    onEnvConfigData,
-    offEnvConfigData,
     onMemoryResetResult,
     offMemoryResetResult,
     onMemoryUpdated,

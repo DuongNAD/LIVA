@@ -1,4 +1,6 @@
 pub mod agent;
+mod artifact_trust;
+mod authorization;
 pub mod boot;
 pub mod commands;
 pub mod consent;
@@ -12,9 +14,11 @@ pub mod keystore;
 pub mod llm;
 pub mod mcp;
 pub mod memory_consolidation;
+pub mod memory_retention;
 pub mod messaging;
 #[cfg(feature = "experimental")]
 pub mod passive;
+pub mod persistence_backup;
 pub mod setup;
 pub mod skills;
 pub mod stt;
@@ -27,6 +31,11 @@ pub mod wake_model;
 pub mod webrtc;
 pub mod websocket;
 
+pub use artifact_trust::{
+    embedded_file_hash, embedded_model_hash, embedded_runtime_artifact_hash, verify_model_artifact,
+    verify_trusted_file,
+};
+pub use authorization::{CommandPrincipal, authorize_command};
 pub use crypto::EncryptionEngine;
 pub use db::DatabasePool;
 pub use llm::LlamaRouterManager;
@@ -82,8 +91,7 @@ pub const DEFAULT_MODELS_DIR: &str = "E:\\AI_Models";
 /// Ràng buộc đó được một test giữ: `setup::tests::router_mac_dinh_khop_manifest`.
 /// Trước 28/07/2026 hằng này còn là `gemma-4-E4B-…`, một model đã không còn nằm
 /// trong danh sách tải từ khi router chuyển sang Qwen3-VL.
-pub const DEFAULT_ROUTER_MODEL: &str =
-    "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf";
+pub const DEFAULT_ROUTER_MODEL: &str = "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf";
 pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
 
 /// Đọc một biến môi trường dạng cờ bật/tắt.
@@ -175,6 +183,10 @@ pub struct BootKey {
     pub rekeyed: usize,
     /// Số fact KHÔNG khoá nào mở được (khoá-chết) — để cảnh báo, không mất.
     pub locked: usize,
+    /// Số checkpoint + conversation turn được mã hóa mới hoặc đổi sang khóa hiện tại.
+    pub personal_data_rekeyed: usize,
+    /// Số checkpoint + conversation turn không khóa nào mở được; bản gốc được giữ nguyên.
+    pub personal_data_locked: usize,
     /// Nguồn khoá, để log: `"env"` | `"device-key"` | `"device-key (mới)"` | `"in-memory"`.
     pub source: &'static str,
 }
@@ -251,12 +263,20 @@ pub fn resolve_and_rekey(
         .map_err(|e| format!("không lấy được connection để rekey: {e}"))?;
     let (rekeyed, locked) = db::rekey_facts_encryption(&conn, &live, &extra)
         .map_err(|e| format!("rekey facts thất bại: {e}"))?;
+    let personal = db::rekey_personal_data_encryption(&conn, &live, &extra)
+        .map_err(|e| format!("rekey checkpoint/conversation thất bại: {e}"))?;
+    if !in_memory && (personal.rekeyed > 0 || personal.fts_removed > 0) {
+        db::purge_personal_data_plaintext_remnants(&conn)
+            .map_err(|e| format!("không dọn được plaintext cũ khỏi SQLite/WAL: {e}"))?;
+    }
 
     Ok(BootKey {
         engine: live,
         escrow_hex,
         rekeyed,
         locked,
+        personal_data_rekeyed: personal.rekeyed,
+        personal_data_locked: personal.locked,
         source,
     })
 }
@@ -282,9 +302,30 @@ pub fn escrow_message(hex_key: &str) -> String {
 /// (sqlite-vec, do gói npm cung cấp). Tách thuần (nhận `&str`) để cả gateway
 /// standalone (`main.rs::die_db`) lẫn vỏ Tauri dùng chung — tránh trôi dạt (M4).
 pub fn db_error_hint(err: &str) -> &'static str {
-    if err.contains("vec0") || err.contains("no such module") {
+    let normalized = err.to_ascii_lowercase();
+    if normalized.contains("vec0") || normalized.contains("no such module") {
         "\n\nNguyên nhân thường gặp: chưa chạy `npm ci` ở thư mục gốc repo — \
-         vec0.dll do gói npm sqlite-vec cung cấp."
+         vec0.dll do gói npm sqlite-vec cung cấp. Với bản đã cài, chạy Repair \
+         hoặc cài lại đúng bộ cài LIVA; không tải DLL rời từ nguồn lạ."
+    } else if normalized.contains("database disk image is malformed")
+        || normalized.contains("file is not a database")
+    {
+        "\n\nCơ sở dữ liệu có dấu hiệu hỏng. Không xóa hoặc ghi đè file gốc. \
+         Sao lưu nguyên file hiện tại, rồi khôi phục một backup đã qua \
+         `quick_check` theo `docs/02-van-hanh/06-backup-restore-sqlite.md`."
+    } else if normalized.contains("unable to open database file")
+        || normalized.contains("readonly")
+        || normalized.contains("read-only")
+        || normalized.contains("permission denied")
+        || normalized.contains("access denied")
+    {
+        "\n\nLIVA không có quyền ghi vào thư mục dữ liệu. Kiểm tra quyền ghi của \
+         `%LOCALAPPDATA%\\com.liva.cognitive-os`, hoặc đặt `LIVA_HOME` tới một \
+         thư mục riêng mà tài khoản hiện tại sở hữu."
+    } else if normalized.contains("database or disk is full") || normalized.contains("disk full") {
+        "\n\nỔ chứa dữ liệu LIVA đã đầy. Giải phóng dung lượng trên ổ của \
+         `LIVA_HOME` rồi khởi động lại; không xóa thủ công file `-wal` khi app \
+         còn chạy."
     } else {
         ""
     }
@@ -488,12 +529,18 @@ pub fn resource_write_root() -> std::path::PathBuf {
 pub fn stray_database_paths(dang_dung: &std::path::Path) -> Vec<std::path::PathBuf> {
     const REL: &str = "data/agents/liva_core/structured_memory.sqlite";
     let dang_dung = dang_dung.canonicalize().ok();
-    ["", "..", "../..", "liva-native-core", "liva-desktop/src-tauri"]
-        .iter()
-        .map(|p| std::path::Path::new(p).join(REL))
-        .filter(|p| p.exists())
-        .filter(|p| p.canonicalize().ok() != dang_dung)
-        .collect()
+    [
+        "",
+        "..",
+        "../..",
+        "liva-native-core",
+        "liva-desktop/src-tauri",
+    ]
+    .iter()
+    .map(|p| std::path::Path::new(p).join(REL))
+    .filter(|p| p.exists())
+    .filter(|p| p.canonicalize().ok() != dang_dung)
+    .collect()
 }
 
 fn read_config_file() -> serde_json::Value {
@@ -830,35 +877,26 @@ pub async fn load_configured_router_model(state: Arc<AppState>, force: bool) {
         tracing::info!("LLM provider is not 'local'; skipping router model load");
         return;
     };
-    if !model_path.exists() {
-        tracing::error!(
-            "Router model not found at {:?} — check ai.localModelsDir/ai.routerModel in {:?}",
-            model_path,
-            config_file_path()
-        );
-        return;
-    }
-    // C2: `update_config` cho phép ghi thẳng `ai.routerModel` từ payload rồi
-    // reload đường này. Chốt tại điểm nạp: model phải nằm DƯỚI thư mục model
-    // và đúng đuôi .gguf, để `routerModel = "../.. /evil.gguf"` không thoát ra.
     let models_dir = configured_models_dir();
-    let duoi_gguf = model_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("gguf"));
-    if !model_path.starts_with(&models_dir) || !duoi_gguf {
-        tracing::error!(
-            "Từ chối nạp router model {:?}: phải là .gguf trong thư mục model {:?} \
-             (kiểm tra ai.routerModel — có thể chứa '..' hoặc trỏ ra ngoài)",
-            model_path,
-            models_dir
-        );
-        return;
-    }
+    let model_path = match verify_model_artifact(&models_dir, &model_path) {
+        Ok(path) => path,
+        Err(error) => {
+            tracing::error!("Từ chối nạp router model {:?}: {}", model_path, error);
+            return;
+        }
+    };
     let mut llm_manager = state.llm.lock().await;
     // Keep the vision projector path current so `vision:ask` can lazily build
     // the multimodal context for a VL model.
-    llm_manager.set_mmproj_path(configured_mmproj_path());
+    let mmproj_path =
+        configured_mmproj_path().and_then(|path| match verify_model_artifact(&models_dir, &path) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                tracing::error!("Từ chối nạp mmproj {:?}: {}", path, error);
+                None
+            }
+        });
+    llm_manager.set_mmproj_path(mmproj_path);
     if llm_manager.engine.is_some() && (!force || llm_manager.current_model_path == model_path) {
         return;
     }
@@ -1081,7 +1119,11 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
                     "n_ctx {} · {} lớp GPU · mmproj {}",
                     m.n_ctx,
                     m.n_gpu_layers,
-                    if m.mmproj_path.is_some() { "có" } else { "không" }
+                    if m.mmproj_path.is_some() {
+                        "có"
+                    } else {
+                        "không"
+                    }
                 )
             } else {
                 "chưa nạp model".to_string()
@@ -1351,29 +1393,16 @@ fn bat_tat(v: bool) -> &'static str {
     if v { "có" } else { "không" }
 }
 
-/// Thư mục gốc của kho skill: `LIVA_SKILLS_DIR`, mặc định `skills`, giải theo gốc
-/// project (`resolve_resource_path`) nên binary chạy từ đâu cũng ra cùng một chỗ.
-///
-/// # Vì sao KHÔNG nhận đường dẫn từ payload của lệnh
-///
-/// Bản đầu của các arm `skills:*` cho phép `payload.path`. Nhưng lớp lệnh này nằm
-/// trên WS 8002 **chưa có xác thực** (chỉ allow-list `Origin` — xem
-/// `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` §C1), nên một tham số đường dẫn
-/// tự do nghĩa là **kẻ gọi chọn được thư mục** để LIVA quét và, với
-/// `skills:pin_ids`, **ghi file vào**. Đó là traversal do kẻ gọi điều khiển, thêm
-/// vào đúng bề mặt mà §C1.1 vừa nói là đang lớn dần.
-///
-/// Cấu hình là việc của người vận hành, không phải của mỗi lời gọi. Đổi kho skill
-/// thì đặt `LIVA_SKILLS_DIR` — một biến môi trường, không phải một field JSON đến
-/// từ socket.
-///
-/// Mặc định KHÔNG phải `.claude/skills`: đó là cây của Claude Code, và
-/// `skills:pin_ids` ghi `.skill_id` vào thư mục skill — không tự ý sửa cây của
-/// công cụ khác. Định dạng thì tương thích, nên trỏ `LIVA_SKILLS_DIR` vào đó là
-/// dùng được ngay.
-fn skills_root() -> std::path::PathBuf {
-    let tho = std::env::var("LIVA_SKILLS_DIR").unwrap_or_else(|_| "skills".to_string());
-    resolve_resource_path(&tho)
+pub async fn handle_command_as(
+    principal: CommandPrincipal,
+    state: Arc<AppState>,
+    command: &str,
+    payload: serde_json::Value,
+    tx: Option<tokio::sync::mpsc::Sender<String>>,
+    req_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    authorize_command(principal, command)?;
+    handle_command(state, command, payload, tx, req_id).await
 }
 
 pub async fn handle_command(
@@ -1423,6 +1452,9 @@ pub async fn handle_command(
     }
     if commands::messaging::owns(command) {
         return commands::messaging::handle(state, command, payload).await;
+    }
+    if commands::skill_store::owns(command) {
+        return commands::skill_store::handle(state, command, payload).await;
     }
 
     match command {
@@ -1479,8 +1511,7 @@ pub async fn handle_command(
                 .and_then(|v| v.as_str())
                 .ok_or("Thiếu 'server'. Dùng mcp_client:list_servers để xem danh sách.")?;
             let tools = mcp::client::global_registry().list_tools(server).await?;
-            serde_json::to_value(tools)
-                .map_err(|e| format!("Failed to serialize tool list: {}", e))
+            serde_json::to_value(tools).map_err(|e| format!("Failed to serialize tool list: {}", e))
         }
 
         "mcp_client:call_tool" => {
@@ -1511,868 +1542,9 @@ pub async fn handle_command(
                 .map_err(|e| format!("Failed to serialize tool result: {}", e))
         }
 
-        // ── Kho skill cục bộ (G2) ──────────────────────────────────────────
-        // Năm arm này là lý do kho skill KHÔNG phải code mồ côi. Xem
-        // docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md §3 (G2).
-        //
-        // CỐ Ý chưa nối vào prompt chọn tool của G1: ngân sách prompt ở G1 được đo
-        // với 6 tool, thêm N skill đổi hẳn kinh tế của `top_k` và cần một phép đo
-        // riêng. Nối bừa vào đó là thêm một hồi quy chưa ai đo.
-        "skills:sync" => {
-            let root = skills_root();
-            let (so_skill, so_version) =
-                skills::SkillStore::new(&state.db).sync_tree(&root)?;
-            Ok(serde_json::json!({
-                "root": root.display().to_string(),
-                "skills": so_skill,
-                "newVersions": so_version,
-            }))
-        }
-
-        "skills:list" => {
-            let ds = skills::SkillStore::new(&state.db).list()?;
-            Ok(serde_json::json!({
-                "count": ds.len(),
-                "skills": ds.iter().map(|s| serde_json::json!({
-                    "skillId": s.skill_id,
-                    "name": s.name,
-                    "description": s.description,
-                    "dirPath": s.dir_path,
-                    "currentVersionId": s.current_version_id,
-                    "updatedAt": s.updated_at,
-                })).collect::<Vec<_>>(),
-            }))
-        }
-
-        // Truy hồi = BM25 tiền lọc → embedder rerank. Đọc skill từ ĐĨA (nguồn sự
-        // thật của nội dung) chứ không từ DB: DB giữ lịch sử và tín hiệu, còn thân
-        // bài để xếp hạng phải là bản đang có trên đĩa.
-        "skills:search" => {
-            let query = payload
-                .get("query")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'query'.")?;
-            let top_k = payload
-                .get("topK")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(5)
-                .clamp(1, 50) as usize;
-            let root = skills_root();
-            let ds = skills::load_skill_tree(&root)?;
-
-            // G3: prior chất lượng từ sổ cái tín hiệu. Đếm **vấn đề phân biệt**
-            // (theo `merge_key`), không phải số lần quan sát — xem
-            // `SkillStore::signal_tallies`.
-            let ids: Vec<String> = ds.iter().map(|s| s.skill_id.clone()).collect();
-            let tallies = skills::SkillStore::new(&state.db).signal_tallies(&ids)?;
-            let phat: Vec<f32> = ds
-                .iter()
-                .map(|s| {
-                    tallies
-                        .get(&s.skill_id)
-                        .map(|t| t.hinh_phat())
-                        .unwrap_or(0.0)
-                })
-                .collect();
-
-            let xep = {
-                let mut guard = state.embedder.lock().await;
-                match guard.as_mut() {
-                    Some(e) => {
-                        skills::rank_skills_with_prior(&ds, query, Some(e), top_k, &phat)
-                    }
-                    None => skills::rank_skills_with_prior(&ds, query, None, top_k, &phat),
-                }
-            };
-            Ok(serde_json::json!({
-                "query": query,
-                // Nói rõ có rerank hay không: cùng một lệnh cho chất lượng khác
-                // hẳn khi thiếu model embedding, và người đọc cần biết điều đó.
-                "reranked": xep.first().is_some_and(|r| r.cosine.is_some()),
-                // Cùng lý do: nói rõ prior có tác động lượt này hay không, thay vì
-                // để người đọc tự đoán vì sao thứ tự lệch khỏi cosine.
-                "priorApplied": xep.iter().any(|r| r.hinh_phat > 0.0),
-                "results": xep.iter().map(|r| serde_json::json!({
-                    "skillId": ds[r.index].skill_id,
-                    "name": ds[r.index].name,
-                    "description": ds[r.index].description,
-                    "bm25": r.bm25,
-                    "cosine": r.cosine,
-                    // Hai trường này làm prior GIẢI THÍCH ĐƯỢC: thứ hạng gốc theo
-                    // liên quan, và mức phạt đã dịch nó đi.
-                    "relevanceRank": r.rank_lien_quan,
-                    "qualityPenalty": r.hinh_phat,
-                })).collect::<Vec<_>>(),
-            }))
-        }
-
-        // G3 — ghi một tín hiệu chất lượng vào sổ cái.
-        //
-        // Vì sao là lệnh chứ không phải tự động ghi ở tầng dưới: chỉ người gọi biết
-        // được lỗi vừa rồi có phải do skill hay không. `mcp:call_tool` thấy tool
-        // lỗi nhưng KHÔNG biết skill nào đang tham gia — đoán hộ ở đó là gán tội
-        // sai. Xem §3 G3 tài liệu 04 về giới hạn này.
-        "skills:signal" => {
-            let skill_id = payload
-                .get("skillId")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
-            let kind = payload
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'kind'. Bốn loại: tool_call_failed, \
-                        tool_failure_affects_skill, skill_selection_not_invoked, \
-                        tool_semantic_issue.")?;
-            let lay = |k: &str| {
-                payload
-                    .get(k)
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-            };
-            let s = skills::Signal {
-                skill_id: skill_id.to_string(),
-                version_id: lay("versionId"),
-                kind: kind.to_string(),
-                actionability: lay("actionability"),
-                evidence_status: lay("evidenceStatus"),
-                failure_signature: lay("failureSignature"),
-                merge_key: lay("mergeKey"),
-                detail: lay("detail"),
-            };
-            let id = skills::SkillStore::new(&state.db).record_signal(&s)?;
-            Ok(serde_json::json!({ "signalId": id, "skillId": skill_id, "kind": kind }))
-        }
-
-        // G3 — đọc sổ cái của một skill, kèm chính con số prior đang dùng.
-        "skills:signals" => {
-            let skill_id = payload
-                .get("skillId")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
-            let kho = skills::SkillStore::new(&state.db);
-            let tally = kho
-                .signal_tallies(&[skill_id.to_string()])?
-                .remove(skill_id)
-                .unwrap_or_default();
-            Ok(serde_json::json!({
-                "skillId": skill_id,
-                // Hai con số cạnh nhau là có ý: `observations` đếm số LẦN, `issues`
-                // đếm số VẤN ĐỀ phân biệt. Chúng lệch nhau chính là dấu hiệu một sự
-                // cố đang lặp, và prior chỉ tính cái thứ hai.
-                "observations": kho.signal_counts(skill_id)?
-                    .into_iter()
-                    .map(|(k, n)| serde_json::json!({ "kind": k, "count": n }))
-                    .collect::<Vec<_>>(),
-                "issues": tally.theo_loai.iter().map(|(k, ev, n)| serde_json::json!({
-                    "kind": k,
-                    "evidenceStatus": ev,
-                    "distinctIssues": n,
-                })).collect::<Vec<_>>(),
-                "weightTotal": tally.tong_trong_so(),
-                "qualityPenalty": tally.hinh_phat(),
-            }))
-        }
-
-        "skills:history" => {
-            let skill_id = payload
-                .get("skillId")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
-            let h = skills::SkillStore::new(&state.db).history(skill_id)?;
-            Ok(serde_json::json!({
-                "skillId": skill_id,
-                "versions": h.iter().map(|v| serde_json::json!({
-                    "versionId": v.version_id,
-                    "parentId": v.parent_id,
-                    "bodySha": v.body_sha,
-                    "createdAt": v.created_at,
-                })).collect::<Vec<_>>(),
-            }))
-        }
-
-        // Hành động GHI ĐĨA, nên có lệnh riêng chứ không lẫn vào `skills:sync` —
-        // xem `skills::loader::pin_skill_ids` về lý do tách.
-        "skills:pin_ids" => {
-            let root = skills_root();
-            let (ghim, bo_qua) = skills::pin_skill_ids(&root)?;
-            Ok(serde_json::json!({
-                "root": root.display().to_string(),
-                "pinned": ghim,
-                "skipped": bo_qua,
-            }))
-        }
-
         _ => Err(format!("Unknown command: {}", command)),
     }
 }
 
 #[cfg(test)]
-mod data_dir_tests {
-    use super::{data_dir, stray_database_paths};
-
-    /// cwd là trạng thái TOÀN CỤC của tiến trình test, và một test dưới đây đổi
-    /// nó. Mọi test đọc `data_dir()` phải giữ khoá này — nếu không, chúng đua
-    /// nhau và đỏ ngẫu nhiên. Đã dính thật một lần trước khi thêm khoá vào test
-    /// thứ hai; cùng đúng lớp lỗi vừa sửa ở `messaging::outbox`.
-    static KHOA_CWD: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn nam_khoa() -> std::sync::MutexGuard<'static, ()> {
-        KHOA_CWD.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// Bất biến chịu lực: **cùng một máy, khác thư mục chạy ⇒ CÙNG một database.**
-    ///
-    /// Đây là thứ bản cũ vi phạm và sinh ra ba database song song. Test đổi cwd
-    /// sang từng điểm vào thật rồi đòi `data_dir()` trỏ về cùng một chỗ.
-    #[test]
-    fn moi_thu_muc_chay_deu_cho_cung_mot_thu_muc_du_lieu() {
-        let _g = nam_khoa();
-        let cu = std::env::current_dir().expect("cwd");
-
-        // ⚠️ Neo vào GỐC REPO, không vào cwd. `cargo test` chạy với cwd là
-        // `liva-native-core/`, nên `cu.join("liva-native-core")` không tồn tại
-        // và bản đầu của test này chỉ tìm thấy MỘT điểm vào rồi thoát sớm —
-        // xanh kể cả khi lỗi còn nguyên (đã thử: tiêm lại hành vi cũ, vẫn xanh).
-        let goc = {
-            let mut d = cu.clone();
-            loop {
-                if d.join("liva-native-core").is_dir() && d.join("liva-desktop").is_dir() {
-                    break Some(d);
-                }
-                match d.parent() {
-                    Some(p) => d = p.to_path_buf(),
-                    None => break None,
-                }
-            }
-        };
-        let Some(goc) = goc else {
-            return; // không nhận ra bố cục repo trên máy này
-        };
-
-        // Chạy từ gốc repo hay từ crate con đều phải ra cùng một nơi.
-        let mut thay = Vec::new();
-        for noi in ["", "liva-native-core", "liva-desktop/src-tauri"] {
-            let dich = goc.join(noi);
-            if !dich.is_dir() {
-                continue;
-            }
-            std::env::set_current_dir(&dich).expect("đổi cwd");
-            if let Ok(that) = data_dir().canonicalize() {
-                thay.push((noi, that));
-            }
-        }
-        std::env::set_current_dir(&cu).expect("trả cwd");
-
-        if thay.len() < 2 {
-            return; // không đủ điểm vào trên máy này để so
-        }
-        let dau = &thay[0].1;
-        for (noi, duong) in &thay[1..] {
-            assert_eq!(
-                duong, dau,
-                "chạy từ {noi:?} cho thư mục dữ liệu khác — đây đúng là lỗi đã sinh ra ba database"
-            );
-        }
-    }
-
-    /// Chỗ đang dùng KHÔNG được tự báo là lạc — nếu không, log sẽ kêu mỗi lần khởi động.
-    #[test]
-    fn khong_tu_bao_chinh_minh_la_lac() {
-        let _g = nam_khoa();
-        let dang_dung = data_dir()
-            .join("agents")
-            .join("liva_core")
-            .join("structured_memory.sqlite");
-        let lac = stray_database_paths(&dang_dung);
-        for p in &lac {
-            assert_ne!(
-                p.canonicalize().ok(),
-                dang_dung.canonicalize().ok(),
-                "database đang dùng bị đếm là lạc"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod env_flag_tests {
-    use super::env_flag;
-
-    /// Các test env_flag phải chạy tuần tự: std::env là trạng thái toàn cục
-    /// dùng chung cho cả tiến trình test.
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn with_var<F: FnOnce()>(key: &str, val: Option<&str>, f: F) {
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let old = std::env::var(key).ok();
-        match val {
-            Some(v) => unsafe { std::env::set_var(key, v) },
-            None => unsafe { std::env::remove_var(key) },
-        }
-        f();
-        match old {
-            Some(v) => unsafe { std::env::set_var(key, v) },
-            None => unsafe { std::env::remove_var(key) },
-        }
-    }
-
-    /// Đây CHÍNH LÀ bug F5: .env.example hướng dẫn ghi , code cũ dùng
-    ///  nên hiểu thành BẬT và xoá sạch dữ liệu người dùng.
-    #[test]
-    fn f5_gia_tri_false_phai_la_tat() {
-        with_var("LIVA_TEST_FLAG", Some("false"), || {
-            assert!(!env_flag("LIVA_TEST_FLAG", false), "=false phải là TẮT");
-            assert!(
-                !env_flag("LIVA_TEST_FLAG", true),
-                "=false phải thắng cả default=true"
-            );
-        });
-    }
-
-    #[test]
-    fn nhan_moi_dang_bat() {
-        for v in ["1", "true", "TRUE", "Yes", "ON", "  on  "] {
-            with_var("LIVA_TEST_FLAG", Some(v), || {
-                assert!(env_flag("LIVA_TEST_FLAG", false), "{:?} phải là BẬT", v);
-            });
-        }
-    }
-
-    #[test]
-    fn nhan_moi_dang_tat() {
-        for v in ["0", "false", "FALSE", "No", "OFF", " off "] {
-            with_var("LIVA_TEST_FLAG", Some(v), || {
-                assert!(!env_flag("LIVA_TEST_FLAG", true), "{:?} phải là TẮT", v);
-            });
-        }
-    }
-
-    #[test]
-    fn khong_dat_bien_thi_dung_default() {
-        with_var("LIVA_TEST_FLAG", None, || {
-            assert!(!env_flag("LIVA_TEST_FLAG", false));
-            assert!(env_flag("LIVA_TEST_FLAG", true));
-        });
-    }
-
-    #[test]
-    fn gia_tri_la_hoac_rong_thi_dung_default_khong_panic() {
-        for v in ["", "  ", "maybe", "2", "tru"] {
-            with_var("LIVA_TEST_FLAG", Some(v), || {
-                assert!(
-                    env_flag("LIVA_TEST_FLAG", true),
-                    "{:?} phải rơi về default=true",
-                    v
-                );
-                assert!(
-                    !env_flag("LIVA_TEST_FLAG", false),
-                    "{:?} phải rơi về default=false",
-                    v
-                );
-            });
-        }
-    }
-}
-
-#[cfg(test)]
-mod tracing_filter_tests {
-    use super::tracing_env_filter;
-
-    /// `std::env` là trạng thái toàn cục dùng chung cả tiến trình test.
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn with_rust_log<F: FnOnce()>(val: Option<&str>, f: F) {
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let old = std::env::var("RUST_LOG").ok();
-        match val {
-            Some(v) => unsafe { std::env::set_var("RUST_LOG", v) },
-            None => unsafe { std::env::remove_var("RUST_LOG") },
-        }
-        f();
-        match old {
-            Some(v) => unsafe { std::env::set_var("RUST_LOG", v) },
-            None => unsafe { std::env::remove_var("RUST_LOG") },
-        }
-    }
-
-    /// Không đặt RUST_LOG PHẢI ra `info` — đây là hành vi cũ
-    /// (`.with_max_level(Level::INFO)`), và đổi nó đi là thay đổi ngầm cho mọi
-    /// người đang chạy. `EnvFilter::from_default_env()` trơn sẽ ra ERROR-only,
-    /// đúng cái bẫy hàm này tồn tại để tránh.
-    #[test]
-    fn khong_dat_rust_log_thi_la_info_dung_nhu_truoc() {
-        with_rust_log(None, || {
-            assert_eq!(tracing_env_filter().to_string(), "info");
-        });
-        with_rust_log(Some("   "), || {
-            assert_eq!(
-                tracing_env_filter().to_string(),
-                "info",
-                "RUST_LOG rỗng cũng phải rơi về info"
-            );
-        });
-    }
-
-    /// Đây là điều KHÔNG làm được trước 26/07/2026: mọi `debug!` trong crate là
-    /// code chết vì subscriber hard-code INFO.
-    #[test]
-    fn bat_duoc_debug_cho_mot_module() {
-        with_rust_log(Some("info,liva_native_core::mcp=debug"), || {
-            let s = tracing_env_filter().to_string();
-            assert!(
-                s.contains("liva_native_core::mcp=debug"),
-                "phải giữ nguyên directive, nhận được: {s}"
-            );
-        });
-    }
-
-    /// RUST_LOG sai cú pháp không được âm thầm đổi hành vi log, cũng không được
-    /// làm chết tiến trình — rơi về `info` (và hàm `eprintln!` cảnh báo).
-    #[test]
-    fn rust_log_sai_cu_phap_thi_roi_ve_info_khong_panic() {
-        for xau in ["=", "info,=debug", "liva=khong_phai_muc_log"] {
-            with_rust_log(Some(xau), || {
-                assert_eq!(
-                    tracing_env_filter().to_string(),
-                    "info",
-                    "{xau:?} phải rơi về info"
-                );
-            });
-        }
-    }
-}
-
-#[cfg(test)]
-mod origin_allowed_tests {
-    use super::{DEFAULT_WS_ALLOWED_ORIGINS, origin_allowed};
-
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn without_extra<F: FnOnce()>(f: F) {
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let old = std::env::var("LIVA_WS_ALLOWED_ORIGINS").ok();
-        unsafe { std::env::remove_var("LIVA_WS_ALLOWED_ORIGINS") };
-        f();
-        if let Some(v) = old {
-            unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", v) }
-        }
-    }
-
-    #[test]
-    fn cho_qua_cac_origin_mac_dinh() {
-        without_extra(|| {
-            for o in DEFAULT_WS_ALLOWED_ORIGINS {
-                assert!(origin_allowed(Some(o)), "{} phai duoc phep", o);
-            }
-        });
-    }
-
-    /// Đây là ca tấn công thật: một trang web bất kỳ mở WebSocket tới 8002.
-    #[test]
-    fn chan_trang_web_la() {
-        without_extra(|| {
-            for o in [
-                "https://evil.example",
-                "http://evil.example",
-                "null",
-                "http://localhost:3000",
-                "http://localhost:5174",
-            ] {
-                assert!(!origin_allowed(Some(o)), "{} phai bi chan", o);
-            }
-        });
-    }
-
-    /// Không có Origin = client gốc (Tauri, verify_duplex) → cho qua. Đây là
-    /// đánh đổi có chủ ý, test này khoá lại hành vi đó cho khỏi đổi ngầm.
-    #[test]
-    fn khong_co_origin_thi_cho_qua() {
-        without_extra(|| assert!(origin_allowed(None)));
-    }
-
-    #[test]
-    fn origin_rong_thi_chan() {
-        without_extra(|| {
-            assert!(!origin_allowed(Some("")));
-            assert!(!origin_allowed(Some("   ")));
-        });
-    }
-
-    #[test]
-    fn khong_khop_tien_to_hay_hau_to() {
-        without_extra(|| {
-            // ke tan cong dat domain chua chuoi hop le
-            assert!(!origin_allowed(Some("http://localhost:5173.evil.example")));
-            assert!(!origin_allowed(Some(
-                "https://evil.example/http://localhost:5173"
-            )));
-            assert!(!origin_allowed(Some("http://localhost:51730")));
-        });
-    }
-
-    #[test]
-    fn mo_rong_bang_bien_moi_truong() {
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let old = std::env::var("LIVA_WS_ALLOWED_ORIGINS").ok();
-        unsafe {
-            std::env::set_var(
-                "LIVA_WS_ALLOWED_ORIGINS",
-                " http://my.app , http://other.app ",
-            )
-        };
-        assert!(origin_allowed(Some("http://my.app")));
-        assert!(origin_allowed(Some("http://other.app")));
-        assert!(!origin_allowed(Some("http://third.app")));
-        // dau phay thua khong duoc bien thanh chuoi rong khop tat ca
-        unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", ",,") };
-        assert!(!origin_allowed(Some("https://evil.example")));
-        match old {
-            Some(v) => unsafe { std::env::set_var("LIVA_WS_ALLOWED_ORIGINS", v) },
-            None => unsafe { std::env::remove_var("LIVA_WS_ALLOWED_ORIGINS") },
-        }
-    }
-}
-
-#[cfg(test)]
-mod validate_model_path_tests {
-    use super::validate_model_path;
-    use std::path::Path;
-
-    #[test]
-    fn cho_phep_gguf_trong_thu_muc_model() {
-        let dir = Path::new("models_root");
-        assert!(validate_model_path(Path::new("router.gguf"), dir).is_ok());
-        assert!(validate_model_path(Path::new("sub/expert.gguf"), dir).is_ok());
-        assert!(
-            validate_model_path(Path::new("A.GGUF"), dir).is_ok(),
-            "duoi khong phan biet hoa thuong"
-        );
-    }
-
-    #[test]
-    fn chan_traversal_va_duoi_sai() {
-        let dir = Path::new("models_root");
-        // C2: đây là các payload đường-dẫn-tuỳ-ý phải bị chặn trước khi tới
-        // parser C++ của llama.cpp.
-        assert!(
-            validate_model_path(Path::new("../secret.gguf"), dir).is_err(),
-            ".."
-        );
-        assert!(
-            validate_model_path(Path::new("sub/../../x.gguf"), dir).is_err(),
-            ".. giua"
-        );
-        assert!(
-            validate_model_path(Path::new("router.txt"), dir).is_err(),
-            "duoi khong phai gguf"
-        );
-        assert!(
-            validate_model_path(Path::new("no_ext"), dir).is_err(),
-            "khong co duoi"
-        );
-    }
-}
-
-#[cfg(test)]
-mod config_update_tests {
-    use super::update_config_file_at;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    fn temp_config_path(label: &str) -> std::path::PathBuf {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        std::env::temp_dir().join(format!(
-            "liva-config-{label}-{}-{}.json",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ))
-    }
-
-    #[test]
-    fn malformed_config_is_preserved_instead_of_overwritten() {
-        let path = temp_config_path("malformed");
-        let original = "{ definitely-not-json";
-        std::fs::write(&path, original).expect("write malformed fixture");
-
-        let result = update_config_file_at(&path, &serde_json::json!({"ai": {"topP": 0.8}}));
-
-        assert!(result.is_err(), "malformed config must fail closed");
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read preserved fixture"),
-            original
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn non_object_patch_cannot_replace_the_entire_config() {
-        let path = temp_config_path("non-object");
-        let original = serde_json::json!({
-            "ai": {"provider": "local"},
-            "voice": {"enabled": true}
-        })
-        .to_string();
-        std::fs::write(&path, &original).expect("write config fixture");
-
-        let result = update_config_file_at(&path, &serde_json::Value::Null);
-
-        assert!(result.is_err(), "config patch must be a JSON object");
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read preserved config"),
-            original
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn non_object_existing_config_is_preserved_instead_of_replaced() {
-        let path = temp_config_path("non-object-existing");
-        let original = serde_json::json!(["unexpected", "root"]).to_string();
-        std::fs::write(&path, &original).expect("write non-object config fixture");
-
-        let result = update_config_file_at(&path, &serde_json::json!({"ai": {"topP": 0.8}}));
-
-        assert!(
-            result.is_err(),
-            "an existing config with a non-object root must fail closed"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read preserved config"),
-            original
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn concurrent_config_patches_do_not_lose_each_other() {
-        let path = temp_config_path("concurrent");
-        std::fs::write(
-            &path,
-            serde_json::json!({"ai": {"temperature": 0.3}, "ui": {"theme": "dark"}}).to_string(),
-        )
-        .expect("write initial config");
-
-        let first_path = path.clone();
-        let first = tokio::task::spawn_blocking(move || {
-            update_config_file_at(&first_path, &serde_json::json!({"ai": {"topP": 0.8}}))
-        });
-        let second_path = path.clone();
-        let second = tokio::task::spawn_blocking(move || {
-            update_config_file_at(
-                &second_path,
-                &serde_json::json!({"ui": {"widgetPosition": "top-left"}}),
-            )
-        });
-
-        first
-            .await
-            .expect("first writer task")
-            .expect("first patch");
-        second
-            .await
-            .expect("second writer task")
-            .expect("second patch");
-
-        let config: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).expect("read merged config"))
-                .expect("config remains valid JSON");
-        assert_eq!(config["ai"]["temperature"], 0.3);
-        assert_eq!(config["ai"]["topP"], 0.8);
-        assert_eq!(config["ui"]["theme"], "dark");
-        assert_eq!(config["ui"]["widgetPosition"], "top-left");
-        let _ = std::fs::remove_file(path);
-    }
-}
-
-/// Khoá hồi quy cho [`system_status`].
-///
-/// Loại test này cố ý viết theo kiểu "hằng số cũ KHÔNG được xuất hiện lại": lỗi
-/// ở đây không phải lỗi logic mà là lỗi **bịa số**, và cách duy nhất để nó không
-/// lặng lẽ quay lại là ghim từng giá trị giả cũ vào một assert có tên.
-#[cfg(test)]
-mod system_status_tests {
-    use super::*;
-
-    /// `AppState` tối thiểu: không TTS, không VAD/denoise/AEC/embedder, STT trỏ
-    /// vào thư mục không tồn tại. Đây đúng là hình trạng của một máy vừa clone
-    /// về chưa tải model — và bảng sức khoẻ phải nói ĐÚNG điều đó.
-    fn state_toi_thieu() -> Arc<AppState> {
-        unsafe {
-            std::env::set_var("LIVA_ENCRYPTION_KEY", "00000000000000000000000000000000");
-            std::env::remove_var("TELEGRAM_BOT_TOKEN");
-        }
-        let capturer = Arc::new(vision::capture::MockScreenCapturer::new(
-            8,
-            8,
-            vision::capture::PixelFormat::Rgba,
-        ));
-        Arc::new(AppState {
-            db: db::DatabasePool::new_in_memory().expect("in-memory db"),
-            crypto: crypto::EncryptionEngine::new("00000000000000000000000000000000"),
-            stt: tokio::sync::Mutex::new(stt::SttManager::new("khong_ton_tai_dau_ca")),
-            tts: tokio::sync::Mutex::new(None),
-            tts_player: tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(
-                llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
-            ),
-            vad: tokio::sync::Mutex::new(None),
-            denoiser: tokio::sync::Mutex::new(None),
-            turn_shadow: tokio::sync::Mutex::new(None),
-            aec: tokio::sync::Mutex::new(None),
-            mcp_server: Arc::new(mcp::server::NativeMcpServer::new("test_vault")),
-            vision: tokio::sync::Mutex::new(vision::VisionManager::new(
-                capturer,
-                vision::VisionConfig::default(),
-            )),
-            embedder: tokio::sync::Mutex::new(None),
-        })
-    }
-
-    /// Mười hai giá trị bịa của bản cũ, từng cái một.
-    #[tokio::test]
-    async fn khong_con_mot_hang_so_bia_dat_nao() {
-        let s = system_status(state_toi_thieu()).await.expect("status");
-        let hc = &s["healthChecks"];
-
-        // Không ai kết nối ⇒ 0, không phải 1.
-        assert_eq!(hc["gateway"]["wsClients"], 0);
-        // Độ trễ chỉ đo được bằng cách CHẠY suy luận ⇒ không có số thì để null.
-        assert!(hc["aiEngine"]["latencyMs"].is_null(), "latencyMs 10 giả");
-        assert!(hc["voiceEngine"]["latencyMs"].is_null(), "latencyMs 5 giả");
-        // Không có token ⇒ chưa cấu hình, không phải "online".
-        assert_eq!(hc["remoteControl"]["telegram"]["status"], "not_configured");
-        assert_eq!(hc["remoteControl"]["enabled"], false);
-        // Zalo chưa từng tồn tại trong mã nguồn — "offline" nghe như đang tắt.
-        assert_eq!(hc["remoteControl"]["zalo"]["status"], "not_configured");
-        // Không có gRPC ở đâu cả.
-        assert_ne!(s["engineMode"], "native_grpc");
-
-        assert_ne!(s["osStats"]["cpuUsage"], 12, "cpuUsage cứng 12");
-        assert_ne!(s["osStats"]["totalMemory"], 16_000_000_000u64, "RAM cứng 16 GB");
-        assert_ne!(s["osStats"]["freeMemory"], 8_000_000_000u64, "RAM trống cứng 8 GB");
-        assert_ne!(s["uptime"], 3600, "uptime cứng 1 giờ");
-        assert_ne!(s["memoryUsage"], 50_000_000, "memoryUsage cứng 50 MB");
-        assert_ne!(s["rssMemory"], 100_000_000, "rssMemory cứng 100 MB");
-    }
-
-    /// Máy chưa có model thì bảng phải BÁO LÀ CHƯA CÓ, không phải 8 đèn xanh.
-    #[tokio::test]
-    async fn may_thieu_model_khong_duoc_bao_toan_online() {
-        let s = system_status(state_toi_thieu()).await.expect("status");
-        let hc = &s["healthChecks"];
-
-        assert_eq!(hc["whisper"]["status"], "offline", "STT thiếu model");
-        assert_eq!(hc["voiceEngine"]["status"], "degraded", "thoại phải xuống cấp");
-        assert!(
-            hc["whisper"]["detail"]
-                .as_str()
-                .is_some_and(|d| d.contains("thiếu model")),
-            "detail phải nói thiếu ở đâu, được: {:?}",
-            hc["whisper"]["detail"]
-        );
-        // NVML không có trên CI ⇒ "unknown", KHÔNG phải "online · 0% utilized".
-        assert_ne!(
-            hc["vramGuard"]["detail"], "0% utilized",
-            "VRAM cứng 0% đã quay lại"
-        );
-    }
-
-    /// Số nào không đo được phải là `null` — UI đã sẵn sàng hiện `--` cho null,
-    /// nhưng sẽ vẽ một con số nếu ta trả 0.
-    ///
-    /// **Bản trước ĐỎ trên CI ngày 29/07/2026 vì chính nó sai, không phải mã
-    /// sai:** nó đòi cả bốn trường phải `null` **hoặc > 0`, rồi nổ với
-    /// `cpuUsage phải là null hoặc số dương thật, được: Number(0)`.
-    ///
-    /// Nhưng `cpuUsage` là **tải CPU NGOÀI LIVA** — nó trừ đi phần LIVA tự dùng
-    /// (`GetProcessTimes`). Trên một runner rảnh thì **0 là số đo THẬT**, không
-    /// phải số giả. Test đã gộp hai thứ khác hẳn nhau: *"0 vì không đo được"* và
-    /// *"0 vì đúng là bằng 0"*. Nó xanh trên máy dev (luôn có gì đó chạy nền) và
-    /// đỏ trên máy rảnh — đúng lớp "xanh cục bộ / đỏ CI" mà phiên này đã gặp ba
-    /// lần ở ba chỗ khác nhau.
-    ///
-    /// Bản này tách theo **đơn vị**, vì ngưỡng hợp lệ phụ thuộc đơn vị:
-    /// - **phần trăm** (`cpuUsage`, `livaCpuUsage`, `gpuUsage`): `null` hoặc
-    ///   `0..=100`. Số 0 hợp lệ; cận trên bắt được lớp lỗi "đảo thứ tự
-    ///   (tổng, đang dùng)" đã cắn ở bẫy 1 của U3.
-    /// - **số byte** (`totalMemory`): `null` hoặc `> 0` — không máy nào có 0 byte
-    ///   RAM tổng, nên ở đây 0 ĐÚNG là dấu hiệu số giả. Giữ nguyên độ nghiêm.
-    /// - `freeMemory`: khẳng định thứ mạnh hơn "dương" — nó phải **≤
-    ///   `totalMemory`**. Bất biến này bắt được cả số giả lẫn ca đảo cặp
-    ///   `(tổng, trống)`, thứ mà một phép kiểm "> 0" cho qua im lặng.
-    #[tokio::test]
-    async fn khong_do_duoc_thi_null_chu_khong_phai_khong() {
-        let s = system_status(state_toi_thieu()).await.expect("status");
-
-        for truong in ["cpuUsage", "livaCpuUsage", "gpuUsage"] {
-            let v = &s["osStats"][truong];
-            assert!(
-                v.is_null() || v.as_u64().is_some_and(|n| n <= 100),
-                "{truong} là phần trăm ⇒ phải null hoặc 0..=100, được: {v:?}"
-            );
-        }
-
-        let tong = &s["osStats"]["totalMemory"];
-        assert!(
-            tong.is_null() || tong.as_u64().is_some_and(|n| n > 0),
-            "totalMemory phải null hoặc > 0 (máy nào cũng có RAM), được: {tong:?}"
-        );
-
-        let trong = &s["osStats"]["freeMemory"];
-        assert!(
-            trong.is_null() || trong.as_u64().is_some(),
-            "freeMemory phải null hoặc là số, được: {trong:?}"
-        );
-        if let (Some(t), Some(f)) = (tong.as_u64(), trong.as_u64()) {
-            assert!(
-                f <= t,
-                "freeMemory ({f}) > totalMemory ({t}) — cặp (tổng, trống) bị đảo?"
-            );
-        }
-
-        for truong in ["uptime", "memoryUsage", "rssMemory"] {
-            let v = &s[truong];
-            assert!(
-                v.is_null() || v.as_u64().is_some(),
-                "{truong} phải là null hoặc số, được: {v:?}"
-            );
-        }
-    }
-
-    /// DB in-memory dựng được ⇒ ô "memory" phải đọc số THẬT từ DB đó.
-    #[tokio::test]
-    async fn o_memory_doc_so_that_tu_db() {
-        let s = system_status(state_toi_thieu()).await.expect("status");
-        let detail = s["healthChecks"]["memory"]["detail"]
-            .as_str()
-            .expect("memory.detail")
-            .to_string();
-        assert!(detail.contains("ký ức"), "phải đếm ký ức thật: {detail}");
-        assert!(detail.contains("journal"), "phải báo journal mode: {detail}");
-        assert_ne!(
-            s["healthChecks"]["memory"]["detail"], "WAL Active",
-            "chuỗi cứng 'WAL Active' đã quay lại"
-        );
-    }
-
-    /// Lock bận không được làm lệnh trạng thái đứng chờ: giữ `state.llm` rồi gọi
-    /// `system_status` vẫn phải trả về ngay, với `"busy"`.
-    #[tokio::test]
-    async fn lock_ban_thi_bao_busy_chu_khong_dung_cho() {
-        let state = state_toi_thieu();
-        let giu = state.llm.lock().await; // mô phỏng một lượt sinh chữ đang chạy
-
-        let s = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            system_status(state.clone()),
-        )
-        .await
-        .expect("system_status KHÔNG được chờ lock")
-        .expect("status");
-
-        assert_eq!(s["healthChecks"]["aiEngine"]["status"], "busy");
-        // Không cầm được lock thì KHÔNG biết engine đã nạp hay chưa — `null`,
-        // không đoán bừa `true`.
-        assert!(s["modelLoaded"].is_null(), "bận thì không đoán trạng thái nạp");
-        drop(giu);
-    }
-}
+mod lib_tests;

@@ -179,9 +179,11 @@ fn tach_nhan_tin(text: &str) -> Option<(String, String)> {
     // câu. Trường hợp lẫn lộn hiếm, và nếu trượt thì thẻ xác nhận đỡ.
     const MOC_CO_DAU: [&str; 4] = ["bảo", "rằng", "là", "nói"];
     const MOC_KHONG_DAU: [&str; 4] = ["bao", "rang", "la", "noi"];
-    let cau_co_dau = goc
-        .iter()
-        .any(|t| t.chars().any(|c| crate::wake::normalize_for_match(&c.to_string()) != c.to_lowercase().to_string()));
+    let cau_co_dau = goc.iter().any(|t| {
+        t.chars().any(|c| {
+            crate::wake::normalize_for_match(&c.to_string()) != c.to_lowercase().to_string()
+        })
+    });
 
     let mut moc = None;
     for k in bat_dau..goc.len() {
@@ -233,8 +235,10 @@ fn tach_nhan_tin(text: &str) -> Option<(String, String)> {
     if i < gap.len() {
         if gap[i] == "no" {
             i += 1;
-        } else if matches!(gap[i].as_str(), "anh" | "chi" | "em" | "cau" | "ban" | "ong" | "ba")
-            && i + 1 < gap.len()
+        } else if matches!(
+            gap[i].as_str(),
+            "anh" | "chi" | "em" | "cau" | "ban" | "ong" | "ba"
+        ) && i + 1 < gap.len()
             && matches!(gap[i + 1].as_str(), "ay" | "ta")
         {
             i += 2;
@@ -329,24 +333,22 @@ pub fn route_intent(text: &str) -> Intent {
     if danh_tu_am_thanh || danh_tu_nhac {
         // ĐỘ TO thắng ĐANG-PHÁT-GÌ: `"nhỏ nhạc lại"` có cả "nhạc" lẫn "nhỏ",
         // và ý người nói là âm lượng. Cùng ranh giới đã ghi trong mô tả tool.
-        let am_luong = if has_word(&tokens, "to")
-            || has_word(&tokens, "lớn")
-            || has_word(&tokens, "tăng")
-        {
-            Some("up")
-        } else if has_word(&tokens, "nhỏ")
-            || has_word(&tokens, "bé")
-            || has_word(&tokens, "giảm")
-            || has_word(&tokens, "khẽ")
-        {
-            Some("down")
-        } else if has_word(&tokens, "tắt") && danh_tu_am_thanh {
-            // "tắt tiếng" = mute. "tắt nhạc" thì KHÁC — đó là dừng phát, nên
-            // nhánh này đòi đúng danh từ âm thanh.
-            Some("mute")
-        } else {
-            None
-        };
+        let am_luong =
+            if has_word(&tokens, "to") || has_word(&tokens, "lớn") || has_word(&tokens, "tăng") {
+                Some("up")
+            } else if has_word(&tokens, "nhỏ")
+                || has_word(&tokens, "bé")
+                || has_word(&tokens, "giảm")
+                || has_word(&tokens, "khẽ")
+            {
+                Some("down")
+            } else if has_word(&tokens, "tắt") && danh_tu_am_thanh {
+                // "tắt tiếng" = mute. "tắt nhạc" thì KHÁC — đó là dừng phát, nên
+                // nhánh này đòi đúng danh từ âm thanh.
+                Some("mute")
+            } else {
+                None
+            };
         if let Some(action) = am_luong {
             return Intent::OsControl {
                 tool: "control_volume",
@@ -498,6 +500,7 @@ impl ConversationMemoryScope {
 
 fn persist_embedded_turn(
     conn: &rusqlite::Connection,
+    engine: &crate::crypto::EncryptionEngine,
     scope: &ConversationMemoryScope,
     content: &str,
     vector: &[f32],
@@ -505,6 +508,7 @@ fn persist_embedded_turn(
     let vec_id = format!("turn_{}", uuid::Uuid::new_v4());
     crate::db::persist_conversation_event_vector(
         conn,
+        engine,
         &vec_id,
         content,
         vector,
@@ -515,6 +519,7 @@ fn persist_embedded_turn(
 
 fn recall_embedded_context(
     conn: &rusqlite::Connection,
+    engine: &crate::crypto::EncryptionEngine,
     scope: &ConversationMemoryScope,
     query: &str,
     vector: &[f32],
@@ -522,6 +527,7 @@ fn recall_embedded_context(
 ) -> Result<Option<String>, rusqlite::Error> {
     let hits = crate::db::search_hybrid_vectors(
         conn,
+        engine,
         query,
         vector,
         top_k,
@@ -572,7 +578,7 @@ pub async fn recall_context_scoped(
         drop(guard);
 
         let conn = state.db.readers.get().ok()?;
-        match recall_embedded_context(&conn, &scope, &query, &vector, top_k) {
+        match recall_embedded_context(&conn, &state.crypto, &scope, &query, &vector, top_k) {
             Ok(memories) => memories,
             Err(e) => {
                 tracing::warn!("[RAG] search_hybrid_vectors that bai: {}", e);
@@ -636,7 +642,7 @@ pub async fn persist_turn_scoped(
         let Ok(conn) = state.db.writer.get() else {
             return;
         };
-        if let Err(e) = persist_embedded_turn(&conn, &scope, &content, &vector) {
+        if let Err(e) = persist_embedded_turn(&conn, &state.crypto, &scope, &content, &vector) {
             tracing::warn!("[RAG] upsert_vector that bai: {}", e);
         }
     })
@@ -749,7 +755,9 @@ pub fn build_pipeline_graph(
                     state
                         .context
                         .insert("message_to".to_string(), json!(recipient));
-                    state.context.insert("message_text".to_string(), json!(body));
+                    state
+                        .context
+                        .insert("message_text".to_string(), json!(body));
                     state.current_node = "message_draft".to_string();
                 }
                 // Đi qua ĐÚNG đường `mcp_call` mà nhánh LLM dùng, thay vì dựng
@@ -774,33 +782,32 @@ pub fn build_pipeline_graph(
                 // mình"), nên nó cũng chính là fallback khi vòng LLM không đọc
                 // được output. Tắt theo mặc định — xem `tool_calling::enabled`.
                 Intent::Chat => {
-                    state.current_node = match crate::llm::tool_calling::select_tool(&ss, &text)
-                        .await
-                    {
-                        Some(call) => match call.policy {
-                            crate::llm::ExecPolicy::Auto => {
-                                state.context.insert(
-                                    "mcp_call".to_string(),
-                                    json!({
-                                        "server": call.server,
-                                        "name": call.name,
-                                        "arguments": call.arguments,
-                                    }),
-                                );
-                                "mcp_tool_exec".to_string()
-                            }
-                            // Chỉ được đề xuất: đưa đề xuất vào hội thoại rồi để
-                            // LLM nói lại cho người dùng. KHÔNG chạy.
-                            crate::llm::ExecPolicy::ProposeOnly => {
-                                state.messages.push(json!({
-                                    "role": "tool",
-                                    "content": call.proposal_text(),
-                                }));
-                                "chat_completion".to_string()
-                            }
-                        },
-                        None => "chat_completion".to_string(),
-                    };
+                    state.current_node =
+                        match crate::llm::tool_calling::select_tool(&ss, &text).await {
+                            Some(call) => match call.policy {
+                                crate::llm::ExecPolicy::Auto => {
+                                    state.context.insert(
+                                        "mcp_call".to_string(),
+                                        json!({
+                                            "server": call.server,
+                                            "name": call.name,
+                                            "arguments": call.arguments,
+                                        }),
+                                    );
+                                    "mcp_tool_exec".to_string()
+                                }
+                                // Chỉ được đề xuất: đưa đề xuất vào hội thoại rồi để
+                                // LLM nói lại cho người dùng. KHÔNG chạy.
+                                crate::llm::ExecPolicy::ProposeOnly => {
+                                    state.messages.push(json!({
+                                        "role": "tool",
+                                        "content": call.proposal_text(),
+                                    }));
+                                    "chat_completion".to_string()
+                                }
+                            },
+                            None => "chat_completion".to_string(),
+                        };
                 }
             }
 
@@ -842,7 +849,10 @@ pub fn build_pipeline_graph(
                     if res.is_error {
                         format!("Công cụ {} báo lỗi: {text}", call.qualified())
                     } else if text.is_empty() {
-                        format!("Công cụ {} chạy xong, không trả về văn bản.", call.qualified())
+                        format!(
+                            "Công cụ {} chạy xong, không trả về văn bản.",
+                            call.qualified()
+                        )
                     } else {
                         text
                     }
@@ -1406,15 +1416,33 @@ mod router_tests {
     /// lên"* rơi sang chỉnh âm lượng và *"chuyển bài khác"* chọn sai hướng.
     #[test]
     fn dieu_khien_may_di_duong_nhanh() {
-        assert_eq!(route_intent("bật nhạc lên"), os("control_media", "play_pause"));
+        assert_eq!(
+            route_intent("bật nhạc lên"),
+            os("control_media", "play_pause")
+        );
         assert_eq!(route_intent("chuyển bài khác"), os("control_media", "next"));
-        assert_eq!(route_intent("tạm dừng nhạc"), os("control_media", "play_pause"));
-        assert_eq!(route_intent("quay lại bài trước"), os("control_media", "previous"));
+        assert_eq!(
+            route_intent("tạm dừng nhạc"),
+            os("control_media", "play_pause")
+        );
+        assert_eq!(
+            route_intent("quay lại bài trước"),
+            os("control_media", "previous")
+        );
         assert_eq!(route_intent("bài tiếp theo"), os("control_media", "next"));
 
-        assert_eq!(route_intent("nhỏ nhạc lại giúp mình"), os("control_volume", "down"));
-        assert_eq!(route_intent("giảm âm lượng xuống"), os("control_volume", "down"));
-        assert_eq!(route_intent("tăng âm lượng lên"), os("control_volume", "up"));
+        assert_eq!(
+            route_intent("nhỏ nhạc lại giúp mình"),
+            os("control_volume", "down")
+        );
+        assert_eq!(
+            route_intent("giảm âm lượng xuống"),
+            os("control_volume", "down")
+        );
+        assert_eq!(
+            route_intent("tăng âm lượng lên"),
+            os("control_volume", "up")
+        );
         assert_eq!(route_intent("tắt tiếng đi"), os("control_volume", "mute"));
     }
 
@@ -1621,21 +1649,51 @@ mod rag_tests {
         let vector = vec![0.01_f32; crate::db::MEMORY_VECTOR_DIM];
         let scope = ConversationMemoryScope::new("telegram:100", "chat:1").unwrap();
 
-        persist_embedded_turn(&conn, &scope, "ma du an ORION-7", &vector).unwrap();
+        let engine = crate::crypto::EncryptionEngine::new("graph-memory-test-key-32-bytes-long");
+        persist_embedded_turn(&conn, &engine, &scope, "ma du an ORION-7", &vector).unwrap();
 
-        let (event_id, domain, category, source_event_ids): (String, String, String, String) = conn
+        let (event_id, domain, category, source_event_ids, raw_content): (
+            String,
+            String,
+            String,
+            String,
+            String,
+        ) = conn
             .query_row(
-                "SELECT e.eventId, e.domain, e.category, m.source_event_ids \
+                "SELECT e.eventId, e.domain, e.category, m.source_event_ids, m.content \
                  FROM events e \
                  JOIN vectors_meta m ON m.vec_id = e.eventId \
-                 WHERE m.content = ?1",
-                ["ma du an ORION-7"],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                 WHERE m.domain = ?1 AND m.category = ?2",
+                ["memory_owner:telegram:100", "conversation:chat:1"],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(domain, "memory_owner:telegram:100");
         assert_eq!(category, "conversation:chat:1");
         assert_eq!(source_event_ids, format!(r#"["{event_id}"]"#));
+        assert_ne!(raw_content, "ma du an ORION-7");
+        assert_eq!(
+            engine.try_decrypt(&raw_content).unwrap(),
+            "ma du an ORION-7"
+        );
+        let fts_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM vectors_fts WHERE rowid = (
+                    SELECT id FROM vectors_meta WHERE vec_id = ?1
+                )",
+                [&event_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_count, 0);
     }
 
     #[test]
@@ -1646,15 +1704,18 @@ mod rag_tests {
         let owner_a = ConversationMemoryScope::new("telegram:100", "chat:1").unwrap();
         let owner_b = ConversationMemoryScope::new("telegram:200", "chat:2").unwrap();
 
-        persist_embedded_turn(&conn, &owner_a, "shared secret owner A", &vector).unwrap();
-        persist_embedded_turn(&conn, &owner_b, "shared secret owner B", &vector).unwrap();
+        let engine = crate::crypto::EncryptionEngine::new("graph-memory-test-key-32-bytes-long");
+        persist_embedded_turn(&conn, &engine, &owner_a, "shared secret owner A", &vector).unwrap();
+        persist_embedded_turn(&conn, &engine, &owner_b, "shared secret owner B", &vector).unwrap();
 
-        let recalled_a = recall_embedded_context(&conn, &owner_a, "shared secret", &vector, 10)
-            .unwrap()
-            .expect("owner A co ky uc");
-        let recalled_b = recall_embedded_context(&conn, &owner_b, "shared secret", &vector, 10)
-            .unwrap()
-            .expect("owner B co ky uc");
+        let recalled_a =
+            recall_embedded_context(&conn, &engine, &owner_a, "shared secret", &vector, 10)
+                .unwrap()
+                .expect("owner A co ky uc");
+        let recalled_b =
+            recall_embedded_context(&conn, &engine, &owner_b, "shared secret", &vector, 10)
+                .unwrap()
+                .expect("owner B co ky uc");
 
         assert!(recalled_a.contains("owner A"));
         assert!(
@@ -1678,12 +1739,21 @@ mod rag_tests {
             ConversationMemoryScope::new_audience_scoped("telegram:100", "telegram_chat:-200")
                 .unwrap();
 
-        persist_embedded_turn(&conn, &dm_scope, "wifi DM la Hunter2", &vector).unwrap();
-        persist_embedded_turn(&conn, &group_scope, "noi dung rieng cua group", &vector).unwrap();
+        let engine = crate::crypto::EncryptionEngine::new("graph-memory-test-key-32-bytes-long");
+        persist_embedded_turn(&conn, &engine, &dm_scope, "wifi DM la Hunter2", &vector).unwrap();
+        persist_embedded_turn(
+            &conn,
+            &engine,
+            &group_scope,
+            "noi dung rieng cua group",
+            &vector,
+        )
+        .unwrap();
 
-        let recalled_group = recall_embedded_context(&conn, &group_scope, "wifi", &vector, 10)
-            .unwrap()
-            .expect("group co ky uc trong cung audience");
+        let recalled_group =
+            recall_embedded_context(&conn, &engine, &group_scope, "wifi", &vector, 10)
+                .unwrap()
+                .expect("group co ky uc trong cung audience");
 
         assert!(recalled_group.contains("noi dung rieng cua group"));
         assert!(
@@ -1707,12 +1777,13 @@ mod rag_tests {
             ConversationMemoryScope::new_audience_scoped("telegram:100", "telegram_chat:-300")
                 .unwrap();
 
-        persist_embedded_turn(&conn, &group_a, "bi mat cua group A", &vector).unwrap();
-        persist_embedded_turn(&conn, &group_b, "noi dung group B", &vector).unwrap();
+        let engine = crate::crypto::EncryptionEngine::new("graph-memory-test-key-32-bytes-long");
+        persist_embedded_turn(&conn, &engine, &group_a, "bi mat cua group A", &vector).unwrap();
+        persist_embedded_turn(&conn, &engine, &group_b, "noi dung group B", &vector).unwrap();
 
         // Recall trong group B: chỉ thấy của B, KHÔNG thấy của A (dù vector giống
         // hệt và FTS 'bi mat' khớp nội dung A — category filter loại A ra).
-        let recalled_b = recall_embedded_context(&conn, &group_b, "bi mat", &vector, 10)
+        let recalled_b = recall_embedded_context(&conn, &engine, &group_b, "bi mat", &vector, 10)
             .unwrap()
             .expect("group B co ky uc cua chinh no");
         assert!(recalled_b.contains("noi dung group B"));
@@ -1722,7 +1793,7 @@ mod rag_tests {
         );
 
         // Chiều ngược lại cũng phải cách ly.
-        let recalled_a = recall_embedded_context(&conn, &group_a, "noi dung", &vector, 10)
+        let recalled_a = recall_embedded_context(&conn, &engine, &group_a, "noi dung", &vector, 10)
             .unwrap()
             .expect("group A co ky uc cua chinh no");
         assert!(recalled_a.contains("group A"));

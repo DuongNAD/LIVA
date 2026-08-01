@@ -24,7 +24,8 @@
 // Chạy được ở build DEBUG và nên thế: `vision:ask` thất bại ngay ở debug, đúng
 // kịch bản trước đây khiến client treo 120 giây.
 //
-// KHÔNG nằm trong CI: cần model weights (gitignored) và một tiến trình sống.
+// CI gọi qua `e2e-gateway-ci.mjs`, tự dựng tiến trình sống; các assertion giao thức
+// không phụ thuộc model weights.
 // Thoát 1 nếu có mục nào trượt.
 
 import { ketNoi, goiLenh } from './lib/ws-client.mjs'
@@ -70,9 +71,10 @@ const main = async () => {
     la.payload?.command === 'khong_ton_tai_dau' && typeof la.payload?.error === 'string')
 
   const mcp = await goiLenh(ws, 'mcp:list_tools')
-  ghi('MCP server đã nối vào lớp lệnh',
-    mcp.event === 'mcp:list_tools_response' && Array.isArray(mcp.payload?.tools),
-    Array.isArray(mcp.payload?.tools) ? `${mcp.payload.tools.length} tool` : (mcp.event ?? mcp.ly))
+  ghi('Remote principal bị chặn khỏi MCP',
+    mcp.event === 'mcp:list_tools_error'
+      && String(mcp.payload?.error).includes('not authorized'),
+    mcp.payload?.error ?? mcp.event ?? mcp.ly)
 
   // Hai profile hành xử khác hẳn nhau ở đây, cả hai đều phải ĐẠT:
   //  - DEBUG:   lỗi "cần build release" trả về trong vài ms — đây là hồi quy

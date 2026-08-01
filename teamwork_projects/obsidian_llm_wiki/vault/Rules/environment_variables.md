@@ -2,51 +2,63 @@
 title: "environment_variables"
 tags:
   - liva/rule
-author: "worker"
-last_update: "2026-06-21T02:21:19Z"
+author: "codex"
+last_update: "2026-07-30T00:00:00+07:00"
 severity: "CRITICAL"
 scope: "all-agents"
 ---
 
 # Rule: Environment Variables
 
-## Rule Statement
-Sensitive keys in the gateway must not be kept in plaintext inside `.env`. The system dynamically encrypts keys from `.env` into `liva_vault.json` using AES-256-GCM and decrypts them dynamically into `process.env` at boot.
+## Rule statement
 
-## Rationale
-To ensure Zero-Trust credentials security (Shift-Left approach) and prevent key leaks from plain text environment files during development, sharing, or version control.
+LIVA's active backend is the Unified Native Engine in Rust. Environment variables are operator
+overrides read by Rust; there is no Node gateway `ConfigManager`, no boot-time `.env` scrubber and
+no supported `liva_vault.json` credential flow.
 
-## Environment Variables Reference Listing
-The following variables are loaded at boot by the `ConfigManager`:
+Secrets must not be written to `.env`, `data/liva-config.json`, logs, generated diagnostics or
+frontend state. Desktop credentials belong in Tauri Stronghold through a purpose-specific command.
+Until every UI is wired to Stronghold, do not claim a credential is encrypted merely because a
+vault primitive exists.
 
-- **LIVA_ENCRYPTION_KEY**: [REQUIRED] 32-byte key for operating the AES-256-GCM `EncryptionEngine`.
-- **LIVA_KERNEL_SECRET**: [OPTIONAL] Fallback UUID for internal kernel communication.
-- **AI_PROVIDER**: Router strategy. Value: `local` (GGUF via llama-server), `cloud` (OpenAI-compatible API), or `hybrid`.
-- **AI_BASE_URL**: Cloud API endpoint (when `AI_PROVIDER` is cloud/hybrid).
-- **AI_API_KEY**: Cloud API key.
-- **AI_MODEL**: Cloud model name (e.g. gemini-2.5-flash).
-- **AI_MODELS_DIR**: Local model directory (default: `~/.liva/models`).
-- **ROUTER_MODEL_NAME**: Fast GGUF model name for Intent Routing.
-- **EXPERT_MODEL_NAME**: Heavy GGUF model name for Deep Reasoning.
-- **LLM_ENDPOINT**: Override LLM API base (default: `http://localhost:8000/v1/chat/completions`).
-- **ZALO_OA_ACCESS_TOKEN**: Zalo Bot Creator token (contains `:`).
-- **ZALO_USER_ID**: Auto-detected User ID on first message.
-- **TAVILY_API_KEY**: Web search API key (falls back to DDG).
-- **LIVA_GEOLOCATION_ENABLED**: "true" to enable IP geolocation lookup on boot.
-- **EMAIL_HOST** / **EMAIL_PORT** / **EMAIL_USER** / **EMAIL_PASS**: Email IMAP configuration.
-- **LIVA_USE_NATIVE**: "true" to use gRPC native engine.
-- **LIVA_TTS_ENGINE**: "python" (Edge-TTS) or "kokoro" (offline fallback).
-- **NEMOTRON_MODEL_DIR**: ASR model path (default: `./models/nemotron-asr`).
-- **NEMOTRON_LANGUAGE**: STT language (default: `vi`).
-- **NEMOTRON_CHUNK_MS**: Streaming ASR chunk duration (default: `160`).
-- **FF_DISABLE_L2_INJECTION**: "true" to disable L2 semantic memory injection.
+## Current authority
 
-## Decryption and Load Flow
-1. **Boot Initialization**: `EncryptionEngine` runs immediately before the Event Loop starts.
-2. **Auto-Migration**: Detects sensitive plain-text variables (e.g., `AI_API_KEY`, `ZALO_OA_ACCESS_TOKEN`) in `.env`.
-3. **Encryption & Vault Write**: Encrypts these secrets with AES-256-GCM using `LIVA_ENCRYPTION_KEY`, writes to `liva_vault.json`, and scrubs the plaintext secrets from `.env`.
-4. **Environment Load**: Loads the decrypted keys directly into memory (`process.env`) for runtime access.
+The complete, source-verified variable registry is:
 
-## Exceptions
-- Plaintext credentials are allowed in `.env` only during first-time setup before initial boot auto-migration encrypts them.
-- Synchronous reading/writing for Vault auto-migration is allowed only during early boot sequence before the main Event Loop starts.
+- `docs/02-van-hanh/01-cau-hinh-va-bien-moi-truong.md`
+- Rust readers under `liva-native-core/src/`
+- security decisions in `docs/05-chat-luong/threat-model.md`
+
+Do not copy the full list into Vault; a second list will drift.
+
+## Critical variable families
+
+| Family | Purpose | Safety rule |
+|---|---|---|
+| `LIVA_HOME` | writable user/resource root | operator override; do not derive secret paths from cwd |
+| `LIVA_DB_PATH` | SQLite path override | must be explicit; warn about stray DBs, never auto-merge |
+| `LIVA_DB_IN_MEMORY` | ephemeral DB mode | test/development; no durability promise |
+| `LIVA_ENCRYPTION_KEY` | DB fact key override | secret; never log; Windows on-disk DB otherwise uses DPAPI device key |
+| `LIVA_ENCRYPTION_KEY_OLD` | one-time rekey source | migration-only; remove after verified rekey |
+| `LIVA_SERVER_HOST` / `LIVA_SERVER_PORT` | WebSocket bind | non-loopback is forbidden until authentication is configured |
+| `LIVA_WS_ALLOWED_ORIGINS` | additional browser origins | exact origins only; not an authentication mechanism |
+| `LIVA_MCP_AUTOEXEC` | widens external-tool execution | security-sensitive operator policy |
+| Telegram token/allowlist variables | bot identity and callers | token is secret; empty allowlist stays fail-closed |
+
+## Required behavior
+
+1. Prefer config for non-secret product settings and Stronghold for credentials.
+2. Keep `data/liva-config.json` secret-free; `get_config` must not become a secret export.
+3. Do not print recovery/device keys to stderr or tracing.
+4. Do not add a new environment variable without:
+   - a Rust read site;
+   - a default/failure policy;
+   - documentation in the canonical operations registry;
+   - tests for security-sensitive values.
+5. Do not restore legacy `AI_PROVIDER`, `AI_API_KEY`, Zalo, Node gateway or Python-core variables
+   unless a new implementation and approved contract explicitly require them.
+
+## Known gap
+
+The current UI still has credential paths that are not connected to Stronghold. Treat
+`docs/05-chat-luong/threat-model.md` S0 as required work, not as an implemented guarantee.

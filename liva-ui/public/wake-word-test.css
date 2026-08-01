@@ -1,0 +1,92 @@
+body {
+  padding: 40px;
+  background: #1a1a2e;
+  color: #fff;
+  font-family: "Segoe UI", sans-serif;
+}
+h1 { color: #e94560; }
+.status {
+  padding: 20px;
+  margin: 10px 0;
+  border-radius: 10px;
+  font-size: 18px;
+}
+.pending { background: #333; }
+.success { background: #28a745; }
+.error { background: #dc3545; }
+.listening { background: #007bff; animation: pulse 1s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .7; } }
+.log {
+  max-height: 300px;
+  padding: 15px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: #000;
+  font: 12px monospace;
+}
+.log-entry { margin: 5px 0; }
+.log-info { color: #0ff; }
+.log-warn { color: #ff0; }
+.log-error { color: #f00; }
+.log-detect { color: #0f0; font-weight: 700; }
+button {
+  padding: 15px 30px;
+  margin: 10px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.btn-start { background: #28a745; color: #fff; }
+.btn-stop { background: #dc3545; color: #fff; }
+.btn-test { background: #007bff; color: #fff; }
+.btn-record { background: #e94560; color: #fff; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+.enrollment {
+  padding: 20px;
+  margin: 24px 0;
+  border: 1px solid #4b4b72;
+  border-radius: 10px;
+  background: #22223b;
+}
+.enrollment h2 { margin-top: 0; }
+.privacy-note { color: #c8c8dc; }
+.privacy-note code { color: #8fe3ff; }
+.visualizer {
+  position: relative;
+  width: 100%;
+  height: 60px;
+  margin: 10px 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #222;
+}
+#energyBar {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  appearance: none;
+}
+#energyBar::-webkit-progress-bar { background: #222; }
+#energyBar::-webkit-progress-value {
+  background: linear-gradient(to right, #28a745, #ff0);
+  transition: width .05s;
+}
+#energyBar.detected::-webkit-progress-value { background: #0f0; }
+.threshold-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 30%;
+  width: 2px;
+  background: #f00;
+}
+.confidence-display {
+  margin: 10px;
+  font-size: 32px;
+  font-weight: 700;
+  text-align: center;
+}
+.confidence-low { color: #fff; }
+.confidence-medium { color: #ff0; }
+.confidence-high { color: #0f0; }

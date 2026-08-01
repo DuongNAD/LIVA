@@ -165,7 +165,7 @@ const confirmReset = () => {
     gateway.onMemoryResetResult(onMemoryResetResult);
 
     // Send reset command via WebSocket
-    gateway.sendMsg('reset_memory');
+    gateway.sendMsg('memory:delete_subject', { dryRun: false });
 
     // Cleanup after 15s (timeout)
     resetTimeout = setTimeout(() => {

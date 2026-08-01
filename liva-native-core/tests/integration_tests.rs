@@ -1,5 +1,5 @@
 use liva_native_core::{
-    DatabasePool,
+    DatabasePool, EncryptionEngine,
     agent::{graph::StateGraph, memory::SqliteCheckpointer, state::AgentState},
     mcp::protocol::{CallToolRequest, ToolContent},
     mcp::server::NativeMcpServer,
@@ -110,7 +110,8 @@ async fn node_two(mut state: AgentState) -> Result<AgentState, String> {
 async fn test_case_2_state_graph_and_checkpointer() {
     // a. Initialize DatabasePool::new_in_memory() and SqliteCheckpointer
     let db = Arc::new(DatabasePool::new_in_memory().expect("failed to create in-memory db"));
-    let checkpointer = SqliteCheckpointer::new(db.clone());
+    let crypto = EncryptionEngine::new("integration-checkpoint-key-32-bytes");
+    let checkpointer = SqliteCheckpointer::new(db.clone(), crypto.clone());
 
     // b. Add nodes to StateGraph and connect edges
     let mut graph = StateGraph::new();
@@ -158,7 +159,9 @@ async fn test_case_2_state_graph_and_checkpointer() {
     let state_json: String = row.get(1).unwrap();
 
     assert_eq!(tid, thread_id);
-    let db_state: AgentState = serde_json::from_str(&state_json).unwrap();
+    assert!(state_json.starts_with("v2:"));
+    let plaintext = crypto.try_decrypt(&state_json).unwrap();
+    let db_state: AgentState = serde_json::from_str(&plaintext).unwrap();
     assert_eq!(db_state.current_node, final_state.current_node);
     assert_eq!(db_state.context, final_state.context);
     assert_eq!(db_state.messages, final_state.messages);
@@ -484,7 +487,10 @@ async fn test_case_6_swarm_duplex_collaboration_no_deadlock() {
 #[tokio::test]
 async fn test_f1_checkpoint_key_must_be_stable_across_vad_turns() {
     let db = Arc::new(DatabasePool::new_in_memory().expect("failed to create in-memory db"));
-    let checkpointer = SqliteCheckpointer::new(db.clone());
+    let checkpointer = SqliteCheckpointer::new(
+        db.clone(),
+        EncryptionEngine::new("integration-checkpoint-key-32-bytes"),
+    );
 
     let turn_state = |n: usize| AgentState {
         messages: vec![json!({"role": "user", "content": format!("cau noi thu {}", n)})],

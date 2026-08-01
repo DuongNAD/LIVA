@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-interactive-zones"
+description = "Enables the update_interactive_zones command without any pre-configured scope."
+commands.allow = ["update_interactive_zones"]
+
+[[permission]]
+identifier = "deny-update-interactive-zones"
+description = "Denies the update_interactive_zones command without any pre-configured scope."
+commands.deny = ["update_interactive_zones"]

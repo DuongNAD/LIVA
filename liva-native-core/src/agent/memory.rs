@@ -1,28 +1,32 @@
 use super::state::AgentState;
+use crate::crypto::{EncryptionEngine, FactRead};
 use crate::db::DatabasePool;
 use std::sync::Arc;
 
 pub struct SqliteCheckpointer {
     db: Arc<DatabasePool>,
+    crypto: EncryptionEngine,
 }
 
 impl SqliteCheckpointer {
-    pub fn new(db: Arc<DatabasePool>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<DatabasePool>, crypto: EncryptionEngine) -> Self {
+        Self { db, crypto }
     }
 
     pub async fn save_checkpoint(&self, thread_id: &str, state: &AgentState) -> Result<(), String> {
         let pool = self.db.clone();
+        let crypto = self.crypto.clone();
         let tid = thread_id.to_string();
         let st = state.clone();
 
         tokio::task::spawn_blocking(move || {
             let conn = pool.writer.get().map_err(|e| e.to_string())?;
             let state_json = serde_json::to_string(&st).map_err(|e| e.to_string())?;
+            let encrypted = crypto.encrypt(&state_json)?;
 
             conn.execute(
                 "INSERT OR REPLACE INTO agent_checkpoints (thread_id, state_json) VALUES (?1, ?2)",
-                rusqlite::params![tid, state_json],
+                rusqlite::params![tid, encrypted],
             )
             .map_err(|e| e.to_string())?;
 
@@ -34,6 +38,7 @@ impl SqliteCheckpointer {
 
     pub async fn load_checkpoint(&self, thread_id: &str) -> Result<Option<AgentState>, String> {
         let pool = self.db.clone();
+        let crypto = self.crypto.clone();
         let tid = thread_id.to_string();
 
         tokio::task::spawn_blocking(move || {
@@ -47,7 +52,15 @@ impl SqliteCheckpointer {
                 .map_err(|e| e.to_string())?;
 
             if let Some(row) = rows.next().map_err(|e| e.to_string())? {
-                let state_json: String = row.get(0).map_err(|e| e.to_string())?;
+                let stored: String = row.get(0).map_err(|e| e.to_string())?;
+                let state_json = match crypto.read_fact(&stored) {
+                    FactRead::Ok(plain) => plain,
+                    FactRead::Locked { reason } => {
+                        return Err(format!(
+                            "checkpoint bị khóa ({reason}); cần đúng LIVA_ENCRYPTION_KEY"
+                        ));
+                    }
+                };
                 let state: AgentState =
                     serde_json::from_str(&state_json).map_err(|e| e.to_string())?;
                 Ok(Some(state))
@@ -63,11 +76,16 @@ impl SqliteCheckpointer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::EncryptionEngine;
     use crate::db::DatabasePool;
     use serde_json::json;
 
     fn pool() -> Arc<DatabasePool> {
         Arc::new(DatabasePool::new_in_memory().expect("dựng DB in-memory"))
+    }
+
+    fn crypto() -> EncryptionEngine {
+        EncryptionEngine::new("checkpoint-tests-key-32-bytes-long")
     }
 
     fn state(node: &str, user_msg: &str) -> AgentState {
@@ -87,7 +105,7 @@ mod tests {
     /// phải khôi phục nguyên trạng AgentState.
     #[tokio::test]
     async fn checkpoint_round_trip_cung_thread_id() {
-        let cp = SqliteCheckpointer::new(pool());
+        let cp = SqliteCheckpointer::new(pool(), crypto());
         let st = state("router", "chào LIVA");
 
         cp.save_checkpoint("conv-abc", &st).await.unwrap();
@@ -112,7 +130,7 @@ mod tests {
     /// sạch trí nhớ đa lượt. `conversation_id` ổn định theo kết nối tránh đúng ca này.
     #[tokio::test]
     async fn thread_id_khac_tra_none_dung_bug_2_1() {
-        let cp = SqliteCheckpointer::new(pool());
+        let cp = SqliteCheckpointer::new(pool(), crypto());
         cp.save_checkpoint("conversation-cố-định", &state("llm", "câu 1"))
             .await
             .unwrap();
@@ -136,7 +154,7 @@ mod tests {
     /// Ghi lại cùng `thread_id` phải ĐÈ (INSERT OR REPLACE), không nhân bản dòng.
     #[tokio::test]
     async fn save_cung_thread_id_ghi_de() {
-        let cp = SqliteCheckpointer::new(pool());
+        let cp = SqliteCheckpointer::new(pool(), crypto());
         cp.save_checkpoint("t1", &state("router", "cũ"))
             .await
             .unwrap();
@@ -152,7 +170,48 @@ mod tests {
     /// Đọc khi chưa từng ghi → `None`, không lỗi.
     #[tokio::test]
     async fn load_khi_chua_co_gi_tra_none() {
-        let cp = SqliteCheckpointer::new(pool());
+        let cp = SqliteCheckpointer::new(pool(), crypto());
         assert!(cp.load_checkpoint("chưa-tồn-tại").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn checkpoint_khong_luu_plaintext_nhung_van_round_trip() {
+        let db = pool();
+        let crypto = EncryptionEngine::new("checkpoint-key-32-bytes-long-enough");
+        let cp = SqliteCheckpointer::new(db.clone(), crypto);
+        let canary = "LIVA-CHECKPOINT-CANARY-7391";
+        let expected = state("llm", canary);
+
+        cp.save_checkpoint("encrypted-thread", &expected)
+            .await
+            .unwrap();
+
+        let raw: String = db
+            .readers
+            .get()
+            .unwrap()
+            .query_row(
+                "SELECT state_json FROM agent_checkpoints WHERE thread_id = ?1",
+                ["encrypted-thread"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !raw.contains(canary),
+            "raw agent_checkpoints.state_json không được chứa transcript plaintext"
+        );
+        assert!(
+            raw.starts_with("v2:"),
+            "checkpoint mới phải dùng ciphertext v2"
+        );
+
+        let loaded = cp
+            .load_checkpoint("encrypted-thread")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.messages, expected.messages);
+        assert_eq!(loaded.current_node, expected.current_node);
+        assert_eq!(loaded.context, expected.context);
     }
 }

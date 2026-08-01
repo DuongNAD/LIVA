@@ -18,11 +18,11 @@
  *
  * Chưa có clip? Sinh bằng chính TTS của LIVA rồi hạ mẫu:
  *   .\target\debug\tts_piper_probe.exe models/piper/vi_VN-vais1000-medium.onnx `
- *     "Này Liva ơi, bật nhạc lên giúp tôi" out.wav
+ *     "Hey Liva, bật nhạc lên giúp tôi" out.wav
  *   ffmpeg -i out.wav -ar 16000 -ac 1 out16k.wav
  *
  * Kiểm 27/07/2026 (giọng Piper tổng hợp, Nemotron thật, 3/3 đúng):
- *   "Này Liva ơi, bật nhạc lên giúp tôi"            → đánh thức
+ *   "Hey Liva, bật nhạc lên giúp tôi"               → đánh thức
  *   "Hôm nay trời đẹp quá, đi ăn cơm không"         → từ chối
  *   "Hey Liva, what is the weather today in Hanoi"  → đánh thức
  */

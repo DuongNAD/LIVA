@@ -100,7 +100,10 @@ const DEFAULT_CONFIG: WakeWordConfig = {
   onsetFrames: 2,
   hangoverFrames: 8,
   prerollFrames: 8,
-  minUtteranceMs: 250,
+  // “Hey Liva” đo thực tế dài khoảng 600–700 ms. Giữ sàn 500 ms loại phần lớn
+  // tiếng ho/click/âm tiết rời vốn chỉ làm tốn một lượt STT nhưng vẫn chừa biên
+  // cho câu gọi được nói nhanh.
+  minUtteranceMs: 500,
   maxUtteranceMs: 3000,
   cooldownMs: 1200,
   minProbeMs: 2300,

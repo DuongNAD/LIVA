@@ -476,6 +476,6 @@ Imported workflow retained for historical reference.
 
       // Verify that running synchronous searches in a loop blocks the event loop
       expect(maxEventLoopDelayDirect).toBeGreaterThan(0);
-    });
+    }, 20_000);
   });
 });

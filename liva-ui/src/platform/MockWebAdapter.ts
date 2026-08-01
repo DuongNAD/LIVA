@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 
 export class MockWebAdapter implements IPlatformAdapter {
   platformName = 'web' as const;
+  private readonly vaultSecretKeys = new Set<string>();
 
   constructor() {
     if (typeof document !== 'undefined') {
@@ -27,13 +28,18 @@ export class MockWebAdapter implements IPlatformAdapter {
     window.close();
   }
 
-  async readVaultKey(key: string) {
-    return localStorage.getItem(`liva_vault_${key}`);
+  async hasVaultSecret(key: string) {
+    return this.vaultSecretKeys.has(key);
   }
 
-  async writeVaultKey(key: string, value: string) {
-    localStorage.setItem(`liva_vault_${key}`, value);
-    logger.debug('[MockWebAdapter]', `Wrote to localStorage: vault_${key}`);
+  async storeVaultSecret(key: string, value: string) {
+    if (!value) throw new Error("vault secret must not be empty");
+    this.vaultSecretKeys.add(key);
+    logger.debug('[MockWebAdapter]', `Stored mock vault presence: ${key}`);
+  }
+
+  async deleteVaultSecret(key: string) {
+    this.vaultSecretKeys.delete(key);
   }
 
   onGatewayReady(callback: (port: number, token: string | null) => void) {

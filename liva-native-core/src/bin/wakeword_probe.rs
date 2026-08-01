@@ -19,7 +19,8 @@ fn read_wav_pcm16_mono(path: &str) -> (u32, Vec<f32>) {
         let chunk_size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
         let body_start = pos + 8;
         if chunk_id == b"fmt " {
-            sample_rate = u32::from_le_bytes(bytes[body_start + 4..body_start + 8].try_into().unwrap());
+            sample_rate =
+                u32::from_le_bytes(bytes[body_start + 4..body_start + 8].try_into().unwrap());
         } else if chunk_id == b"data" {
             let body = &bytes[body_start..body_start + chunk_size];
             data = body
@@ -40,7 +41,12 @@ fn main() {
     }
 
     let (rate, mut samples) = read_wav_pcm16_mono(&args[2]);
-    println!("clip: {} samples @ {} Hz ({:.2}s)", samples.len(), rate, samples.len() as f32 / rate as f32);
+    println!(
+        "clip: {} samples @ {} Hz ({:.2}s)",
+        samples.len(),
+        rate,
+        samples.len() as f32 / rate as f32
+    );
     assert_eq!(rate, 16000, "wake-word pipeline expects 16kHz mono input");
 
     // Isolated-word clips (e.g. straight from the training data generator)
@@ -52,13 +58,19 @@ fn main() {
         let pad = MIN_SAMPLES - samples.len();
         let mut padded = vec![0.0f32; pad];
         padded.extend_from_slice(&samples);
-        println!("padded with {} leading silence samples to reach the ~2s minimum", pad);
+        println!(
+            "padded with {} leading silence samples to reach the ~2s minimum",
+            pad
+        );
         samples = padded;
     }
 
     let t_load = std::time::Instant::now();
     let mut detector = TrainedWakeDetector::new(&[&args[1]], 0.5).expect("load wake-word pipeline");
-    println!("model load time (one-off, at LIVA startup): {:?}", t_load.elapsed());
+    println!(
+        "model load time (one-off, at LIVA startup): {:?}",
+        t_load.elapsed()
+    );
 
     let scores = detector.predict_raw(&samples).expect("predict_raw");
     if scores.is_empty() {

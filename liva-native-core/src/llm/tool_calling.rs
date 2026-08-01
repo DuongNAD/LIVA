@@ -453,10 +453,7 @@ pub fn render_selection_prompt(tools: &[&CatalogTool], user_text: &str) -> Strin
 /// để biết đến lượt nó nói.
 ///
 /// Một message `user` là đủ cho cả hai họ template (Gemma và ChatML).
-pub fn compile_selection_prompt(
-    tools: &[&CatalogTool],
-    user_text: &str,
-) -> Result<String, String> {
+pub fn compile_selection_prompt(tools: &[&CatalogTool], user_text: &str) -> Result<String, String> {
     crate::llm::compile_prompt(&[crate::llm::ChatMessage {
         role: "user".to_string(),
         content: render_selection_prompt(tools, user_text),
@@ -731,9 +728,10 @@ impl ExecPolicy {
         let Ok(raw) = std::env::var("LIVA_MCP_AUTOEXEC") else {
             return Self::ProposeOnly;
         };
-        let khop = raw.split(',').map(str::trim).any(|muc| {
-            muc == format!("{server}/{name}") || muc == format!("{server}/*")
-        });
+        let khop = raw
+            .split(',')
+            .map(str::trim)
+            .any(|muc| muc == format!("{server}/{name}") || muc == format!("{server}/*"));
         if khop { Self::Auto } else { Self::ProposeOnly }
     }
 }
@@ -1001,7 +999,8 @@ mod tests {
                 "properties": { "path": { "type": "string" } }
             }),
         ));
-        c.tools.push(tool(NATIVE_SERVER, "khong_tham_so", "Tool rỗng", json!({})));
+        c.tools
+            .push(tool(NATIVE_SERVER, "khong_tham_so", "Tool rỗng", json!({})));
         c
     }
 
@@ -1169,7 +1168,10 @@ mod tests {
 
     #[test]
     fn doc_duoc_output_dung_khuon() {
-        let s = parse_selection("TOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}", 3);
+        let s = parse_selection(
+            "TOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}",
+            3,
+        );
         assert_eq!(
             s,
             Selection::Tool {
@@ -1183,10 +1185,22 @@ mod tests {
     #[test]
     fn khoan_dung_voi_output_lam_nham() {
         for (ten, raw) in [
-            ("có lời dẫn", "Chắc chắn rồi!\nTOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}"),
-            ("bọc code fence", "```\nTOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}\n```"),
-            ("chữ thường", "tool: 1\nargs: {\"device\":\"light\",\"command\":\"on\"}"),
-            ("nói thêm sau", "TOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}\nHy vọng giúp được bạn!"),
+            (
+                "có lời dẫn",
+                "Chắc chắn rồi!\nTOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}",
+            ),
+            (
+                "bọc code fence",
+                "```\nTOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}\n```",
+            ),
+            (
+                "chữ thường",
+                "tool: 1\nargs: {\"device\":\"light\",\"command\":\"on\"}",
+            ),
+            (
+                "nói thêm sau",
+                "TOOL: 1\nARGS: {\"device\":\"light\",\"command\":\"on\"}\nHy vọng giúp được bạn!",
+            ),
         ] {
             match parse_selection(raw, 3) {
                 Selection::Tool { index, arguments } => {
@@ -1221,7 +1235,10 @@ mod tests {
             Selection::Unreadable(_)
         ));
         assert!(
-            matches!(parse_selection("tôi không biết", 3), Selection::Unreadable(_)),
+            matches!(
+                parse_selection("tôi không biết", 3),
+                Selection::Unreadable(_)
+            ),
             "output rác phải thành Unreadable để caller rơi về route_intent"
         );
     }
@@ -1357,7 +1374,11 @@ mod tests {
         fn embed_passage_vec(&mut self, text: &str) -> Result<Vec<f32>, String> {
             Ok(vec![
                 if text.contains("vault") { 1.0 } else { 0.0 },
-                if text.contains("smart home") { 1.0 } else { 0.0 },
+                if text.contains("smart home") {
+                    1.0
+                } else {
+                    0.0
+                },
             ])
         }
     }
@@ -1369,7 +1390,8 @@ mod tests {
         // nhưng embedder nối nó với "smart home".
         let top = rank_tools(&c, "bật đèn", Some(&mut EmbedderGia), 1);
         assert_eq!(
-            c.tools()[top[0]].name, "control_smarthome",
+            c.tools()[top[0]].name,
+            "control_smarthome",
             "đây chính là chỗ embedder hơn trùng token"
         );
     }
@@ -1494,10 +1516,7 @@ mod tests {
     #[test]
     fn env_mo_duoc_tung_tool_va_ca_server() {
         with_autoexec(Some("everything/echo"), || {
-            assert_eq!(
-                ExecPolicy::for_tool("everything", "echo"),
-                ExecPolicy::Auto
-            );
+            assert_eq!(ExecPolicy::for_tool("everything", "echo"), ExecPolicy::Auto);
             assert_eq!(
                 ExecPolicy::for_tool("everything", "get-env"),
                 ExecPolicy::ProposeOnly,

@@ -157,7 +157,11 @@ mod tests {
     #[test]
     fn khong_tin_hieu_thi_khong_phat() {
         assert_eq!(SignalTally::default().hinh_phat(), 0.0);
-        assert_eq!(khoa_hoa_tron(2, 0.0), 2.0, "không phạt ⇒ khoá = đúng thứ hạng");
+        assert_eq!(
+            khoa_hoa_tron(2, 0.0),
+            2.0,
+            "không phạt ⇒ khoá = đúng thứ hạng"
+        );
     }
 
     /// Quyết định (2): tín hiệu đã bị phản chứng phải KHÔNG trừ điểm. Không có
@@ -211,7 +215,10 @@ mod tests {
         let p5 = tally(&[(KIND_TOOL_FAILURE_AFFECTS_SKILL, Some("confirmed"), 5)]).hinh_phat();
         let p500 = tally(&[(KIND_TOOL_FAILURE_AFFECTS_SKILL, Some("confirmed"), 500)]).hinh_phat();
         assert!(p1 < p5 && p5 < p500, "phải đơn điệu tăng: {p1} {p5} {p500}");
-        assert!(p500 < 1.0, "không bao giờ đạt 1,0 ⇒ luôn còn đường hồi phục");
+        assert!(
+            p500 < 1.0,
+            "không bao giờ đạt 1,0 ⇒ luôn còn đường hồi phục"
+        );
         // Bão hoà thật: từ 5 lên 500 lỗi thêm rất ít, còn từ 1 lên 5 thêm nhiều.
         assert!(
             p500 - p5 < p5 - p1,

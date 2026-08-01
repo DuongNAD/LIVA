@@ -113,6 +113,19 @@ describe("LivaWakeWorker", () => {
     expect(candidates()).toHaveLength(0);
   });
 
+  it("đoạn giọng quá ngắn 320 ms không được gửi sang STT", async () => {
+    await import("../../src/workers/LivaWakeWorker");
+    const onmessage = (globalThis.self as any).onmessage;
+    await onmessage({ data: { type: "init" } });
+
+    await feed(onmessage, [
+      ...Array.from({ length: 10 }, () => speechFrame()), // 320 ms
+      ...Array.from({ length: 8 }, silentFrame),
+    ]);
+
+    expect(candidates()).toHaveLength(0);
+  });
+
   it("cắt phần mở đầu khi người dùng nói một mạch quá dài", async () => {
     await import("../../src/workers/LivaWakeWorker");
     const onmessage = (globalThis.self as any).onmessage;

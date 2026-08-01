@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/livekit/livekit-wakeword.git",
+  "commit": "60b5d755ee0835bd184cbb1f05063944a9bed121",
+  "torch": {
+    "version": "2.11.0",
+    "index_url": "https://download.pytorch.org/whl/cu128"
+  }
+}

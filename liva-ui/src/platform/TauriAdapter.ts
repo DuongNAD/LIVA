@@ -37,23 +37,24 @@ export class TauriAdapter implements IPlatformAdapter {
     }
   }
 
-  async readVaultKey(key: string): Promise<string | null> {
+  async hasVaultSecret(key: string): Promise<boolean> {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<string | null>('read_vault_key', { key });
+      return await invoke<boolean>('vault_secret_present', { key });
     } catch (e) {
-      logger.warn('[TauriAdapter] readVaultKey not available', e);
-      return null;
+      logger.warn('[TauriAdapter] hasVaultSecret not available', e);
+      return false;
     }
   }
 
-  async writeVaultKey(key: string, value: string) {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('write_vault_key', { key, value });
-    } catch (e) {
-      logger.warn('[TauriAdapter] writeVaultKey not available', e);
-    }
+  async storeVaultSecret(key: string, value: string) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('store_vault_secret', { key, value });
+  }
+
+  async deleteVaultSecret(key: string) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('delete_vault_secret', { key });
   }
 
   onGatewayReady(callback: (port: number, token: string | null) => void) {

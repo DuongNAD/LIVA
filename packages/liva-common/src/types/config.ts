@@ -35,7 +35,6 @@ export type AIProvider = 'local' | 'cloud' | 'hybrid';
 export interface AIConfig {
     provider: AIProvider;
     cloudBaseUrl: string;
-    cloudApiKey: string;
     cloudModel: string;
     localModelsDir: string;
     routerModel: string;
@@ -43,6 +42,23 @@ export interface AIConfig {
     temperature: number;
     maxTokens: number;
     topP: number;
+}
+
+export interface IntegrationConfig {
+    whisperCloudEnabled: boolean;
+    whisperCloudUrl: string;
+    tavilyEnabled: boolean;
+    weatherEnabled: boolean;
+    telegramEnabled: boolean;
+    telegramAllowedIds: string;
+    zaloEnabled: boolean;
+    zaloAppId: string;
+    zaloUserId: string;
+    emailEnabled: boolean;
+    emailHost: string;
+    emailPort: string;
+    emailUser: string;
+    googleEnabled: boolean;
 }
 
 // ─── Voice Configuration ───
@@ -102,6 +118,7 @@ export interface LivaConfig {
     voice: VoiceConfig;
     ui: UIConfig;
     system: SystemConfig;
+    integrations?: IntegrationConfig;
 }
 
 // ─── System Status (from CoreKernel health check) ───

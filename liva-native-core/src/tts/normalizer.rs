@@ -1008,8 +1008,8 @@ mod tests {
     /// tính chất ấy lại để lần sau ai thêm một regex mới thì test bắt được.
     #[test]
     fn normalize_khong_panic_tren_dau_vao_rac() {
-        let van_ban_100kb = "Xin chào, hôm nay 25/12/2026 lúc 9:30, giá 1.500.000 đồng. "
-            .repeat(1_800); // ~105 KB
+        let van_ban_100kb =
+            "Xin chào, hôm nay 25/12/2026 lúc 9:30, giá 1.500.000 đồng. ".repeat(1_800); // ~105 KB
         let sau_dau_cham = format!("1{}", ".000".repeat(5_000)); // bệnh lý cho re_composite_number
         let truong_hop: Vec<(&str, &str)> = vec![
             ("chuỗi rỗng", ""),

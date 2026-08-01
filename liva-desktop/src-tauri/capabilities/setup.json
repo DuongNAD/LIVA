@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "setup",
+  "description": "LIVA setup: artifact setup IPC and close/return controls only",
+  "windows": ["setup"],
+  "permissions": [
+    "allow-native-ipc-call",
+    "allow-native-ipc-call-stream",
+    "allow-open-dashboard",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close"
+  ]
+}

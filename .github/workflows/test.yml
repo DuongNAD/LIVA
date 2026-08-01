@@ -69,11 +69,19 @@ jobs:
     - name: Install Dependencies
       run: npm ci
 
-    # Runtime dependencies must not contain HIGH/CRITICAL advisories. Tooling-only
-    # findings (currently GitNexus native image dependencies) remain visible in
-    # the full audit without blocking application delivery.
-    - name: Audit Runtime Dependencies
-      run: npm audit --omit=dev --audit-level=high
+    # Pin the external workflow checker. The five docs/ai README files are
+    # compatibility pointers to LIVA's canonical docs, not a second doc tree.
+    - name: Check AI DevKit Workspace Contract
+      run: npm run devkit:lint
+
+    # Production and development tooling both process untrusted files on CI.
+    # Keep the full workspace clean instead of allowing vulnerable archive/image
+    # tooling merely because it is not shipped in the desktop bundle.
+    - name: Audit npm Dependencies
+      run: npm audit --audit-level=high
+
+    - name: Check Rust Formatting
+      run: cargo fmt --all -- --check
 
     # Cache Cargo registry + build artifacts. llama.cpp được biên dịch từ C++ và
     # bị ghim opt-level=3 ngay cả ở profile dev, nên build sạch mất rất lâu —
@@ -88,6 +96,14 @@ jobs:
           target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: ${{ runner.os }}-cargo-
+
+    # Pin the scanner version so an upstream CLI release cannot silently change
+    # the gate contract between two runs of the same revision.
+    - name: Install cargo-audit
+      run: cargo install cargo-audit --version 0.22.2 --locked
+
+    - name: Audit Rust Dependencies
+      run: cargo audit
 
     - name: Install LLVM
       run: choco install llvm -y
@@ -157,6 +173,12 @@ jobs:
     - name: E2E gateway over a real socket (debug)
       run: node scripts/e2e-gateway-ci.mjs
 
+    # Capability policy is a security boundary: setup must not inherit the
+    # dashboard/widget command surface. Compile-only used to leave these five
+    # policy tests completely outside CI.
+    - name: Test Tauri Desktop Integration
+      run: cargo test -p liva-desktop
+
     - name: Check Tauri Desktop Integration
       run: cargo check -p liva-desktop
 
@@ -186,4 +208,3 @@ jobs:
     - name: Clippy
       working-directory: liva-native-core
       run: cargo clippy --all-targets -- -D warnings
-

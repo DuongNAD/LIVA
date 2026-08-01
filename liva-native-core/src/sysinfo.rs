@@ -68,9 +68,7 @@ pub const FILETIME_UNIX_EPOCH_100NS: u64 = 11_644_473_600 * 10_000_000;
 /// RAM vật lý `(tổng, còn trống)` theo byte.
 #[cfg(windows)]
 pub fn ram_bytes() -> Option<(u64, u64)> {
-    use windows_sys::Win32::System::ProcessStatus::{
-        GetPerformanceInfo, PERFORMANCE_INFORMATION,
-    };
+    use windows_sys::Win32::System::ProcessStatus::{GetPerformanceInfo, PERFORMANCE_INFORMATION};
 
     let mut info: PERFORMANCE_INFORMATION = unsafe { std::mem::zeroed() };
     info.cb = std::mem::size_of::<PERFORMANCE_INFORMATION>() as u32;
@@ -141,9 +139,15 @@ mod tests {
 
         let (tong, trong) = ram_bytes().expect("Windows phải lấy được RAM");
         assert!(tong > 0, "RAM tổng phải > 0");
-        assert!(trong <= tong, "RAM trống ({trong}) không được vượt tổng ({tong})");
+        assert!(
+            trong <= tong,
+            "RAM trống ({trong}) không được vượt tổng ({tong})"
+        );
         // 256 MB: thấp hơn mọi máy chạy nổi LIVA — bắt lỗi quên nhân PageSize.
-        assert!(tong > 256 * 1024 * 1024, "RAM tổng {tong} B quá nhỏ — quên nhân PageSize?");
+        assert!(
+            tong > 256 * 1024 * 1024,
+            "RAM tổng {tong} B quá nhỏ — quên nhân PageSize?"
+        );
 
         let (rss, commit) = process_memory_bytes().expect("Windows phải lấy được RSS");
         assert!(rss > 0, "RSS phải > 0");

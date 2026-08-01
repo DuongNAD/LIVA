@@ -5,9 +5,10 @@ It serves as the Webview content for the Tauri desktop application.
 
 ## Key Features
 - **Ghost Mode UI**: Transparent background for floating widget.
-- **WebSocket Gateway Client**: Real-time duplex communication with `liva-gateway`.
-- **WASM Wake-Word Detection**: Runs local `hey_liva.onnx` inference.
+- **Native Gateway Client**: Real-time duplex communication with `liva-native-core`.
+- **Wake Candidate Capture**: Browser worker cuts utterances; Rust verifies them with
+  the ONNX classifier and/or local STT.
 - **WebRTC AEC**: Always-on microphone with hardware echo cancellation.
 
 ## Development
-Run `npm run dev` from the `liva-ui` folder or use the root `start.ps1` script.
+Run `npm run dev` from the `liva-ui` folder or use `npm run dev` at the repository root.

@@ -1,25 +1,17 @@
 <script setup lang="ts">
 /**
- * ApiManagementView.vue — AI & Integrations Management
- * ====================================================
- * Modern 2-column design:
- * 1. AI Infrastructure & Search Core (Cloud AI, Whisper Cloud, Tavily Search, Weather API)
- * 2. Personal & Social Integrations (Telegram, Zalo OA, Email, Google Workspace)
+ * ApiManagementView.vue — public integration settings plus write-only Stronghold inputs.
+ * Stored secrets are never loaded back into the renderer.
  */
-import { onActivated, onMounted, ref, onUnmounted } from "vue";
+import { computed, onActivated, onMounted, ref } from "vue";
 import { useGateway } from "../../composables/useGateway";
+import { detectPlatform } from "../../platform";
 
 const gateway = useGateway();
-
-// ==========================================
-// CONFIG STATE (.env Vault)
-// ==========================================
-let rawEnvContent = "";
+const platform = detectPlatform();
 const isSavingEnv = ref(false);
 const envMessage = ref("");
 
-// ─── AI Providers & Search Core ───
-// Cloud AI Core
 const useCloudAI = ref(false);
 const aiBaseUrl = ref("");
 const aiApiKey = ref("");
@@ -27,28 +19,19 @@ const aiModel = ref("");
 const showAiApiKey = ref(false);
 const aiProvider = ref("local");
 
-// Whisper Cloud STT
 const useWhisperCloud = ref(false);
 const whisperCloudUrl = ref("");
-
-// Tavily Web Search
 const useTavily = ref(false);
 const tavilyKey = ref("");
 const showTavilyKey = ref(false);
-
-// Weather API
 const useWeather = ref(false);
 const weatherKey = ref("");
 const showWeatherKey = ref(false);
 
-// ─── Personal & Social Integrations ───
-// Telegram
 const useTelegram = ref(false);
 const telegramToken = ref("");
 const telegramAllowedIds = ref("");
 const showTelegramToken = ref(false);
-
-// Zalo
 const useZalo = ref(false);
 const zaloToken = ref("");
 const showZaloToken = ref(false);
@@ -56,161 +39,141 @@ const zaloAppId = ref("");
 const zaloAppSecret = ref("");
 const zaloUserId = ref("");
 const showZaloSecret = ref(false);
-
-// Email
 const useEmail = ref(false);
 const emailHost = ref("");
 const emailPort = ref("993");
 const emailUser = ref("");
 const emailPass = ref("");
 const showEmailPass = ref(false);
-
-// Google
 const useGoogle = ref(false);
 const googleSecret = ref("");
 
-// ─── Parsers & Helpers ───
-const parseEnvField = (content: string, key: string): string => {
-  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
-  return match ? match[1].trim() : '';
-};
+const secretPresence = ref<Record<string, boolean>>({});
+const configuredSecretCount = computed(
+  () => Object.values(secretPresence.value).filter(Boolean).length,
+);
 
-const setEnvField = (content: string, key: string, value: string): string => {
-  const regex = new RegExp(`^${key}=.*$`, 'm');
-  if (regex.test(content)) {
-    return content.replace(regex, `${key}=${value}`);
-  } else {
-    return content + `\n${key}=${value}`;
-  }
-};
+const SECRET_KEYS = [
+  "ai/cloud_api_key",
+  "search/tavily_api_key",
+  "weather/api_key",
+  "telegram/bot_token",
+  "zalo/access_token",
+  "zalo/app_secret",
+  "email/password",
+  "google/client_secret",
+] as const;
 
-// Hình dạng dữ liệu cấu hình .env do gateway gửi về
-interface EnvConfigPayload {
-  content?: string;
-  vault?: Record<string, string>;
-}
+const loadSecureConfig = async () => {
+  const config = gateway.configData.value as unknown as {
+    ai?: Record<string, unknown>;
+    integrations?: Record<string, unknown>;
+  };
+  const ai = config?.ai || {};
+  const integrations = config?.integrations || {};
 
-const onEnvConfigData = (payload: unknown) => {
-  const envContent = (payload as EnvConfigPayload | undefined)?.content || '';
-  const vaultData: Record<string, string> = (payload as EnvConfigPayload | undefined)?.vault || {};
-  rawEnvContent = envContent;
+  aiProvider.value = String(ai.provider || "local");
+  useCloudAI.value = aiProvider.value === "cloud";
+  aiBaseUrl.value = String(ai.cloudBaseUrl || "");
+  aiModel.value = String(ai.cloudModel || "");
+  whisperCloudUrl.value = String(integrations.whisperCloudUrl || "");
+  useWhisperCloud.value = Boolean(integrations.whisperCloudEnabled);
+  useTavily.value = Boolean(integrations.tavilyEnabled);
+  useWeather.value = Boolean(integrations.weatherEnabled);
+  useTelegram.value = Boolean(integrations.telegramEnabled);
+  telegramAllowedIds.value = String(integrations.telegramAllowedIds || "");
+  useZalo.value = Boolean(integrations.zaloEnabled);
+  zaloAppId.value = String(integrations.zaloAppId || "");
+  zaloUserId.value = String(integrations.zaloUserId || "");
+  useEmail.value = Boolean(integrations.emailEnabled);
+  emailHost.value = String(integrations.emailHost || "");
+  emailPort.value = String(integrations.emailPort || "993");
+  emailUser.value = String(integrations.emailUser || "");
+  useGoogle.value = Boolean(integrations.googleEnabled);
 
-  // Parse AI Provider
-  aiProvider.value = parseEnvField(rawEnvContent, 'AI_PROVIDER') || "local";
-  useCloudAI.value = aiProvider.value === 'cloud';
-  aiBaseUrl.value = vaultData['AI_BASE_URL'] || parseEnvField(rawEnvContent, 'AI_BASE_URL');
-  aiApiKey.value = vaultData['AI_API_KEY'] || parseEnvField(rawEnvContent, 'AI_API_KEY');
-  aiModel.value = vaultData['AI_MODEL'] || parseEnvField(rawEnvContent, 'AI_MODEL');
-
-  // Parse Whisper Cloud STT
-  whisperCloudUrl.value = vaultData['WHISPER_CLOUD_URL'] || parseEnvField(rawEnvContent, 'WHISPER_CLOUD_URL');
-  useWhisperCloud.value = whisperCloudUrl.value.length > 0;
-
-  // Parse Tavily Search
-  tavilyKey.value = vaultData['TAVILY_API_KEY'] || parseEnvField(rawEnvContent, 'TAVILY_API_KEY');
-  useTavily.value = tavilyKey.value.length > 0;
-
-  // Parse Weather API
-  weatherKey.value = vaultData['WEATHER_API_KEY'] || parseEnvField(rawEnvContent, 'WEATHER_API_KEY');
-  useWeather.value = weatherKey.value.length > 0;
-
-  // Parse Telegram
-  useTelegram.value = parseEnvField(rawEnvContent, 'REMOTE_CONTROL_ENABLED') === 'true';
-  telegramToken.value = vaultData['TELEGRAM_BOT_TOKEN'] || parseEnvField(rawEnvContent, 'TELEGRAM_BOT_TOKEN');
-  telegramAllowedIds.value = vaultData['TELEGRAM_ALLOWED_IDS'] || parseEnvField(rawEnvContent, 'TELEGRAM_ALLOWED_IDS');
-
-  // Parse Zalo
-  zaloToken.value = vaultData['ZALO_OA_ACCESS_TOKEN'] || parseEnvField(rawEnvContent, 'ZALO_OA_ACCESS_TOKEN');
-  zaloAppId.value = vaultData['ZALO_APP_ID'] || parseEnvField(rawEnvContent, 'ZALO_APP_ID');
-  zaloAppSecret.value = vaultData['ZALO_APP_SECRET'] || parseEnvField(rawEnvContent, 'ZALO_APP_SECRET');
-  zaloUserId.value = vaultData['ZALO_USER_ID'] || parseEnvField(rawEnvContent, 'ZALO_USER_ID');
-  useZalo.value = zaloToken.value.length > 0 || zaloAppId.value.length > 0;
-
-  // Parse Email
-  emailHost.value = vaultData['EMAIL_HOST'] || parseEnvField(rawEnvContent, 'EMAIL_HOST');
-  emailPort.value = vaultData['EMAIL_PORT'] || parseEnvField(rawEnvContent, 'EMAIL_PORT') || "993";
-  emailUser.value = vaultData['EMAIL_USER'] || parseEnvField(rawEnvContent, 'EMAIL_USER');
-  emailPass.value = vaultData['EMAIL_PASS'] || parseEnvField(rawEnvContent, 'EMAIL_PASS');
-  useEmail.value = emailUser.value.length > 0;
-
-  // Parse Google
-  googleSecret.value = vaultData['GOOGLE_CLIENT_SECRET'] || parseEnvField(rawEnvContent, 'GOOGLE_CLIENT_SECRET');
-  useGoogle.value = googleSecret.value.length > 0;
-};
-
-const loadEnvConfig = () => {
-  gateway.sendMsg('get_env_config');
+  const pairs = await Promise.all(
+    SECRET_KEYS.map(async key => [key, await platform.hasVaultSecret(key)] as const),
+  );
+  secretPresence.value = Object.fromEntries(pairs);
 };
 
 const saveEnvConfig = async () => {
   isSavingEnv.value = true;
   envMessage.value = "";
-  
-  let updatedEnv = rawEnvContent;
-  
-  // Clean up duplicate vault comments
-  updatedEnv = updatedEnv.replace(/^# .*đã được chuyển vào liva_vault\.json.*$/gm, '').replace(/\n\n+/g, '\n');
-  
-  // Cloud AI Core
-  updatedEnv = setEnvField(updatedEnv, 'AI_PROVIDER', useCloudAI.value ? 'cloud' : 'local');
-  updatedEnv = setEnvField(updatedEnv, 'AI_BASE_URL', useCloudAI.value ? aiBaseUrl.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'AI_API_KEY', useCloudAI.value ? aiApiKey.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'AI_MODEL', useCloudAI.value ? aiModel.value : '');
 
-  // Whisper Cloud STT
-  updatedEnv = setEnvField(updatedEnv, 'WHISPER_CLOUD_URL', useWhisperCloud.value ? whisperCloudUrl.value : '');
+  try {
+    const pendingSecrets: Array<[string, string]> = [
+      ["ai/cloud_api_key", aiApiKey.value],
+      ["search/tavily_api_key", tavilyKey.value],
+      ["weather/api_key", weatherKey.value],
+      ["telegram/bot_token", telegramToken.value],
+      ["zalo/access_token", zaloToken.value],
+      ["zalo/app_secret", zaloAppSecret.value],
+      ["email/password", emailPass.value],
+      ["google/client_secret", googleSecret.value],
+    ];
+    for (const [key, value] of pendingSecrets) {
+      if (value) {
+        await platform.storeVaultSecret(key, value);
+        secretPresence.value[key] = true;
+      }
+    }
 
-  // Tavily Search
-  updatedEnv = setEnvField(updatedEnv, 'TAVILY_API_KEY', useTavily.value ? tavilyKey.value : '');
+    gateway.updateConfig({
+      ai: {
+        provider: useCloudAI.value ? "cloud" : "local",
+        cloudBaseUrl: aiBaseUrl.value,
+        cloudModel: aiModel.value,
+        localModelsDir: gateway.configData.value.ai?.localModelsDir || "",
+        routerModel: gateway.configData.value.ai?.routerModel || "",
+        expertModel: gateway.configData.value.ai?.expertModel || "",
+        temperature: gateway.configData.value.ai?.temperature ?? 0.3,
+        maxTokens: gateway.configData.value.ai?.maxTokens ?? 2048,
+        topP: gateway.configData.value.ai?.topP ?? 0.9,
+      },
+      integrations: {
+        whisperCloudEnabled: useWhisperCloud.value,
+        whisperCloudUrl: whisperCloudUrl.value,
+        tavilyEnabled: useTavily.value,
+        weatherEnabled: useWeather.value,
+        telegramEnabled: useTelegram.value,
+        telegramAllowedIds: telegramAllowedIds.value,
+        zaloEnabled: useZalo.value,
+        zaloAppId: zaloAppId.value,
+        zaloUserId: zaloUserId.value,
+        emailEnabled: useEmail.value,
+        emailHost: emailHost.value,
+        emailPort: emailPort.value,
+        emailUser: emailUser.value,
+        googleEnabled: useGoogle.value,
+      },
+    });
 
-  // Weather API
-  updatedEnv = setEnvField(updatedEnv, 'WEATHER_API_KEY', useWeather.value ? weatherKey.value : '');
-
-  // Telegram
-  updatedEnv = setEnvField(updatedEnv, 'REMOTE_CONTROL_ENABLED', useTelegram.value ? 'true' : 'false');
-  updatedEnv = setEnvField(updatedEnv, 'TELEGRAM_BOT_TOKEN', useTelegram.value ? telegramToken.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'TELEGRAM_ALLOWED_IDS', useTelegram.value ? telegramAllowedIds.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'TELEGRAM_CHAT_ID', useTelegram.value ? telegramAllowedIds.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'TELEGRAM_ADMIN_ID', useTelegram.value ? telegramAllowedIds.value : '');
-
-  // Zalo
-  updatedEnv = setEnvField(updatedEnv, 'ZALO_OA_ACCESS_TOKEN', useZalo.value ? zaloToken.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'ZALO_APP_ID', useZalo.value ? zaloAppId.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'ZALO_APP_SECRET', useZalo.value ? zaloAppSecret.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'ZALO_USER_ID', useZalo.value ? zaloUserId.value : '');
-
-  // Email
-  updatedEnv = setEnvField(updatedEnv, 'EMAIL_HOST', useEmail.value ? emailHost.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'EMAIL_PORT', useEmail.value ? emailPort.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'EMAIL_USER', useEmail.value ? emailUser.value : '');
-  updatedEnv = setEnvField(updatedEnv, 'EMAIL_PASS', useEmail.value ? emailPass.value : '');
-
-  // Google
-  updatedEnv = setEnvField(updatedEnv, 'GOOGLE_CLIENT_SECRET', useGoogle.value ? googleSecret.value : '');
-
-  // Send to backend
-  gateway.sendMsg('save_env_config', { content: updatedEnv });
-  rawEnvContent = updatedEnv;
-  envMessage.value = "✅ Đã lưu cấu hình và đang khởi động lại Gateway...";
-  isSavingEnv.value = false;
+    aiApiKey.value = "";
+    tavilyKey.value = "";
+    weatherKey.value = "";
+    telegramToken.value = "";
+    zaloToken.value = "";
+    zaloAppSecret.value = "";
+    emailPass.value = "";
+    googleSecret.value = "";
+    envMessage.value = "✅ Đã lưu cấu hình công khai và secret vào Stronghold.";
+  } catch (error) {
+    envMessage.value = "❌ Không thể lưu cấu hình: " + String(error);
+  } finally {
+    isSavingEnv.value = false;
+  }
 };
 
 const isRestarting = ref(false);
 
-// Lifecycle
-onMounted(() => { 
-  if (!gateway.isConnected.value) gateway.init(); 
-  gateway.onEnvConfigData(onEnvConfigData);
-  loadEnvConfig();
+onMounted(() => {
+  if (!gateway.isConnected.value) gateway.init();
+  void loadSecureConfig();
 });
 
 onActivated(() => {
-  gateway.onEnvConfigData(onEnvConfigData);
-  loadEnvConfig();
-});
-
-onUnmounted(() => {
-  gateway.offEnvConfigData();
+  void loadSecureConfig();
 });
 </script>
 
@@ -218,7 +181,10 @@ onUnmounted(() => {
   <div class="api-view animate-fadeIn">
     <div class="page-header">
       <h1 class="section-title">🔌 Tích hợp & Bảo mật</h1>
-      <p class="page-desc">Quản lý các kết nối API mở rộng được lưu trữ và mã hóa an toàn trong Vault.</p>
+      <p class="page-desc">
+        Quản lý cấu hình công khai và secret write-only trong Stronghold.
+        Đã cấu hình {{ configuredSecretCount }}/{{ SECRET_KEYS.length }} secret.
+      </p>
     </div>
 
     <div class="tab-content animate-fadeIn">

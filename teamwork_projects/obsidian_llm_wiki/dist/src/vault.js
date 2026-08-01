@@ -248,7 +248,11 @@ export class VaultSearchEngine {
     search(queryText) {
         const query = QueryParser.parse(queryText);
         const results = [];
+        const statusFilterRequested = Object.prototype.hasOwnProperty.call(query.fields, 'status');
         for (const doc of this.index.values()) {
+            const status = String(doc.frontmatter.status ?? '').toLowerCase();
+            if (status === 'archived' && !statusFilterRequested)
+                continue;
             // 1. Apply field-specific filters (e.g. tags:x, author:y, title:z)
             let fieldMatch = true;
             for (const [field, values] of Object.entries(query.fields)) {

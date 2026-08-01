@@ -26,13 +26,13 @@
 //!
 //! Thoát 1 nếu có ca nào trượt.
 
-use liva_native_core::llm::embedder::{EmbeddingEngine, resolve_model_dir};
-use liva_native_core::llm::tool_calling::{
-    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, compile_selection_prompt, parse_selection,
-    rank_tools, validate_arguments,
-};
 use liva_native_core::agent::graph::{Intent, route_intent};
 use liva_native_core::integrations::os_control::{MediaArgs, VolumeArgs};
+use liva_native_core::llm::embedder::{EmbeddingEngine, resolve_model_dir};
+use liva_native_core::llm::tool_calling::{
+    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, compile_selection_prompt,
+    parse_selection, rank_tools, validate_arguments,
+};
 use liva_native_core::mcp::server::NativeMcpServer;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -71,7 +71,10 @@ const CORPUS: &[(&str, Option<(&str, &str)>)] = &[
     ("nhỏ nhạc lại giúp mình", Some(("control_volume", "down"))),
     ("to lên chút đi", Some(("control_volume", "up"))),
     ("tắt tiếng đi", Some(("control_volume", "mute"))),
-    ("ồn quá, giảm âm lượng xuống", Some(("control_volume", "down"))),
+    (
+        "ồn quá, giảm âm lượng xuống",
+        Some(("control_volume", "down")),
+    ),
     ("mở to hơn nữa", Some(("control_volume", "up"))),
     // ── control_media ───────────────────────────────────────────────────────
     ("tạm dừng nhạc", Some(("control_media", "play_pause"))),
@@ -108,7 +111,10 @@ fn main() {
     for (ten, vi_du) in NativeMcpServer::retrieval_examples() {
         catalog.set_embed_extra(NATIVE_SERVER, ten, vi_du);
     }
-    println!("Catalog: {} tool nội bộ · top_k = {DEFAULT_TOP_K}", catalog.len());
+    println!(
+        "Catalog: {} tool nội bộ · top_k = {DEFAULT_TOP_K}",
+        catalog.len()
+    );
     if catalog.len() > DEFAULT_TOP_K {
         println!(
             "→ {} tool bị loại khỏi prompt mỗi lượt: từ đây thứ hạng truy hồi CHI PHỐI hành vi.\n",
@@ -133,7 +139,12 @@ fn main() {
             let Some((ten_mong_doi, _)) = mong_doi else {
                 continue; // câu âm tính không có tool nào để đòi hỏi
             };
-            let top = rank_tools(&catalog, cau, embedder.as_mut().map(|e| e as _), DEFAULT_TOP_K);
+            let top = rank_tools(
+                &catalog,
+                cau,
+                embedder.as_mut().map(|e| e as _),
+                DEFAULT_TOP_K,
+            );
             let vao_prompt: Vec<&str> = top
                 .iter()
                 .map(|&i| catalog.tools()[i].name.as_str())
@@ -156,7 +167,9 @@ fn main() {
         ket_thuc(truot);
     };
     if embedder.is_none() {
-        println!("\n!!! Không có embedder thì tầng 2 đo lệch (mọi tool vào prompt theo thứ tự khai báo).");
+        println!(
+            "\n!!! Không có embedder thì tầng 2 đo lệch (mọi tool vào prompt theo thứ tự khai báo)."
+        );
     }
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -202,7 +215,12 @@ fn main() {
         }
 
         llm_tong += 1;
-        let top = rank_tools(&catalog, cau, embedder.as_mut().map(|e| e as _), DEFAULT_TOP_K);
+        let top = rank_tools(
+            &catalog,
+            cau,
+            embedder.as_mut().map(|e| e as _),
+            DEFAULT_TOP_K,
+        );
         let ung_vien: Vec<_> = top.iter().map(|&i| &catalog.tools()[i]).collect();
         let prompt = match compile_selection_prompt(&ung_vien, cau) {
             Ok(p) => p,
@@ -231,7 +249,8 @@ fn main() {
                 let t = ung_vien[*index];
                 let hop_le = validate_arguments(&t.input_schema, arguments);
                 let action_that = hanh_dong_chuan(&t.name, arguments);
-                let dat = &t.name == ten && action_that.as_deref() == Some(*action) && hop_le.is_ok();
+                let dat =
+                    &t.name == ten && action_that.as_deref() == Some(*action) && hop_le.is_ok();
                 // Khi không phân giải được, in THAM SỐ THÔ. Không có nó thì mọi
                 // ca hỏng đều trông giống nhau và chỉ còn cách đoán — đúng thứ
                 // đã làm mất một vòng đo.
@@ -253,10 +272,13 @@ fn main() {
                 )
             }
             (Selection::NoTool, None) => (true, "không dùng tool — đúng".to_string()),
-            (Selection::NoTool, Some((ten, _))) => (false, format!("nói không cần tool, đáng lẽ {ten}")),
-            (Selection::Tool { index, .. }, None) => {
-                (false, format!("chọn {} cho câu trò chuyện", ung_vien[*index].name))
+            (Selection::NoTool, Some((ten, _))) => {
+                (false, format!("nói không cần tool, đáng lẽ {ten}"))
             }
+            (Selection::Tool { index, .. }, None) => (
+                false,
+                format!("chọn {} cho câu trò chuyện", ung_vien[*index].name),
+            ),
             // `Unreadable` KHÔNG tính là trượt tuyệt đối: hợp đồng của G1 là rơi
             // về `route_intent` khi không đọc được. Nhưng vẫn in ra, vì tỉ lệ
             // này cao nghĩa là prompt hoặc model đang không hợp nhau.

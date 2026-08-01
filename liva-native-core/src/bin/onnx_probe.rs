@@ -11,9 +11,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let session = match Session::builder()
-        .and_then(|b| b.commit_from_file(&args[1]))
-    {
+    let session = match Session::builder().and_then(|b| b.commit_from_file(&args[1])) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to load model: {}", e);

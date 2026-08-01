@@ -47,11 +47,9 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         "contacts:upsert" => upsert(state, payload).await,
         "contacts:delete" => delete(state, payload).await,
         "message:draft" => draft(state, payload).await,
-        "message:confirm" => confirm(payload).await,
-        "message:cancel" => Ok(json!({
-            "cancelled": outbox::cancel(chuoi_bat_buoc(&payload, "draftId")?.as_str())
-        })),
-        "message:pending" => Ok(json!({ "drafts": outbox::pending() })),
+        "message:confirm" => confirm(state, payload).await,
+        "message:cancel" => cancel(state, payload).await,
+        "message:pending" => pending(state).await,
         "messenger:status" => crate::integrations::messenger::status().await,
         _ => Err(format!("Unknown command: {command}")),
     }
@@ -145,8 +143,9 @@ async fn draft(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let nen = nen_tuy_chon(&payload)?;
 
     let to_cho_truy_van = to.clone();
+    let state_cho_truy_van = Arc::clone(&state);
     let kq = tokio::task::spawn_blocking(move || {
-        let conn = state
+        let conn = state_cho_truy_van
             .db
             .readers
             .get()
@@ -171,7 +170,19 @@ async fn draft(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
         })),
         contacts::Resolution::Found(c) => {
             let nen = contacts::Platform::parse(&c.platform)?;
-            let d = outbox::stage(nen, &c.display_name, &c.handle, &text);
+            let crypto = state.crypto.clone();
+            let db = state.db.clone();
+            let display_name = c.display_name.clone();
+            let handle = c.handle.clone();
+            let d = tokio::task::spawn_blocking(move || {
+                let conn = db
+                    .writer
+                    .get()
+                    .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
+                outbox::stage(&conn, &crypto, nen, &display_name, &handle, &text)
+            })
+            .await
+            .map_err(|e| format!("Tác vụ ghi outbox panic: {e}"))??;
             Ok(json!({
                 "needsConfirm": true,
                 "draft": d,
@@ -182,22 +193,75 @@ async fn draft(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
 }
 
 /// Xác nhận và gửi. Đây là **lệnh duy nhất** đẩy chữ ra khỏi máy theo đường này.
-async fn confirm(payload: Value) -> Result<Value, String> {
+async fn confirm(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let id = chuoi_bat_buoc(&payload, "draftId")?;
-
-    // `take` tiêu bản nháp. Nếu nó trả None thì hoặc đã gửi rồi, hoặc đã huỷ,
-    // hoặc hết hạn — cả ba đều KHÔNG được gửi, và thông điệp phải phân biệt
-    // được với "gửi thất bại" để người dùng không bấm lại vô ích.
-    let d = outbox::take(&id).ok_or_else(|| {
-        format!(
-            "Bản nháp '{id}' không còn: đã gửi, đã huỷ, hoặc quá hạn {} giây. \
-             Nói lại yêu cầu để tạo bản mới.",
-            outbox::TTL_SECS
-        )
-    })?;
+    let crypto = state.crypto.clone();
+    let db = state.db.clone();
+    let id_cho_db = id.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let conn = db
+            .writer
+            .get()
+            .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
+        outbox::take(&conn, &crypto, &id_cho_db)
+    })
+    .await
+    .map_err(|e| format!("Tác vụ xác nhận outbox panic: {e}"))??;
+    let d = match result {
+        outbox::TakeResult::Taken(draft) => draft,
+        outbox::TakeResult::Expired => {
+            return Err(format!(
+                "Bản nháp '{id}' đã quá hạn {} giây và đã được xóa. \
+                 Nói lại yêu cầu để tạo bản mới.",
+                outbox::TTL_SECS
+            ));
+        }
+        outbox::TakeResult::Missing => {
+            return Err(format!(
+                "Bản nháp '{id}' không tồn tại hoặc đã được gửi/hủy. \
+                 Không gửi lại để tránh trùng."
+            ));
+        }
+        outbox::TakeResult::Locked => {
+            return Err(format!(
+                "Bản nháp '{id}' bị khóa bởi khóa mã hóa khác. \
+                 Khôi phục đúng LIVA_ENCRYPTION_KEY; LIVA chưa xóa và chưa gửi bản này."
+            ));
+        }
+    };
 
     let mo_ta = crate::messaging::send(d).await?;
     Ok(json!({ "sent": true, "detail": mo_ta }))
+}
+
+async fn cancel(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+    let id = chuoi_bat_buoc(&payload, "draftId")?;
+    let db = state.db.clone();
+    let cancelled = tokio::task::spawn_blocking(move || {
+        let conn = db
+            .writer
+            .get()
+            .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
+        outbox::cancel(&conn, &id)
+    })
+    .await
+    .map_err(|e| format!("Tác vụ hủy outbox panic: {e}"))??;
+    Ok(json!({ "cancelled": cancelled }))
+}
+
+async fn pending(state: Arc<AppState>) -> Result<Value, String> {
+    let db = state.db.clone();
+    let crypto = state.crypto.clone();
+    let drafts = tokio::task::spawn_blocking(move || {
+        let conn = db
+            .writer
+            .get()
+            .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
+        outbox::pending(&conn, &crypto)
+    })
+    .await
+    .map_err(|e| format!("Tác vụ liệt kê outbox panic: {e}"))??;
+    Ok(json!({ "drafts": drafts }))
 }
 
 #[cfg(test)]
@@ -229,18 +293,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn confirm_voi_draft_id_khong_ton_tai_bao_ro_ly_do() {
-        let e = confirm(json!({ "draftId": "dr_khong_co_that" }))
-            .await
-            .unwrap_err();
-        assert!(e.contains("không còn"), "{e}");
-        assert!(e.contains("quá hạn"), "phai neu ca kha nang het han: {e}");
-    }
-
-    #[tokio::test]
-    async fn confirm_thieu_tham_so_khong_panic() {
-        assert!(confirm(json!({})).await.is_err());
+    #[test]
+    fn payload_thieu_draft_id_bi_tu_choi_khong_panic() {
+        let error = chuoi_bat_buoc(&json!({}), "draftId").unwrap_err();
+        assert!(error.contains("draftId"), "{error}");
     }
 
     #[test]

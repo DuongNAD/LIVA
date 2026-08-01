@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-issue-websocket-session"
+description = "Enables the issue_websocket_session command without any pre-configured scope."
+commands.allow = ["issue_websocket_session"]
+
+[[permission]]
+identifier = "deny-issue-websocket-session"
+description = "Denies the issue_websocket_session command without any pre-configured scope."
+commands.deny = ["issue_websocket_session"]

@@ -1,6 +1,6 @@
+use liva_native_core::vision::diff::{BoundingBox, find_changes, find_changes_u32};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
-use liva_native_core::vision::diff::{find_changes, find_changes_u32, BoundingBox};
 
 const WIDTH: usize = 1920;
 const HEIGHT: usize = 1080;
@@ -55,7 +55,14 @@ fn main() {
     // Case A: 0% changes (fast-path)
     let frame_b_pixels_0 = vec![0u32; WIDTH * HEIGHT];
     run_find_changes_bench("find_changes (0% change)", || {
-        find_changes(&frame_a_pixels, &frame_b_pixels_0, WIDTH, HEIGHT, STRIDE_PIXELS).unwrap()
+        find_changes(
+            &frame_a_pixels,
+            &frame_b_pixels_0,
+            WIDTH,
+            HEIGHT,
+            STRIDE_PIXELS,
+        )
+        .unwrap()
     });
 
     // Case B: Tiny local change (10x10 button click)
@@ -67,13 +74,27 @@ fn main() {
         }
     }
     run_find_changes_bench("find_changes (10x10 change)", || {
-        find_changes(&frame_a_pixels, &frame_b_pixels_10x10, WIDTH, HEIGHT, STRIDE_PIXELS).unwrap()
+        find_changes(
+            &frame_a_pixels,
+            &frame_b_pixels_10x10,
+            WIDTH,
+            HEIGHT,
+            STRIDE_PIXELS,
+        )
+        .unwrap()
     });
 
     // Case C: Full screen refresh (100% changed)
     let frame_b_pixels_100 = vec![1u32; WIDTH * HEIGHT];
     run_find_changes_bench("find_changes (100% change)", || {
-        find_changes(&frame_a_pixels, &frame_b_pixels_100, WIDTH, HEIGHT, STRIDE_PIXELS).unwrap()
+        find_changes(
+            &frame_a_pixels,
+            &frame_b_pixels_100,
+            WIDTH,
+            HEIGHT,
+            STRIDE_PIXELS,
+        )
+        .unwrap()
     });
 
     // =========================================================================
@@ -84,7 +105,14 @@ fn main() {
     // Case A: 0% changes (fast-path)
     let frame_b_bytes_0 = vec![0u8; WIDTH * HEIGHT * 4];
     run_find_changes_bench("find_changes_u32 (0% change)", || {
-        find_changes_u32(&frame_a_bytes, &frame_b_bytes_0, WIDTH, HEIGHT, STRIDE_BYTES).unwrap()
+        find_changes_u32(
+            &frame_a_bytes,
+            &frame_b_bytes_0,
+            WIDTH,
+            HEIGHT,
+            STRIDE_BYTES,
+        )
+        .unwrap()
     });
 
     // Case B: Tiny local change (10x10 button click)
@@ -99,15 +127,36 @@ fn main() {
             frame_b_bytes_10x10[offset + 3] = 1;
         }
     }
-    find_changes_u32(&frame_a_bytes, &frame_b_bytes_10x10, WIDTH, HEIGHT, STRIDE_BYTES).unwrap(); // sanity check
+    find_changes_u32(
+        &frame_a_bytes,
+        &frame_b_bytes_10x10,
+        WIDTH,
+        HEIGHT,
+        STRIDE_BYTES,
+    )
+    .unwrap(); // sanity check
     run_find_changes_bench("find_changes_u32 (10x10 change)", || {
-        find_changes_u32(&frame_a_bytes, &frame_b_bytes_10x10, WIDTH, HEIGHT, STRIDE_BYTES).unwrap()
+        find_changes_u32(
+            &frame_a_bytes,
+            &frame_b_bytes_10x10,
+            WIDTH,
+            HEIGHT,
+            STRIDE_BYTES,
+        )
+        .unwrap()
     });
 
     // Case C: Full screen refresh (100% changed)
     let frame_b_bytes_100 = vec![1u8; WIDTH * HEIGHT * 4];
     run_find_changes_bench("find_changes_u32 (100% change)", || {
-        find_changes_u32(&frame_a_bytes, &frame_b_bytes_100, WIDTH, HEIGHT, STRIDE_BYTES).unwrap()
+        find_changes_u32(
+            &frame_a_bytes,
+            &frame_b_bytes_100,
+            WIDTH,
+            HEIGHT,
+            STRIDE_BYTES,
+        )
+        .unwrap()
     });
 
     println!("==================================================");

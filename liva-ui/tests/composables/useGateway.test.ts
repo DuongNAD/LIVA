@@ -40,6 +40,7 @@ class MockWebSocket {
   CLOSED = 3;
 
   readyState = MockWebSocket.OPEN;
+  url: string;
   binaryType = '';
   onopen: ((ev: any) => void) | null = null;
   onmessage: ((ev: any) => void) | null = null;
@@ -47,12 +48,49 @@ class MockWebSocket {
   onerror: ((ev: any) => void) | null = null;
   send = vi.fn();
   close = vi.fn();
+
+  constructor(url: string) {
+    this.url = url;
+  }
 }
 
 vi.stubGlobal('WebSocket', MockWebSocket);
 
 // ─── Import AFTER mocking ───
-import { useGateway } from '../../src/composables/useGateway';
+import {
+  bootstrapCommandsForPrincipal,
+  gatewayPrincipalForPath,
+  useGateway,
+} from '../../src/composables/useGateway';
+
+describe('useGateway — principal boundary', () => {
+  it('maps only known entry points to privileged principals', () => {
+    expect(gatewayPrincipalForPath('/widget.html')).toBe('widget');
+    expect(gatewayPrincipalForPath('/dashboard.html')).toBe('dashboard');
+    expect(gatewayPrincipalForPath('/')).toBe('widget');
+    expect(gatewayPrincipalForPath('/preview/admin.html')).toBe('remote');
+  });
+
+  it('does not bootstrap admin data in the widget', () => {
+    const widgetCommands = bootstrapCommandsForPrincipal('widget');
+    expect(widgetCommands).toContain('get_config');
+    expect(widgetCommands).not.toContain('get_memory_data');
+    expect(widgetCommands).not.toContain('get_tasks');
+    expect(widgetCommands).not.toContain('get_skills_list');
+
+    expect(bootstrapCommandsForPrincipal('dashboard')).toContain('get_memory_data');
+    expect(bootstrapCommandsForPrincipal('remote')).toEqual([]);
+  });
+
+  it('does not self-declare a privileged principal over WebSocket', () => {
+    const gw = useGateway();
+    gw.init();
+    const socket = gw.getRawWs() as MockWebSocket;
+    expect(socket.url).toBe('ws://127.0.0.1:8002/ws');
+    socket.onclose?.({} as Event);
+    gw.destroy();
+  });
+});
 
 describe('useGateway — sendMsg guards', () => {
   beforeEach(() => {
@@ -202,13 +240,6 @@ describe('useGateway — Callback Registration', () => {
     expect(() => gw.onSkillCheckResult(cb)).not.toThrow();
   });
 
-  it('should register onEnvConfigData callback', () => {
-    const gw = useGateway();
-    const cb = vi.fn();
-
-    expect(() => gw.onEnvConfigData(cb)).not.toThrow();
-  });
-
   it('should register onMemoryResetResult callback', () => {
     const gw = useGateway();
     const cb = vi.fn();
@@ -237,14 +268,6 @@ describe('useGateway — Callback Unregistration', () => {
     expect(() => gw.offSkillCheckResult()).not.toThrow();
   });
 
-  it('should unregister offEnvConfigData without error', () => {
-    const gw = useGateway();
-    const cb = vi.fn();
-    gw.onEnvConfigData(cb);
-
-    expect(() => gw.offEnvConfigData()).not.toThrow();
-  });
-
   it('should unregister offMemoryResetResult without error', () => {
     const gw = useGateway();
     const cb = vi.fn();
@@ -266,7 +289,7 @@ describe('useGateway — Callback Unregistration', () => {
 
     expect(() => {
       gw.offSkillCheckResult();
-      gw.offEnvConfigData();
+      gw.offAllSkillsCheckComplete();
       gw.offMemoryResetResult();
       gw.offMemoryUpdated();
     }).not.toThrow();
@@ -355,30 +378,27 @@ describe('useGateway — Message Dispatch & Error Handlers', () => {
     const taskPlanCb = vi.fn();
     const skillCheckCb = vi.fn();
     const allSkillsCb = vi.fn();
-    const envCb = vi.fn();
     const memoryResetCb = vi.fn();
     const memoryUpdatedCb = vi.fn();
 
     gw.onTaskPlanReply(taskPlanCb);
     gw.onSkillCheckResult(skillCheckCb);
     gw.onAllSkillsCheckComplete(allSkillsCb);
-    gw.onEnvConfigData(envCb);
     gw.onMemoryResetResult(memoryResetCb);
     gw.onMemoryUpdated(memoryUpdatedCb);
 
     rawWs.onmessage({ data: JSON.stringify({ event: 'task_plan_reply', payload: { task: 1 } }) });
     rawWs.onmessage({ data: JSON.stringify({ event: 'skill_check_result', payload: { skill: 1 } }) });
     rawWs.onmessage({ data: JSON.stringify({ event: 'all_skills_check_complete', payload: { ok: true } }) });
-    rawWs.onmessage({ data: JSON.stringify({ event: 'env_config_data', payload: { env: 1 } }) });
     rawWs.onmessage({ data: JSON.stringify({ event: 'memory_reset_result', payload: { ok: true } }) });
     rawWs.onmessage({ data: JSON.stringify({ event: 'memory_updated' }) });
+    rawWs.onmessage({ data: JSON.stringify({ event: 'consolidate_memory_response' }) });
 
     expect(taskPlanCb).toHaveBeenCalledWith({ task: 1 });
     expect(skillCheckCb).toHaveBeenCalledWith({ skill: 1 });
     expect(allSkillsCb).toHaveBeenCalledWith({ ok: true });
-    expect(envCb).toHaveBeenCalledWith({ env: 1 });
     expect(memoryResetCb).toHaveBeenCalledWith({ ok: true });
-    expect(memoryUpdatedCb).toHaveBeenCalled();
+    expect(memoryUpdatedCb).toHaveBeenCalledTimes(2);
   });
 
   it('should handle websocket close and error events', () => {

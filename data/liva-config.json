@@ -1,69 +1,73 @@
 {
-  "avatar": {
-    "engineMode": "auto",
-    "live2dModel": "models/live2d/pio/index.json",
-    "vrmModel": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
-    "autoBlinkEnabled": true,
-    "lookAtMouseEnabled": true,
-    "lipSyncEnabled": true,
-    "activeModel": "little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
-    "activeType": "3d",
-    "activeFormat": "fbx"
-  },
   "ai": {
-    "provider": "local",
-    "cloudBaseUrl": "",
     "cloudApiKey": "",
+    "cloudBaseUrl": "",
     "cloudModel": "",
-    "localModelsDir": "E:\\AI_Models",
-    "routerModel": "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
-    "mmprojModel": "Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf",
     "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
-    "temperature": 0.3,
+    "localModelsDir": "E:\\AI_Models",
     "maxTokens": 2048,
+    "mmprojModel": "Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf",
+    "provider": "local",
+    "routerModel": "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
+    "temperature": 0.3,
     "topP": 0.9
   },
-  "ui": {
-    "widgetPosition": "bottom-right",
-    "dashboardTheme": "dark",
-    "avatarMode": "auto",
-    "activeModel": {
-      "filename": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
-      "type": "3d",
-      "format": "fbx"
-    }
+  "avatar": {
+    "activeFormat": "fbx",
+    "activeModel": "little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+    "activeType": "3d",
+    "autoBlinkEnabled": true,
+    "engineMode": "3D",
+    "lipSyncEnabled": true,
+    "live2dModel": "models/live2d/pio/index.json",
+    "lookAtMouseEnabled": true,
+    "vrmModel": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx"
   },
   "system": {
-    "geolocationEnabled": true,
-    "proactiveEnabled": true,
-    "proactiveHour": 7,
-    "proactiveMinute": 0,
-    "proactiveDeliverUI": false,
-    "proactiveDeliverTelegram": true,
-    "proactiveDeliverZalo": true,
-    "proactiveDeliverEmail": false,
-    "proactiveFocus": "",
-    "digestInterestsEnabled": true,
-    "digestInterestsHour": 7,
-    "digestInterestsMinute": 0,
-    "digestInterestsDeliverUI": true,
-    "digestInterestsDeliverTelegram": true,
-    "digestInterestsDeliverZalo": false,
-    "digestInterestsDeliverEmail": false,
+    "digestFocusDeliverEmail": false,
+    "digestFocusDeliverTelegram": true,
+    "digestFocusDeliverUI": true,
+    "digestFocusDeliverZalo": false,
     "digestFocusEnabled": true,
     "digestFocusHour": 8,
     "digestFocusMinute": 0,
-    "digestFocusDeliverUI": true,
-    "digestFocusDeliverTelegram": true,
-    "digestFocusDeliverZalo": false,
-    "digestFocusDeliverEmail": false,
-    "digestFocusTopics": ""
+    "digestFocusTopics": "",
+    "digestInterestsDeliverEmail": false,
+    "digestInterestsDeliverTelegram": true,
+    "digestInterestsDeliverUI": true,
+    "digestInterestsDeliverZalo": false,
+    "digestInterestsEnabled": true,
+    "digestInterestsHour": 7,
+    "digestInterestsMinute": 0,
+    "geolocationEnabled": true,
+    "proactiveDeliverEmail": false,
+    "proactiveDeliverTelegram": true,
+    "proactiveDeliverUI": false,
+    "proactiveDeliverZalo": true,
+    "proactiveEnabled": true,
+    "proactiveFocus": "",
+    "proactiveHour": 7,
+    "proactiveMinute": 0
+  },
+  "tts": {
+    "vieneuEnabled": true,
+    "vieneuVoice": "Trúc Ly"
+  },
+  "ui": {
+    "activeModel": {
+      "filename": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+      "format": "fbx",
+      "type": "3d"
+    },
+    "avatarMode": "3D",
+    "dashboardTheme": "dark",
+    "widgetPosition": "bottom-right"
   },
   "voice": {
-    "enabled": true,
-    "provider": "hybrid",
     "activeProfile": "vi-VN-HoaiMyNeural",
+    "enabled": true,
     "language": "vi-VN",
+    "provider": "hybrid",
     "sampleRate": 16000,
     "trainingEnabled": false
   }

@@ -1,5 +1,11 @@
 {
   "version": 1,
+  "runtimeArtifacts": {
+    "vec0": {
+      "dest": "vec0.dll",
+      "sha256": "fcf98662a7ad9dce394b96a88f91032047823831b951c76636787c312a6476e6"
+    }
+  },
   "_doc": [
     "Nguồn sự thật DUY NHẤT về model của LIVA. Đọc bởi hai bên:",
     "  - scripts/models.mjs   — `npm run doctor` / `npm run setup:models` (máy dev, cần Node)",
@@ -326,6 +332,15 @@
       "url": "https://github.com/livekit/rust-sdks/raw/06371a336d485cf6b51c75a3fee3d208f8f2eedb/livekit-wakeword/onnx/embedding_model.onnx",
       "bytes": 1326578,
       "sha256": "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f"
+    },
+    {
+      "group": "wake",
+      "profile": "full",
+      "dest": "models/wake_liva_en_v2.onnx",
+      "url": null,
+      "bytes": 956143,
+      "sha256": "7487fcb480ce05a6ba02901ee48071caed73b593dfed5d9b55202ae1001c4780",
+      "manual": "Tự train (2026-07-31). Hey Liva v2: threshold 0.58, recall 91.82%, FPPH 0.0773 trên 25.88h validation."
     },
     {
       "group": "wake",

@@ -10,7 +10,8 @@
  * Kiểm 7 thứ:
  *   1. Front-matter YAML hợp lệ, đủ trường bắt buộc
  *   2. LỖI THỜI — file mã nguồn trong `covers` đã đổi kể từ commit ghi trong front-matter
- *   3. Liên kết markdown tương đối trỏ tới file có thật
+ *   3. Liên kết markdown tương đối trỏ tới file có thật — **và** neo `#anchor`
+ *      trỏ tới một tiêu đề có thật (xem §3a)
  *   4. `covers` trỏ tới đường dẫn có thật trong repo
  *   5. Khoá `owns` không bị hai tài liệu cùng nhận
  *   6. Dòng "📌 Nguồn đầy đủ:" trỏ tới tài liệu thật sự sở hữu sự thật đó
@@ -269,15 +270,95 @@ const stripCode = (text, keepInline = false) => {
   return out.join('\n')
 }
 
+// --------------------------------------------------- 3a. neo `#anchor` có thật
+//
+// Vì sao cần (đo 01/08/2026): bản trước của vòng lặp §3 làm đúng một dòng
+// `t = t.split('#')[0]` — tức nó kiểm FILE rồi **vứt neo đi**. Quét tay hôm đó
+// tìm ra **4 neo hỏng / 5 chỗ dùng** trên 76 liên kết, và `docs-citations.mjs`
+// cũng không thấy vì nó chỉ kiểm trích dẫn MÃ NGUỒN. Tức là mục lục nội bộ của
+// bộ tài liệu chưa từng được kiểm bởi bất cứ cổng nào.
+//
+// Cả 4 đều cùng một chế độ hỏng: **đổi tiêu đề mà quên liên kết trỏ tới** — nối
+// thêm đuôi ("(đo lại đủ, thay bảng 26/07)"), gạch ngang tiêu đề khi đánh dấu
+// XONG, hoặc đổi hẳn chữ. Không lần nào người sửa biết mình vừa làm hỏng gì.
+/**
+ * Sinh slug đúng cách GitHub sinh neo tiêu đề.
+ *
+ * **Bẫy đã cắn khi viết bộ dò tay:** dùng `\s+` để gom khoảng trắng sẽ báo
+ * 26/26 liên kết hỏng trong khi thực tế chỉ 2. Em dash `—` bị **xoá**, nhưng hai
+ * khoảng trắng quanh nó **ở lại** và thành `--`. Phải thay TỪNG khoảng trắng
+ * bằng một `-`, không gộp. Cùng họ bẫy với `.` trong `` `Input.dispatchKeyEvent` ``:
+ * dấu chấm bị xoá hẳn (→ `inputdispatchkeyevent`), không đổi thành `-` như
+ * GitLab — đoán sai một ký tự là hỏng cả liên kết.
+ *
+ * **Bẫy thứ hai, do chính cổng này bắt được ở lần chạy đầu.** `trim()` phải chạy
+ * TRƯỚC bước xoá ký tự, đúng thứ tự của `github-slugger`. Bản đầu trim sau, nên
+ * `## 🔮 Future Roadmap` ra `future-roadmap` trong khi GitHub ra `-future-roadmap`
+ * (emoji bị xoá, **khoảng trắng sau nó ở lại**) — và cổng báo 2 liên kết ĐÚNG
+ * trong `README.md` là hỏng. Một cổng mới báo dương tính giả ngay ngày đầu là
+ * cách nhanh nhất để nó bị vô hiệu hoá, nên thứ tự hai dòng này là phần đắt
+ * nhất của cả khối.
+ */
+const slugify = (raw) => raw
+  // `[text](url)` trong tiêu đề: GitHub slug theo TEXT hiển thị, không theo url.
+  .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+  .toLowerCase()
+  .trim()
+  // Giữ chữ (mọi bảng mã — tài liệu này là tiếng Việt), số, `_`, `-`, khoảng
+  // trắng. Xoá phần còn lại: dấu câu, `**`, `~~`, backtick, emoji.
+  .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+  .replace(/\s/g, '-')
+
+/** Tập neo của một file .md; `null` nếu không đọc được. Có cache vì nhiều file cùng trỏ tới một đích. */
+const anchorCache = new Map()
+const anchorsOf = (abs) => {
+  if (anchorCache.has(abs)) return anchorCache.get(abs)
+  let set = null
+  try {
+    const text = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
+    set = new Set()
+    // Trùng slug thì GitHub thêm hậu tố `-1`, `-2`… theo thứ tự xuất hiện.
+    // Thiếu bước này thì mọi liên kết tới tiêu đề trùng tên đều báo hỏng oan.
+    const seen = new Map()
+    // `keepInline = true`: GIỮ inline `code`. Tiêu đề như "U21 — Sổ đo mỗi lượt
+    // — `turn_telemetry`" mà bị xoá inline code sẽ sinh slug thiếu hẳn phần đuôi.
+    for (const m of stripCode(text, true).matchAll(/^#{1,6}[ \t]+(.+?)[ \t]*#*$/gm)) {
+      const base = slugify(m[1])
+      if (!base) continue
+      const n = seen.get(base) ?? 0
+      seen.set(base, n + 1)
+      set.add(n === 0 ? base : `${base}-${n}`)
+    }
+    // Neo HTML đặt tay (`<a id="x">`) cũng là neo hợp lệ trên GitHub.
+    for (const m of text.matchAll(/<a\s[^>]*\b(?:id|name)=["']([^"']+)["']/gi)) set.add(m[1])
+  } catch { set = null }
+  anchorCache.set(abs, set)
+  return set
+}
+
 const LINK = /\[([^\]\n]{1,120})\]\(([^)\s]+)\)/g
+let anchorsChecked = 0
 for (const [p, d] of [...docs, ...rootDocs]) {
+  // Snapshot `frozen` giữ liên kết đúng với cấu trúc tài liệu LÚC CHỤP — cùng
+  // nguyên tắc đã áp cho citation, đường dẫn tuyệt đối và con trỏ 📌 ở dưới.
+  const frozen = d.fm?.status === 'frozen'
   for (const m of stripCode(d.text).matchAll(LINK)) {
-    let t = m[2]
-    if (/^(https?:|mailto:|#)/.test(t)) continue
-    t = t.split('#')[0]
-    if (!t) continue
-    const target = path.resolve(path.dirname(path.join(REPO, p)), decodeURIComponent(t))
-    if (!fs.existsSync(target)) err(p, `liên kết hỏng → \`${m[2]}\``)
+    const raw = m[2]
+    if (/^(https?:|mailto:)/.test(raw)) continue
+    const cut = raw.indexOf('#')
+    const filePart = cut < 0 ? raw : raw.slice(0, cut)
+    const frag = cut < 0 ? '' : decodeURIComponent(raw.slice(cut + 1))
+    // Không có phần file ⇒ neo trỏ vào chính tài liệu đang đọc.
+    const target = filePart
+      ? path.resolve(path.dirname(path.join(REPO, p)), decodeURIComponent(filePart))
+      : path.join(REPO, p)
+    if (filePart && !fs.existsSync(target)) { err(p, `liên kết hỏng → \`${raw}\``); continue }
+    if (!frag || frozen || !target.endsWith('.md')) continue
+    const anchors = anchorsOf(target)
+    if (!anchors) continue
+    anchorsChecked++
+    if (!anchors.has(frag))
+      err(p, `neo không tồn tại → \`${raw}\` — tiêu đề đã đổi mà liên kết chưa sửa?`)
   }
 }
 
@@ -325,6 +406,10 @@ for (const [p, d] of docs) {
 const POINTER = /📌\s*Nguồn đầy đủ:\s*\[([^\]]+)\]\(([^)\s]+)\)/g
 let pointers = 0
 for (const [p, d] of docs) {
+  // Snapshot frozen giữ con trỏ đúng với cấu trúc tài liệu tại thời điểm chụp.
+  // Không ép chúng trỏ tới owner hiện hành — cùng nguyên tắc với citation,
+  // absolute-path và stale checks ở trên.
+  if (d.fm?.status === 'frozen') continue
   for (const m of stripCode(d.text).matchAll(POINTER)) {
     pointers++
     const t = m[2].split('#')[0]
@@ -424,6 +509,7 @@ say(`Tài liệu       : ${docs.size}`)
 say(`Sơ đồ mermaid  : ${mermaidCount}`)
 say(`Khoá sở hữu    : ${ownerOf.size}`)
 say(`Con trỏ 📌      : ${pointers}`)
+say(`Neo #anchor    : ${anchorsChecked}`)
 say(`Mã nguồn chưa tài liệu hoá : ${uncovered.length}`)
 
 if (STRICT_STALE.length) say(`Lỗi thời = LỖI ở  : ${STRICT_STALE.join(', ')}`)

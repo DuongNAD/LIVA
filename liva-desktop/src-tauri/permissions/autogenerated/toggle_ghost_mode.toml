@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-toggle-ghost-mode"
+description = "Enables the toggle_ghost_mode command without any pre-configured scope."
+commands.allow = ["toggle_ghost_mode"]
+
+[[permission]]
+identifier = "deny-toggle-ghost-mode"
+description = "Denies the toggle_ghost_mode command without any pre-configured scope."
+commands.deny = ["toggle_ghost_mode"]

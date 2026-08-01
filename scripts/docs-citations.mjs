@@ -60,9 +60,20 @@ import { bocKyHieu, kyHieuBao, hoTroKyHieu } from './lib/symbols.mjs'
 const ROOT = path.resolve(import.meta.dirname, '..')
 const DOCS = path.join(ROOT, 'docs')
 
-// Khảo sát gốc được ĐÓNG BĂNG có chủ đích để đối chiếu về sau — toạ độ trong
-// đó phản ánh mã nguồn tại thời điểm khảo sát và không được sửa theo hiện tại.
-const FROZEN = ['00-bao-cao-khao-sat-goc-2026-07.md']
+// Snapshot FREEZE phản ánh mã nguồn tại thời điểm lịch sử và không được sửa để khớp HEAD.
+// Document inventory là nguồn duy nhất cho disposition; registry hỏng phải làm script fail closed.
+const INVENTORY_PATH = path.join(DOCS, '_data', 'document-inventory.json')
+const FROZEN = (() => {
+  const inventory = JSON.parse(fs.readFileSync(INVENTORY_PATH, 'utf8'))
+  if (!Array.isArray(inventory.documents)) {
+    throw new Error('docs citation inventory không có mảng documents')
+  }
+  return new Set(
+    inventory.documents
+      .filter((document) => document.disposition === 'FREEZE')
+      .map((document) => document.path.replace(/\\/g, '/')),
+  )
+})()
 
 const DUOI = '(?:rs|ts|tsx|vue|toml|json|yml|yaml|cjs|mjs|ps1|md)'
 // Dấu `.` được phép ở đầu để bắt `.github/workflows/test.yml:78`.
@@ -117,7 +128,8 @@ const listDocs = (dir) =>
     const p = path.join(dir, e.name)
     if (e.isDirectory()) return e.name === '99-luu-tru' ? [] : listDocs(p)
     if (!e.name.endsWith('.md')) return []
-    if (FROZEN.includes(e.name)) return []
+    const rel = path.relative(ROOT, p).replace(/\\/g, '/')
+    if (FROZEN.has(rel)) return []
     return [p]
   })
 
@@ -222,12 +234,17 @@ const timKyHieu = (rel, id) => {
 // ─── Quét ───────────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2)
+const detailsDoc = argv.find((item) => item.startsWith('--details='))?.slice('--details='.length) ?? null
 const maxUnchecked = (() => {
   const a = argv.find((x) => x.startsWith('--max-unchecked='))
   return a ? Number(a.split('=')[1]) : null
 })()
 
 const docs = listDocs(DOCS).sort()
+const frozenDocsSkipped = [...FROZEN]
+  .filter((documentPath) => !documentPath.startsWith('docs/99-luu-tru/'))
+  .filter((documentPath) => fs.existsSync(path.join(ROOT, documentPath)))
+  .sort()
 const findings = []
 const khongKiem = [] // trích dẫn không kết luận được (tên file mơ hồ)
 const deXuat = []    // gợi ý đổi toạ độ -> neo ký hiệu
@@ -316,11 +333,27 @@ for (const abs of docs) {
 // ─── Báo cáo ────────────────────────────────────────────────────────────────
 
 const vuotChot = maxUnchecked !== null && khongKiem.length > maxUnchecked
+const uncheckedByDoc = Object.fromEntries(
+  [...khongKiem.reduce((counts, item) => {
+    counts.set(item.doc, (counts.get(item.doc) ?? 0) + 1)
+    return counts
+  }, new Map())].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])),
+)
+const uncheckedByFile = Object.fromEntries(
+  [...khongKiem.reduce((counts, item) => {
+    counts.set(item.file, (counts.get(item.file) ?? 0) + 1)
+    return counts
+  }, new Map())].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])),
+)
 
 if (argv.includes('--json')) {
   console.log(JSON.stringify({
     total, neoKyHieu, docs: docs.length,
     khongKiem: khongKiem.length, maxUnchecked, findings, deXuat: deXuat.length,
+    frozenDocsSkipped, uncheckedByDoc, uncheckedByFile,
+    ...(detailsDoc
+      ? { unchecked: khongKiem.filter((item) => item.doc === detailsDoc) }
+      : {}),
   }, null, 2))
 } else if (argv.includes('--suggest')) {
   console.log(`${deXuat.length} toạ độ có ứng viên neo ký hiệu.\n`)
@@ -350,6 +383,7 @@ if (argv.includes('--json')) {
   }
 } else {
   console.log(`Đã quét ${docs.length} tài liệu, ${total} trích dẫn (${neoKyHieu} neo ký hiệu, ${total - neoKyHieu} toạ độ).\n`)
+  console.log(`Đã bỏ qua ${frozenDocsSkipped.length} snapshot FREEZE theo document inventory.\n`)
 
   if (khongKiem.length) {
     const theoFile = new Map()

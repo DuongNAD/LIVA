@@ -43,6 +43,18 @@ export default defineConfig({
         branches: 43,
         functions: 46,
         lines: 62,
+        // A31-06: tổng số đẹp từng che ba đường UI rủi ro cao. Giữ chốt
+        // per-file để reconnect/command transport/vision không âm thầm tụt lại
+        // dưới mức đã nghiệm thu ngày 31/07/2026.
+        'src/WidgetApp.vue': {
+          lines: 50,
+        },
+        'src/composables/useGateway.ts': {
+          lines: 50,
+        },
+        'src/components/dashboard/VisionView.vue': {
+          lines: 50,
+        },
       },
     },
   }

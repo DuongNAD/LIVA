@@ -1,8 +1,7 @@
-
-use std::time::{Duration, Instant};
 use liva_native_core::stt::engine::SttEngine;
 use liva_native_core::tts::engine::TtsEngine;
 use liva_native_core::tts::g2p::G2p;
+use std::time::{Duration, Instant};
 
 fn verify_g2p_normalization() {
     println!("\n==============================================");
@@ -108,11 +107,13 @@ fn benchmark_g2p_speed() {
     println!("G2P Speed Benchmark");
     println!("==============================================");
 
-    let sentences = ["The quick brown fox jumps over the lazy dog.",
+    let sentences = [
+        "The quick brown fox jumps over the lazy dog.",
         "Mr. Sherlock Holmes and Dr. John Watson lived at 221B Baker Street.",
         "Mrs. Hudson served tea, while Ms. Mary Morstan explained her case.",
         "We need apples, pears, peaches, oranges, etc. from the grocery store.",
-        "Hello world! Life is like a box of chocolates, you never know what you're gonna get."];
+        "Hello world! Life is like a box of chocolates, you never know what you're gonna get.",
+    ];
 
     let start = Instant::now();
     let iterations: u32 = 10000; // 10k runs to get stable average
@@ -213,7 +214,10 @@ async fn main() {
     let voice_bytes = std::fs::read(&tts_voice).expect("Failed to read voice bin file");
     let len_rounded = (voice_bytes.len() / 4) * 4;
     let voice_bytes_aligned = &voice_bytes[..len_rounded];
-    let voice_data_vec: Vec<f32> = voice_bytes_aligned.chunks_exact(4).map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])).collect();
+    let voice_data_vec: Vec<f32> = voice_bytes_aligned
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
 
     let mut tts_engine = TtsEngine::new(&tts_model, voice_data_vec).expect("Failed to load TTS");
     println!("TTS Engine initialized.");

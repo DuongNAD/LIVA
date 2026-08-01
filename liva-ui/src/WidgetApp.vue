@@ -453,6 +453,7 @@ let ws: WebSocket | null = null;
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let wsReconnectAttempt = 0;
 let allowWsReconnect = true;
+let wsConnectPending = false;
 
 const sendMsg = (event: string, payload: Record<string, unknown> = {}) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -764,8 +765,8 @@ onMounted(() => {
 
   // 3. Connect WebSocket
   // Connect directly because the Tauri event might fire before this component mounts.
-  const connectWebSocket = () => {
-    if (!allowWsReconnect || (ws && (
+  const connectWebSocket = async () => {
+    if (!allowWsReconnect || wsConnectPending || (ws && (
       ws.readyState === WebSocket.CONNECTING ||
       ws.readyState === WebSocket.OPEN
     ))) {
@@ -773,7 +774,50 @@ onMounted(() => {
     }
 
     const port = 8002;
-    const wsUrl = `ws://127.0.0.1:${port}/ws`;
+    let sessionQuery = "";
+    if (platform?.platformName === "tauri") {
+      wsConnectPending = true;
+      try {
+        const ticket = await platform.invokeBackend("issue_websocket_session") as {
+          token?: unknown;
+        } | null;
+        const token = ticket?.token;
+        if (typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token)) {
+          throw new Error("Tauri không trả session ticket WebSocket hợp lệ");
+        }
+        sessionQuery = `?session=${encodeURIComponent(token)}`;
+      } catch (error) {
+        const delay = Math.min(500 * (2 ** wsReconnectAttempt), 5_000);
+        wsReconnectAttempt += 1;
+        engineStatus.value = "websocket-session-error";
+        logger.warn(
+          "[Widget]",
+          `Không xin được WebSocket session; thử lại sau ${delay}ms:`,
+          error instanceof Error ? error.message : String(error),
+        );
+        if (allowWsReconnect) {
+          if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+          wsReconnectTimer = setTimeout(() => {
+            wsReconnectTimer = null;
+            void connectWebSocket();
+          }, delay);
+        }
+        return;
+      } finally {
+        wsConnectPending = false;
+      }
+    }
+
+    // Component có thể đã unmount hoặc một kết nối khác đã mở trong lúc chờ
+    // Tauri cấp ticket. Không tiêu thụ ticket vào một socket thừa.
+    if (!allowWsReconnect || (ws && (
+      ws.readyState === WebSocket.CONNECTING ||
+      ws.readyState === WebSocket.OPEN
+    ))) {
+      return;
+    }
+
+    const wsUrl = `ws://127.0.0.1:${port}/ws${sessionQuery}`;
     const socket = new WebSocket(wsUrl);
     ws = socket;
     socket.binaryType = "arraybuffer";
@@ -1138,14 +1182,14 @@ onMounted(() => {
         if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
         wsReconnectTimer = setTimeout(() => {
           wsReconnectTimer = null;
-          connectWebSocket();
+          void connectWebSocket();
         }, delay);
         logger.warn('[Widget]', `Gateway disconnected; reconnecting in ${delay}ms`);
       });
     };
   };
 
-  connectWebSocket();
+  void connectWebSocket();
 
   // 4. Listen for avatar/config hot-swap from Dashboard (Handled via WebSocket instead of IPC)
 
@@ -1366,7 +1410,7 @@ onDeactivated(() => {
         <!-- Kết quả xác minh cụm đánh thức (core trả về, không phải điểm model) -->
         <div class="flex flex-col gap-1.5">
           <div class="flex justify-between text-slate-400">
-            <span>Xác minh "Hey Liva"</span>
+            <span>Câu gọi duy nhất: “Hey Liva”</span>
             <span class="font-mono text-[10px] text-purple-400">core STT</span>
           </div>
           <div class="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5 relative">

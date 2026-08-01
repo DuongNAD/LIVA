@@ -4,6 +4,7 @@ use liva_native_core::crypto::EncryptionEngine;
 use liva_native_core::webrtc::frame::{OP_AUTH_HANDSHAKE, VoiceFrame};
 use liva_native_core::{AppState, db, llm, stt, tts};
 use std::sync::Arc;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 fn test_state() -> Arc<AppState> {
@@ -130,5 +131,86 @@ async fn oversized_text_messages_are_rejected_before_json_parsing() {
         "oversized text must terminate the connection"
     );
 
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn loopback_handshake_rejects_self_declared_privileged_principal() {
+    let server = liva_native_core::websocket::WebSocketServer::bind("127.0.0.1:0")
+        .await
+        .expect("bind reusable WebSocket server");
+    let address = server.local_addr();
+    let server_task = tokio::spawn(server.run(test_state()));
+
+    for principal in ["widget", "dashboard"] {
+        let denied = connect_async(format!("ws://{address}/ws?principal={principal}"))
+            .await
+            .expect_err("self-declared privileged principal must fail");
+        let tokio_tungstenite::tungstenite::Error::Http(response) = denied else {
+            panic!("expected HTTP principal rejection");
+        };
+        assert_eq!(response.status().as_u16(), 403);
+    }
+
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn loopback_session_ticket_is_single_use_and_derives_principal_server_side() {
+    let server = liva_native_core::websocket::WebSocketServer::bind("127.0.0.1:0")
+        .await
+        .expect("bind reusable WebSocket server");
+    let address = server.local_addr();
+    let sessions = server.session_authority();
+    let ticket = sessions
+        .issue(liva_native_core::CommandPrincipal::WebSocketDashboard)
+        .expect("issue dashboard ticket");
+    let server_task = tokio::spawn(server.run(test_state()));
+    let url = format!("ws://{address}/ws?session={}", ticket.token);
+
+    let (mut authorized, _) = connect_async(&url)
+        .await
+        .expect("fresh ticket must connect");
+    authorized.close(None).await.unwrap();
+
+    let replay = connect_async(&url)
+        .await
+        .expect_err("consumed ticket must reject replay");
+    let tokio_tungstenite::tungstenite::Error::Http(response) = replay else {
+        panic!("expected HTTP session rejection");
+    };
+    assert_eq!(response.status().as_u16(), 403);
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn non_loopback_rejects_missing_token_and_accepts_exact_bearer() {
+    let token = "0123456789abcdef0123456789abcdef";
+    let server = liva_native_core::websocket::WebSocketServer::bind_with_auth(
+        "0.0.0.0:0",
+        Some(token.to_string()),
+    )
+    .await
+    .expect("bind authenticated non-loopback server");
+    let port = server.local_addr().port();
+    let server_task = tokio::spawn(server.run(test_state()));
+    let url = format!("ws://127.0.0.1:{port}/ws");
+
+    let denied = connect_async(&url)
+        .await
+        .expect_err("missing token must fail");
+    let tokio_tungstenite::tungstenite::Error::Http(response) = denied else {
+        panic!("expected HTTP authentication rejection");
+    };
+    assert_eq!(response.status().as_u16(), 401);
+
+    let mut request = url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    let (mut authorized, _) = connect_async(request)
+        .await
+        .expect("exact bearer token must connect");
+    authorized.close(None).await.unwrap();
     server_task.abort();
 }

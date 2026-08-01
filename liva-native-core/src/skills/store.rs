@@ -420,7 +420,11 @@ mod tests {
         let h = st.history("id-1").unwrap();
         assert_eq!(h.len(), 2, "lịch sử phải có 2 bản");
         assert_eq!(h[0].version_id, v2, "bản mới nhất đứng đầu");
-        assert_eq!(h[0].parent_id.as_deref(), Some(v1.as_str()), "phải trỏ về cha");
+        assert_eq!(
+            h[0].parent_id.as_deref(),
+            Some(v1.as_str()),
+            "phải trỏ về cha"
+        );
         assert_eq!(h[1].parent_id, None);
         assert_eq!(st.current_body("id-1").unwrap().as_deref(), Some("thân 2"));
     }
@@ -434,7 +438,11 @@ mod tests {
         st.upsert(&skill("id-1", "aaa", "thân")).unwrap();
         let mut s = skill("id-1", "aaa", "thân");
         s.description = "mô tả HOÀN TOÀN mới".to_string();
-        assert_eq!(st.upsert(&s).unwrap(), None, "thân không đổi ⇒ không version mới");
+        assert_eq!(
+            st.upsert(&s).unwrap(),
+            None,
+            "thân không đổi ⇒ không version mới"
+        );
         assert_eq!(st.list().unwrap()[0].description, "mô tả HOÀN TOÀN mới");
     }
 
@@ -455,7 +463,11 @@ mod tests {
         let d = db();
         let st = SkillStore::new(&d);
         let v = st.upsert(&skill("id-1", "aaa", "thân")).unwrap();
-        for k in ["tool_call_failed", "tool_call_failed", "tool_semantic_issue"] {
+        for k in [
+            "tool_call_failed",
+            "tool_call_failed",
+            "tool_semantic_issue",
+        ] {
             st.record_signal(&Signal {
                 skill_id: "id-1".to_string(),
                 version_id: v.clone(),
@@ -561,9 +573,18 @@ mod tests {
             .unwrap();
         }
         let t = &st.signal_tallies(&["id-1".to_string()]).unwrap()["id-1"];
-        assert_eq!(t.theo_loai.len(), 3, "ba mức bằng chứng ⇒ ba nhóm: {:?}", t.theo_loai);
+        assert_eq!(
+            t.theo_loai.len(),
+            3,
+            "ba mức bằng chứng ⇒ ba nhóm: {:?}",
+            t.theo_loai
+        );
         // confirmed(1,0) + refuted(0,0) + chưa rõ(0,5) = 1,5
-        assert!((t.tong_trong_so() - 1.5).abs() < 1e-6, "{}", t.tong_trong_so());
+        assert!(
+            (t.tong_trong_so() - 1.5).abs() < 1e-6,
+            "{}",
+            t.tong_trong_so()
+        );
     }
 
     /// Hỏi nhiều skill một lượt: skill không có tín hiệu vẫn phải CÓ mặt trong map
@@ -582,7 +603,11 @@ mod tests {
         .unwrap();
 
         let m = st
-            .signal_tallies(&["id-1".to_string(), "id-2".to_string(), "khong-co".to_string()])
+            .signal_tallies(&[
+                "id-1".to_string(),
+                "id-2".to_string(),
+                "khong-co".to_string(),
+            ])
             .unwrap();
         assert_eq!(m.len(), 3, "đủ ba khoá kể cả skill_id không tồn tại");
         assert!(m["id-1"].hinh_phat() > 0.0);

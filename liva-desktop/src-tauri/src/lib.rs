@@ -1,11 +1,18 @@
-use liva_native_core::{handle_command, AppState};
+use liva_native_core::{
+    authorize_command, handle_command_as, websocket::WebSocketSessionAuthority,
+    websocket::WebSocketSessionTicket, AppState, CommandPrincipal,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use tauri::Emitter;
 use tauri::Manager;
 
 struct NativeCoreState(Arc<AppState>);
+
+#[derive(Default)]
+struct WebSocketSessionState(OnceLock<WebSocketSessionAuthority>);
 
 /// [Phase 5.1] LIVA Tauri Host — Multi-Window Desktop Shell (Optimized)
 /// =========================================================
@@ -210,15 +217,20 @@ fn fail_soft_reset_vault(dir: &std::path::Path, snapshot: &std::path::Path) {
 }
 
 /// H5: thoát với DIALOG lỗi thay vì panic im lặng. Boot fail (thiếu vec0.dll,
-/// DB hỏng, LLM không nạp được) trước đây `.expect()` → vỏ Tauri panic mà người
+/// DB hỏng hoặc không mở được khoá thiết bị) trước đây `.expect()` → vỏ Tauri panic mà người
 /// dùng chỉ thấy "app không mở". Nay hiện MessageBox có hướng khắc phục
 /// (`db_error_hint` dùng chung với gateway) rồi thoát sạch.
 fn die_tauri_boot(context: &str, err: impl std::fmt::Display) -> ! {
     let e = err.to_string();
-    let msg = format!(
-        "LIVA không khởi động được.\n\n{context}:\n{e}{}",
-        liva_native_core::db_error_hint(&e)
-    );
+    let hint = liva_native_core::db_error_hint(&e);
+    // `BootError::db` đã gắn hint vào context để gateway standalone cũng nhận
+    // được. Không lặp lại cùng đoạn trong dialog Tauri.
+    let suffix = if hint.is_empty() || context.contains(hint.trim()) {
+        ""
+    } else {
+        hint
+    };
+    let msg = format!("LIVA không khởi động được.\n\n{context}:\n{e}{}", suffix);
     liva_native_core::keystore::show_message_box("LIVA — lỗi khởi động", &msg);
     eprintln!("{msg}");
     std::process::exit(1);
@@ -344,8 +356,40 @@ fn migrate_legacy_vault(snapshot: &std::path::Path, new_key: &[u8]) -> Result<()
     Ok(())
 }
 
-#[tauri::command]
-fn read_vault_key(app: tauri::AppHandle, key: String) -> Result<Option<String>, String> {
+const VAULT_SECRET_KEYS: &[&str] = &[
+    "ai/cloud_api_key",
+    "search/tavily_api_key",
+    "weather/api_key",
+    "telegram/bot_token",
+    "zalo/access_token",
+    "zalo/app_secret",
+    "email/password",
+    "google/client_secret",
+];
+const MAX_VAULT_SECRET_BYTES: usize = 16 * 1024;
+
+fn validate_vault_secret_key(key: &str) -> Result<(), String> {
+    if !VAULT_SECRET_KEYS.contains(&key) {
+        return Err("vault secret key is not allowed".to_string());
+    }
+    Ok(())
+}
+
+fn validate_vault_secret_input(key: &str, value: &str) -> Result<(), String> {
+    validate_vault_secret_key(key)?;
+    if value.is_empty() {
+        return Err("vault secret value must not be empty".to_string());
+    }
+    if value.len() > MAX_VAULT_SECRET_BYTES {
+        return Err(format!(
+            "vault secret exceeds {MAX_VAULT_SECRET_BYTES} bytes"
+        ));
+    }
+    Ok(())
+}
+
+fn read_vault_key(app: &tauri::AppHandle, key: &str) -> Result<Option<String>, String> {
+    validate_vault_secret_key(key)?;
     let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let snapshot_path = local_data_dir.join("liva_vault.app");
 
@@ -353,7 +397,7 @@ fn read_vault_key(app: tauri::AppHandle, key: String) -> Result<Option<String>, 
         return Ok(None);
     }
 
-    let vault_key = get_vault_key(&app)?;
+    let vault_key = get_vault_key(app)?;
     let stronghold =
         tauri_plugin_stronghold::stronghold::Stronghold::new(&snapshot_path, vault_key)
             .map_err(|e| format!("Failed to load Stronghold: {:?}", e))?;
@@ -377,8 +421,8 @@ fn read_vault_key(app: tauri::AppHandle, key: String) -> Result<Option<String>, 
     }
 }
 
-#[tauri::command]
-fn write_vault_key(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+fn write_vault_key(app: &tauri::AppHandle, key: &str, value: &str) -> Result<(), String> {
+    validate_vault_secret_input(key, value)?;
     let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let snapshot_path = local_data_dir.join("liva_vault.app");
 
@@ -387,7 +431,7 @@ fn write_vault_key(app: tauri::AppHandle, key: String, value: String) -> Result<
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let vault_key = get_vault_key(&app)?;
+    let vault_key = get_vault_key(app)?;
     let stronghold =
         tauri_plugin_stronghold::stronghold::Stronghold::new(&snapshot_path, vault_key)
             .map_err(|e| format!("Failed to load/create Stronghold: {:?}", e))?;
@@ -415,13 +459,99 @@ fn write_vault_key(app: tauri::AppHandle, key: String, value: String) -> Result<
     Ok(())
 }
 
+fn delete_vault_key(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
+    validate_vault_secret_key(key)?;
+    let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    let snapshot_path = local_data_dir.join("liva_vault.app");
+    if !snapshot_path.exists() {
+        return Ok(());
+    }
+
+    let vault_key = get_vault_key(app)?;
+    let stronghold =
+        tauri_plugin_stronghold::stronghold::Stronghold::new(&snapshot_path, vault_key)
+            .map_err(|e| format!("Failed to load Stronghold: {:?}", e))?;
+    let client = match stronghold.get_client("liva_client") {
+        Ok(client) => client,
+        Err(_) => match stronghold.load_client("liva_client") {
+            Ok(client) => client,
+            Err(_) => return Ok(()),
+        },
+    };
+
+    client
+        .store()
+        .delete(key.as_bytes())
+        .map_err(|e| format!("Store delete failed: {:?}", e))?;
+    stronghold
+        .save()
+        .map_err(|e| format!("Stronghold save failed: {:?}", e))
+}
+
+#[tauri::command]
+fn vault_secret_present(app: tauri::AppHandle, key: String) -> Result<bool, String> {
+    Ok(read_vault_key(&app, &key)?.is_some())
+}
+
+#[tauri::command]
+fn store_vault_secret(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    write_vault_key(&app, &key, &value)
+}
+
+#[tauri::command]
+fn delete_vault_secret(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    delete_vault_key(&app, &key)
+}
+
+fn authorize_tauri_principal(
+    window_label: &str,
+    command: &str,
+) -> Result<CommandPrincipal, String> {
+    let principal = match window_label {
+        "widget" => CommandPrincipal::TauriWidget,
+        "dashboard" => CommandPrincipal::TauriDashboard,
+        "setup" => CommandPrincipal::TauriSetup,
+        _ => {
+            return Err(format!("Cửa sổ Tauri không được cấp quyền: {window_label}"));
+        }
+    };
+
+    authorize_command(principal, command)?;
+    Ok(principal)
+}
+
+fn websocket_principal_for_window(window_label: &str) -> Result<CommandPrincipal, String> {
+    match window_label {
+        "widget" => Ok(CommandPrincipal::WebSocketWidget),
+        "dashboard" => Ok(CommandPrincipal::WebSocketDashboard),
+        _ => Err(format!(
+            "Cửa sổ Tauri không được cấp WebSocket session: {window_label}"
+        )),
+    }
+}
+
+#[tauri::command]
+fn issue_websocket_session(
+    window: tauri::Window,
+    state: tauri::State<'_, WebSocketSessionState>,
+) -> Result<WebSocketSessionTicket, String> {
+    let principal = websocket_principal_for_window(window.label())?;
+    let sessions = state
+        .0
+        .get()
+        .ok_or_else(|| "WebSocket session authority chưa sẵn sàng".to_string())?;
+    sessions.issue(principal)
+}
+
 #[tauri::command]
 async fn native_ipc_call(
+    window: tauri::Window,
     state: tauri::State<'_, NativeCoreState>,
     command: String,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    handle_command(state.0.clone(), &command, payload, None, None).await
+    let principal = authorize_tauri_principal(window.label(), &command)?;
+    handle_command_as(principal, state.0.clone(), &command, payload, None, None).await
 }
 
 #[tauri::command]
@@ -433,6 +563,7 @@ async fn native_ipc_call_stream(
     req_id: String,
 ) -> Result<serde_json::Value, String> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
+    let principal = authorize_tauri_principal(window.label(), &command)?;
 
     let window_clone = window.clone();
     let req_id_clone = req_id.clone();
@@ -444,7 +575,15 @@ async fn native_ipc_call_stream(
         }
     });
 
-    handle_command(state.0.clone(), &command, payload, Some(tx), Some(req_id)).await
+    handle_command_as(
+        principal,
+        state.0.clone(),
+        &command,
+        payload,
+        Some(tx),
+        Some(req_id),
+    )
+    .await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -483,7 +622,6 @@ pub fn run() {
             "LIVA — SAO LƯU khoá mã hoá",
             &liva_native_core::escrow_message(hex),
         );
-        eprint!("{}", liva_native_core::escrow_message(hex));
     }
     tracing::info!(
         "Khoá mã hoá: nguồn={}, rekey {} fact, {} bản khoá-chết",
@@ -504,11 +642,12 @@ pub fn run() {
         .manage(InteractiveZones::default())
         .manage(EcoModeState::default())
         .manage(StrongholdKey(Mutex::new(None)))
+        .manage(WebSocketSessionState::default())
         // Plugin tauri_plugin_stronghold ĐÃ GỠ (H2): closure của nó là literal
         // hardcode salt cuối cùng trên write path, và UI KHÔNG import
-        // @tauri-apps/plugin-stronghold (chỉ invoke command read/write_vault_key).
+        // @tauri-apps/plugin-stronghold (renderer chỉ invoke present/store/delete).
         // Vault vẫn dùng qua tauri_plugin_stronghold::stronghold::Stronghold trực
-        // tiếp trong read_vault_key/write_vault_key, khoá lấy từ get_vault_key
+        // tiếp trong helper vault private; khoá lấy từ get_vault_key
         // (bí mật per-machine DPAPI, không còn hardcode).
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
@@ -530,6 +669,7 @@ pub fn run() {
             // bot Telegram ghi vào (bot vẫn chạy đủ, chỉ mất kênh phụ đó).
             let services_state = app.state::<NativeCoreState>().0.clone();
             let ready_handle = handle.clone();
+            let session_handle = handle.clone();
             // `spawn_background_services` gọi `tokio::spawn` bên trong, nhưng
             // closure `.setup()` của Tauri chạy NGOÀI runtime Tokio — gọi trực
             // tiếp sẽ panic ngay lúc khởi động:
@@ -557,6 +697,14 @@ pub fn run() {
                             }),
                         ) {
                             tracing::error!("Không emit được gateway-ready: {error}");
+                        }
+                    })),
+                    on_websocket_sessions_ready: Some(Box::new(move |sessions| {
+                        let state = session_handle.state::<WebSocketSessionState>();
+                        if state.0.set(sessions).is_err() {
+                            tracing::error!(
+                                "WebSocket session authority đã được khởi tạo trước đó"
+                            );
                         }
                     })),
                     llm_n_gpu_layers,
@@ -688,8 +836,10 @@ pub fn run() {
             update_interactive_zones,
             open_dashboard,
             open_setup,
-            read_vault_key,
-            write_vault_key,
+            vault_secret_present,
+            store_vault_secret,
+            delete_vault_secret,
+            issue_websocket_session,
             native_ipc_call,
             native_ipc_call_stream
         ])
@@ -699,7 +849,11 @@ pub fn run() {
 
 #[cfg(test)]
 mod h2_migration_tests {
-    use super::{derive_vault_key, legacy_vault_key, migrate_legacy_vault};
+    use super::{
+        authorize_tauri_principal, derive_vault_key, legacy_vault_key, migrate_legacy_vault,
+        validate_vault_secret_input, websocket_principal_for_window,
+    };
+    use liva_native_core::CommandPrincipal;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tauri_plugin_stronghold::stronghold::Stronghold;
 
@@ -795,5 +949,79 @@ mod h2_migration_tests {
             "vault rỗng phải bị coi là nghi ngờ, không migrate"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vault_chi_nhan_namespace_secret_da_phe_duyet() {
+        for key in [
+            "ai/cloud_api_key",
+            "search/tavily_api_key",
+            "weather/api_key",
+            "telegram/bot_token",
+            "zalo/access_token",
+            "zalo/app_secret",
+            "email/password",
+            "google/client_secret",
+        ] {
+            validate_vault_secret_input(key, "secret").expect(key);
+        }
+
+        assert!(validate_vault_secret_input("../escape", "secret").is_err());
+        assert!(validate_vault_secret_input("arbitrary/key", "secret").is_err());
+        assert!(validate_vault_secret_input("ai/cloud_api_key", "").is_err());
+        assert!(validate_vault_secret_input("ai/cloud_api_key", &"x".repeat(16_385)).is_err());
+    }
+
+    #[test]
+    fn window_label_anh_xa_sang_principal_chinh_xac() {
+        assert_eq!(
+            authorize_tauri_principal("widget", "ping").unwrap(),
+            CommandPrincipal::TauriWidget
+        );
+        assert_eq!(
+            authorize_tauri_principal("dashboard", "update_config").unwrap(),
+            CommandPrincipal::TauriDashboard
+        );
+        assert_eq!(
+            authorize_tauri_principal("setup", "setup:fetch").unwrap(),
+            CommandPrincipal::TauriSetup
+        );
+    }
+
+    #[test]
+    fn tauri_tu_choi_label_la_va_lenh_vuot_quyen() {
+        assert!(authorize_tauri_principal("unknown", "ping").is_err());
+        assert!(authorize_tauri_principal("widget", "update_config").is_err());
+        assert!(authorize_tauri_principal("setup", "get_memory_data").is_err());
+        assert!(authorize_tauri_principal("dashboard", "mcp:call_tool").is_err());
+    }
+
+    #[test]
+    fn chi_widget_va_dashboard_duoc_cap_websocket_session() {
+        assert_eq!(
+            websocket_principal_for_window("widget").unwrap(),
+            CommandPrincipal::WebSocketWidget
+        );
+        assert_eq!(
+            websocket_principal_for_window("dashboard").unwrap(),
+            CommandPrincipal::WebSocketDashboard
+        );
+        assert!(websocket_principal_for_window("setup").is_err());
+        assert!(websocket_principal_for_window("unknown").is_err());
+    }
+
+    #[test]
+    fn recovery_key_khong_duoc_ghi_ra_stderr() {
+        let source = include_str!("lib.rs");
+        let forbidden = [
+            "eprint!",
+            "(\"{}\", liva_native_core::",
+            "escrow_message(hex))",
+        ]
+        .concat();
+        assert!(
+            !source.contains(&forbidden),
+            "recovery key chỉ được giao one-time qua local secure dialog"
+        );
     }
 }

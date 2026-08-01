@@ -3,7 +3,7 @@ title: "voice_pipeline"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-07-23T00:00:00Z"
+last_update: "2026-07-31T13:00:00Z"
 ---
 
 # Knowledge: Voice Pipeline
@@ -26,6 +26,16 @@ now the unified Rust core:
 - Wake-worker initialization is single-flight. Partial microphone/AudioContext startup failures
   release acquired resources, and a lifecycle generation prevents an in-flight permission request
   from resurrecting the pipeline after `stopPipeline()`.
+- The wake worker only segments candidate utterances. It sends `OP_WAKE_PROBE`; Rust performs
+  classifier/STT verification and returns `wake_word_triggered` or `wake_probe_rejected`.
+  The former browser RMS MLP, weights JSON and browser ONNX artifact were removed on 2026-07-31.
+- Wake probes use a fail-closed two-tier decision. The synthetic classifier may directly wake only
+  above `max(LIVA_WAKE_THRESHOLD, 0.90)`; every lower score must be confirmed by exact STT phrase
+  matching. The response always returns the raw classifier score so field recordings can expose
+  synthetic-to-real domain shift instead of the UI displaying a fabricated 100%/0% value.
+- `wake_liva_en_v2.onnx` has only synthetic/augmented validation evidence. Production calibration
+  requires opt-in recordings of the owner's real `Hey Liva` plus ordinary-speech/noise hard
+  negatives; synthetic recall/FPPH alone must not be presented as real-room accuracy.
 - The widget reconnects its local gateway with bounded exponential backoff and waits for voice
   cleanup before reconnecting. Unmount disables and clears reconnect timers.
 - Turn cancellation uses a generation epoch. Speaker PCM carries that epoch, control frames have a
@@ -51,7 +61,9 @@ now the unified Rust core:
 ### Sentient Omni-Duplex Pipeline (v23)
 The voice pipeline coordinates full-duplex communication with active echo cancellation:
 - **Audio Capturing & VAD**: Microphone input is captured on the Frontend with WebRTC Acoustic Echo Cancellation (AEC) and Noise Suppression enabled: `{ echoCancellation: true, noiseSuppression: true }`.
-- **WASM Wake-Word / VAD**: The Frontend ONNX WASM wake-word model (~5KB, `hey_liva.onnx`) is always active locally. Audio data is only sent to the Backend via WebSocket after wake-word detection or Alt+Space hotkey activation. During silence, CPU/GPU usage remains at 0%.
+- **Wake candidate segmentation**: The frontend uses an energy floor only to cut a bounded
+  utterance. It never treats energy as keyword confidence. Rust verifies the candidate locally
+  with the trained classifier and STT phrase matching before the Widget becomes active.
 - **Nemotron STT (v31 ASR)**: Uses Nemotron 3.5 ONNX CPU-only model (`onnxruntime-node`) on a worker thread (`NemotronWorker.ts`). It completely replaces the legacy WhisperNode. This offloads STT entirely from the GPU to prevent VRAM conflict with the main LLM.
 - **Stage 1 Barge-in**: When speech is detected (`speech_start`), TTS volume ducks to 20% immediately while the LLM continues executing. Speculative RAG starts warming vector/KV caches in memory.
 - **Stage 2 Barge-in**: When speech ends (`speech_end`), the transcription is processed by `BackchannelDetector`:

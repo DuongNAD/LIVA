@@ -31,6 +31,17 @@ vi.mock("@tauri-apps/plugin-process", () => ({
   exit: vi.fn(),
 }));
 
+const platformMock = {
+  platformName: "tauri" as const,
+  hasVaultSecret: vi.fn().mockResolvedValue(false),
+  storeVaultSecret: vi.fn().mockResolvedValue(undefined),
+  deleteVaultSecret: vi.fn().mockResolvedValue(undefined),
+};
+
+vi.mock("../../src/platform", () => ({
+  detectPlatform: () => platformMock,
+}));
+
 // Mock HardwareDetector
 vi.mock("../../src/utils/HardwareDetector", () => ({
   detectOptimalEngine: () => "3D",
@@ -210,6 +221,8 @@ describe("Dashboard Views", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     registeredCallbacks.clear();
+    platformMock.hasVaultSecret.mockResolvedValue(false);
+    platformMock.storeVaultSecret.mockResolvedValue(undefined);
   });
 
   it("should mount and exercise AISettings.vue", async () => {
@@ -228,48 +241,41 @@ describe("Dashboard Views", () => {
     // Save config
     const saveBtn = wrapper.find(".btn-primary");
     if (saveBtn.exists()) {
+      (wrapper.vm as any).cloudApiKey = "new-cloud-secret";
       await saveBtn.trigger("click");
+      await flushPromises();
       expect(gatewayMock.updateConfig).toHaveBeenCalled();
+      const configPatch = gatewayMock.updateConfig.mock.calls.at(-1)?.[0];
+      expect(configPatch.ai).not.toHaveProperty("cloudApiKey");
+      expect(platformMock.storeVaultSecret).toHaveBeenCalledWith(
+        "ai/cloud_api_key",
+        "new-cloud-secret",
+      );
     }
   });
 
   it("should mount and exercise ApiManagementView.vue", async () => {
     const wrapper = mount(ApiManagementView);
     expect(wrapper.exists()).toBe(true);
-
-    const onEnvConfigDataCb = registeredCallbacks.get("onEnvConfigData");
-    expect(onEnvConfigDataCb).toBeDefined();
-
-    if (onEnvConfigDataCb) {
-      onEnvConfigDataCb({
-        content: `AI_PROVIDER=cloud
-AI_BASE_URL=https://api.openai.com
-AI_API_KEY=testkey
-AI_MODEL=gpt-4
-WHISPER_CLOUD_URL=https://whisper.api
-TAVILY_API_KEY=tavilykey
-WEATHER_API_KEY=weatherkey
-REMOTE_CONTROL_ENABLED=true
-TELEGRAM_BOT_TOKEN=tgtoken
-TELEGRAM_ALLOWED_IDS=123,456
-ZALO_OA_ACCESS_TOKEN=zalotoken
-ZALO_APP_ID=zaloapp
-ZALO_APP_SECRET=zalosecret
-ZALO_USER_ID=zalouser
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=993
-EMAIL_USER=user@gmail.com
-EMAIL_PASS=pass
-GOOGLE_CLIENT_SECRET=googlesecret`,
-        vault: {}
-      });
-      await flushPromises();
-    }
+    await flushPromises();
+    expect(gatewayMock.onEnvConfigData).not.toHaveBeenCalled();
+    expect(platformMock.hasVaultSecret).toHaveBeenCalledWith("ai/cloud_api_key");
 
     const saveBtn = wrapper.find(".btn-primary");
     if (saveBtn.exists()) {
+      (wrapper.vm as any).useCloudAI = true;
+      (wrapper.vm as any).aiApiKey = "new-ai-secret";
       await saveBtn.trigger("click");
-      expect(gatewayMock.sendMsg).toHaveBeenCalledWith("save_env_config", expect.any(Object));
+      await flushPromises();
+      expect(platformMock.storeVaultSecret).toHaveBeenCalledWith(
+        "ai/cloud_api_key",
+        "new-ai-secret",
+      );
+      expect(gatewayMock.updateConfig).toHaveBeenCalled();
+      expect(gatewayMock.sendMsg).not.toHaveBeenCalledWith(
+        "save_env_config",
+        expect.any(Object),
+      );
     }
   });
 
@@ -327,7 +333,10 @@ GOOGLE_CLIENT_SECRET=googlesecret`,
       const confirmBtn = wrapper.find(".modal-actions .btn-danger");
       if (confirmBtn.exists()) {
         await confirmBtn.trigger("click");
-        expect(gatewayMock.sendMsg).toHaveBeenCalledWith("reset_memory");
+        expect(gatewayMock.sendMsg).toHaveBeenCalledWith(
+          "memory:delete_subject",
+          { dryRun: false },
+        );
 
         const resetResultCb = registeredCallbacks.get("onMemoryResetResult");
         if (resetResultCb) {

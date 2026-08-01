@@ -15,7 +15,7 @@ tracing = "0.1"
 # Thiếu nó thì chỉ còn `.with_max_level(...)` cố định, và đó chính là lý do mọi
 # `debug!` trong crate này từng là code chết: RUST_LOG bị bỏ qua hoàn toàn.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rusqlite = { version = "0.31.0", features = ["bundled", "modern_sqlite", "load_extension"] }
+rusqlite = { version = "0.31.0", features = ["backup", "bundled", "modern_sqlite", "load_extension"] }
 r2d2 = "0.8.10"
 r2d2_sqlite = "0.24.0"
 aes-gcm = "0.10"
@@ -184,4 +184,3 @@ test = false
 name = "os_control_probe"
 path = "src/bin/os_control_probe.rs"
 test = false
-

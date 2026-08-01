@@ -43,7 +43,12 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://localhost:5173 ws://localhost:5173 ws://localhost:8002 ws://127.0.0.1:8002; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; font-src 'self';"
+      "capabilities": [
+        "widget",
+        "dashboard",
+        "setup"
+      ],
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://localhost:5173 ws://localhost:5173 ws://localhost:8002 ws://127.0.0.1:8002; script-src 'self'; style-src 'self'; img-src 'self' asset: data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none';"
     }
   },
   "bundle": {

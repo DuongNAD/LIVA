@@ -271,12 +271,17 @@ watch(eventsCount, (n) => {
   if (mocSuKien.value === null) mocSuKien.value = n;
 });
 
+const onMemoryUpdated = () => {
+  isConsolidating.value = false;
+  refreshMemory();
+};
+
 onActivated(() => {
   // Chốt mốc TRƯỚC khi làm mới: mọi sự kiện dữ liệu mới mang về sẽ được tính
   // là "vừa nhớ", đúng nghĩa "thêm kể từ lần bạn nhìn gần nhất".
   datLaiMoc();
   refreshMemory();
-  gateway.onMemoryUpdated(refreshMemory);
+  gateway.onMemoryUpdated(onMemoryUpdated);
 });
 
 onDeactivated(() => {
@@ -303,7 +308,7 @@ onDeactivated(() => {
         <div class="header-actions">
           <button class="btn btn-secondary btn-sm" @click="triggerConsolidation" :disabled="isConsolidating">
             <span v-if="isConsolidating" class="spinner"></span>
-            <span v-else>⚡ {{ currentLang === 'vi-VN' ? 'Hợp nhất' : 'Consolidate' }}</span>
+            <span v-else>⚡ {{ currentLang === 'vi-VN' ? 'Kiểm tra projection' : 'Validate projections' }}</span>
           </button>
           <button class="btn btn-secondary btn-sm" @click="refreshMemory" :disabled="isRefreshing">
             <span v-if="isRefreshing" class="spinner"></span>

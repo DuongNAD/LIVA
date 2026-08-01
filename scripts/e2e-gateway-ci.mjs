@@ -12,7 +12,7 @@
 // **Đo lại 26/07/2026: sai.** Cho mọi biến model trỏ vào đường dẫn không tồn
 // tại rồi chạy → vẫn **8/8 đạt**. Lõi khởi động được mà không cần weight nào
 // (LLM autoload chỉ log WARN, TTS rơi xuống backend khác, STT/embedder tắt êm),
-// và cả 8 mục kiểm đều nói về giao thức chứ không về chất lượng model. Thứ duy
+// và cả 8 mục kiểm đều nói về giao thức/authorization chứ không về chất lượng model. Thứ duy
 // nhất thật sự cần là `vec0` — do npm `sqlite-vec` cung cấp, tức là `npm ci` đã
 // có sẵn trên CI.
 //

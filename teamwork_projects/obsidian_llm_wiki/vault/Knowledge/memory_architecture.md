@@ -3,7 +3,7 @@ title: "memory_architecture"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-06-21T02:21:19Z"
+last_update: "2026-07-31T00:00:00+07:00"
 ---
 
 # Knowledge: Memory Architecture
@@ -11,14 +11,21 @@ last_update: "2026-06-21T02:21:19Z"
 ## Executive Summary
 This document outlines the detailed memory architecture of the LIVA system (LIVA-UHM v2 — Consolidated Brain), covering memory layers L0/L1/L2/L3, ReflectionDaemon, and ConsolidationCron.
 
+Canonical as-built source: `docs/03-he-thong-con/memory.md`. The deeper L0–L3 sections below are
+target design unless the Rust Runtime Delta explicitly says they are implemented.
+
 ## Rust Runtime Delta — 2026-07-23
 
 The sections below describe the target LIVA-UHM design. The current Rust runtime has implemented only the producer boundary:
 
-- Every successfully embedded `conversation_turn` is written by `persist_conversation_event_vector()` as one atomic SQLite transaction across `events`, `vectors_meta`, `vectors_fts`, and `vec_idx`.
+- Every successfully embedded `conversation_turn` is written by `persist_conversation_event_vector()` as one atomic SQLite transaction across `events`, encrypted `vectors_meta.content`, and `vec_idx`.
 - Lineage invariant: `events.eventId == vectors_meta.vec_id` and `vectors_meta.source_event_ids == [eventId]`.
 - `domain` and `category` preserve the memory owner and conversation/audience scope.
-- The ledger row is metadata-only: `rawUserMsg` and `rawAiReply` remain `NULL`; plaintext retrieval content still exists in `vectors_meta`/FTS.
+- The ledger row is metadata-only: `rawUserMsg` and `rawAiReply` remain `NULL`. Conversation content is AES-GCM v2 ciphertext in `vectors_meta`; conversation FTS rows are forbidden. Dense retrieval selects candidates and decrypts content with the live key.
+- `agent_checkpoints.state_json` is encrypted with the same live data key. Boot migrates plaintext/default/old-key rows, removes legacy conversation FTS, and purges DB/WAL remnants with secure-delete, WAL truncate, and `VACUUM`.
+- Backup manifest v2 carries a non-secret key-ID. Restore rejects a mismatched recovery key before touching the target database.
+- Schema v7 adds a privacy deletion audit that stores only a deterministic scope hash, request id and row counts. `delete_conversation()` supports dry-run and atomically removes current event/vector/vec0/FTS/local-checkpoint/DLQ/source-fact projections; secure-delete plus WAL truncate reports whether byte-level cleanup completed. `memory:delete_conversation` is Dashboard-only and defaults to dry-run.
+- The messaging confirmation outbox is no longer process RAM: schema v6 stores encrypted message text, survives restart, orders with SQLite AUTOINCREMENT, consumes once under `BEGIN IMMEDIATE`, and retains locked ciphertext for key recovery.
 - New events start as `consolidation_status='pending'`. A projection consumer runs in both standalone and Tauri: batch 25 every 30 seconds (immediate first tick), `BEGIN IMMEDIATE`, validates type/lineage/scope, checkpoints atomically, retries three times, then writes `dlq_consolidation`.
 - In this runtime, `consolidated` means the existing L2 retrieval projection was validated and finalized. The worker does not call an LLM or create facts/relationships.
 - ReflectionDaemon, semantic consolidation, decay and L3 writers still do not exist.

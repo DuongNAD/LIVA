@@ -186,11 +186,7 @@ pub fn upsert(
     }
 }
 
-fn get_by_key(
-    conn: &Connection,
-    key: &str,
-    platform: Platform,
-) -> Result<Option<Contact>, String> {
+fn get_by_key(conn: &Connection, key: &str, platform: Platform) -> Result<Option<Contact>, String> {
     let sql = format!("SELECT {SELECT_COLS} FROM contacts WHERE lookup_key = ?1 AND platform = ?2");
     let mut stmt = conn
         .prepare(&sql)
@@ -348,7 +344,14 @@ mod tests {
     fn trung_ten_tra_ambiguous_chu_khong_doan_bua() {
         let conn = db();
         upsert(&conn, "Hiến", Platform::Telegram, "1", "ban cap 3").unwrap();
-        upsert(&conn, "Hiến", Platform::Messenger, "hien.nguyen", "dong nghiep").unwrap();
+        upsert(
+            &conn,
+            "Hiến",
+            Platform::Messenger,
+            "hien.nguyen",
+            "dong nghiep",
+        )
+        .unwrap();
 
         match resolve(&conn, "Hiến", None).unwrap() {
             Resolution::Ambiguous(v) => assert_eq!(v.len(), 2),
@@ -366,7 +369,10 @@ mod tests {
         let conn = db();
         let a = upsert(&conn, "Nam", Platform::Telegram, "111", "").unwrap();
         let b = upsert(&conn, "Nam", Platform::Telegram, "222", "sua so").unwrap();
-        assert_eq!(a.contact_id, b.contact_id, "sua so khong duoc tao nguoi moi");
+        assert_eq!(
+            a.contact_id, b.contact_id,
+            "sua so khong duoc tao nguoi moi"
+        );
         assert_eq!(b.handle, "222");
         assert_eq!(list(&conn, None).unwrap().len(), 1);
     }
@@ -388,6 +394,9 @@ mod tests {
         let conn = db();
         let c = upsert(&conn, "Nam", Platform::Telegram, "1", "").unwrap();
         assert!(delete(&conn, &c.contact_id).unwrap());
-        assert!(!delete(&conn, &c.contact_id).unwrap(), "xoa lan hai phai la false");
+        assert!(
+            !delete(&conn, &c.contact_id).unwrap(),
+            "xoa lan hai phai la false"
+        );
     }
 }

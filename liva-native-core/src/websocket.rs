@@ -1,12 +1,198 @@
-use crate::{AppState, handle_command, wake};
+use crate::{AppState, CommandPrincipal, authorize_command, handle_command_as, wake};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
 const MAX_WS_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_WS_MESSAGE_BYTES: usize = MAX_WS_TEXT_BYTES + 9;
+const MIN_WS_AUTH_TOKEN_BYTES: usize = 32;
+const MAX_WS_AUTH_TOKEN_BYTES: usize = 4096;
+const WS_SESSION_TTL: Duration = Duration::from_secs(30);
+const MAX_OUTSTANDING_WS_SESSIONS: usize = 64;
+const WAKE_PROBE_DIRECT_ACCEPT_SCORE: f32 = 0.90;
+
+/// The synthetic classifier is only allowed to wake Liva by itself when its
+/// confidence is exceptionally high. Scores between the model's candidate
+/// threshold and this safety threshold must still be confirmed by exact STT.
+fn wake_probe_classifier_direct_accept(score: Option<f32>, model_threshold: f32) -> bool {
+    let direct_threshold = model_threshold.max(WAKE_PROBE_DIRECT_ACCEPT_SCORE);
+    score.is_some_and(|value| value.is_finite() && value > direct_threshold)
+}
+
+#[derive(Serialize)]
+pub struct WebSocketSessionTicket {
+    pub token: String,
+    pub expires_in_ms: u64,
+}
+
+#[derive(Clone)]
+pub struct WebSocketSessionAuthority {
+    inner: Arc<Mutex<HashMap<[u8; 32], WebSocketSessionGrant>>>,
+    ttl: Duration,
+}
+
+struct WebSocketSessionGrant {
+    principal: CommandPrincipal,
+    expires_at: Instant,
+}
+
+impl Default for WebSocketSessionAuthority {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WebSocketSessionAuthority {
+    pub fn new() -> Self {
+        Self::with_ttl(WS_SESSION_TTL)
+    }
+
+    fn with_ttl(ttl: Duration) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+            ttl,
+        }
+    }
+
+    pub fn issue(&self, principal: CommandPrincipal) -> Result<WebSocketSessionTicket, String> {
+        if !matches!(
+            principal,
+            CommandPrincipal::WebSocketWidget | CommandPrincipal::WebSocketDashboard
+        ) {
+            return Err("principal không được cấp WebSocket session đặc quyền".to_string());
+        }
+
+        let now = Instant::now();
+        let mut grants = self
+            .inner
+            .lock()
+            .map_err(|_| "WebSocket session authority bị lỗi đồng bộ".to_string())?;
+        grants.retain(|_, grant| grant.expires_at > now);
+        if grants.len() >= MAX_OUTSTANDING_WS_SESSIONS {
+            return Err("đã đạt giới hạn WebSocket session đang chờ".to_string());
+        }
+
+        let (token, digest) = loop {
+            let mut raw = [0_u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut raw);
+            let token = hex::encode(raw);
+            let digest = websocket_session_digest(&token);
+            if !grants.contains_key(&digest) {
+                break (token, digest);
+            }
+        };
+        grants.insert(
+            digest,
+            WebSocketSessionGrant {
+                principal,
+                expires_at: now + self.ttl,
+            },
+        );
+
+        Ok(WebSocketSessionTicket {
+            token,
+            expires_in_ms: self.ttl.as_millis().min(u128::from(u64::MAX)) as u64,
+        })
+    }
+
+    fn consume(&self, token: &str) -> Result<CommandPrincipal, String> {
+        if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("WebSocket session không hợp lệ".to_string());
+        }
+        let digest = websocket_session_digest(token);
+        let mut grants = self
+            .inner
+            .lock()
+            .map_err(|_| "WebSocket session authority bị lỗi đồng bộ".to_string())?;
+        let grant = grants
+            .remove(&digest)
+            .ok_or_else(|| "WebSocket session không tồn tại hoặc đã được dùng".to_string())?;
+        if grant.expires_at <= Instant::now() {
+            return Err("WebSocket session đã hết hạn".to_string());
+        }
+        Ok(grant.principal)
+    }
+}
+
+fn websocket_session_digest(token: &str) -> [u8; 32] {
+    Sha256::digest(token.as_bytes()).into()
+}
+
+fn auth_token_for_ip(ip: IpAddr, configured: Option<&str>) -> Result<Option<String>, String> {
+    if ip.is_loopback() {
+        return Ok(None);
+    }
+
+    let token = configured.ok_or_else(|| {
+        "LIVA_WS_AUTH_TOKEN is required when LIVA_SERVER_HOST is non-loopback".to_string()
+    })?;
+    if !(MIN_WS_AUTH_TOKEN_BYTES..=MAX_WS_AUTH_TOKEN_BYTES).contains(&token.len())
+        || !token.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(format!(
+            "LIVA_WS_AUTH_TOKEN must contain {MIN_WS_AUTH_TOKEN_BYTES}..={MAX_WS_AUTH_TOKEN_BYTES} visible ASCII bytes"
+        ));
+    }
+    Ok(Some(token.to_string()))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
+}
+
+fn bearer_token_matches(header: Option<&str>, expected: Option<&str>) -> bool {
+    match expected {
+        None => true,
+        Some(expected) => header
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .is_some_and(|provided| constant_time_eq(provided.as_bytes(), expected.as_bytes())),
+    }
+}
+
+fn websocket_principal(
+    peer_ip: IpAddr,
+    query: Option<&str>,
+    sessions: &WebSocketSessionAuthority,
+) -> Result<CommandPrincipal, String> {
+    let mut session = None;
+    for pair in query.into_iter().flat_map(|query| query.split('&')) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key == "principal" {
+            return Err("WebSocket không chấp nhận principal do client tự khai".to_string());
+        }
+        if key == "session" && (value.is_empty() || session.replace(value).is_some()) {
+            return Err("WebSocket session bị thiếu hoặc khai báo lặp".to_string());
+        }
+    }
+
+    match session {
+        None => Ok(CommandPrincipal::WebSocketRemote),
+        Some(_) if !peer_ip.is_loopback() => {
+            Err("WebSocket session đặc quyền chỉ hợp lệ trên loopback".to_string())
+        }
+        Some(token) => sessions.consume(token),
+    }
+}
+
+fn authorize_websocket_event(principal: CommandPrincipal, event_name: &str) -> Result<(), String> {
+    let command = match event_name {
+        "user_voice_command" | "chat:completion" => "chat:completion",
+        command => command,
+    };
+    authorize_command(principal, command)
+}
 
 /// Số client WebSocket đang kết nối. Ô "Gateway" trên Dashboard trước đây in
 /// cứng `wsClients: 1` — tức là báo "có một client" ngay cả khi không có ai,
@@ -76,17 +262,34 @@ struct IpcResponse {
 pub struct WebSocketServer {
     listener: TcpListener,
     address: SocketAddr,
+    auth_token: Option<Arc<str>>,
+    sessions: WebSocketSessionAuthority,
 }
 
 impl WebSocketServer {
     pub async fn bind(address: &str) -> Result<Self, String> {
+        let configured_token = std::env::var("LIVA_WS_AUTH_TOKEN").ok();
+        Self::bind_with_auth(address, configured_token).await
+    }
+
+    pub async fn bind_with_auth(
+        address: &str,
+        configured_token: Option<String>,
+    ) -> Result<Self, String> {
         let listener = TcpListener::bind(address)
             .await
             .map_err(|error| format!("Failed to bind to {address}: {error}"))?;
         let address = listener
             .local_addr()
             .map_err(|error| format!("Failed to resolve WebSocket address: {error}"))?;
-        Ok(Self { listener, address })
+        let auth_token =
+            auth_token_for_ip(address.ip(), configured_token.as_deref())?.map(Arc::<str>::from);
+        Ok(Self {
+            listener,
+            address,
+            auth_token,
+            sessions: WebSocketSessionAuthority::new(),
+        })
     }
 
     pub async fn bind_from_env() -> Result<Self, String> {
@@ -97,6 +300,10 @@ impl WebSocketServer {
 
     pub fn local_addr(&self) -> SocketAddr {
         self.address
+    }
+
+    pub fn session_authority(&self) -> WebSocketSessionAuthority {
+        self.sessions.clone()
     }
 
     pub async fn run(self, state: Arc<AppState>) -> Result<(), String> {
@@ -117,10 +324,14 @@ impl WebSocketServer {
                     continue;
                 }
             };
-            let (stream, _) =
+            let (stream, peer_address) =
                 accepted.map_err(|error| format!("WebSocket accept failed: {error}"))?;
             let connection_state = Arc::clone(&state);
+            let connection_auth_token = self.auth_token.clone();
+            let connection_sessions = self.sessions.clone();
             connections.spawn(async move {
+                let principal_slot = Arc::new(std::sync::OnceLock::new());
+                let callback_principal_slot = Arc::clone(&principal_slot);
                 let reject = |status: StatusCode, message: &str| -> ErrorResponse {
                     HttpResponse::builder()
                         .status(status)
@@ -133,6 +344,14 @@ impl WebSocketServer {
                     if request.uri().path() != "/ws" {
                         return Err(reject(StatusCode::NOT_FOUND, "invalid path"));
                     }
+                    let authorization = request
+                        .headers()
+                        .get("authorization")
+                        .and_then(|value| value.to_str().ok());
+                    if !bearer_token_matches(authorization, connection_auth_token.as_deref()) {
+                        warn!("WebSocket rejected: authentication failed");
+                        return Err(reject(StatusCode::UNAUTHORIZED, "authentication required"));
+                    }
                     let origin = request
                         .headers()
                         .get("origin")
@@ -143,6 +362,23 @@ impl WebSocketServer {
                             origin.unwrap_or("<none>")
                         );
                         return Err(reject(StatusCode::FORBIDDEN, "origin not allowed"));
+                    }
+                    let principal = match websocket_principal(
+                        peer_address.ip(),
+                        request.uri().query(),
+                        &connection_sessions,
+                    ) {
+                        Ok(principal) => principal,
+                        Err(error) => {
+                            warn!("WebSocket rejected: {error}");
+                            return Err(reject(StatusCode::FORBIDDEN, "invalid session"));
+                        }
+                    };
+                    if callback_principal_slot.set(principal).is_err() {
+                        return Err(reject(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "principal already resolved",
+                        ));
                     }
                     Ok(response)
                 };
@@ -162,9 +398,14 @@ impl WebSocketServer {
                             return;
                         }
                     };
+                let principal = *principal_slot
+                    .get()
+                    .expect("successful WebSocket handshake resolves principal");
 
                 let _client = WsClientGuard::new();
-                if let Err(error) = handle_ws_connection(websocket, connection_state).await {
+                if let Err(error) =
+                    handle_ws_connection(websocket, connection_state, principal).await
+                {
                     error!("WebSocket connection error: {error}");
                 }
                 info!("WebSocket client disconnected");
@@ -201,6 +442,7 @@ fn decode_f32_payload(payload: &[u8]) -> Vec<f32> {
 async fn handle_ws_connection(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     state: Arc<AppState>,
+    principal: CommandPrincipal,
 ) -> Result<(), String> {
     use crate::webrtc::frame::{
         OP_AUTH_HANDSHAKE, OP_FLUSH, OP_MIC_IN, OP_WAKE_PROBE, SpeakerEpochGate, VoiceFrame,
@@ -371,9 +613,9 @@ async fn handle_ws_connection(
                             // audio to và sạch, ASR vẫn không ra chữ.
                             let best_score = wake_gate.score_clip(&samples_vec);
                             let model_threshold = wake_gate.model_threshold();
-                            let clip_score = best_score
-                                .clone()
-                                .filter(|(_, score)| *score > model_threshold);
+                            let clip_score = best_score.clone().filter(|(_, score)| {
+                                wake_probe_classifier_direct_accept(Some(*score), model_threshold)
+                            });
 
                             // ── Tầng 2: STT + so cụm từ ──
                             // Vẫn chạy khi tầng 1 trượt: classifier là mô hình
@@ -435,10 +677,13 @@ async fn handle_ws_connection(
                                     let rms = (samples_vec.iter().map(|s| s * s).sum::<f32>()
                                         / samples_vec.len().max(1) as f32)
                                         .sqrt();
+                                    let direct_threshold =
+                                        model_threshold.max(WAKE_PROBE_DIRECT_ACCEPT_SCORE);
                                     let classifier = match &best_score {
-                                        Some((name, score)) => {
-                                            format!("{} {:.3}/{:.2}", name, score, model_threshold)
-                                        }
+                                        Some((name, score)) => format!(
+                                            "{} {:.3} (candidate {:.2}, direct {:.2})",
+                                            name, score, model_threshold, direct_threshold
+                                        ),
                                         None => "không nạp được".to_string(),
                                     };
                                     info!(
@@ -459,7 +704,9 @@ async fn handle_ws_connection(
                                         "payload": {
                                             "source": "widget_probe",
                                             "tier": if clip_score.is_some() { "classifier" } else { "stt" },
-                                            "score": clip_score.as_ref().map(|(_, s)| *s),
+                                            // Luon tra diem tho de UI hien thi dung muc phan biet,
+                                            // ke ca khi probe bi tu choi hoac phai qua STT.
+                                            "score": best_score.as_ref().map(|(_, s)| *s),
                                             // Cho panel chẩn đoán thấy nó NGHE ra gì —
                                             // không có cái này thì "sao không thức" là
                                             // một câu hỏi không tài nào trả lời được.
@@ -609,6 +856,22 @@ async fn handle_ws_connection(
                         && let Some(event_str) = legacy_val["event"].as_str()
                     {
                         let event_name = event_str.to_string();
+                        if let Err(error) = authorize_websocket_event(principal, &event_name) {
+                            warn!("WebSocket event '{}' bị từ chối: {}", event_name, error);
+                            let _ = text_tx
+                                .send(
+                                    serde_json::json!({
+                                        "event": format!("{}_error", event_name),
+                                        "payload": {
+                                            "command": event_name,
+                                            "error": error
+                                        }
+                                    })
+                                    .to_string(),
+                                )
+                                .await;
+                            continue;
+                        }
                         let payload = legacy_val["payload"].clone();
                         let state_clone = state.clone();
                         let text_tx_clone = text_tx.clone();
@@ -617,7 +880,8 @@ async fn handle_ws_connection(
                         tokio::spawn(async move {
                             match event_name.as_str() {
                                 "get_config" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_config",
                                         payload,
@@ -638,7 +902,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_ai_config" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_ai_config",
                                         payload,
@@ -659,7 +924,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_voice_status" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_voice_status",
                                         payload,
@@ -680,7 +946,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_voice_profiles" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_voice_profiles",
                                         payload,
@@ -701,7 +968,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_system_status" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_system_status",
                                         payload,
@@ -722,7 +990,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_skills_list" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_skills_list",
                                         payload,
@@ -743,7 +1012,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_user_profile" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_user_profile",
                                         payload,
@@ -764,7 +1034,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_tasks" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_tasks",
                                         payload,
@@ -785,7 +1056,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_avatar_models" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_avatar_models",
                                         payload,
@@ -806,7 +1078,8 @@ async fn handle_ws_connection(
                                     }
                                 }
                                 "get_memory_data" => {
-                                    if let Ok(res) = handle_command(
+                                    if let Ok(res) = handle_command_as(
+                                        principal,
                                         state_clone,
                                         "get_memory_data",
                                         payload,
@@ -930,8 +1203,10 @@ async fn handle_ws_connection(
                                     // Câu trả lời ở đây soạn sẵn, KHÔNG cho LLM diễn đạt lại: model
                                     // 2B rất dễ biến "chưa gửi" thành "đã gửi rồi nhé", mà đây đúng
                                     // là chỗ không được nói sai.
-                                    if let crate::agent::graph::Intent::SendMessage { recipient, body } =
-                                        crate::agent::graph::route_intent(&user_text)
+                                    if let crate::agent::graph::Intent::SendMessage {
+                                        recipient,
+                                        body,
+                                    } = crate::agent::graph::route_intent(&user_text)
                                     {
                                         let cau = if body.trim().is_empty() {
                                             format!("Bạn muốn nhắn gì cho {recipient}?")
@@ -946,20 +1221,36 @@ async fn handle_ws_connection(
                                             )
                                             .await
                                             {
-                                                Ok(v) if v.get("needsConfirm").and_then(|b| b.as_bool()) == Some(true) => {
+                                                Ok(v)
+                                                    if v.get("needsConfirm")
+                                                        .and_then(|b| b.as_bool())
+                                                        == Some(true) =>
+                                                {
                                                     format!(
                                                         "Mình đã soạn tin cho {}: \"{}\". Bạn đọc lại rồi bấm xác nhận nhé — mình chưa gửi.",
-                                                        v.pointer("/draft/display_name").and_then(|s| s.as_str()).unwrap_or(&recipient),
-                                                        v.pointer("/draft/text").and_then(|s| s.as_str()).unwrap_or(&body),
+                                                        v.pointer("/draft/display_name")
+                                                            .and_then(|s| s.as_str())
+                                                            .unwrap_or(&recipient),
+                                                        v.pointer("/draft/text")
+                                                            .and_then(|s| s.as_str())
+                                                            .unwrap_or(&body),
                                                     )
                                                 }
-                                                Ok(v) if v.get("ambiguous").and_then(|b| b.as_bool()) == Some(true) => {
-                                                    format!("Có nhiều người tên {recipient} trong danh bạ. Bạn muốn nhắn cho ai?")
+                                                Ok(v)
+                                                    if v.get("ambiguous")
+                                                        .and_then(|b| b.as_bool())
+                                                        == Some(true) =>
+                                                {
+                                                    format!(
+                                                        "Có nhiều người tên {recipient} trong danh bạ. Bạn muốn nhắn cho ai?"
+                                                    )
                                                 }
                                                 Ok(_) => format!(
                                                     "Chưa có ai tên {recipient} trong danh bạ nên mình chưa nhắn được. Bạn thêm liên hệ này trước nhé."
                                                 ),
-                                                Err(e) => format!("Mình không soạn được tin cho {recipient}: {e}"),
+                                                Err(e) => format!(
+                                                    "Mình không soạn được tin cho {recipient}: {e}"
+                                                ),
                                             }
                                         };
 
@@ -1154,7 +1445,8 @@ async fn handle_ws_connection(
                                     // "cần build release" ngay lập tức, nhưng
                                     // người dùng phải đợi 120 giây để nhận một
                                     // thông báo sai.
-                                    match handle_command(
+                                    match handle_command_as(
+                                        principal,
                                         state_clone,
                                         &event_name,
                                         payload,
@@ -1211,7 +1503,8 @@ async fn handle_ws_connection(
                     let req_id_clone = req_id.clone();
 
                     tokio::spawn(async move {
-                        let result = handle_command(
+                        let result = handle_command_as(
+                            principal,
                             state_clone,
                             &req.command,
                             req.payload,
@@ -1253,4 +1546,179 @@ async fn handle_ws_connection(
     send_task.abort();
     actor_handle.abort();
     Ok(())
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::{
+        WebSocketSessionAuthority, auth_token_for_ip, authorize_websocket_event,
+        bearer_token_matches, wake_probe_classifier_direct_accept, websocket_principal,
+        websocket_session_digest,
+    };
+    use crate::CommandPrincipal;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    #[test]
+    fn non_loopback_bat_buoc_token_du_manh() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        assert_eq!(auth_token_for_ip(loopback, None).unwrap(), None);
+
+        let lan = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
+        assert!(auth_token_for_ip(lan, None).is_err());
+        assert!(auth_token_for_ip(lan, Some("too-short")).is_err());
+        assert_eq!(
+            auth_token_for_ip(lan, Some(&"x".repeat(32))).unwrap(),
+            Some("x".repeat(32))
+        );
+    }
+
+    #[test]
+    fn bearer_auth_fail_closed_va_khong_chap_nhan_prefix() {
+        let expected = "0123456789abcdef0123456789abcdef";
+        assert!(bearer_token_matches(
+            Some("Bearer 0123456789abcdef0123456789abcdef"),
+            Some(expected)
+        ));
+        assert!(!bearer_token_matches(None, Some(expected)));
+        assert!(!bearer_token_matches(
+            Some("Bearer 0123456789abcdef"),
+            Some(expected)
+        ));
+        assert!(!bearer_token_matches(
+            Some("Bearer 0123456789abcdef0123456789abcdef-extra"),
+            Some(expected)
+        ));
+        assert!(bearer_token_matches(None, None));
+    }
+
+    #[test]
+    fn loopback_chi_nhan_principal_da_khai_bao() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let sessions = WebSocketSessionAuthority::new();
+        assert!(websocket_principal(loopback, Some("principal=widget"), &sessions).is_err());
+        assert!(websocket_principal(loopback, Some("principal=dashboard"), &sessions).is_err());
+        assert_eq!(
+            websocket_principal(loopback, None, &sessions).unwrap(),
+            CommandPrincipal::WebSocketRemote
+        );
+        assert!(websocket_principal(loopback, Some("principal=admin"), &sessions).is_err());
+    }
+
+    #[test]
+    fn client_ngoai_loopback_khong_the_nang_quyen_bang_query() {
+        let lan = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 12));
+        let sessions = WebSocketSessionAuthority::new();
+        assert!(websocket_principal(lan, Some("principal=dashboard"), &sessions).is_err());
+        let ticket = sessions
+            .issue(CommandPrincipal::WebSocketDashboard)
+            .expect("issue dashboard ticket");
+        assert!(
+            websocket_principal(lan, Some(&format!("session={}", ticket.token)), &sessions)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn session_ticket_ngan_han_mot_lan_va_khong_luu_plaintext() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let sessions = WebSocketSessionAuthority::new();
+        let ticket = sessions
+            .issue(CommandPrincipal::WebSocketDashboard)
+            .expect("issue dashboard ticket");
+        assert_eq!(ticket.token.len(), 64);
+        assert!(ticket.token.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert!(
+            sessions
+                .inner
+                .lock()
+                .unwrap()
+                .contains_key(&websocket_session_digest(&ticket.token)),
+            "authority phải lưu digest thay vì plaintext ticket"
+        );
+        assert_eq!(
+            websocket_principal(
+                loopback,
+                Some(&format!("session={}", ticket.token)),
+                &sessions,
+            )
+            .unwrap(),
+            CommandPrincipal::WebSocketDashboard
+        );
+        assert!(
+            websocket_principal(
+                loopback,
+                Some(&format!("session={}", ticket.token)),
+                &sessions,
+            )
+            .is_err(),
+            "ticket đã dùng phải bị từ chối replay"
+        );
+    }
+
+    #[test]
+    fn session_ticket_het_han_va_principal_khong_dac_quyen_bi_tu_choi() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let sessions = WebSocketSessionAuthority::with_ttl(Duration::ZERO);
+        let ticket = sessions
+            .issue(CommandPrincipal::WebSocketWidget)
+            .expect("issue widget ticket");
+        assert!(
+            websocket_principal(
+                loopback,
+                Some(&format!("session={}", ticket.token)),
+                &sessions,
+            )
+            .is_err()
+        );
+        assert!(sessions.issue(CommandPrincipal::WebSocketRemote).is_err());
+        let duplicate = sessions
+            .issue(CommandPrincipal::WebSocketWidget)
+            .expect("issue duplicate-query ticket");
+        assert!(
+            websocket_principal(
+                loopback,
+                Some(&format!(
+                    "session={}&session={}",
+                    duplicate.token, duplicate.token
+                )),
+                &sessions,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn legacy_event_cung_bi_phan_quyen() {
+        assert!(
+            authorize_websocket_event(CommandPrincipal::WebSocketRemote, "get_memory_data")
+                .is_err()
+        );
+        assert!(
+            authorize_websocket_event(CommandPrincipal::WebSocketRemote, "user_voice_command")
+                .is_ok()
+        );
+        assert!(
+            authorize_websocket_event(CommandPrincipal::WebSocketWidget, "update_config").is_err()
+        );
+        assert!(
+            authorize_websocket_event(CommandPrincipal::WebSocketDashboard, "update_config")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn wake_probe_diem_lung_chung_khong_duoc_tu_danh_thuc() {
+        assert!(wake_probe_classifier_direct_accept(Some(0.95), 0.58));
+        assert!(!wake_probe_classifier_direct_accept(Some(0.70), 0.58));
+        assert!(!wake_probe_classifier_direct_accept(Some(0.58), 0.58));
+        assert!(!wake_probe_classifier_direct_accept(None, 0.58));
+        assert!(!wake_probe_classifier_direct_accept(Some(f32::NAN), 0.58));
+    }
+
+    #[test]
+    fn wake_probe_ton_trong_nguong_model_cao_hon_nguong_an_toan() {
+        assert!(!wake_probe_classifier_direct_accept(Some(0.95), 0.96));
+        assert!(wake_probe_classifier_direct_accept(Some(0.97), 0.96));
+    }
 }

@@ -124,7 +124,20 @@ Object.defineProperty(globalThis, "Worker", {
   configurable: true,
 });
 
-import { useVoicePipeline } from "../../src/composables/useVoicePipeline";
+import {
+  useVoicePipeline,
+  wakeConfidencePercent,
+} from "../../src/composables/useVoicePipeline";
+
+describe("wakeConfidencePercent", () => {
+  it("hien thi diem classifier that va chan gia tri loi", () => {
+    expect(wakeConfidencePercent(0.734)).toBe("73.4%");
+    expect(wakeConfidencePercent(2)).toBe("100.0%");
+    expect(wakeConfidencePercent(-1)).toBe("0.0%");
+    expect(wakeConfidencePercent(undefined)).toBe("0.0%");
+    expect(wakeConfidencePercent(Number.NaN)).toBe("0.0%");
+  });
+});
 
 describe("useVoicePipeline — Composable State & Lifecycle", () => {
   beforeEach(() => {

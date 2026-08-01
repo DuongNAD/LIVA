@@ -1,6 +1,6 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-08-01
+updated: 2026-08-02
 commit: 32fd1f5
 stale-ok: 98efc55
 status: living
@@ -65,7 +65,7 @@ Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong 
 
 | Thứ tự | Việc | Vì sao ở vị trí này | Bắt đầu từ đâu |
 |---|---|---|---|
-| ~~**0**~~ | ~~Đo lại đủ 9 dòng đường cơ sở §1 tại HEAD~~ | ✅ **XONG 29/07/2026** — đo lại **11 cổng** tại `c6ec120` trong một phiên. Không có hồi quy nào ở mã nguồn (test 405 → **554**, coverage nhích lên cả bốn chỉ số); **một hồi quy ở tài liệu**: `docs-check` đỏ 6 lỗi, đã vá cùng phiên | Bảng mới ở [§1](#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120-đo-lại-đủ-thay-bảng-2607) |
+| ~~**0**~~ | ~~Đo lại đủ 9 dòng đường cơ sở §1 tại HEAD~~ | ✅ **XONG 29/07/2026** — đo lại **11 cổng** tại `c6ec120` trong một phiên. Không có hồi quy nào ở mã nguồn (test 405 → **554**, coverage nhích lên cả bốn chỉ số); **một hồi quy ở tài liệu**: `docs-check` đỏ 6 lỗi, đã vá cùng phiên | Bảng mới ở [§1](#1-đường-cơ-sở-đã-đo--02082026-tại-260c643-thay-bảng-2907) |
 | **1** | **U2 — installer + thử trên máy sạch** | Mục cao nhất chưa gạch của nhóm A, và A chặn beta | [§U2](#u2--installer-hiện-hành-và-thử-trên-máy-sạch). Nhớ: **U1c cho kết quả ÂM TÍNH**, cuBLAS là phụ thuộc cứng ⇒ tính gói **~830 MB**, đừng lên kế hoạch cho một con số nhỏ hơn |
 | **2** | **U16 — quay video** | Mã và dụng cụ đo xong rồi; **chỉ bạn quay được**, không ai làm hộ | Kịch bản quay đã viết sẵn trong [§U16](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí). Cần **build release + CUDA** (vision 1,2 s); trên debug `vision:ask` hỏng có chủ đích |
 | **3** | **U3 (màn hình UI) + U8 (bảng năng lực theo profile)** | Hai mục ◐ còn sót đuôi nhỏ, gỡ nốt cho nhóm A/C sạch | `preflight` CLI đã xong; còn màn hình. U8: `boot.rs` đã xong, còn bảng ở `01-ban-ve/01` + `02-van-hanh/03` |
@@ -92,27 +92,36 @@ Sau khi ghim, chạy `npx gitnexus analyze` là **incremental 52 s** thay vì re
 
 ---
 
-## 1. Đường cơ sở đã đo — **29/07/2026 tại `c6ec120`** (đo lại đủ, thay bảng 26/07)
+## 1. Đường cơ sở đã đo — **02/08/2026 tại `260c643`** (thay bảng 29/07)
 
 Tất cả các số dưới đây do **chạy thật**, không trích từ tài liệu. Lệnh kèm theo để tái lập.
 
-Bảng cũ ngày 26/07 tự khai rằng **5 trong 9 dòng đo tại `ce1697a`** với ~1 380 dòng chưa commit, và tự đặt việc "đo lại đủ chín dòng tại HEAD" làm bước 0. Bảng này là kết quả của bước đó, **đo trong một phiên, cùng một cây làm việc** — hết cảnh ghép số từ nhiều commit.
+Bảng này đo sau khi hạ **253 file** đang treo trong cây làm việc thành ba lát commit (`98efc55` mã nguồn · `e6391eb` tài liệu · `260c643` vá cuối), và **CI đã xác nhận 25/25 xanh trên `260c643`** — nên đây là lần đầu đường cơ sở được đo ở một trạng thái mà *cả* máy dev *và* runner sạch cùng đồng ý. Bảng 29/07 đo với 3 file `.rs` chưa commit; bảng này không có ngoại lệ nào.
 
-| Cổng | Lệnh | Kết quả 29/07/2026 | So 26/07 |
+| Cổng | Lệnh | Kết quả 02/08/2026 | So 29/07 |
 |---|---|---|---|
-| Test Rust | `cargo test --no-fail-fast` (gốc workspace) | **564 pass · 0 fail · 2 ignored**, 20 binary test | ↑ từ 405 |
+| Test Rust | `cargo test --no-fail-fast` (gốc workspace) | **625 pass · 0 fail · 2 ignored**, 31 binary test | ↑ từ 564 / 20 binary |
 | Clippy (gate cứng) | `cargo clippy --all-targets --message-format=short` rồi đếm `": warning:"` | **0 warning** | = |
+| **Format** (gate MỚI) | `cargo fmt --all -- --check` | **0** | mới có — xem [§gate mới](../02-van-hanh/04-kiem-thu-va-ci.md) |
 | Typecheck | `npx vue-tsc --noEmit -p tsconfig.app.json` (trong `liva-ui/`) | **0 lỗi** | = |
 | ESLint | `npx eslint . --max-warnings 0` | **0 warning** | = |
-| Test + Coverage UI | `npm run test:coverage -w liva-ui` | **273 pass / 28 file** — **63,29 % stmt · 46,56 % branch · 50,85 % func · 65,28 % line** | ↑ nhẹ cả bốn |
-| Lỗ hổng phụ thuộc | `npm audit --omit=dev --audit-level=high` | **0 vulnerabilities** | (chưa đo trước đó) |
-| Vỏ Tauri | `cargo check -p liva-desktop` | **0** | (chưa đo trước đó) |
-| Module thử nghiệm | `cargo check --all-targets --features experimental` | **0 lỗi** | (chưa đo trước đó) |
-| Sức khoẻ tài liệu | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` | **❌ ĐỎ khi vào phiên — 6 lỗi**; xanh sau khi vá trong chính phiên này | **HỒI QUY, đã xử lý** |
-| Trích dẫn tài liệu | `node scripts/docs-citations.mjs --max-unchecked=508` | pass — 507/2 149 không kiểm được, **0 neo hỏng** | = |
-| E2E WebSocket | `node scripts/e2e-gateway-ci.mjs` (tự dựng + tự chạy binary debug) | **8/8 đạt**, `vision:ask` hồi âm 969 ms | = |
-| E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | *chưa đo lại phiên này* — số gần nhất **6/6** (26/07) | không đo |
-| **TTFT** ([U9](#u9--một-con-số-ttft-đo-được)) | `.\target\release\ttft_bench.exe 20` | **p50 667 ms CPU · 18 ms CUDA** (p95 837 / 21 ms; thông lượng 18,4 / 193,9 token/s) | mới có |
+| Test + Coverage UI | `npm run test:coverage -w liva-ui` | **287 pass / 29 file** — **68,15 % stmt · 50,01 % branch · 54,33 % func · 70,37 % line** | ↑ cả bốn |
+| Lỗ hổng npm | `npm audit --audit-level=high` (**toàn workspace**, không còn `--omit=dev`) | **0 vulnerabilities** | phạm vi rộng hơn trước |
+| **Lỗ hổng Rust** (gate MỚI) | `cargo audit` (cargo-audit ghim `0.22.2`) | **exit 0** — 0 vulnerability trên 857 crate; **22 warning** `unmaintained`/`unsound` | mới có |
+| Vỏ Tauri | `cargo check -p liva-desktop` | **0** | = |
+| **Test vỏ Tauri** (gate MỚI) | `cargo test -p liva-desktop` | **xanh** (qua CI bước 22) | mới có |
+| Module thử nghiệm | `cargo check --all-targets --features experimental` | **0 lỗi** | = |
+| Sức khoẻ tài liệu | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` | **exit 0** — và nay kiểm cả **78 neo `#anchor`** | cổng mạnh hơn |
+| Trích dẫn tài liệu | `node scripts/docs-citations.mjs --max-unchecked=508` | pass — 56 tài liệu · 1 086 trích dẫn, **207 không kiểm được**, **0 neo hỏng** | phạm vi đổi, xem ghi chú |
+| E2E WebSocket | `node scripts/e2e-gateway-ci.mjs` (tự dựng + tự chạy binary debug) | **8/8 đạt** | = |
+| E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | *chưa đo lại* — số gần nhất **6/6** (26/07) | không đo |
+| **TTFT** ([U9](#u9--một-con-số-ttft-đo-được)) | `.\target\release\ttft_bench.exe 20` | *chưa đo lại* — số gần nhất **p50 667 ms CPU · 18 ms CUDA** (29/07) | không đo |
+
+**Ba dòng KHÔNG đo lại phiên này, nói rõ thay vì bỏ lửng:** E2E bộ nhớ (cần model embedding + DB trên đĩa), TTFT (cần build release + CUDA), và **mật độ `.unwrap()`** — dòng này bị bỏ có chủ đích, xem ghi chú dưới bảng quy mô.
+
+⚠️ **Đừng so thẳng 1 086 trích dẫn với 2 149 của bảng 29/07.** Cây tài liệu v2 vào ở `e6391eb` thay nhiều tài liệu cũ bằng tài liệu mới có ít toạ độ `file:dòng` hơn (dùng neo ký hiệu nhiều hơn), và 11 snapshot FREEZE bị bỏ qua theo `document-inventory.json`. Con số nhỏ đi **không** có nghĩa là mất trích dẫn; điều đáng theo dõi là **0 neo hỏng**, không phải tổng.
+
+⚠️ **`cargo audit` chỉ đỏ vì *vulnerability*.** 22 warning `unmaintained`/`unsound` đến từ cây Tauri/GTK và **trôi theo RustSec chứ không theo mã LIVA** — con số này đổi *không* tự động là hồi quy. [A31-01](02-no-ky-thuat-va-rui-ro.md) ghi 21 khi đo ngày 31/07; chênh 1 là advisory mới công bố. Đừng đọc nó như hạn ngạch phải hạ.
 
 **Hồi quy đã tìm ra và nguyên nhân.** `docs-check` đỏ ở 6 tài liệu tầng `03-danh-gia`, do `241e8f9` — **67 file, +5 280 dòng, gộp CẢ mã nguồn lẫn tài liệu trong một commit**. Đúng cái bẫy §0.2 mục 1 viết ngày 27/07, vi phạm hai commit sau đó. `docs-check` đọc `git log base..HEAD` nên đây là **đỏ ở commit**, không phải đỏ ở cây làm việc: CI trên `main` fail ở bước 3/19.
 
@@ -121,6 +130,14 @@ Bảng cũ ngày 26/07 tự khai rằng **5 trong 9 dòng đo tại `ce1697a`** 
 Đã vá bằng cách tách hai thứ bản cũ trộn làm một: **phép đo** chuyển vào *bên trong* closure (loại hẳn độ trễ lên lịch khỏi con số), còn **hàng rào treo** bên ngoài nới lên 10 s — nó không phải phép đo, vì chế độ hỏng cần bắt là chặn **vô hạn** nên hạn nào cũng bắt được. Kiểm chứng: 6 lần chạy cả suite liên tiếp đều xanh.
 
 **Và một test nhấp nháy THỨ HAI, chỉ lộ ra trên CI** — `system_status_tests::khong_do_duoc_thi_null_chu_khong_phai_khong` (`lib.rs`). Nó đòi `cpuUsage` phải `null` **hoặc > 0**, rồi đỏ với `được: Number(0)`. Nhưng `cpuUsage` là tải CPU **ngoài** LIVA (trừ phần LIVA tự dùng qua `GetProcessTimes`), nên trên một runner rảnh **0 là số đo THẬT**. Test đã gộp *"0 vì không đo được"* với *"0 vì đúng bằng 0"* ⇒ xanh trên máy dev (luôn có gì chạy nền), đỏ trên máy rảnh. Vá bằng cách tách theo **đơn vị**: phần trăm thì `null` hoặc `0..=100` (cận **trên** là thứ mới, bắt được lớp lỗi đảo cặp ở bẫy 1 của U3); `totalMemory` giữ nguyên `> 0` vì ở đó 0 đúng là số giả; `freeMemory` đổi sang bất biến mạnh hơn — phải **≤ `totalMemory`**.
+
+**🔴 Và một test nhấp nháy THỨ BA, 01/08/2026 — cùng họ, khác cơ chế.** `db::db_tests::tests::tu_choi_db_tu_tuong_lai` đỏ trên CI tại `bc20eb1` với `os error 32` ("file being used by another process") ở khâu **dọn file tạm**, không phải ở khâu khẳng định. **Bằng chứng nó là nhấp nháy chứ không phải hồi quy, và bằng chứng này là loại tốt nhất có thể có:** `bc20eb1` chỉ đổi `CLAUDE.md` + một file `docs/`, mã Rust **byte-identical** với `e6391eb` vừa xanh. Cùng mã, một lần xanh một lần đỏ.
+
+Cơ chế: `DatabasePool::new` trả `Err`, nhưng r2d2 giữ pool sau một `Arc` dùng chung với thread bảo trì của nó ⇒ kết nối SQLite **đóng trễ**, không đồng bộ với lúc hàm trả về. Trên Windows, xoá file còn handle mở là lỗi cứng. Bản cũ gọi `remove_file` một phát nên ăn may theo tải máy.
+
+Vá ở `f5cbd26` bằng đúng nguyên tắc của hai ca trước — **tách phép khẳng định khỏi phần không phải phép đo**: `assert!` giữ nguyên, phần dọn dẹp chuyển sang `xoa_file_test()` retry giới hạn 40 × 50 ms, và **vẫn panic khi hết hạn** vì một handle rò *vĩnh viễn* là lỗi thật. Retry nuốt độ trễ đóng, không nuốt rò rỉ.
+
+⚠️ **Bản vá này mới có MỘT điểm dữ liệu** (`260c643` xanh). Một cuộc đua thì thắng phần lớn thời gian — `e6391eb` cũng đã thắng trước khi `bc20eb1` thua. Nếu nó đỏ lại ở đúng test đó thì giả thuyết "handle đóng trễ" **SAI** và phải đào lại; **đừng nới thêm thời gian chờ**, vì nới ngưỡng cho một cổng nhấp nháy đúng là cách biến nó thành cổng vô dụng.
 
 **Vì sao ghi vào đây thay vì lặng lẽ sửa:** một cổng đỏ ngẫu nhiên **tệ hơn không có cổng**, vì nó dạy người ta bấm "chạy lại" — và thói quen đó sẽ nuốt luôn lần đỏ thật đầu tiên. Đây cũng là lý do phải phân biệt "test đỏ" với "test nhấp nháy" ngay khi thấy, chứ đừng chạy lại rồi đi tiếp.
 
@@ -140,9 +157,15 @@ Worktree tái hiện **chính xác** thứ CI thấy — kể cả gitlink rỗn
 
 **⚠️ Một bẫy đo mới, chưa có trong §0.2 — chạy `cargo test` và `cargo clippy` SONG SONG trên cùng `target/`.** Lần chạy đầu ra một loạt `error: crate 'moxcms' required to be available in rlib format, but was not found in this form` cộng `can't find crate for 'liva_native_core'` — trông y hệt build gãy ở HEAD. Không phải: `clippy` sinh `.rmeta` thay cho `.rlib`, hai tiến trình giẫm lên fingerprint của nhau. Chạy tuần tự thì sạch tuyệt đối. **Nhận dạng:** lỗi nói về *định dạng* crate phụ thuộc chứ không về mã nguồn của bạn ⇒ nghi công cụ trước, đừng nghi code. Cùng họ với bẫy §0.2 mục 3.
 
-**Quy mô mã nguồn** (đếm cùng ngày): Rust `liva-native-core/src` **111 file · 41 912 dòng**; `liva-ui/src` **50 file · 17 452 dòng**; vỏ Tauri `liva-desktop/src-tauri/src` **805 dòng**; test Rust `tests/` 3 593 dòng; test UI 5 073 dòng; tài liệu `docs/` **23 581 dòng / 67 file**. **858 crate** trong `Cargo.lock`. `handle_command` còn **21 nhánh** trong `lib.rs` sau khi [U10](#u10--tách-handle_command) tách **11 module `commands/` · 2 369 dòng**.
+**Quy mô mã nguồn** (đếm 02/08/2026 tại `260c643`): Rust `liva-native-core/src` **123 file · 46 733 dòng**; `liva-ui/src` **50 file · 17 517 dòng**; vỏ Tauri `liva-desktop/src-tauri/src` **1 033 dòng**; test Rust `tests/` **19 file · 5 196 dòng**; tài liệu `docs/` **96 file · 28 551 dòng**. **857 crate** trong `Cargo.lock`.
 
-**Mật độ panic:** `.unwrap()` xuất hiện **96 lần trong code production** (106 lúc vào phiên, −10 sau [U7](#u7--dọn-unwrap-trên-đường-thoại)) và ~436 lần trong khối `#[cfg(test)]`.
+**[U10](#u10--tách-handle_command) đã đi xa hơn bảng cũ ghi.** `handle_command` nay **140 dòng** trong `lib.rs`, định tuyến **8 miền qua `::owns()`** (`config`, `integrations`, `llm`, `memory`, `messaging`, `setup`, `skill_store`, `task`) và chỉ còn **5 nhánh chuỗi inline**. Thư mục `commands/` là **12 module · 2 890 dòng**. `lib.rs` **1 550** · `db.rs` **1 641** · `main.rs` **266** dòng.
+
+**Hotspot còn lại** — 12 file > 1 000 dòng trong `liva-native-core/src` + `liva-ui/src` (phạm vi đếm này hẹp hơn phạm vi của [A31-04](02-no-ky-thuat-va-rui-ro.md), nên **hai con số không so thẳng được**): `agent/graph.rs` 1 871 · `WidgetApp.vue` 1 837 · `MemoryViewer.vue` 1 773 · `websocket.rs` 1 724 · `db.rs` 1 641 · `lib.rs` 1 550 · `llm/tool_calling.rs` 1 537 · `tts/vieneu/mod.rs` 1 167.
+
+**Mật độ panic — số CŨ, đo 29/07 tại `c6ec120`, KHÔNG đo lại ở `260c643`:** `.unwrap()` xuất hiện **96 lần trong code production** (106 lúc vào phiên 29/07, −10 sau [U7](#u7--dọn-unwrap-trên-đường-thoại)) và ~436 lần trong khối `#[cfg(test)]`.
+
+**Vì sao cố ý không đo lại.** `98efc55` thêm 12 file `.rs` vào `src/` (46 733 dòng, +4 821), nên con số 96 gần như chắc chắn đã đổi. Nhưng chính đoạn dưới đây kết luận mật độ `unwrap()` là **chỉ số TỆ** cho độ bền, và đo lại một chỉ số tệ chỉ tạo ra một con số phải bảo trì. Nếu phiên sau cần nó, hãy đo **kèm phân loại** (bao nhiêu là `Regex::new(<hằng>)`, bao nhiêu chạm đầu vào người dùng) chứ đừng chỉ đếm — đếm trần thì con số mới cũng vô dụng như con số cũ.
 
 ⚠️ **Con số này chỉ có nghĩa khi đếm bằng bộ đếm phân biệt được `#[cfg(test)]` *và* bỏ comment.** Grep phẳng cho **524** — trộn lẫn code production với test, mà §9 lại cấm dọn unwrap trong test, nên số đó không dùng để nghiệm thu được. Bộ đếm cũng phải **cắt comment cuối dòng trước khi đếm**: một doc-comment *nhắc tới* `.unwrap()` sẽ bị tính thành một điểm panic — đúng lỗi đã xảy ra khi thêm doc-comment cho `doc_cache` trong `vieneu/g2p.rs`, làm số đếm cao hơn thực tế 1 đơn vị và suýt biến thành "còn sót một chỗ chưa sửa".
 
@@ -153,7 +176,7 @@ Worktree tái hiện **chính xác** thứ CI thấy — kể cả gitlink rỗn
 **Ba điều kiện đo cần biết để không hiểu nhầm số trên:**
 
 1. Đo trên **build debug**. Bản release có sẵn từ 26/07/2026 ([U1](#u1--build-release-và-kiểm-visionask-thật)): `target/release/liva-native-core.exe`, và `e2e-gateway.mjs` trên đó cũng **8/8** — khác biệt duy nhất là `vision:ask` trả mô tả thật thay vì lỗi "requires a release build". Trên debug, `vision:ask` trả **lỗi trong 969 ms**; đó là hành vi đúng và có chủ đích, không phải hỏng.
-2. **Cây làm việc lúc đo có 3 file `.rs` chưa commit** (`integrations/messenger.rs`, `wake.rs`, `websocket.rs` — tổng ~380 dòng). Mọi cổng biên dịch/test ở trên đo **kèm** chúng. `docs-check` thì không bị ảnh hưởng: nó chỉ đọc lịch sử git.
+2. **Cây làm việc SẠCH lúc đo** — khác bảng 29/07, vốn đo kèm 3 file `.rs` chưa commit. Ở `260c643` chỉ còn `models/nemotron-asr` (nested repo có LFS, luôn hiện "modified content"). Mọi số ở trên vì thế **tái lập được từ một checkout sạch**, và CI đã tái lập chúng: 25/25 xanh.
 3. **Phân biệt "đỏ ở cây làm việc" với "đỏ ở commit".** Trong phiên 26/07 có lúc `cargo check -p liva-desktop` hỏng vì `tts/vieneu/mod.rs` thiếu field — nhưng file đó **nguyên vẹn ở HEAD**, chỉ là một phiên song song đang sửa dở. Đây đúng loại nhầm lẫn khiến người ta tưởng có hồi quy trong khi không có; luôn kiểm ở commit trước khi kết luận. Bẫy `cargo test` ‖ `cargo clippy` ghi ở trên là biến thể thứ hai của cùng lớp lỗi này: **cái báo lỗi chưa chắc là cái hỏng**.
 
 > 📌 Nguồn đầy đủ: [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)

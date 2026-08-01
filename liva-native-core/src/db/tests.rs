@@ -273,15 +273,44 @@ mod tests {
         }
         let res = DatabasePool::new(&path);
         assert!(res.is_err(), "db tu tuong lai phai bi tu choi");
+        drop(res);
         for candidate in [
             path.clone(),
             std::path::PathBuf::from(format!("{}-wal", path.display())),
             std::path::PathBuf::from(format!("{}-shm", path.display())),
         ] {
-            match std::fs::remove_file(&candidate) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => panic!("khong the don test DB {}: {error}", candidate.display()),
+            xoa_file_test(&candidate);
+        }
+    }
+
+    /// Xoá file tạm của test, chịu được việc handle đóng TRỄ.
+    ///
+    /// **Vì sao cần retry thay vì `remove_file` một phát.** `DatabasePool::new`
+    /// trả `Err`, nhưng r2d2 giữ pool sau một `Arc` dùng chung với thread bảo
+    /// trì của nó — kết nối SQLite không nhất thiết đóng xong ngay tại thời điểm
+    /// hàm trả về. Trên Windows, xoá một file còn handle mở là `os error 32`
+    /// ("being used by another process"), nên bản một-phát ăn may theo tải máy:
+    /// xanh trên máy dev, **đỏ trên CI** (`bc20eb1`, bước 19) trong khi cùng mã
+    /// Rust đó vừa xanh ở `e6391eb` — cùng lớp "test nhấp nháy" đã cắn hai lần
+    /// trước ở `speaker_queue_day_fail_fast` và `system_status_tests`.
+    ///
+    /// Vẫn **panic** nếu hết hạn: một handle bị rò VĨNH VIỄN là lỗi thật và
+    /// test này là chỗ duy nhất bắt được nó. Retry chỉ nuốt độ trễ đóng, không
+    /// nuốt rò rỉ.
+    fn xoa_file_test(candidate: &std::path::Path) {
+        const SO_LAN: u32 = 40;
+        const NGHI: std::time::Duration = std::time::Duration::from_millis(50);
+        for lan in 0..SO_LAN {
+            match std::fs::remove_file(candidate) {
+                Ok(()) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) if lan + 1 == SO_LAN => panic!(
+                    "khong the don test DB {} sau {} lan trong {:?}: {error}",
+                    candidate.display(),
+                    SO_LAN,
+                    NGHI * SO_LAN
+                ),
+                Err(_) => std::thread::sleep(NGHI),
             }
         }
     }

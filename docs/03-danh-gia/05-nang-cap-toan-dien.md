@@ -463,7 +463,9 @@ Kích thước củng cố kết luận: 45,5 MB nằm ở dải CPU mà [U1b](#
 | `release/desktop-client.exe` (11,2 MB) | 25/06 | chứa **Electron + Node**, **không** có `liva-native-core` ⇒ đúng là bản thời Node.js |
 | `release/desktop-client-setup.exe` (2,5 MB) | 25/06 | không dấu vết nào (stub NSIS), cùng ngày ⇒ di sản theo liên đới |
 
-⚠️ **Cả hai đều `gitignore`.** Xoá là **mất vĩnh viễn** — git không khôi phục được. U2 viết "xoá hoặc chuyển vào lưu trữ"; với file gitignored thì **chuyển** là lựa chọn duy nhất an toàn. Cần người quyết, không tự làm.
+⚠️ **Cả hai đều `gitignore`.** Xoá là **mất vĩnh viễn** — git không khôi phục được. U2 viết "xoá hoặc chuyển vào lưu trữ"; với file gitignored thì **chuyển** là lựa chọn duy nhất an toàn.
+
+✅ **ĐÃ CHUYỂN 02/08/2026** sang `release/_luu-tru-nodejs-2026-06/`, kèm `README.md` ghi lý do và cách hoàn tác (chuyển ngược ra `release/`). Không xoá byte nào. `release/` nay chỉ còn `liva-mobile.apk` + `.idsig`.
 
 `release/liva-mobile.apk` (27/06) là thứ khác, **không** thuộc phạm vi U2.
 

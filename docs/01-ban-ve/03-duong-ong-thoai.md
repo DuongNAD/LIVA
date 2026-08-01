@@ -2,12 +2,11 @@
 title: "Đường ống thoại"
 updated: 2026-07-27
 commit: 17f1774
-status: living
-owns:
-  - chuoi-xu-ly-thoai
-  - bang-nguong-vad-aec-denoise
-  - bang-backend-tts
-  - bang-engine-stt
+status: frozen
+owns: []
+superseded_by:
+  - docs/03-he-thong-con/voice.md
+  - docs/05-chat-luong/voice-slo.md
 covers:
   - Cargo.toml
   - liva-desktop/src-tauri/src/lib.rs
@@ -28,6 +27,11 @@ covers:
   - liva-voice/src/vietnamese_normalizer.py
 ---
 # Đường ống thoại LIVA
+
+> **ĐÓNG BĂNG 30/07/2026.** Đây là khảo sát chi tiết theo các commit lịch sử; không sửa tọa độ
+> để khớp HEAD. Canonical hiện hành:
+> [Voice runtime](../03-he-thong-con/voice.md) và
+> [Voice SLO](../05-chat-luong/voice-slo.md).
 
 > **Runtime delta 23/07/2026:** client mic đã chuyển sang `AudioWorkletNode`
 > (`src/worklets/mic-capture.worklet.js`), gom 512 mẫu = 32 ms ở 16 kHz và chuyển buffer

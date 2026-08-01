@@ -2,10 +2,12 @@
 title: "Hệ agent, bộ nhớ và tiến hoá"
 updated: 2026-07-26
 commit: 6b5b87b
-status: living
-owns:
-  - may-trang-thai-agent
-  - state-graph-4-node
+status: frozen
+owns: []
+superseded_by:
+  - docs/03-he-thong-con/agent-tools.md
+  - docs/03-he-thong-con/memory.md
+  - docs/05-chat-luong/action-policy.md
 covers:
   - liva-native-core/src/db.rs
   - liva-native-core/src/agent/*
@@ -22,6 +24,12 @@ covers:
   - liva-ui/src/composables/useGateway.ts
 ---
 # Hệ agent, bộ nhớ và tiến hoá
+
+> **FROZEN — snapshot khảo sát trước khi tách subsystem.** Nguồn chuẩn hiện hành cho agent và
+> tool runtime là [Agent và tool runtime](../03-he-thong-con/agent-tools.md); memory là
+> [Memory runtime](../03-he-thong-con/memory.md); ranh giới an toàn là
+> [Action policy](../05-chat-luong/action-policy.md). Phần evolution dưới đây chỉ giữ làm bằng
+> chứng lịch sử/experimental.
 
 [⬆ Mục lục](../README.md) · [◀ Hệ LLM và prompt](04-he-llm-va-prompt.md) · [Thị giác, passive và governor ▶](06-thi-giac-passive-va-governor.md)
 

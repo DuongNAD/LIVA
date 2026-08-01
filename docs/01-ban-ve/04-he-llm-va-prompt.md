@@ -1,7 +1,7 @@
 ---
 title: "Hệ LLM và prompt"
-updated: 2026-07-22
-commit: 5fc8e2d
+updated: 2026-07-30
+commit: 3688b5f
 status: living
 owns:
   - cau-hinh-llm
@@ -25,7 +25,7 @@ covers:
 ---
 # Hệ LLM và prompt
 
-[⬆ Mục lục](../README.md) · [◀ Đường ống thoại](03-duong-ong-thoai.md) · [Hệ agent, bộ nhớ và tiến hoá ▶](05-agent-bo-nho-va-tien-hoa.md)
+[⬆ Mục lục](../README.md) · [◀ Voice runtime](../03-he-thong-con/voice.md) · [Agent và tool runtime ▶](../03-he-thong-con/agent-tools.md)
 
 ---
 
@@ -231,7 +231,7 @@ Trả `false` khi engine chưa nạp (caller sẽ retry), `true` khi đã ở đ
 
 Ai quyết định gọi hàm này, theo ngưỡng GPU/CPU nào, và với chu kỳ bao lâu là chuyện của governor — tài liệu này chỉ mô tả **phía LLM nhận lệnh reload**.
 
-> 📌 Nguồn đầy đủ: [Thị giác màn hình và quan sát thụ động](06-thi-giac-passive-va-governor.md)
+> 📌 Nguồn đầy đủ: [Resource governor](../05-chat-luong/resource-governor.md)
 
 ### 3.5 Hot-swap thủ công qua IPC **[OK]**
 
@@ -260,7 +260,7 @@ packages/liva-common/src/types/config.ts:42                     // kiểu TS
 
 Từ 22/07/2026 `agent/graph.rs` được viết lại (289 → 693 dòng) và luật rẽ nhánh đổi hẳn bản chất: ~~"chỉ dùng `String::contains` trên text đã lowercase"~~ nay **không còn đúng**. `route_intent` tách text thành token (`tokenize()`, `agent/graph.rs:90`) rồi khớp **token trọn vẹn** bằng `has_word()` / `has_phrase()` (`agent/graph.rs:99`, `:109`), có thêm từ khoá tiếng Việt (đèn / bật / tắt / quạt / điều hoà / máy lạnh / màn hình), và trả về `enum Intent { Vision, SmartHome { device, action }, Chat }` (`agent/graph.rs:77`). Trong logic định tuyến không còn một lời gọi `contains(` nào — chuỗi đó chỉ còn nằm trong doc-comment giải thích vì sao bản cũ sai (`agent/graph.rs:115-120`: `contains("ac")` khớp "b**ac**k", `contains("on")` khớp "m**on**ey", `contains("off")` khớp "c**off**ee"). Có test hồi quy khoá đúng các dương tính giả đó (`agent/graph.rs:537` — `khong_con_duong_tinh_gia`).
 
-> 📌 Nguồn đầy đủ (luật rẽ nhánh từng node, máy trạng thái agent): [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md)
+> 📌 Nguồn đầy đủ (luật rẽ nhánh từng node, máy trạng thái agent): [Agent và tool runtime](../03-he-thong-con/agent-tools.md)
 
 ### 4.1 Model đang chạy thật
 
@@ -387,7 +387,7 @@ Bổ trợ: `set_mmproj_path(&mut self, path: Option<PathBuf>)` (`engine.rs:134-
 | Điểm gọi | Ảnh vào | Streaming |
 |---|---|---|
 | `lib.rs:1478-1529` — lệnh IPC/WS `"vision:ask"` | base64 (`VisionImage::Encoded`) hoặc chụp màn hình `vision::capture::capture_for_vision()` → `VisionImage::Rgb` | **không** (`\|_\| true`); mặc định temp 0.7 / top_p 0.8. UI gọi ở `liva-ui/src/composables/useGateway.ts:524` (hàm `askVision`, phát lệnh ở `:532`) |
-| `main.rs:906-951` — nhánh keyword trong `user_voice_command` | chụp màn hình | **có**, qua event `ai_stream_chunk`; lỗi → fallback `"Xin lỗi, hiện mình chưa xem được màn hình."` |
+| `liva-native-core/src/websocket.rs:1088-1177` — nhánh keyword trong `user_voice_command` | chụp màn hình | **có**, qua event `ai_stream_chunk`; lỗi → fallback `"Xin lỗi, hiện mình chưa xem được màn hình."` |
 | `agent/graph.rs:456-521` — node `"vision"` | chụp màn hình | **có**, stream token vào `llm_chunk_tx` (→ TTS) |
 | `src/bin/qwen3vl_probe.rs` | binary probe | chạy đúng production path |
 
@@ -623,7 +623,7 @@ pub embedder: tokio::sync::Mutex<Option<llm::embedder::EmbeddingEngine>>,   // l
   - Cả hai hàm đều **không bao giờ ném lỗi ngược lên**: thiếu model, không tìm được gì hay lỗi DB đều cho hội thoại chạy tiếp đúng như khi chưa có RAG. Hợp đồng này được khoá bằng `mod rag_tests` (`agent/graph.rs:605`).
 - Bảng vector `vec_idx` trong SQLite là **384 chiều, kiểu int8** — nhưng con số 384 nay **không còn hard-code trong chuỗi SQL**: nó nội suy từ hằng `db::MEMORY_VECTOR_DIM` (`db.rs:551`, doc ghi rõ "phải khớp `llm::embedder::EMBEDDING_DIM`") vào câu `CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[{MEMORY_VECTOR_DIM}])` (`db.rs:358`). Vì `EMBEDDING_DIM = 384` nên **vector của đường RAG khớp chiều theo thiết kế**; ~~"vector từ `get_embedding` không thể nhét thẳng vào `vec_idx`"~~ chỉ còn đúng cho model **chat** (`n_embd` của Qwen3-VL-2B khác 384), tức cho đúng lệnh `llm:embed` vốn không ai gọi.
 - ~~`upsert_vector` **không kiểm tra chiều**~~ — **đã hết đúng**: `db::upsert_vector` (`db.rs:577`) gọi `check_vector_dim(vector, "upsert_vector")?` ngay dòng đầu thân hàm (`db.rs:589`), và `search_similar_vectors` cũng vậy (`db.rs:674`); hàm kiểm nằm ở `db.rs:560`.
-  > 📌 Nguồn đầy đủ (ERD, định nghĩa 15 bảng, cách lưu/mã hoá): [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md)
+  > 📌 Nguồn đầy đủ: [Persistence runtime](../03-he-thong-con/persistence.md) · phạm vi mã hóa: [Threat model](../05-chat-luong/threat-model.md)
 
 ⇒ Xếp loại **[MỘT PHẦN]** vẫn giữ, nhưng lý do đã đổi: `embed.rs` / `llm:embed` code đúng, có endpoint, **không có consumer sản xuất**; còn RAG dense thì đã được nối thật qua `llm/embedder.rs` và **chỉ chờ file model ở `models/embedding/`** để bật lên khi chạy.
 
@@ -648,8 +648,8 @@ pub embedder: tokio::sync::Mutex<Option<llm::embedder::EmbeddingEngine>>,   // l
 | `lib.rs:1438` (`chat:completion`) | chat IPC/WS | `.blocking_lock()` |
 | `lib.rs:1494` (`vision:ask`) | hỏi ảnh | `.blocking_lock()` |
 | `lib.rs:1531` | đọc trạng thái | `.lock().await` |
-| `main.rs:913` (`user_voice_command` → vision) | thoại + màn hình | `.blocking_lock()` |
-| `main.rs:978` (`user_voice_command` → chat) | thoại + chat | `.blocking_lock()` |
+| `liva-native-core/src/websocket.rs:1122-1151` (`user_voice_command` → vision) | thoại + màn hình | `.blocking_lock()` |
+| `liva-native-core/src/websocket.rs:1264-1375` (`user_voice_command` → chat) | thoại + chat | `.blocking_lock()` |
 | `agent/graph.rs:407` (node `chat_completion`) | agent chat | `.blocking_lock()` |
 | `agent/graph.rs:477` (node `vision`) | agent vision | `.blocking_lock()` |
 
@@ -658,7 +658,7 @@ Ngoài bảng trên, `AppState` còn một mutex LLM-liền-kề **hoàn toàn t
 ```mermaid
 flowchart LR
     subgraph Callers["Mọi đường vào tầng LLM"]
-        V["Thoại: user_voice_command<br/>main.rs:913,978"]
+        V["Thoại: user_voice_command<br/>liva-native-core/src/websocket.rs:1122-1151,978"]
         W["WebRTC graph<br/>graph.rs:407,477"]
         I["IPC chat:completion<br/>lib.rs:1438"]
         E["IPC llm:embed<br/>lib.rs:1382"]
@@ -831,7 +831,7 @@ Chú ý: biến `message` — nội dung chat của chính user — **không** s
 |---|---|
 | `lib.rs:1416-1421` (`chat:completion`) | nếu client không gửi message role `system` thì chèn `PERSONA_LIVA` vào đầu |
 | `agent/graph.rs:369-374` (node `chat_completion`) | fallback cho checkpoint legacy không có system |
-| `main.rs:952-961` (`user_voice_command`) | luôn dựng `[system=PERSONA_LIVA, user=text]` |
+| `liva-native-core/src/websocket.rs:1264-1271` (`user_voice_command`) | luôn dựng `[system=PERSONA_LIVA, user=text]` |
 | `webrtc/pipeline.rs:267-274` (dòng chèn: `:269`) | session mới seed `{"role":"system","content":PERSONA_LIVA}` |
 | `engine.rs:469` (vision) | nhúng thẳng `PERSONA_LIVA` vào turn `system` ChatML hard-code |
 
@@ -845,7 +845,7 @@ Chú ý: biến `message` — nội dung chat của chính user — **không** s
 
 ### 11.1 Hạ tầng WS
 
-Tóm tắt vừa đủ để đọc mạch: server WS (`start_websocket_server`, `main.rs:463-525`) lắng nghe trên cổng cục bộ mặc định **8002**, bắt buộc path `/ws`, và từ 22/07/2026 còn kiểm thêm header `Origin` theo allow-list (`origin_allowed()`, `lib.rs:128`) — handshake bị từ chối nếu origin lạ; mỗi kết nối có **hai kênh** — một kênh **binary** cho audio và một kênh **text** cho JSON — được một task `send_task` multiplex vào cùng một socket. Token LLM luôn đi ra bằng **kênh text**, còn audio TTS đi ra bằng kênh binary.
+Tóm tắt vừa đủ để đọc mạch: server WS (`start_websocket_server`, `liva-native-core/src/websocket.rs:286-405`) lắng nghe trên cổng cục bộ mặc định **8002**, bắt buộc path `/ws`, và từ 22/07/2026 còn kiểm thêm header `Origin` theo allow-list (`origin_allowed()`, `lib.rs:128`) — handshake bị từ chối nếu origin lạ; mỗi kết nối có **hai kênh** — một kênh **binary** cho audio và một kênh **text** cho JSON — được một task `send_task` multiplex vào cùng một socket. Token LLM luôn đi ra bằng **kênh text**, còn audio TTS đi ra bằng kênh binary.
 
 > 📌 Nguồn đầy đủ (khung nhị phân 9 byte, bảng opcode, bảng 44 lệnh `handle_command`): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
@@ -871,7 +871,7 @@ llm_manager.generate_completion(&compiled_prompt, TEMP_DEFAULT, TOP_P_DEFAULT, |
 });
 ```
 
-Trình tự event phát ra: `ai_thinking_start` → `ai_stream_start` → n × `ai_stream_chunk` → `ai_spoken_response` (full text) → `ai_thinking_end`. Lỗi → phát `"Xin lỗi, đã xảy ra lỗi trong quá trình xử lý."` (`main.rs:996`).
+Trình tự event phát ra: `ai_thinking_start` → `ai_stream_start` → n × `ai_stream_chunk` → `ai_spoken_response` (full text) → `ai_thinking_end`. Lỗi → phát `"Xin lỗi, đã xảy ra lỗi trong quá trình xử lý."` (`liva-native-core/src/websocket.rs:1088-1415`).
 
 Consumer UI: `liva-ui/src/App.vue:215` và `liva-ui/src/WidgetApp.vue:827`.
 
@@ -888,7 +888,7 @@ Sau đó response cuối `{ text, done: true, usage: { prompt_tokens, completion
 
 `tx`/`req_id` được bơm vào từ **cả hai** transport:
 
-- stdin/stdout JSON-lines: `main.rs:413-419` (`handle_command(..., Some(tx_clone), Some(req_id))`), writer task ghi ra stdout kèm `\n` (`main.rs:361-373`).
+- stdin/stdout JSON-lines: `liva-native-core/src/main.rs:206-239` (`handle_command(..., Some(tx_clone), Some(req_id))`), writer task ghi ra stdout kèm `\n` (`liva-native-core/src/main.rs:158-171`).
 - WS text frame dạng `IpcRequest`: `websocket.rs#handle_ws_connection` (`Some(text_tx_clone)`).
 
 Lưu ý: `chat:completion` **không có caller nào trong `liva-ui/src`** (grep 0 hit) → hiện là API cho IPC/tool bên ngoài, không phải đường UI. Vì vậy xếp **[MỘT PHẦN]**.
@@ -925,7 +925,7 @@ Phía tiêu thụ (`run_tts`, `pipeline.rs`) nhận token, gom thành câu bằn
 rồi đẩy khung audio ra WS binary. Chi tiết cắt câu, chọn backend TTS và định dạng khung loa không
 thuộc tài liệu này.
 
-> 📌 Nguồn đầy đủ: [Đường ống thoại](03-duong-ong-thoai.md)
+> 📌 Nguồn đầy đủ: [Voice runtime](../03-he-thong-con/voice.md)
 
 Đây là đường **token → audio ra loa** thật, và là đường **duy nhất có barge-in**: mọi bước đều kiểm
 `active_session_id` để huỷ giữa chừng. Ở phía LLM, callback trả `false` tại ranh giới token kế tiếp;
@@ -982,16 +982,16 @@ Bảng dưới là **mục lục nội bộ** của chính tài liệu này: m�
 
 ## Liên quan
 
-**Đọc tiếp theo mạch:** [⬆ Mục lục](../README.md) · [◀ Đường ống thoại](03-duong-ong-thoai.md) · [Hệ agent, bộ nhớ và tiến hoá ▶](05-agent-bo-nho-va-tien-hoa.md)
+**Đọc tiếp theo mạch:** [⬆ Mục lục](../README.md) · [◀ Voice runtime](../03-he-thong-con/voice.md) · [Agent và tool runtime ▶](../03-he-thong-con/agent-tools.md)
 
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 
 - [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — hai profile chạy và vị trí tầng LLM trong sơ đồ tổng thể.
 - [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — bảng 44 lệnh `handle_command` (`chat:completion`, `llm:embed`, `llm:swap_model`, `vision:ask`), khung nhị phân 9 byte và bảng opcode dùng ở §11.
-- [Đường ống thoại](03-duong-ong-thoai.md) — phía tiêu thụ token: cắt câu, backend TTS, khung audio ra loa (§11.4).
-- [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — StateGraph 4 node và luật rẽ nhánh của node `router` (§4).
-- [Thị giác màn hình và quan sát thụ động](06-thi-giac-passive-va-governor.md) — ngưỡng governor quyết định khi nào gọi `reload_llm_gpu_layers` (§3.4).
-- [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) — ERD SQLite và bảng vector `vec_idx` mà embedding phải khớp chiều (§8.1).
+- [Voice runtime](../03-he-thong-con/voice.md) — phía tiêu thụ token: cắt câu, backend TTS, khung audio ra loa (§11.4).
+- [Agent và tool runtime](../03-he-thong-con/agent-tools.md) — StateGraph sáu node và luật rẽ nhánh của node `router`.
+- [Resource governor](../05-chat-luong/resource-governor.md) — ngưỡng và ranh giới tín hiệu quyết định khi nào gọi `reload_llm_gpu_layers` (§3.4).
+- [Persistence runtime](../03-he-thong-con/persistence.md) — ERD SQLite và bảng vector `vec_idx` mà embedding phải khớp chiều (§8.1).
 - [Phụ thuộc module và tra cứu](10-phu-thuoc-module-va-tra-cuu.md) — bản đồ module + LOC toàn repo (§1).
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường và danh sách lệch `.env.example` ↔ code (§3.2).
 - [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — danh mục model, dung lượng, RAM/VRAM và điều kiện tiên quyết build (§4.1, §5.2 release build).
@@ -999,9 +999,9 @@ Bảng dưới là **mục lục nội bộ** của chính tài liệu này: m�
 
 **Tài liệu khác dựa vào tài liệu này:**
 
-- [Đường ống thoại](03-duong-ong-thoai.md) — lấy hành vi `generate_completion` và cơ chế huỷ bằng callback trả `false` (barge-in ở ranh giới token).
-- [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — lấy cấu hình LLM, `compile_prompt` và persona mà node `chat_completion` / `vision` sử dụng.
-- [Thị giác màn hình và quan sát thụ động](06-thi-giac-passive-va-governor.md) — lấy hợp đồng `reload_llm_gpu_layers` (trả `false` khi engine chưa nạp) và giá phải trả khi reload (mất KV cache).
+- [Voice runtime](../03-he-thong-con/voice.md) — lấy hành vi `generate_completion` và cơ chế huỷ bằng callback trả `false` (barge-in ở ranh giới token).
+- [Agent và tool runtime](../03-he-thong-con/agent-tools.md) — lấy cấu hình LLM, `compile_prompt` và persona mà node `chat_completion` / `vision` sử dụng.
+- [Resource governor](../05-chat-luong/resource-governor.md) — lấy hợp đồng `reload_llm_gpu_layers` (trả `false` khi engine chưa nạp) và giá phải trả khi reload (mất KV cache).
 - [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy kết luận "router/expert 2 model chưa tồn tại", và ~~"decoupled contexts là sai so với code"~~ (tuyên bố "decoupled" đã bị gỡ khỏi README — xem §8).
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy 15 mục ở §12 làm đầu vào cho bảng rủi ro xếp hạng và bảng code mồ côi.
 

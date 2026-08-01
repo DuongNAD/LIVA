@@ -1,7 +1,8 @@
 ---
 title: "Đối chiếu tuyên bố và thực tế"
-updated: 2026-07-29
-commit: 0fd816c
+updated: 2026-07-30
+commit: 3688b5f
+stale-ok: 98efc55
 
 status: living
 owns:
@@ -174,7 +175,7 @@ Bảng trên là **phán quyết**, không phải đặc tả. Chi tiết kỹ t
 > 📌 Ngưỡng VAD/AEC/denoise, backend TTS, engine STT: [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md)
 > 📌 Cấu hình LLM, persona, chống injection: [Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md)
 > 📌 Máy trạng thái agent, StateGraph 4 node: [Agent, bộ nhớ và tiến hoá](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md)
-> 📌 ERD SQLite, 15 bảng dữ liệu, sơ đồ mã hoá: [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md)
+> 📌 Schema SQLite hiện hành: [Persistence runtime](../03-he-thong-con/persistence.md) · mã hóa và ranh giới tin cậy: [Threat model](../05-chat-luong/threat-model.md)
 > 📌 Bảng tích hợp ngoài (Telegram, MCP, smart home): [Tích hợp ngoài](../01-ban-ve/09-tich-hop-ngoai.md)
 > 📌 Bảng biến môi trường và lệch `.env.example` vs code: [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 
@@ -634,7 +635,7 @@ Các đoạn dưới đây đã được viết sẵn để **dán thẳng** và
 - [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) — ngưỡng VAD/AEC/denoise, backend TTS, engine STT đứng sau các dòng phán quyết thoại ở §1
 - [Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md) — cấu hình LLM/router, làm nền cho §2.1
 - [Agent, bộ nhớ và tiến hoá](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) — máy trạng thái agent và StateGraph, nền cho §2.2
-- [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) — ERD SQLite và sơ đồ mã hoá, nền cho các dòng WAL/AES/Argon2id
+- [Persistence runtime](../03-he-thong-con/persistence.md) và [Threat model](../05-chat-luong/threat-model.md) — schema/WAL và AES/DPAPI/Stronghold hiện hành
 - [Tích hợp ngoài](../01-ban-ve/09-tich-hop-ngoai.md) — bảng tích hợp Telegram/MCP/smart home
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến `LIVA_*`/`AI_*` và lệch `.env.example` vs code
 - [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — bảng model và điều kiện tiên quyết build (`cdn.pyke.io`)

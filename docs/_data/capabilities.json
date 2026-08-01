@@ -1,0 +1,329 @@
+{
+  "schema_version": 1,
+  "updated": "2026-07-31",
+  "canonical_document": "docs/06-ke-hoach/roadmap.md",
+  "status_definitions": {
+    "working": "Đã nối vào đường sản phẩm và có bằng chứng kiểm chứng.",
+    "partial": "Có đường chạy thật nhưng còn thiếu một phần quan trọng hoặc chưa đủ điều kiện bật mặc định.",
+    "experimental": "Có mã hoặc PoC, không nằm trong hành vi sản phẩm mặc định.",
+    "missing": "Chưa có implementation sản phẩm.",
+    "blocked": "Không thể triển khai đúng nếu chưa giải quyết dependency hoặc quyết định sản phẩm."
+  },
+  "capabilities": [
+    {
+      "id": "runtime.native-core",
+      "title": "Lõi Rust thống nhất",
+      "domain": "foundation",
+      "status": "working",
+      "priority": "P0",
+      "target_phase": 0,
+      "current_state": "Tauri và binary standalone dùng chung build_app_state, AppState và danh sách dịch vụ nền.",
+      "evidence": [
+        "liva-native-core/src/boot.rs",
+        "liva-native-core/src/lib.rs",
+        "liva-desktop/src-tauri/src/lib.rs"
+      ],
+      "next_milestone": "Giữ một composition root và loại bỏ mọi tài liệu còn mô tả hai runtime có năng lực khác nhau."
+    },
+    {
+      "id": "experience.voice-conversation",
+      "title": "Hội thoại giọng nói song công",
+      "domain": "voice",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 0,
+      "current_state": "STT, TTS, VAD, denoise, AEC và barge-in có đường chạy cục bộ; chưa có SLO đầu-cuối khóa trong CI.",
+      "evidence": [
+        "liva-native-core/src/webrtc/pipeline.rs",
+        "liva-native-core/src/commands/voice.rs",
+        "liva-ui/src/composables/useVoicePipeline.ts",
+        "liva-native-core/tests/voice_runtime_components.rs"
+      ],
+      "next_milestone": "Đo speech-end → first-audio và thời gian dừng khi barge-in trên vỏ Tauri release."
+    },
+    {
+      "id": "experience.wake-word",
+      "title": "Wake word cá nhân",
+      "domain": "voice",
+      "status": "partial",
+      "priority": "P1",
+      "target_phase": 5,
+      "current_state": "Đường wake chạy thật và chỉ có một câu gọi “Hey Liva”. Artifact v2 đã được tích hợp, pin SHA-256 và vượt gate tổng hợp 25,88h tại threshold 0,58 (recall 91,82%, FPPH 0,0773); UX beta vẫn yêu cầu kèm lệnh cho tới khi vượt gate giọng thật trên mic mục tiêu.",
+      "evidence": [
+        "liva-native-core/src/wake.rs",
+        "liva-native-core/src/wake_model.rs",
+        "liva-native-core/src/bin/wakeword_benchmark.rs",
+        "scripts/e2e-wake-probe.mjs",
+        "tools/wakeword/hey_liva_prod.yaml",
+        "docs/03-he-thong-con/wake-word.md",
+        "docs/05-chat-luong/wake-benchmark.md"
+      ],
+      "next_milestone": "Thu 20+ positive và 1 giờ negative trên mic mục tiêu, benchmark artifact v2 và xác nhận recall >=90%, FPPH <=1 trước khi bật UX câu gọi đứng riêng."
+    },
+    {
+      "id": "perception.screen-vision",
+      "title": "Thị giác màn hình cục bộ",
+      "domain": "vision",
+      "status": "partial",
+      "priority": "P1",
+      "target_phase": 1,
+      "current_state": "Windows Graphics Capture, region diff và Qwen3-VL chạy thật; CUDA đạt tốc độ hội thoại, CPU không đạt.",
+      "evidence": [
+        "liva-native-core/src/vision/mod.rs",
+        "liva-native-core/src/vision/capture.rs",
+        "liva-native-core/src/commands/vision.rs",
+        "liva-native-core/src/bin/screen_vision_bench.rs"
+      ],
+      "next_milestone": "Chọn vùng theo ngữ cảnh, thêm SLO CUDA và hiển thị rõ khi hệ thống rơi về CPU."
+    },
+    {
+      "id": "memory.cross-session-recall",
+      "title": "Nhớ và truy hồi qua nhiều phiên",
+      "domain": "memory",
+      "status": "working",
+      "priority": "P1",
+      "target_phase": 0,
+      "current_state": "Typed chat, voice và Telegram/API dùng hybrid vector + FTS5 recall, lưu trong SQLite qua restart.",
+      "evidence": [
+        "liva-native-core/src/agent/graph.rs",
+        "liva-native-core/src/db.rs",
+        "liva-native-core/src/llm/embedder.rs",
+        "docs/03-he-thong-con/memory.md",
+        "scripts/e2e-memory.mjs"
+      ],
+      "next_milestone": "Giữ regression E2E đa phiên và bổ sung benchmark retrieval theo owner/conversation scope."
+    },
+    {
+      "id": "memory.semantic-consolidation",
+      "title": "Semantic consolidation và L3 graph",
+      "domain": "memory",
+      "status": "partial",
+      "priority": "P1",
+      "target_phase": 2,
+      "current_state": "Projection worker, checkpoint và DLQ đã có; chưa trích fact/quan hệ bền vào turn_layer_nodes và l3_nodes.",
+      "evidence": [
+        "liva-native-core/src/memory_consolidation.rs",
+        "liva-native-core/src/db.rs",
+        "docs/03-he-thong-con/memory.md",
+        "teamwork_projects/obsidian_llm_wiki/vault/Knowledge/memory_architecture.md"
+      ],
+      "next_milestone": "Viết semantic consolidator có provenance, confidence, conflict queue và delete propagation."
+    },
+    {
+      "id": "agent.tool-runtime",
+      "title": "Tool runtime do LLM dẫn",
+      "domain": "agent",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 1,
+      "current_state": "Keyword fast path và LLM tool-calling loop đã có; LLM path vẫn opt-in do chi phí và chưa nối retrieval threshold vào chat thật.",
+      "evidence": [
+        "liva-native-core/src/llm/tool_calling.rs",
+        "liva-native-core/src/agent/graph.rs",
+        "liva-native-core/src/bin/tool_calling_probe.rs",
+        "docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md"
+      ],
+      "next_milestone": "Chỉ gọi LLM khi retrieval vượt ngưỡng và khóa corpus song ngữ cho accuracy/latency."
+    },
+    {
+      "id": "agent.action-policy",
+      "title": "Policy, consent và audit cho hành động",
+      "domain": "safety",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 1,
+      "current_state": "Có consent store, messaging confirmation và ExecPolicy cục bộ nhưng chưa có hợp đồng ActionProposal/PolicyDecision thống nhất.",
+      "evidence": [
+        "liva-native-core/src/consent.rs",
+        "liva-native-core/src/llm/tool_calling.rs",
+        "liva-native-core/src/messaging/outbox.rs",
+        "liva-native-core/src/commands/consent.rs"
+      ],
+      "next_milestone": "Chuẩn hóa risk tier, action id, idempotency, confirmation, observation và audit record."
+    },
+    {
+      "id": "action.os-control",
+      "title": "Điều khiển âm lượng và media",
+      "domain": "action",
+      "status": "working",
+      "priority": "P2",
+      "target_phase": 1,
+      "current_state": "Volume và media virtual-key tools chạy trên Windows, có giới hạn thao tác và lỗi trung thực ngoài Windows.",
+      "evidence": [
+        "liva-native-core/src/integrations/os_control.rs",
+        "liva-native-core/src/mcp/server.rs",
+        "liva-native-core/src/bin/os_control_probe.rs"
+      ],
+      "next_milestone": "Đưa vào action audit chung và đo tỷ lệ thực thi thành công trên corpus nói tự nhiên."
+    },
+    {
+      "id": "action.messaging",
+      "title": "Nhắn tin có xác nhận",
+      "domain": "integration",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 0,
+      "current_state": "Danh bạ, draft confirmation và Messenger đã chạy thật; outbox SQLite mã hóa sống qua restart, phân loại expiry/missing/locked và tiêu thụ một lần; Telegram chưa nghiệm thu với token thật.",
+      "evidence": [
+        "liva-native-core/src/messaging",
+        "liva-native-core/src/integrations/messenger.rs",
+        "liva-native-core/src/commands/messaging.rs",
+        "docs/03-danh-gia/06-nhan-tin-ra-ngoai.md"
+      ],
+      "next_milestone": "Chạy Telegram E2E thật và đưa messaging vào action audit/idempotency contract chung."
+    },
+    {
+      "id": "action.smart-home",
+      "title": "Smart home cục bộ",
+      "domain": "integration",
+      "status": "missing",
+      "priority": "P2",
+      "target_phase": 4,
+      "current_state": "Command placeholder chỉ báo không có adapter; không thực hiện hardware I/O.",
+      "evidence": [
+        "liva-native-core/src/integrations/smart_home.rs",
+        "liva-native-core/src/integrations/mod.rs"
+      ],
+      "next_milestone": "Thiết kế device registry, Matter/Home Assistant adapter, read-after-write verification và physical-action consent."
+    },
+    {
+      "id": "proactive.context-broker",
+      "title": "Chủ động theo ngữ cảnh",
+      "domain": "proactive",
+      "status": "experimental",
+      "priority": "P1",
+      "target_phase": 3,
+      "current_state": "Passive keyboard/mouse hook tồn tại sau feature experimental nhưng chưa có call site và không được phép bật mặc định.",
+      "evidence": [
+        "liva-native-core/src/passive",
+        "liva-native-core/Cargo.toml",
+        "liva-native-core/src/consent.rs"
+      ],
+      "next_milestone": "Thay raw keylogging bằng ContextBroker opt-in, chỉ báo trực quan, retention và kill switch."
+    },
+    {
+      "id": "personalization.voice-clone",
+      "title": "Clone giọng người dùng",
+      "domain": "personalization",
+      "status": "blocked",
+      "priority": "P3",
+      "target_phase": 5,
+      "current_state": "VieNeu preset chạy thật nhưng thiếu MOSS encoder và speaker encoder tương thích để clone từ WAV.",
+      "evidence": [
+        "liva-native-core/src/tts/vieneu/mod.rs",
+        "liva-native-core/src/tts/style_vector.rs",
+        "liva-voice/src/voice_pipeline.py"
+      ],
+      "next_milestone": "Xác định đúng hai model tương thích, kiểm bằng tai và chỉ sau đó thiết kế onboarding ghi âm."
+    },
+    {
+      "id": "devices.cross-device",
+      "title": "Companion đa thiết bị",
+      "domain": "devices",
+      "status": "experimental",
+      "priority": "P3",
+      "target_phase": 4,
+      "current_state": "Có mobile Capacitor PoC và WebSocket transport nhưng chưa có pairing, identity hoặc encrypted sync.",
+      "evidence": [
+        "mobile_client",
+        "liva-native-core/src/websocket.rs",
+        "packages/liva-common/src/types/websocket.ts"
+      ],
+      "next_milestone": "Thiết kế pairing, device identity, scoped capability và đồng bộ event/memory được mã hóa."
+    },
+    {
+      "id": "evolution.self-correction",
+      "title": "Tự sửa mã có kiểm soát",
+      "domain": "evolution",
+      "status": "experimental",
+      "priority": "P4",
+      "target_phase": 6,
+      "current_state": "Sandbox loop và CodeAgent mock có test, không được nối với LLM thật và nằm ngoài build mặc định.",
+      "evidence": [
+        "liva-native-core/src/evolution",
+        "liva-native-core/tests/self_correction_stress.rs",
+        "liva-native-core/Cargo.toml"
+      ],
+      "next_milestone": "Hoãn tới khi có OS isolation, review gate, patch provenance và rollback end-to-end."
+    },
+    {
+      "id": "distribution.windows-beta",
+      "title": "Phân phối Windows cho beta",
+      "domain": "operations",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 0,
+      "current_state": "Có installer, model manifest, preflight CLI, setup UI tự mở khi thiếu model bắt buộc, resume + SHA-256 download, boot dialog có remediation và release workflow; chưa có signing và clean-machine matrix định kỳ.",
+      "evidence": [
+        "liva-desktop/src-tauri/tauri.conf.json",
+        "data/models-manifest.json",
+        "scripts/check-installer-config.mjs",
+        "docs/02-van-hanh/05-cai-dat-cho-nguoi-dung.md"
+      ],
+      "next_milestone": "Chạy clean-machine acceptance định kỳ và quyết định code signing."
+    },
+    {
+      "id": "data.persistence-integrity",
+      "title": "Dữ liệu bền và có thể phục hồi",
+      "domain": "memory",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 0,
+      "current_state": "SQLite schema v7 có một writer/bốn reader, WAL, foreign keys, migration transaction và backup/restore gắn key-ID. DeleteConversation và DeleteSubject local có dry-run/audit/transaction + raw DB/WAL gate; retention conversation local opt-in theo last activity, batch tối đa 25 và retry từ remaining state.",
+      "evidence": [
+        "liva-native-core/src/db.rs",
+        "liva-native-core/src/boot.rs",
+        "liva-native-core/src/db/deletion.rs",
+        "liva-native-core/src/memory_retention.rs",
+        "liva-native-core/src/lib.rs",
+        "docs/03-he-thong-con/persistence.md"
+      ],
+      "next_milestone": "Thêm scheduler/quota backup, release restore matrix và owner columns cho projection lịch sử trước khi mở DeleteSubject non-local; harden audit cho DeleteFact."
+    },
+    {
+      "id": "security.desktop-boundaries",
+      "title": "Ranh giới quyền desktop",
+      "domain": "safety",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 0,
+      "current_state": "Command plane có principal allow-list fail-closed; WebSocket mặc định là remote, query tự khai principal bị từ chối 403, còn widget/dashboard chỉ nhận principal đặc quyền qua session ticket 256-bit do Tauri capability tương ứng cấp, TTL 30 giây và dùng một lần; non-loopback bắt buộc Bearer; credential UI dùng Stronghold; widget/dashboard/setup có capability riêng; CSP không còn unsafe-inline; GGUF/mmproj/vec0 canonicalize và kiểm SHA-256 từ manifest nhúng trước khi nạp; transcript/checkpoint dùng field encryption, conversation dense-only; backup manifest key-ID fail-closed.",
+      "evidence": [
+        "liva-native-core/src/authorization.rs",
+        "liva-native-core/src/artifact_trust.rs",
+        "liva-native-core/src/websocket.rs",
+        "liva-native-core/tests/command_authorization.rs",
+        "liva-native-core/tests/artifact_trust.rs",
+        "liva-native-core/tests/websocket_transport.rs",
+        "liva-ui/tests/composables/useGateway.test.ts",
+        "liva-desktop/src-tauri/capabilities/widget.json",
+        "liva-desktop/src-tauri/capabilities/dashboard.json",
+        "liva-desktop/src-tauri/capabilities/setup.json",
+        "liva-desktop/src-tauri/tests/capability_policy.rs",
+        "liva-desktop/src-tauri/tauri.conf.json",
+        "scripts/check-installer-config.test.mjs",
+        "liva-native-core/tests/crypto_boot_e2e.rs",
+        "liva-native-core/tests/sqlite_backup_restore.rs",
+        "docs/01-kien-truc/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md",
+        "docs/05-chat-luong/threat-model.md"
+      ],
+      "next_milestone": "Bổ sung audit correlation/redaction cho các session WebSocket đặc quyền và mở rộng policy at-rest cho metadata cá nhân hậu beta."
+    },
+    {
+      "id": "governance.documentation",
+      "title": "Quản trị tài liệu và nguồn sự thật",
+      "domain": "governance",
+      "status": "partial",
+      "priority": "P0",
+      "target_phase": 0,
+      "current_state": "Có frontmatter, owns/covers, stale gate và citation checker; roadmap bị phân tán và còn hàng trăm citation mơ hồ.",
+      "evidence": [
+        "scripts/docs-check.mjs",
+        "scripts/docs-citations.mjs",
+        "docs/_meta/nguon-su-that.md",
+        "docs/_meta/huong-dan-bao-tri.md"
+      ],
+      "next_milestone": "Dùng registry này làm nguồn status duy nhất, sinh ma trận tự động và di trú roadmap cũ vào master roadmap."
+    }
+  ]
+}

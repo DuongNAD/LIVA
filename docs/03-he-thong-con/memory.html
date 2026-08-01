@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="source" content="memory.md">
+  <title>LIVA Memory Runtime — bản quét nhanh</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071018;
+      --surface: #0d1a26;
+      --surface-2: #122333;
+      --line: #284358;
+      --text: #e7f2f8;
+      --muted: #9cb2c1;
+      --cyan: #56d6e8;
+      --green: #63d69b;
+      --amber: #f2bd5b;
+      --red: #ff7b7b;
+      --blue: #7da8ff;
+      --shadow: 0 12px 32px rgb(0 0 0 / 24%);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 15% 0%, rgb(29 98 121 / 25%), transparent 34rem),
+        radial-gradient(circle at 92% 12%, rgb(57 82 151 / 22%), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    main { width: min(1440px, calc(100% - 40px)); margin: 24px auto 52px; }
+    .hero, .card {
+      border: 1px solid var(--line);
+      background: linear-gradient(145deg, rgb(18 35 51 / 94%), rgb(11 25 37 / 96%));
+      box-shadow: var(--shadow);
+      border-radius: 18px;
+    }
+    .hero {
+      padding: 28px;
+      display: grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap: 28px;
+      align-items: center;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: clamp(2rem, 4vw, 4rem); line-height: 1; margin-bottom: 14px; }
+    h2 { font-size: 1.25rem; margin-bottom: 14px; }
+    h3 { color: var(--cyan); font-size: 1rem; margin-bottom: 8px; }
+    a { color: var(--cyan); }
+    .eyebrow { color: var(--cyan); letter-spacing: .14em; text-transform: uppercase; font-size: .76rem; }
+    .lead { color: var(--muted); max-width: 72ch; font-size: 1.06rem; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .badge {
+      border: 1px solid var(--line);
+      background: rgb(4 15 23 / 66%);
+      padding: 5px 10px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: .8rem;
+    }
+    .scoreboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .metric { background: rgb(4 15 23 / 58%); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+    .metric strong { display: block; font-size: 1.25rem; color: var(--green); }
+    .metric span { color: var(--muted); font-size: .8rem; }
+    .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+    .card { padding: 18px; grid-column: span 4; }
+    .wide { grid-column: span 8; }
+    .full { grid-column: 1 / -1; }
+    .half { grid-column: span 6; }
+    ul { margin: 0; padding-left: 19px; }
+    li + li { margin-top: 7px; }
+    .muted { color: var(--muted); }
+    .ok { border-top: 3px solid var(--green); }
+    .warning { border-top: 3px solid var(--amber); }
+    .risk { border-top: 3px solid var(--red); }
+    .info { border-top: 3px solid var(--blue); }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--cyan); }
+    code { color: #c8e4ff; background: rgb(0 0 0 / 25%); border-radius: 5px; padding: 1px 5px; }
+    .mermaid { overflow: auto; background: #f7fbff; border-radius: 14px; padding: 12px; }
+    .lane { display: grid; grid-template-columns: 74px 1fr; gap: 12px; align-items: start; }
+    .lane + .lane { margin-top: 12px; }
+    .phase { font-weight: 800; color: var(--cyan); background: rgb(86 214 232 / 11%); border-radius: 10px; padding: 8px; text-align: center; }
+    .checklist { list-style: none; padding: 0; }
+    .checklist li::before { content: "□"; color: var(--cyan); margin-right: 8px; }
+    details { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+    summary { cursor: pointer; color: var(--cyan); font-weight: 650; }
+    footer { color: var(--muted); margin-top: 18px; font-size: .8rem; text-align: center; }
+    @media (max-width: 1000px) {
+      .hero { grid-template-columns: 1fr; }
+      .card, .wide, .half { grid-column: span 6; }
+    }
+    @media (max-width: 700px) {
+      main { width: min(100% - 20px, 1440px); margin-top: 10px; }
+      .hero { padding: 20px; }
+      .card, .wide, .half { grid-column: 1 / -1; }
+      .scoreboard { grid-template-columns: 1fr; }
+    }
+    @media print {
+      :root { color-scheme: light; --bg: #fff; --surface: #fff; --surface-2: #fff; --line: #ccd8df; --text: #10222e; --muted: #435b69; }
+      body { background: #fff; }
+      main { width: 100%; margin: 0; }
+      .hero, .card { box-shadow: none; break-inside: avoid; }
+      .grid { display: block; }
+      .card { margin-top: 10px; }
+      details { display: block; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div>
+      <div class="eyebrow">LIVA · Unified Native Engine · As-built</div>
+      <h1>Memory Runtime</h1>
+      <p class="lead">Bản quét nhanh sinh từ <code>memory.md</code>: phân biệt memory đang chạy,
+        những tầng mới có schema/UI, các ranh giới privacy và lộ trình biến recall hiện tại thành
+        trí nhớ có provenance kiểu JARVIS.</p>
+      <div class="badges">
+        <span class="badge">Rust</span><span class="badge">SQLite WAL</span>
+        <span class="badge">sqlite-vec INT8 · 384D</span><span class="badge">FTS5</span>
+        <span class="badge">ONNX Runtime</span><span class="badge">Depth 3</span>
+        <span class="badge">30/07/2026</span>
+      </div>
+    </div>
+    <div class="scoreboard">
+      <div class="metric"><strong>WORKING</strong><span>Recall xuyên phiên</span></div>
+      <div class="metric"><strong>PARTIAL</strong><span>Semantic consolidation</span></div>
+      <div class="metric"><strong>3</strong><span>RAG top-k mặc định</span></div>
+      <div class="metric"><strong>25 / 30s</strong><span>Projection batch / interval</span></div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card ok">
+      <h2>Đang chạy thật</h2>
+      <ul>
+        <li>Checkpoint voice theo conversation ID.</li>
+        <li>Hybrid recall trên voice, UI và Telegram.</li>
+        <li>Event + vector projection ghi atomic.</li>
+        <li>Owner/audience isolation.</li>
+        <li>Projection retry, checkpoint và DLQ.</li>
+        <li>Facts mã hóa, rekey và backup-before-overwrite.</li>
+      </ul>
+    </article>
+
+    <article class="card warning">
+      <h2>Chỉ mới một phần</h2>
+      <ul>
+        <li>“Consolidation” chỉ validate projection.</li>
+        <li>Facts có CRUD nhưng chưa auto-extract.</li>
+        <li>Memory viewer đọc dữ liệu thật nhưng nhãn tầng gây hiểu sai.</li>
+        <li>E2E có kiểm tra DB; answer quality vẫn là soft check.</li>
+      </ul>
+    </article>
+
+    <article class="card risk">
+      <h2>Chưa tồn tại</h2>
+      <ul>
+        <li>Semantic consolidator và provenance.</li>
+        <li>Writer cho <code>turn_layer_nodes</code> và L0.5.</li>
+        <li>Writer/reader cho L3 graph.</li>
+        <li>Delete propagation và retention policy.</li>
+        <li>Retrieval benchmark corpus.</li>
+        <li>MemoryDreaming/Ebbinghaus đang chạy.</li>
+      </ul>
+    </article>
+
+    <article class="card full">
+      <h2>Luồng ghi và finalize</h2>
+      <div class="mermaid">
+sequenceDiagram
+  participant C as Kênh chat
+  participant G as persist_turn_scoped
+  participant E as Embedder
+  participant DB as SQLite
+  participant W as Projection worker
+  C->>G: user + final reply + scope
+  G->>E: embed_passage
+  alt thiếu/lỗi embedder
+    E-->>G: no-op
+  else vector 384D
+    G->>DB: event pending + 3 projection (atomic)
+    W->>DB: validate type / owner / category / lineage
+    W->>DB: consolidated hoặc retry → DLQ
+  end
+      </div>
+    </article>
+
+    <article class="card wide">
+      <h2>Bốn miền không được trộn</h2>
+      <table>
+        <thead><tr><th>Miền</th><th>Mục đích</th><th>Trạng thái</th></tr></thead>
+        <tbody>
+          <tr><td>Agent checkpoint</td><td>Khôi phục StateGraph trong cùng kết nối voice</td><td>Hoạt động, plaintext</td></tr>
+          <tr><td>Conversational RAG</td><td>Nhớ semantic qua restart/conversation</td><td>Hoạt động khi có embedder</td></tr>
+          <tr><td>Structured facts</td><td>KV fact có metadata và mã hóa value</td><td>CRUD, chưa auto-extract</td></tr>
+          <tr><td>Event projection</td><td>Kiểm tra projection/lineage rồi finalize</td><td>Không phải semantic consolidation</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="card info">
+      <h2>Scope</h2>
+      <p><code>domain</code> là owner boundary. <code>category</code> là conversation/audience
+        lineage.</p>
+      <ul>
+        <li>Local: nhớ xuyên conversation cùng owner.</li>
+        <li>Telegram DM: nhớ theo người gửi.</li>
+        <li>Telegram group: recall giới hạn đúng group.</li>
+        <li>Raw search không được đọc <code>conversation_turn</code>.</li>
+      </ul>
+    </article>
+
+    <article class="card risk half">
+      <h2>Privacy hiện tại</h2>
+      <table>
+        <tbody>
+          <tr><td>Facts value</td><td>AES-256-GCM v2</td></tr>
+          <tr><td>Vector/FTS content</td><td>Plaintext hội thoại</td></tr>
+          <tr><td>Agent checkpoint</td><td>Plaintext JSON</td></tr>
+          <tr><td>Event metadata</td><td>Plaintext owner/time/category</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="card warning half">
+      <h2>Ba lỗi truthfulness của Dashboard</h2>
+      <ol>
+        <li>Nút consolidation gửi command backend không sở hữu.</li>
+        <li>L0 và L0.5 không có production writer.</li>
+        <li>Backend trả <code>id</code>, filter UI đòi <code>vecId</code>.</li>
+      </ol>
+      <p class="muted">M0 phải xử lý ba điểm này trước tính năng “thông minh” mới.</p>
+    </article>
+
+    <article class="card full">
+      <h2>Lộ trình nâng cấp</h2>
+      <div class="lane"><div class="phase">M0</div><div><h3>Truthful surface</h3><p>Sửa command/UI contract, tên tầng, projection health và loading dựa trên response thật.</p></div></div>
+      <div class="lane"><div class="phase">M1</div><div><h3>Privacy + identity + lifecycle</h3><p>MemoryRecord/Provenance, capability, encryption coverage, delete graph, backup, audit.</p></div></div>
+      <div class="lane"><div class="phase">M2</div><div><h3>Retrieval quality gate</h3><p>Corpus Việt/Anh, Recall@K, MRR, irrelevant injection, p95 và prompt budget.</p></div></div>
+      <div class="lane"><div class="phase">M3</div><div><h3>Semantic consolidator v1</h3><p>MemoryCandidate typed, provenance, conflict queue, idempotency, human review.</p></div></div>
+      <div class="lane"><div class="phase">M4</div><div><h3>Human memory controls</h3><p>View/edit/pin/lock/forget/export, delete preview và durable action ID.</p></div></div>
+      <div class="lane"><div class="phase">M5</div><div><h3>Temporal graph + multimodal</h3><p>Chỉ sau M0–M4; vision/audio opt-in, temporal validity và proactive consent.</p></div></div>
+    </article>
+
+    <article class="card full info">
+      <h2>Target gates — chưa phải số đã đạt</h2>
+      <div class="scoreboard">
+        <div class="metric"><strong>0</strong><span>Cross-owner/audience leak</span></div>
+        <div class="metric"><strong>≥ 0,90</strong><span>Recall@3 exact/paraphrase</span></div>
+        <div class="metric"><strong>≤ 0,05</strong><span>Irrelevant injection</span></div>
+        <div class="metric"><strong>≤ 150 ms</strong><span>p95 retrieval trên máy beta chuẩn</span></div>
+      </div>
+    </article>
+
+    <article class="card half">
+      <h2>Acceptance còn thiếu</h2>
+      <ul class="checklist">
+        <li>Corpus retrieval version hóa.</li>
+        <li>Delete cascade qua crash/restart.</li>
+        <li>DB-at-rest inspection cho privacy mode.</li>
+        <li>Provenance/conflict semantic extraction.</li>
+        <li>Component/contract test cho viewer.</li>
+      </ul>
+    </article>
+
+    <article class="card half">
+      <h2>Không được tuyên bố</h2>
+      <ul>
+        <li>L0–L3 đã hoàn chỉnh.</li>
+        <li>Consolidation tự suy ngẫm.</li>
+        <li>Xóa fact đồng nghĩa quên toàn bộ.</li>
+        <li>Toàn bộ memory đã mã hóa.</li>
+        <li>Ebbinghaus/graph/reconsolidation đang chạy.</li>
+      </ul>
+      <details>
+        <summary>Nguồn đọc đầy đủ</summary>
+        <p><a href="memory.md">memory.md</a> là nguồn chuẩn. Trạng thái capability nằm trong
+          <code>docs/_data/capabilities.json</code>; milestone thuộc master roadmap.</p>
+      </details>
+    </article>
+  </section>
+
+  <footer>
+    Generated from memory.md · 2026-07-30 · dependency depth 3 · surveyed commit 3688b5f
+  </footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });
+</script>
+</body>
+</html>

@@ -1,8 +1,7 @@
 ---
 title: "Kiến trúc tổng thể"
-updated: 2026-07-26
-commit: a6955aa
-stale-ok: afbcc87
+updated: 2026-07-30
+commit: 3688b5f
 status: living
 owns:
   - hai-profile-chay
@@ -21,7 +20,6 @@ covers:
   - liva-ui/src/composables/useVoicePipeline.ts
   - liva-ui/src/utils/speakerFrame.ts
   - liva-ui/src/utils/voiceFrame.ts
-  - liva-ui/src/workers/hey_liva_weights.json
   - scripts/start_all.ps1
 ---
 # Kiến trúc tổng thể LIVA
@@ -183,7 +181,7 @@ flowchart TB
         MTTS["models/kokoro-v1.0.onnx<br/>+ VieNeu"]
         MLLM["E:/AI_Models/*.gguf<br/>Qwen3-VL / gemma"]
         MVAD["silero VAD / GTCRN / turn"]
-        MWAKE["hey_liva_weights.json<br/>(MLP thuan JS trong worker)"]
+        MWAKE["wakeword mel + embedding<br/>classifier ONNX trong Rust"]
     end
 
     subgraph EXT["Dich vu ngoai"]
@@ -270,7 +268,7 @@ vault: `toggle_ghost_mode`, `update_interactive_zones`, `open_dashboard`,
 `read_vault_key` / `write_vault_key` (Stronghold, mật khẩu hardcode) và `set_eco_mode`
 (**code chết**, xem §3.5).
 
-> 📌 Nguồn đầy đủ: [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md)
+> 📌 Nguồn đầy đủ: [Desktop Tauri](../03-he-thong-con/desktop-tauri.md)
 
 `HITTEST` là một **luồng riêng** liên tục đọc vị trí con trỏ để quyết định cửa sổ widget có
 "ăn" sự kiện chuột hay không — đây là cơ chế Ghost Mode end-to-end và nó **chạy thật**.
@@ -287,10 +285,12 @@ vault: `toggle_ghost_mode`, `update_interactive_zones`, `open_dashboard`,
 
 > 📌 Nguồn đầy đủ (bảng opcode, chi tiết khung 9 byte, bảng lệnh `handle_command`): [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
-`start_websocket_server` đọc `LIVA_SERVER_PORT` (mặc định `8002`) và `LIVA_SERVER_HOST`
-(mặc định `127.0.0.1`) rồi `TcpListener::bind` (`main.rs:463` trở đi; được spawn ở
-`main.rs:315`). Vì vỏ Tauri không gọi
-hàm này, **mọi mũi tên từ `liva-ui` vào cụm `GATEWAY` đều là nét đứt**.
+`WebSocketServer::bind_from_env` đọc `LIVA_SERVER_PORT` (mặc định `8002`) và
+`LIVA_SERVER_HOST` (mặc định `127.0.0.1`) rồi bind listener
+(`liva-native-core/src/websocket.rs:286-405`). `boot::spawn_background_services`
+khởi động server này cho **cả binary standalone lẫn vỏ Tauri**
+(`liva-native-core/src/boot.rs:360-380`). UI desktop vẫn ưu tiên Tauri IPC cho command;
+WebSocket chạy song song cho voice/binary transport và client ngoài.
 
 ### 2.4 Khối `CORE` — lõi Rust `liva-native-core` (`AppState`)
 
@@ -314,8 +314,8 @@ vì server MCP là read-only.
 | `EncryptionEngine` | AES-256-GCM | Chỉ **1 cột** được mã hoá: `facts.value` |
 | Governor game-aware | Vòng lặp 5s, hạ `n_gpu_layers` khi phát hiện tải nặng, gọi `reload_llm_gpu_layers` | Win32; early-return nếu `n_gpu_layers` vốn đã bằng 0 |
 | `VAD` / GTCRN denoise / SmartTurn shadow / AEC | Cụm xử lý tín hiệu tiếng nói | Dựng qua `VoiceRuntimeComponents::from_env` ở **cả hai vỏ**; `None` khi thiếu model hoặc bị tắt bằng `LIVA_*_ENABLED=0` |
-| `NativeMcpServer` | Server MCP nội bộ | Đã nối vào dispatcher: `mcp:list_tools` (`lib.rs:1575`) và `mcp:call_tool` (`lib.rs:1578`); **chưa client UI nào gọi** — xem điểm 4 của §3 |
-| `STDIO` | IPC dòng JSON qua stdin/stdout (`main.rs:375-450`) | Chỉ binary standalone |
+| `NativeMcpServer` | Server MCP nội bộ | Đã nối vào dispatcher: `mcp:list_tools` (`liva-native-core/src/lib.rs:1467-1468`) và `mcp:call_tool` (`liva-native-core/src/lib.rs:1470-1494`); **chưa client UI nào gọi** — xem điểm 4 của §3 |
+| `STDIO` | IPC dòng JSON qua stdin/stdout (`liva-native-core/src/main.rs:173-244`) | Chỉ binary standalone |
 
 Chuỗi xử lý cốt lõi trong sơ đồ: `VAD → STT → LLM → TTS` — đây là đường thoại; và
 `handle_command → {LLM, STT, TTS, VISION, DB, CRYPTO}` — đây là đường lệnh.
@@ -323,7 +323,7 @@ Chuỗi xử lý cốt lõi trong sơ đồ: `VAD → STT → LLM → TTS` — �
 > 📌 Nguồn đầy đủ cho từng khối: [Đường ống thoại](03-duong-ong-thoai.md) (bảng engine STT,
 > bảng backend TTS, ngưỡng VAD/AEC) · [Hệ LLM và prompt](04-he-llm-va-prompt.md) (cấu hình LLM) ·
 > [Thị giác, quan sát thụ động và governor](06-thi-giac-passive-va-governor.md) (ngưỡng governor) ·
-> [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) (ERD SQLite, 15 bảng, sơ đồ mã hoá)
+> [Persistence runtime](../03-he-thong-con/persistence.md) (ERD SQLite 20 bảng) · [Threat model](../05-chat-luong/threat-model.md) (mã hóa và trust boundary)
 
 ### 2.5 Khối `MODELS` — trọng số (toàn bộ gitignored)
 
@@ -331,10 +331,10 @@ Về mặt kiến trúc chỉ cần nhớ ba điều: trọng số STT/TTS/VAD n
 `models/nemotron-asr` là nested git repo có LFS, **không** phải submodule — để yên), còn
 GGUF của LLM/vision nằm **ngoài repo** ở `E:/AI_Models/` và được trỏ qua
 `data/liva-config.json`. Kokoro vắng mặt mặc định ⇒ init TTS lỗi cho tới khi cấp file.
-Riêng `hey_liva_weights.json` **không phải model Rust**: đó là MLP thuần JavaScript chạy
-trong web worker phía UI — nên wake word có **hai bản**, bản JS trong `liva-ui` (nét liền,
-chạy thật) và `WakeGate` phía Rust. Bản Rust dựng trong `websocket.rs` nên **đi theo WS
-server, tức có ở cả hai vỏ**; nó tắt hay bật là do `LIVA_WAKE_MODE`, không do profile.
+Wake worker phía UI chỉ cắt utterance và gửi `OP_WAKE_PROBE`; nó không nhận dạng nội
+dung bằng RMS. Quyết định nằm ở `WakeGate` + classifier ONNX/STT trong Rust, dựng trong
+`websocket.rs` nên **đi theo WS server và có ở cả hai vỏ**. MLP năng lượng,
+`hey_liva_weights.json` và browser `hey_liva.onnx` cũ đã bị gỡ ngày 31/07/2026.
 
 > 📌 Nguồn đầy đủ: [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md)
 
@@ -361,8 +361,9 @@ hai lệnh dispatcher `mcp:list_tools` / `mcp:call_tool` gọi tới, nhưng ch�
    `liva-desktop/src-tauri/src/lib.rs:229-235` → `handle_command`. Streaming thì qua
    `native_ipc_call_stream` + `window.emit("ipc-stream:{req_id}")` (`lib.rs:237-258`).
 
-2. **Gateway 8002 chỉ tồn tại ở binary standalone.** Đây là lý do mọi mũi tên vào cụm
-   `GATEWAY` là nét đứt từ phía `liva-ui`.
+2. **Gateway 8002 dùng chung cho cả hai vỏ.** Desktop dựng cùng `AppState` và gọi
+   `boot::spawn_background_services`; command UI chính đi qua Tauri IPC, còn WebSocket
+   phục vụ voice/binary transport và client ngoài với principal-aware authorization.
 
 3. **Hợp đồng khung mic lên đã được vá (22/07/2026).** `useVoicePipeline.ts` nay import
    `serializeVoiceFrame` / `OP_MIC_IN` từ `liva-ui/src/utils/voiceFrame.ts`
@@ -390,8 +391,8 @@ hai lệnh dispatcher `mcp:list_tools` / `mcp:call_tool` gọi tới, nhưng ch�
 
 4. **`NativeMcpServer` đã nối vào dispatcher, nhưng chưa có client nào gọi.** Nó nằm trong
    `AppState` (`lib.rs:44`), khởi tạo ở cả `main.rs:171` và `src-tauri/src/lib.rs:349`.
-   Từ 22/07/2026 `handle_command` có hai nhánh `mcp:*`: `"mcp:list_tools"` (`lib.rs:1575`,
-   gọi thẳng `state.mcp_server.list_tools()`) và `"mcp:call_tool"` (`lib.rs:1578`).
+   Từ 22/07/2026 `handle_command` có hai nhánh `mcp:*`: `"mcp:list_tools"` (`liva-native-core/src/lib.rs:1467-1468`,
+   gọi thẳng `state.mcp_server.list_tools()`) và `"mcp:call_tool"` (`liva-native-core/src/lib.rs:1470-1494`).
    `list_tools()` (`mcp/server.rs:39`) vì thế có caller thật, cộng thêm test tích hợp
    `liva-native-core/tests/integration_tests.rs:539` ("2.7 — `mcp:list_tools` /
    `mcp:call_tool` phải đi qua `handle_command`").
@@ -429,14 +430,14 @@ này để tránh trùng — xem §4.2.
 | LLM router | `llama.cpp` GGUF; một `Mutex` duy nhất cho chat/embed/vision/swap | **[OK]** |
 | Vision màn hình | Windows Graphics Capture thuần Rust + Qwen3-VL; **cần build release** | **[OK]** |
 | VAD / denoise / AEC / turn-shadow | silero VAD v6, GTCRN, smart-turn v3.2 (ONNX); **cả hai vỏ** qua `VoiceRuntimeComponents::from_env` | **[OK]** cho VAD + denoise (mặc định bật); **[MỘT PHẦN]** cho turn-shadow + AEC (opt-in, mặc định tắt) |
-| Wake word (UI) | MLP thuần JS trong web worker (`hey_liva_weights.json`), chạy trong WebView2 | **[MỘT PHẦN]** — mặc định `Off` |
-| `WakeGate` (Rust) | Dựng trong `websocket.rs:283` (`WakeGate::from_env`) nên **đi theo WS server ⇒ có ở cả hai vỏ** | **[MỘT PHẦN]** — mặc định tắt (`LIVA_WAKE_MODE`), không phải vì profile |
+| Wake candidate (UI) | `LivaWakeWorker` chỉ cắt utterance, gửi `OP_WAKE_PROBE`; không tự nhận dạng bằng RMS | **[OK]** |
+| `WakeGate` + classifier (Rust) | Dựng trong `websocket.rs` và xác minh bằng ONNX hoặc STT phrase; có ở cả hai vỏ | **[MỘT PHẦN]** — artifact hiện tại chưa đạt “Hey Liva” trần |
 | Governor game-aware | Win32 API, vòng lặp 5s, `reload_llm_gpu_layers` | **[OK]** (early-return khi `n_gpu_layers`=0) |
 | Ghost Mode / hit-test | Win32, luồng riêng trong vỏ Tauri (`LIVA.exe`) | **[OK]** |
 | Stronghold vault | Tauri plugin Stronghold, Argon2id; file trong `AppData/Local/com.liva.cognitive-os/` | **[MỘT PHẦN]** — mật khẩu hardcode |
 | Lưu trữ | SQLite WAL, pool writer(1)+readers(4), `data/agents/liva_core/structured_memory.sqlite` | **[MỘT PHẦN]** — chỉ 4 bảng thường + 2 bảng ảo có writer |
 | Mã hoá | AES-256-GCM, khoá từ `LIVA_ENCRYPTION_KEY` | **[MỘT PHẦN]** — chỉ 1 cột `facts.value` |
-| `NativeMcpServer` | MCP nội bộ, đích là Obsidian vault; cấp phát ở cả hai điểm vào | **[MỘT PHẦN]** — đã nối dispatcher (`lib.rs:1575`, `lib.rs:1578`), chưa client UI nào gọi |
+| `NativeMcpServer` | MCP nội bộ, đích là Obsidian vault; cấp phát ở cả hai điểm vào | **[MỘT PHẦN]** — đã nối dispatcher (`liva-native-core/src/lib.rs:1467-1468`, `liva-native-core/src/lib.rs:1470-1494`), chưa client UI nào gọi |
 | Telegram bot | HTTPS long-poll `api.telegram.org`; shell-out `ffmpeg.exe` cho voice; **cả hai vỏ** từ 26/07/2026 | **[MỘT PHẦN]** — cần `TELEGRAM_BOT_TOKEN`, không phải vì profile |
 | `liva-voice` | Python + FastAPI `0.0.0.0:8765`, edge-tts / GPT-SoVITS, khởi động thủ công | **[MỘT PHẦN]** — không auth/CORS/rate-limit |
 | `mobile_client` | Capacitor 8 + Vue 3 (Android), `adb reverse` | **[MỘT PHẦN]** — mic giả |
@@ -479,7 +480,7 @@ Còn lại đều tuỳ chọn hoặc chạy tay: `liva-native-core.exe` standal
    còn lại của schema bộ nhớ dài hạn vẫn là **schema rỗng**.
    > ~~"chỉ 3/15 bảng thực sự có câu `INSERT` (`facts`, `tasks`, `agent_checkpoints`)"~~ —
    > bản đếm cũ bỏ sót nhánh vector; sửa 22/07/2026.
-   > 📌 Nguồn đầy đủ: [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md)
+   > 📌 Nguồn đầy đủ: [Persistence runtime](../03-he-thong-con/persistence.md)
 
 ---
 
@@ -494,8 +495,8 @@ Còn lại đều tuỳ chọn hoặc chạy tay: `liva-native-core.exe` standal
 - [Đường ống thoại](03-duong-ong-thoai.md) — bảng engine STT, bảng backend TTS, ngưỡng VAD/AEC/denoise (§2.4, §4.1)
 - [Hệ LLM và prompt](04-he-llm-va-prompt.md) — cấu hình LLM (`n_ctx`, `n_gpu_layers`, model router)
 - [Thị giác, quan sát thụ động và governor](06-thi-giac-passive-va-governor.md) — ngưỡng và hành vi governor game-aware
-- [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) — ERD SQLite, 15 bảng, sơ đồ mã hoá (§4.1, §5.3)
-- [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md) — bảng 8 lệnh Tauri, cấu hình cửa sổ, bảng màn hình dashboard (§2.1, §2.2)
+- [Persistence runtime](../03-he-thong-con/persistence.md) và [Threat model](../05-chat-luong/threat-model.md) — schema v5 và mã hóa hiện hành (§4.1, §5.3)
+- [Frontend runtime](../03-he-thong-con/frontend.md) và [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) — entry Vue, bảng màn hình, command và cấu hình cửa sổ (§2.1, §2.2)
 - [Tích hợp ngoài](09-tich-hop-ngoai.md) — bảng tích hợp Telegram / `liva-voice` / Edge-TTS / Obsidian (§2.6)
 - [Phụ thuộc module và tra cứu file](10-phu-thuoc-module-va-tra-cuu.md) — LOC và phụ thuộc từng module (§4.1)
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — mọi biến `LIVA_*` và `data/liva-config.json`
@@ -508,7 +509,7 @@ Còn lại đều tuỳ chọn hoặc chạy tay: `liva-native-core.exe` standal
 - [Mục lục bộ tài liệu](../README.md) — trích cảnh báo "hai profile chạy" ngay ở đầu trang
 - [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — lấy ranh giới hai vỏ; ⚠ tài liệu đó vẫn giải thích "WS 8002 vắng mặt ở Tauri", **khẳng định đã sai**, cần rà lại
 - [Đường ống thoại](03-duong-ong-thoai.md) — ⚠ vẫn lấy "VAD/AEC/denoise/turn-shadow = `None` ở profile Tauri" làm tiền đề, **khẳng định đã sai** (xem §0.2), cần rà lại
-- [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md) — lấy sơ đồ tổng thể để định vị vỏ Tauri trong hệ
+- [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) — định vị vỏ Tauri và security boundary trong hệ
 - [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md) — lấy hai profile để mô tả cách chạy đúng
 - [Đối chiếu tuyên bố và thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy trạng thái [OK]/[MỘT PHẦN]/[THIẾU] ở §4.1
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy 5 điểm ở §3 (lịch sử lệch header 9 byte, MCP chưa có client UI, `set_eco_mode` chết)

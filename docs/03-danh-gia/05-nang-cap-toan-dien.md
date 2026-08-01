@@ -1,7 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-07-29
+updated: 2026-08-01
 commit: 32fd1f5
+stale-ok: 98efc55
 status: living
 owns:
   - duong-co-so-do-luong
@@ -64,7 +65,7 @@ Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong 
 
 | Thứ tự | Việc | Vì sao ở vị trí này | Bắt đầu từ đâu |
 |---|---|---|---|
-| ~~**0**~~ | ~~Đo lại đủ 9 dòng đường cơ sở §1 tại HEAD~~ | ✅ **XONG 29/07/2026** — đo lại **11 cổng** tại `c6ec120` trong một phiên. Không có hồi quy nào ở mã nguồn (test 405 → **554**, coverage nhích lên cả bốn chỉ số); **một hồi quy ở tài liệu**: `docs-check` đỏ 6 lỗi, đã vá cùng phiên | Bảng mới ở [§1](#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120) |
+| ~~**0**~~ | ~~Đo lại đủ 9 dòng đường cơ sở §1 tại HEAD~~ | ✅ **XONG 29/07/2026** — đo lại **11 cổng** tại `c6ec120` trong một phiên. Không có hồi quy nào ở mã nguồn (test 405 → **554**, coverage nhích lên cả bốn chỉ số); **một hồi quy ở tài liệu**: `docs-check` đỏ 6 lỗi, đã vá cùng phiên | Bảng mới ở [§1](#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120-đo-lại-đủ-thay-bảng-2607) |
 | **1** | **U2 — installer + thử trên máy sạch** | Mục cao nhất chưa gạch của nhóm A, và A chặn beta | [§U2](#u2--installer-hiện-hành-và-thử-trên-máy-sạch). Nhớ: **U1c cho kết quả ÂM TÍNH**, cuBLAS là phụ thuộc cứng ⇒ tính gói **~830 MB**, đừng lên kế hoạch cho một con số nhỏ hơn |
 | **2** | **U16 — quay video** | Mã và dụng cụ đo xong rồi; **chỉ bạn quay được**, không ai làm hộ | Kịch bản quay đã viết sẵn trong [§U16](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí). Cần **build release + CUDA** (vision 1,2 s); trên debug `vision:ask` hỏng có chủ đích |
 | **3** | **U3 (màn hình UI) + U8 (bảng năng lực theo profile)** | Hai mục ◐ còn sót đuôi nhỏ, gỡ nốt cho nhóm A/C sạch | `preflight` CLI đã xong; còn màn hình. U8: `boot.rs` đã xong, còn bảng ở `01-ban-ve/01` + `02-van-hanh/03` |
@@ -72,6 +73,8 @@ Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong 
 | ~~**5**~~ | ~~U9 — một con số TTFT đo được~~ | ✅ **XONG 29/07/2026** — `ttft_bench.exe`, p50 **667 ms CPU · 18 ms CUDA** | [§U9](#u9--một-con-số-ttft-đo-được) |
 
 **Đang bị chặn, đừng nhận:** **U17b** (thiếu 2 model: MOSS *encode* và bộ mã hoá giọng 192 chiều) · **U20 bước 2+** (có mìn — nếu làm thì **bắt buộc** dùng UIAutomation, **tuyệt đối không** `passive/hook.rs`).
+
+**Ứng viên ngoại lệ, chưa duyệt:** [**U21**](#u21--sổ-đo-mỗi-lượt--turn_telemetry) (sổ đo mỗi lượt) thuộc nhóm E nên theo quy tắc chặn thì chưa tới lượt — nhưng nó là *hạ tầng đo* cho U14 chứ không phải năng lực mới, và mỗi ngày hoãn là một ngày mất dữ liệu. Điều kiện để chen ngang: nghiệm thu 3 (độ trễ thêm < 5 ms ở p50) phải đạt. Không đạt thì xếp lại hàng.
 
 **Việc vặt còn treo:** `.gitnexusrc` đang ở trạng thái `M` (thêm `walCheckpointThreshold`) — chưa commit.
 
@@ -179,8 +182,9 @@ Worktree tái hiện **chính xác** thứ CI thấy — kể cả gitlink rỗn
 | **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
 | **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |
 | **U15** | [Nối `CodeAgent` vào LLM thật](#u15--nối-codeagent-vào-llm-thật) | E | — | 1 tuần |
+| **U21** | [Sổ đo mỗi lượt — `turn_telemetry`](#u21--sổ-đo-mỗi-lượt--turn_telemetry) | E | **U14** (và có ích cho U13) | 0,5–1 ngày |
 | ◐ **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) — dụng cụ đo xong 26/07; video chưa quay (vision 80 s chặn kịch bản đầy đủ) | F | Hồ sơ | còn quay |
-| ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng-làm-được-ngay-05-ngày) — ✅ **XONG 26/07/2026** | F | — | xong |
+| ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng--xong-26072026) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | ~~**U18**~~ | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — ✅ **nghiệm thu 26/07** (người dùng chạy trên vỏ Tauri) | F | — | xong |
 | ~~**U19**~~ | [Ba tool OS thật](#u19--ba-tool-os-thật) — ✅ **nghiệm thu 10/10 ngày 26/07**; độ sáng cố tình bỏ | F | — | xong (2/3 tool) |
@@ -873,6 +877,48 @@ Bộ tiêu thụ projection có giới hạn đã chạy (validate lineage, chec
 Vòng lặp tự sửa lỗi đã hoàn chỉnh và có test; `trait CodeAgent` chỉ có bản mock. Nối adapter vào engine thật rồi đưa `evolution/` ra khỏi `--features experimental`.
 
 **Nghiệm thu.** Một bug có thật, cố ý gieo vào một hàm nhỏ, được vòng lặp tự vá và `cargo test` xanh lại — chạy lại được, không phải trình diễn một lần.
+
+---
+
+### U21 — Sổ đo mỗi lượt — `turn_telemetry`
+
+> **Vì sao số hiệu nhảy qua khối F.** U16–U20 đã chiếm dải kế tiếp và các neo `#u16…`–`#u20…` đang được tài liệu khác trỏ tới. Đánh số lại để cho liền mạch sẽ làm hỏng những neo đó — `docs-citations` là cổng cứng. U21 nằm ở **nhóm E**, đọc theo §2 chứ đừng đọc theo số.
+>
+> **Nguồn gốc.** Rà `github.com/ethanplusai/jarvis` ngày 01/08/2026 (Python/FastAPI, Claude API + Fish Audio, macOS — **không lấy được dòng mã nào**: ngăn xếp ngược hẳn và giấy phép cấm dùng thương mại). Thứ đáng lấy là **ý tưởng bảng `task_log`** trong `learning.py` của họ: ghi loại việc / thành-bại / thời lượng, rồi dùng thống kê đó để quyết định hành vi. Mục này là bản LIVA của ý tưởng đó, **không** phải bản port.
+
+**Vì sao.** [U14](#u14--tự-động-chuyển-router--expert) ghi rõ chỗ tắc: *"`llm:swap_model` chạy được; **quyết định khi nào swap** thì chưa có. Cần một tín hiệu đánh giá độ khó câu hỏi."* Tín hiệu đó không thể bịa ra lúc viết chính sách — nó phải là dữ liệu đã tích luỹ. Hôm nay LIVA **vứt đi** đúng thứ dữ liệu ấy: `handle_chat_completion_scoped` tính xong `prompt_tokens`/`completion_tokens` rồi trả về cho client và không lưu gì (`lib.rs`, nhánh dựng JSON `usage` ở cuối hàm); độ trễ mỗi lượt thì không ai đo. Kết quả: ngày bắt tay làm U14 là ngày **bắt đầu** gom số từ con số không.
+
+Đây là lý do mục này đáng làm **sớm** dù thuộc nhóm E: nó không phải năng lực mới, nó là **hạ tầng đo** cho một năng lực đã lên lịch. Ghi sớm một ngày là có thêm một ngày dữ liệu thật.
+
+⚠️ **Nhưng quy tắc chặn ở §2 vẫn là quy tắc** — *"Chỉ vào nhóm này sau khi A–C xong"*. Mục này là **ứng viên ngoại lệ có lập luận**, không phải ngoại lệ đã được duyệt. Điều kiện để nhận nó khi A còn dở: nghiệm thu 3 (độ trễ) phải **đạt**, vì đó là thứ duy nhất khiến nó có thể làm hỏng một mục nhóm A. Không đạt thì trả về đúng chỗ trong hàng đợi.
+
+**Ba quyết định thiết kế cần chốt trước khi gõ dòng nào.**
+
+**1. Đặt tên `turn_telemetry`, KHÔNG đặt `task_log`.** Bảng `tasks` (`db.rs`) đã tồn tại và là **to-do của người dùng** (`commands/task.rs`, 4 nhánh CRUD). Một bảng tên `task_log` cạnh nó sẽ đọc thành "nhật ký của bảng `tasks`" — sai hoàn toàn. Đây đúng lớp nhầm lẫn mà doc-comment đầu `commands/task.rs` đã phải viết hẳn một đoạn để cảnh báo (`task_plan_chat` không thuộc miền task dù tên bắt đầu bằng `task`). Đừng tạo thêm một ca nữa.
+
+**2. Móc ở `persist_turn_scoped`, không móc ở từng điểm vào.** Hàm đó có **3 điểm gọi thật** — `lib.rs` (`chat:completion`), `websocket.rs` (đường thoại), `agent/graph.rs` (pipeline graph) — cộng một điểm trong test. Móc một chỗ thì cả ba đường vào được phủ và không thể trôi lệch; móc ba chỗ thì lần thêm đường vào thứ tư sẽ thiếu, im lặng. Giá phải trả: **đổi chữ ký hàm** ⇒ **bắt buộc chạy `impact({target: "persist_turn_scoped", direction: "upstream"})` trước khi sửa**, theo `CLAUDE.md`.
+
+**3. KHÔNG chép plaintext vào bảng này.** `events` cố ý **không** nhân bản `rawUserMsg`/`rawAiReply` — doc-comment của `persist_conversation_event_vector` nêu rõ nội dung đã nằm ở `vectors_meta` nên không lặp lại. Một bảng telemetry chứa nguyên văn câu người dùng sẽ phá quyết định đó **và** tạo một bản sao không mã hoá nằm ngoài mọi đường xoá. Chỉ ghi **số và nhãn**; muốn nối về nội dung thì giữ `event_id`.
+
+**Việc.**
+1. Thêm `CREATE TABLE IF NOT EXISTS turn_telemetry (...)` vào `init_schemas` (`db.rs`) — cùng khuôn `execute_batch` với các bảng hiện có. Cột tối thiểu: `id`, `event_id`, `ts`, `entry_path` (`chat`/`voice`/`graph`), `model_id`, `prompt_tokens`, `completion_tokens`, `latency_ms`, `outcome` (`ok`/`err`), `err_kind`.
+2. `model_id` lấy từ `current_model_path` (`llm/engine.rs`) — **đây là cột làm nên giá trị của bảng cho U14**; thiếu nó thì không trả lời được "tỷ lệ câu đi vào expert".
+3. Đo `latency_ms` bao quanh `spawn_blocking` sinh completion trong `handle_chat_completion_scoped`, truyền xuống cùng token count.
+4. Ghi qua `persist_turn_scoped` (xem quyết định 2). Lỗi ghi telemetry **không được** làm hỏng lượt trả lời — nuốt vào `tracing::warn!`, đừng `?`.
+5. Một lệnh đọc: `telemetry:summary` trả tỷ lệ theo `model_id`, p50/p95 `latency_ms`, tỷ lệ `outcome='err'`. Không có lệnh đọc thì bảng này là một thư mục ghi rồi quên.
+
+**File.** `liva-native-core/src/db.rs` (schema), `liva-native-core/src/agent/graph.rs` (`persist_turn_scoped`), `liva-native-core/src/lib.rs` (`handle_chat_completion_scoped`), `liva-native-core/src/websocket.rs`, `liva-native-core/src/commands/llm.rs` (lệnh đọc).
+
+**Nghiệm thu — bốn điều kiện, cả bốn đều là lệnh chạy được.**
+
+1. **Có dữ liệu thật.** Chạy gateway với `LIVA_DB_PATH` trên đĩa (**không** `LIVA_DB_IN_MEMORY=1` — DB in-memory không mở lại từ ngoài được, đúng lý do `e2e-memory.mjs` từ chối chạy khi thiếu biến này), rồi `e2e-gateway.mjs`. Mở file SQLite và kiểm: `SELECT COUNT(*) FROM turn_telemetry` ≥ số lượt chat của kịch bản, **và mọi dòng** có `model_id <> ''`, `latency_ms > 0`, `completion_tokens > 0`.
+2. **Phủ cả ba đường vào.** Sau một lượt qua `chat:completion` **và** một lượt qua đường thoại, `SELECT DISTINCT entry_path` trả về ít nhất `chat` và `voice`. Chỉ thấy `chat` nghĩa là móc sai chỗ — quay lại quyết định 2.
+3. **Không làm chậm đường nóng.** `persist_turn_scoped` được `await` **trước** khi `handle_chat_completion_scoped` trả kết quả, nên đây là chi phí người dùng chịu thật, không phải chi phí nền. Đo p50 của 20 lượt trước và sau bằng cùng một lệnh: **chênh lệch p50 < 5 ms**. Ghi **cả hai con số** vào §1 — ghi "không đáng kể" mà không có số là vi phạm [không bịa số](../README.md#không-bịa-số-liệu).
+4. **Không hồi quy cổng nào.** `cargo test` (≥ 564 pass), `cargo clippy --all-targets --message-format=short` **0 warning**, `e2e-gateway-ci.mjs` 8/8, `e2e-memory.mjs` 6/6. Riêng `e2e-memory` phải chạy vì mục này đụng đúng hàm ghi lượt hội thoại.
+
+**Chưa xong nếu chỉ có bảng.** Cùng lý lẽ với [U13](#u13--consolidation-ngữ-nghĩa-l2--l3) (*"Chưa chứng minh được điều đó thì L3 chỉ là schema"*): `turn_telemetry` không có `telemetry:summary` đọc ra được số thì nó là schema, không phải sổ đo — và nghiệm thu 1–3 đều không kiểm được.
+
+**Cái mục này KHÔNG làm, để khỏi bị nhầm là trùng lặp.** Nó **không** thay `skill_signals` + `skills/signals.rs` — sổ ghi đó đo **chất lượng skill** để cộng prior vào *thứ hạng truy hồi*, và nó đã tinh vi hơn (đếm `merge_key` phân biệt, trọng số theo loại, `refuted` không trừ điểm). `turn_telemetry` đo **chi phí và kết cục của một lượt LLM** để phục vụ *quyết định chọn model*. Hai miền khác nhau, đừng gộp.
 
 ---
 

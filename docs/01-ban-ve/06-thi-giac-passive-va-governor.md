@@ -1,11 +1,13 @@
 ---
 title: "Thị giác, quan sát thụ động và governor"
-updated: 2026-07-22
-commit: 5fc8e2d
-status: living
-owns:
-  - nguong-governor
-  - canh-bao-passive-keylogger
+updated: 2026-07-30
+commit: 3688b5f
+status: frozen
+owns: []
+superseded_by:
+  - docs/03-he-thong-con/vision.md
+  - docs/03-he-thong-con/context-broker.md
+  - docs/05-chat-luong/resource-governor.md
 covers:
   - Cargo.toml
   - liva-desktop/src-tauri/src/lib.rs
@@ -21,7 +23,7 @@ covers:
 ---
 # Thị giác màn hình, quan sát thụ động và governor
 
-[⬆ Mục lục](../README.md) · [◀ Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) · [Tầng dữ liệu và bảo mật ▶](07-tang-du-lieu-va-bao-mat.md)
+[⬆ Mục lục](../README.md) · [◀ Agent và tool runtime](../03-he-thong-con/agent-tools.md) · [Persistence ▶](../03-he-thong-con/persistence.md)
 
 ---
 
@@ -340,7 +342,7 @@ Khuôn payload/response của `vision:ask`, `vision:capture`, `vision:get_change
 
 > 📌 Nguồn đầy đủ: [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
-Định tuyến vào node vision chỉ bằng **keyword thô**: `text_lower.contains("màn hình") || text_lower.contains("screen")` (`agent/graph.rs:114-116`) — **không** dùng LLM để phân loại ý định. Graph này chạy thật: `build_pipeline_graph` được gọi ở `webrtc/pipeline.rs:271`, `WebRTCActor::new` ở `main.rs:509`.
+Định tuyến vào node vision chỉ bằng **keyword thô**: `text_lower.contains("màn hình") || text_lower.contains("screen")` (`agent/graph.rs:114-116`) — **không** dùng LLM để phân loại ý định. Graph này chạy thật: `build_pipeline_graph` được gọi ở `webrtc/pipeline.rs:271`, `WebRTCActor::new` ở `liva-native-core/src/websocket.rs:1113-1124`.
 
 Giá trị mặc định:
 
@@ -644,14 +646,14 @@ Bảng tra cứu file toàn dự án (kèm LOC và sơ đồ phụ thuộc modul
 
 ## Liên quan
 
-**Đọc tiếp theo mạch:** [⬆ Mục lục](../README.md) · [◀ Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) · [Tầng dữ liệu và bảo mật ▶](07-tang-du-lieu-va-bao-mat.md)
+**Đọc tiếp theo mạch:** [⬆ Mục lục](../README.md) · [◀ Agent và tool runtime](../03-he-thong-con/agent-tools.md) · [Persistence ▶](../03-he-thong-con/persistence.md)
 
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 
 - [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — khuôn payload/response của `vision:capture`, `vision:ask`, `vision:get_changed_regions` trong bảng 42 lệnh.
 - [Hệ LLM và prompt](04-he-llm-va-prompt.md) — nội dung `PERSONA_LIVA` dùng trong prompt ChatML của `answer_with_image`, cấu hình LLM và chống prompt-injection.
-- [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — StateGraph 4 node mà node `"vision"` gắn vào, và cách `active_session_id` huỷ lượt khi barge-in.
-- [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) — vault/sơ đồ mã hoá mà `FlushedPayload` bắt buộc phải dùng nếu sau này nối dây `passive/`.
+- [Agent và tool runtime](../03-he-thong-con/agent-tools.md) — StateGraph sáu node mà node `"vision"` gắn vào, và cách `active_session_id` huỷ lượt khi barge-in.
+- [Threat model](../05-chat-luong/threat-model.md) — consent, vault và data-at-rest policy mà `FlushedPayload` bắt buộc phải dùng nếu sau này nối dây `passive/`.
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường đầy đủ (`LIVA_VISION_*`, `LIVA_GAME_*`, `LIVA_QWENVL_*`) và danh mục lệch `.env.example` vs code.
 - [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — cặp Qwen3-VL LM + mmproj, RAM/VRAM, và yêu cầu build release cho vision.
 - [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md) — cách build/chạy `screen_vision_bench.exe` và `qwen3vl_probe.exe`.

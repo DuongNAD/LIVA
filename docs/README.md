@@ -1,22 +1,65 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
-updated: 2026-07-29
-commit: 0fd816c
+updated: 2026-07-30
+commit: 3688b5f
 status: living
 owns: []
 covers:
-  - data/liva-config.json
-  - liva-desktop/src-tauri/tauri.conf.json
-  - liva-native-core/src/*
-  - liva-native-core/src/agent/memory.rs
-  - liva-native-core/src/vision/capture.rs
-  - liva-native-core/src/webrtc/vad.rs
-  - liva-ui/src/composables/useGateway.ts
-  - liva-ui/src/composables/useVoicePipeline.ts
+  - docs/_data/capabilities.json
+  - docs/_data/document-inventory.json
+  - docs/_generated/kiem-ke-tai-lieu.md
+  - docs/00-san-pham/tam-nhin-jarvis.md
+  - docs/01-kien-truc/cognitive-runtime.md
+  - docs/01-kien-truc/inventory-he-thong.md
+  - docs/03-he-thong-con/agent-tools.md
+  - docs/03-he-thong-con/context-broker.md
+  - docs/03-he-thong-con/desktop-tauri.md
+  - docs/03-he-thong-con/frontend.md
+  - docs/03-he-thong-con/memory.md
+  - docs/03-he-thong-con/persistence.md
+  - docs/03-he-thong-con/vision.md
+  - docs/03-he-thong-con/voice.md
+  - docs/03-he-thong-con/wake-word.md
+  - docs/05-chat-luong/action-policy.md
+  - docs/05-chat-luong/resource-governor.md
+  - docs/05-chat-luong/threat-model.md
+  - docs/05-chat-luong/voice-slo.md
+  - docs/05-chat-luong/wake-benchmark.md
+  - docs/06-ke-hoach/roadmap.md
+  - docs/07-dong-gop/quy-hoach-tai-lieu.md
 ---
 # Tài liệu LIVA
 
-LIVA là một trợ lý AI chạy **cục bộ trên máy người dùng**: lõi Rust `liva-native-core` (LLM, STT, TTS, agent, WebSocket gateway cổng 8002) được vỏ Tauri v2 `liva-desktop` nhúng in-process, còn giao diện là ứng dụng Vue 3 `liva-ui`. Toàn bộ suy luận mặc định chạy offline bằng model cục bộ — `llama.cpp` cho LLM/vision, ONNX Runtime cho STT/TTS/VAD/denoise — dữ liệu nằm trong SQLite cục bộ. Bộ tài liệu này mô tả **code thật đang tồn tại tại commit `5d69c3c`**, không mô tả kế hoạch hay ý định.
+LIVA là một trợ lý AI chạy **cục bộ trên máy người dùng**: lõi Rust `liva-native-core` (LLM, STT, TTS, agent, WebSocket gateway cổng 8002) được vỏ Tauri v2 `liva-desktop` nhúng in-process, còn giao diện là ứng dụng Vue 3 `liva-ui`. Toàn bộ suy luận mặc định chạy offline bằng model cục bộ — `llama.cpp` cho LLM/vision, ONNX Runtime cho STT/TTS/VAD/denoise — dữ liệu nằm trong SQLite cục bộ. Tài liệu as-built phải bám code/test; tài liệu target và roadmap phải tự ghi rõ rằng chúng mô tả đích đến.
+
+Từ 30/07/2026, bộ tài liệu được di trú dần sang kiến trúc v2. Tài liệu **as-built**
+vẫn nằm trong `01-ban-ve/`, `02-van-hanh/` và `03-danh-gia/`; tầm nhìn, kiến trúc
+đích và roadmap mới có nguồn chuẩn riêng. Khi một tài liệu cũ và ma trận năng lực
+mâu thuẫn về trạng thái hiện tại, đọc bằng chứng code/test trong ma trận và dùng code
+làm trọng tài.
+
+## Nguồn chuẩn mới
+
+1. [Tầm nhìn LIVA — trợ lý kiểu JARVIS](00-san-pham/tam-nhin-jarvis.md) — định nghĩa sản phẩm và nguyên tắc.
+2. [Ma trận năng lực LIVA → JARVIS](_generated/ma-tran-nang-luc.md) — trạng thái sinh từ registry, không sửa tay.
+3. [Inventory capability → module](01-kien-truc/inventory-he-thong.md) — entry point, luồng, test và khoảng trống as-built.
+4. [Kiến trúc đích Cognitive Runtime](01-kien-truc/cognitive-runtime.md) — vòng perception → policy → action → memory.
+5. [Master roadmap](06-ke-hoach/roadmap.md) — nguồn duy nhất cho việc còn làm và thứ tự.
+6. [Kiểm kê disposition tài liệu](_generated/kiem-ke-tai-lieu.md) — toàn bộ file được gắn KEEP/SPLIT/GENERATE/FREEZE/MERGE.
+7. [Quy hoạch tài liệu v2](07-dong-gop/quy-hoach-tai-lieu.md) — mapping và gate di trú.
+8. [Voice runtime](03-he-thong-con/voice.md) + [Voice SLO](05-chat-luong/voice-slo.md) — as-built và cổng chất lượng thoại.
+9. [Wake architecture](03-he-thong-con/wake-word.md) + [Wake benchmark](05-chat-luong/wake-benchmark.md) — đường wake hiện hành và cổng nghiệm thu.
+10. [Agent và tool runtime](03-he-thong-con/agent-tools.md) + [Action policy](05-chat-luong/action-policy.md) — StateGraph, selector, executor và ranh giới side effect.
+11. [Memory runtime](03-he-thong-con/memory.md) ([HTML quét nhanh](03-he-thong-con/memory.html)) — checkpoint, RAG, facts, projection worker và lộ trình semantic memory.
+12. [Persistence runtime](03-he-thong-con/persistence.md) + [Threat model](05-chat-luong/threat-model.md) — data root, 20 bảng, migration, backup/restore, trust boundary, mã hóa và kế hoạch hardening.
+13. [Vision runtime](03-he-thong-con/vision.md) + [Context broker](03-he-thong-con/context-broker.md) + [Resource governor](05-chat-luong/resource-governor.md) — perception theo yêu cầu, ranh giới proactive và chính sách sống chung với workload nặng.
+14. [Frontend runtime](03-he-thong-con/frontend.md) + [Desktop Tauri](03-he-thong-con/desktop-tauri.md) — hai entry Vue production, transport, cửa sổ, capability và IPC native.
+
+Registry máy đọc được: [`capabilities.json`](_data/capabilities.json) và
+[`document-inventory.json`](_data/document-inventory.json).
+
+> **Trạng thái chuyển tiếp:** chưa di chuyển hàng loạt tài liệu cũ. Việc này giữ mọi
+> liên kết hiện có hoạt động trong khi từng subsystem được tách sang cấu trúc mới.
 
 > **Cảnh báo "hai profile chạy không tương đương" đã được GỠ (26/07/2026).** Bản trước dặn người đọc rằng VAD/WS 8002/Telegram chỉ sống ở binary standalone chứ không ở vỏ Tauri. Đối chiếu lại mã nguồn: **hai trong ba khẳng định đó đã sai từ trước**, và phần còn lại đã đóng — từ `boot.rs`, hai vỏ dựng cùng một `AppState` và bật cùng một danh sách dịch vụ nền. Khác biệt còn lại chỉ là **đường IPC** (stdin/stdout ở gateway vs `invoke` ở vỏ Tauri). `npm run dev` cho bạn đủ tính năng. ⚠ Đổi lại: **đừng chạy đồng thời hai vỏ** — cả hai đều bind `:8002`. Chi tiết và đối chiếu từng khẳng định cũ ở [§0 của Kiến trúc tổng thể](01-ban-ve/01-kien-truc-tong-the.md).
 
@@ -36,8 +79,8 @@ Ba lối vào theo vai trò. Mỗi lối là một chuỗi đọc **theo đúng 
 ### 2. Lập trình viên chuẩn bị sửa code
 
 1. [01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md](01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) — "sửa X thì mở file nào", bảng module + LOC + người gọi, nguyên tắc an toàn.
-2. [01-ban-ve/02-giao-thuc-ipc-va-websocket.md](01-ban-ve/02-giao-thuc-ipc-va-websocket.md) — hợp đồng giao thức: `AppState`, 25 bước khởi động, bảng 42 lệnh `handle_command`.
-3. Bản vẽ của đúng khu vực bạn đụng tới: [thoại](01-ban-ve/03-duong-ong-thoai.md) · [LLM & prompt](01-ban-ve/04-he-llm-va-prompt.md) · [agent & bộ nhớ](01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) · [thị giác & governor](01-ban-ve/06-thi-giac-passive-va-governor.md) · [dữ liệu & bảo mật](01-ban-ve/07-tang-du-lieu-va-bao-mat.md) · [frontend & Tauri](01-ban-ve/08-frontend-va-vo-tauri.md) · [tích hợp ngoài](01-ban-ve/09-tich-hop-ngoai.md).
+2. [01-ban-ve/02-giao-thuc-ipc-va-websocket.md](01-ban-ve/02-giao-thuc-ipc-va-websocket.md) — hợp đồng giao thức: `AppState`, vòng đời khởi động và catalog lệnh `handle_command` theo miền.
+3. Bản vẽ của đúng khu vực bạn đụng tới: [voice runtime](03-he-thong-con/voice.md) · [wake word](03-he-thong-con/wake-word.md) · [agent & tools](03-he-thong-con/agent-tools.md) · [memory](03-he-thong-con/memory.md) · [persistence](03-he-thong-con/persistence.md) · [vision](03-he-thong-con/vision.md) · [context broker](03-he-thong-con/context-broker.md) · [resource governor](05-chat-luong/resource-governor.md) · [frontend](03-he-thong-con/frontend.md) · [desktop Tauri](03-he-thong-con/desktop-tauri.md) · [action policy](05-chat-luong/action-policy.md) · [threat model](05-chat-luong/threat-model.md) · [LLM & prompt](01-ban-ve/04-he-llm-va-prompt.md) · [tích hợp ngoài](01-ban-ve/09-tich-hop-ngoai.md).
 4. [02-van-hanh/04-kiem-thu-va-ci.md](02-van-hanh/04-kiem-thu-va-ci.md) — test nào có thật, 17 binary kiểm chứng, pre-commit hook và cách bypass.
 
 ### 3. Người đánh giá dự án (giám khảo, reviewer, người quyết định đầu tư)
@@ -58,13 +101,13 @@ Mô tả **hệ thống được lắp ráp thế nào**. Đây là phần dày 
 |---|---|---|
 | [00-tong-quan-he-thong.md](01-ban-ve/00-tong-quan-he-thong.md) | Cửa vào bộ tài liệu: LIVA là gì, tầm nhìn gốc & ba trụ cột, đánh giá hiện trạng thẳng thắn, bảng chỉ số dự án, bản đồ workspace và cây thư mục, hướng dẫn đọc tiếp | 3 mermaid |
 | [01-kien-truc-tong-the.md](01-ban-ve/01-kien-truc-tong-the.md) | **Hai profile chạy** (Tauri nhúng core vs binary standalone) và vì sao chúng không tương đương; sơ đồ kiến trúc tổng thể; diễn giải từng khối; bảng thành phần — công nghệ — tiến trình — trạng thái; ba lát cắt kiến trúc đáng chú ý | 1 mermaid |
-| [02-giao-thuc-ipc-va-websocket.md](01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | **Hợp đồng giao thức** cho mọi client: `AppState`, vòng đời khởi động 25 bước, WebSocket server + stdio IPC, khung nhị phân `VoiceFrame`, hai giao thức text trên cùng socket, **bảng 42 lệnh `handle_command`**, khung streaming, lệnh UI gửi mà core không có handler, đối chiếu thiết kế gốc vs as-built, checklist viết client | 5 mermaid |
-| [03-duong-ong-thoai.md](01-ban-ve/03-duong-ong-thoai.md) | Toàn chuỗi mic → AEC → GTCRN denoise → Silero VAD → Smart Turn shadow / wake gate → STT → agent+LLM → TTS → loa; hai hệ wake word song song; barge-in bốn lớp; bảng timing từ hằng số trong code; bảng env đường ống thoại | 3 mermaid |
+| [02-giao-thuc-ipc-va-websocket.md](01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | **Hợp đồng giao thức** cho mọi client: `AppState`, vòng đời khởi động, WebSocket server + stdio IPC, khung nhị phân `VoiceFrame`, hai giao thức text trên cùng socket, **catalog lệnh `handle_command` theo miền**, khung streaming, đối chiếu thiết kế gốc vs as-built, checklist viết client | 5 mermaid |
+| [03-duong-ong-thoai.md](01-ban-ve/03-duong-ong-thoai.md) | **Snapshot frozen** của khảo sát thoại cũ; nguồn chuẩn hiện hành là [Voice runtime](03-he-thong-con/voice.md), [Voice SLO](05-chat-luong/voice-slo.md), [Wake architecture](03-he-thong-con/wake-word.md) và [Wake benchmark](05-chat-luong/wake-benchmark.md) | 3 mermaid |
 | [04-he-llm-va-prompt.md](01-ban-ve/04-he-llm-va-prompt.md) | Kiến trúc engine LLM, `swap_model`/hot-swap, đường đa phương thức Qwen3-VL, prefix-cache + sliding window, sampler, embedding, persona và ba lớp chống prompt-injection, ba đường streaming token; **giới hạn cốt lõi: một engine / một context / một Mutex dùng chung**; router vs expert **[THIẾU]** | 5 mermaid |
-| [05-agent-bo-nho-va-tien-hoa.md](01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) | Hai tầng máy trạng thái, `StateGraph` + `build_pipeline_graph`, router phân loại ý định, `memory.rs` như checkpointer, swarm dispatcher và `evolution/` (đều mồ côi), tool/skill calling, ranh giới nối dây, tóm tắt rủi ro tầng agent | 5 mermaid |
-| [06-thi-giac-passive-va-governor.md](01-ban-ve/06-thi-giac-passive-va-governor.md) | Chụp màn hình `vision/capture.rs`, hai thuật toán diff độc lập, đường nối ảnh → Qwen3-VL, module `passive/` (hook bàn phím/chuột), `governor.rs` (fullscreen **và** tải CPU thật) và ảnh hưởng lên LLM/TTS/vision, bảng tra cứu nhanh file | 7 mermaid |
-| [07-tang-du-lieu-va-bao-mat.md](01-ban-ve/07-tang-du-lieu-va-bao-mat.md) | ERD SQLite 15 bảng (9/15 không có câu lệnh ghi nào), pool + PRAGMA + WAL, `crypto.rs` AES-256-GCM với ba vấn đề, ba két bí mật đều không sống, cấu trúc `data/`, `prng.rs`, `.gitignore`/`.aiexclude`, rủi ro bảo mật quan sát được | 1 mermaid (ERD) |
-| [08-frontend-va-vo-tauri.md](01-ban-ve/08-frontend-va-vo-tauri.md) | Ba entry Vite (chỉ hai được build), `useGateway.ts` dual transport, `useVoicePipeline.ts` (ScriptProcessorNode chứ không AudioWorklet), playback loa, adapter `platform/`, Ghost Mode click-through, avatar VRM/Three.js vs model FBX thật, bảng đầy đủ màn hình Dashboard, i18n/logger/safeFetch, tám lệnh Tauri, `tauri.conf.json` + CSP + capabilities, cách nhúng core in-process | 4 mermaid |
+| [05-agent-bo-nho-va-tien-hoa.md](01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) | **Snapshot frozen** trước khi tách subsystem; nguồn chuẩn hiện hành là [Agent và tool runtime](03-he-thong-con/agent-tools.md), [Action policy](05-chat-luong/action-policy.md) và [Memory runtime](03-he-thong-con/memory.md); evolution chỉ còn là lịch sử/experimental | 5 mermaid |
+| [06-thi-giac-passive-va-governor.md](01-ban-ve/06-thi-giac-passive-va-governor.md) | **Snapshot frozen** trước khi tách subsystem; nguồn chuẩn hiện hành là [Vision runtime](03-he-thong-con/vision.md), [Context broker](03-he-thong-con/context-broker.md) và [Resource governor](05-chat-luong/resource-governor.md) | 7 mermaid |
+| [07-tang-du-lieu-va-bao-mat.md](01-ban-ve/07-tang-du-lieu-va-bao-mat.md) | **Snapshot frozen** trước schema v5 và crypto/Stronghold hiện hành; nguồn chuẩn là [Persistence runtime](03-he-thong-con/persistence.md) và [Threat model](05-chat-luong/threat-model.md) | 1 mermaid (ERD lịch sử) |
+| [08-frontend-va-vo-tauri.md](01-ban-ve/08-frontend-va-vo-tauri.md) | **Snapshot frozen** trước khi tách subsystem; nguồn chuẩn hiện hành là [Frontend runtime](03-he-thong-con/frontend.md) và [Desktop Tauri](03-he-thong-con/desktop-tauri.md) | 4 mermaid |
 | [09-tich-hop-ngoai.md](01-ban-ve/09-tich-hop-ngoai.md) | MCP (hai bản song song, bản Rust mồ côi), bot Telegram (chạy được nhưng vòng lặp không khép kín), smart home **[THIẾU]**, dịch vụ Python `liva-voice` cổng 8765, `mobile_client/` Capacitor, `obsidian_llm_wiki`; bảng tổng hợp danh sách mồ côi cần hành động | 4 mermaid |
 | [10-phu-thuoc-module-va-tra-cuu.md](01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) | **Bản đồ tìm đường trong mã nguồn**: sơ đồ phụ thuộc module Rust, bảng module (LOC · trách nhiệm · phụ thuộc · người gọi), bảng tra cứu nhanh file quan trọng, sáu thành phần mồ côi, tra cứu theo tình huống "tôi cần sửa X thì mở file nào", nguyên tắc an toàn khi sửa | 1 mermaid |
 
@@ -80,6 +123,7 @@ Mô tả **cách làm cho hệ thống chạy được trên một máy thật**
 | [02-mo-hinh-ai-va-tai-nguyen.md](02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) | Nguồn sự thật của đường dẫn model, bảng model trong `models/`, LLM GGUF ngoài repo, ánh xạ model → module → thiết bị (CPU/GPU), bảng tài nguyên RAM/VRAM, điều kiện build, ba feature flag `cuda`/`vulkan`/`openblas` thật sự làm gì, checklist trước khi chạy trên máy mới | 1 mermaid |
 | [03-trien-khai-va-runtime.md](02-van-hanh/03-trien-khai-va-runtime.md) | Sơ đồ triển khai; bảng tiến trình · cổng · phụ thuộc; bảng bộ nhớ model; **cách chạy đúng** để có đủ cả hai profile (`npm run dev` không khởi động binary lõi); sự cố thường gặp khi khởi động; đóng gói bản build | 1 mermaid |
 | [04-kiem-thu-va-ci.md](02-van-hanh/04-kiem-thu-va-ci.md) | Bản đồ bề mặt kiểm thử; bảng test Rust (cái nào thật sự chạy trong CI); **bảng 17 binary kiểm chứng trong `src/bin/`**; CI pipeline làm và không làm gì; pre-commit hook + ba cách bypass; khoảng trống độ phủ; script/asset mồ côi; công thức chạy nhanh | 4 mermaid |
+| [06-backup-restore-sqlite.md](02-van-hanh/06-backup-restore-sqlite.md) | Runbook online backup, manifest SHA-256, restore offline, rollback và release drill | — |
 
 ---
 
@@ -97,7 +141,7 @@ Mô tả **hệ thống đang ở đâu so với những gì nó tuyên bố**, 
 
 | [06-nhan-tin-ra-ngoai.md](03-danh-gia/06-nhan-tin-ra-ngoai.md) | **Nhắn tin ra ngoài (Telegram + Messenger + web khác)**: hiện trạng từng mảnh kèm bằng chứng, 5 việc còn lại theo thứ tự, và — phần đáng đọc nhất — **các bẫy đã trả giá**: `Input.dispatchKeyEvent` bị Chrome vứt khi cửa sổ không phải foreground, danh bạ biến mất theo thư mục chạy, bản nháp chết khi lõi restart, cùng ba lỗi ĐO từng dẫn tới kết luận sai | — |
 
-| [07-wake-word-viec-con-lai.md](03-danh-gia/07-wake-word-viec-con-lai.md) | **Wake word sau bản vá 27/07/2026.** Lỗi "nhảy với mọi tiếng nói" đã đóng (28/28 câu trong phòng bị từ chối đúng). Còn **một** quyết định sản phẩm: `"Hey Liva"` trần **không khả thi với model hiện có** — classifier chấm giọng thật **0,004–0,025** so với ngưỡng 0,68, tức **ngang tiếng ồn**, nên hạ ngưỡng bị loại thẳng. Chọn giữa train lại classifier bằng giọng chủ máy, hay đổi UX sang cụm dài hơn (đã chạy được). Kèm 6 bẫy ĐO từng dẫn tới kết luận sai | — |
+| [07-wake-word-viec-con-lai.md](03-danh-gia/07-wake-word-viec-con-lai.md) | **Snapshot frozen** của đợt vá ngày 27/07/2026; nguồn chuẩn hiện hành là [Wake architecture](03-he-thong-con/wake-word.md) và [Wake benchmark](05-chat-luong/wake-benchmark.md) | — |
 
 Hai tài liệu hành động này **không trùng nhau**: `03-…` theo dõi **sửa lỗi** GĐ0–GĐ4; `05-…` theo dõi **nâng cấp chất lượng** sau khi lớp bug chặn phát hành đã đóng, và là nơi ghi lại số đo thật để so sánh về sau. Nhóm F trong `05-…` trả lời một câu hỏi khác hẳn hai nhóm còn lại — không phải "cái gì đang hỏng" mà "làm sao để người ngoài nhìn vào thấy ấn tượng" — nên nó xếp sau cùng và cần A/B/C làm nguyên liệu.
 

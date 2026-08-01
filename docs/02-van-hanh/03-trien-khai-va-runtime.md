@@ -1,7 +1,7 @@
 ---
 title: "Triển khai và runtime"
-updated: 2026-07-28
-commit: 9517030
+updated: 2026-07-31
+commit: 3688b5f
 status: living
 owns:
   - bang-tien-trinh
@@ -19,11 +19,12 @@ covers:
 ---
 # Triển khai & Runtime
 
-> **Runtime delta 23/07/2026:** `npm run dev` khởi động Tauri với core Rust nhúng và
+> **Runtime delta 31/07/2026:** `npm run dev` khởi động Tauri với core Rust nhúng và
 > WebSocket gateway thật trên `127.0.0.1:8002`; gateway và IPC dùng chung `AppState`.
 > Launcher chỉ kiểm tra 5173/8002, chỉ dọn tiến trình thuộc checkout LIVA, và có
-> `-CheckOnly` để preflight không thay đổi tiến trình. Phần khảo sát lịch sử bên dưới
-> chưa được viết lại toàn bộ; các kết luận “script kill mọi port / desktop không bind
+> `-CheckOnly` để preflight không thay đổi tiến trình. Bản cài tự mở cửa sổ Setup khi
+> thiếu model bắt buộc; lỗi boot DB/khoá hiện ra MessageBox có hướng khắc phục thay vì
+> chỉ biến mất. Các kết luận lịch sử “script kill mọi port / desktop không bind
 > gateway / voice fields là None” không còn đúng với runtime hiện tại.
 
 [⬆ Mục lục](../README.md) · [◀ Mô hình AI và tài nguyên](02-mo-hinh-ai-va-tai-nguyen.md) · [Kiểm thử và CI ▶](04-kiem-thu-va-ci.md)
@@ -285,11 +286,12 @@ Phần dưới đây là **cách chạy đúng** từng profile — đây mới 
 
 ### 4.1 Chuẩn bị trước khi chạy (một lần)
 
-Cài dependency Node trước — gói `sqlite-vec` nằm trong đây, và **thiếu nó là không mở nổi DB**, tức không phải suy giảm mà là chặn khởi động:
+Cài dependency Node theo lockfile trước — gói `sqlite-vec` nằm trong đây, và
+**thiếu nó là không mở nổi DB**, tức không phải suy giảm mà là chặn khởi động:
 
 ```powershell
 cd E:\Project\LIVA
-npm install
+npm ci
 ```
 
 Rồi kiểm bằng **một** lệnh thay cho danh sách `Get-Command` thủ công:
@@ -302,8 +304,8 @@ Nó không thay đổi tiến trình nào, và chạy hai bộ kiểm **bổ sun
 
 | Bộ kiểm | Trả lời | Thoát |
 |---|---|---|
-| `liva-native-core.exe --preflight` | **môi trường chạy**: profile build (debug ⇒ `vision:ask` trả lỗi ngay), **bốn** điều kiện của vision (release · `--features cuda` · thấy GPU · `LIVA_LLM_N_GPU_LAYERS` > 0 — thiếu bất kỳ cái nào là ~80 s/lượt thay vì ~1,4 s), `espeak-ng`, `ffmpeg`, `vec0`, khoá mã hoá có phải khoá mặc định công khai, allow-list Telegram, và `data/liva-config.json` có được tìm thấy hay không | **luôn 0** — báo cáo, không phải cổng kiểm |
-| `npm run doctor` | **file model trên đĩa**: 11 năng lực, kèm hệ quả khi thiếu, biến override và lệnh tải | **1** khi thiếu file bắt buộc |
+| `liva-native-core.exe --preflight` | **môi trường chạy**: profile build; bốn điều kiện vision; `espeak-ng`; `ffmpeg`; `vec0`; khoá mã hoá dữ liệu cá nhân (facts/transcript/checkpoint/outbox); allow-list Telegram; vị trí config | **luôn 0** — báo cáo, không phải cổng kiểm |
+| `npm run doctor` | **file model trên đĩa** theo `data/models-manifest.json`: 12 group năng lực, hệ quả khi thiếu, biến override và lệnh tải | **1** khi thiếu group bắt buộc |
 
 Chạy riêng từng cái cũng được:
 
@@ -319,7 +321,9 @@ Ba điểm dễ vướng:
 
 - **`--preflight` chạy trước mọi khởi tạo** — không runtime Tokio, không mở DB, không nạp model. Đó là cả điểm của nó: phải trả lời được trên đúng cái máy chưa boot nổi.
 - **Đọc bản `release` nếu có.** `-CheckOnly` ưu tiên `target\release\` rồi mới tới `target\debug\`, vì hàng "vision" phụ thuộc profile — báo theo bản debug sẽ nói vision không dùng được trong khi bản ship thì dùng được. Khi chỉ có bản debug, nó nói rõ điều đó.
-- **Chạy từ thư mục gốc repo.** `data/liva-config.json` được dò từ cwd rồi hai cấp trên; hụt thì rơi về giá trị mặc định trong code (hiện vẫn là `gemma-4-E4B`, **không** phải router thật Qwen3-VL). Hàng "Cấu hình" trong bảng đứng trước hai hàng model chính là để bắt trường hợp này.
+- **Chạy từ thư mục gốc repo.** `data/liva-config.json` được dò từ cwd rồi hai
+  cấp trên; hụt thì rơi về default Qwen3-VL Q4_K_M hiện hành. Hàng "Cấu hình"
+  trong bảng đứng trước hai hàng model chính để phát hiện việc đang đọc fallback.
 
 Còn UTF-8 cho tiếng Việt trên console thì `start_all.ps1` tự đặt; chạy tay thì:
 
@@ -350,7 +354,9 @@ Ghi chú:
 
 - `--no-dev-server` là **cố ý**: Tauri không tự spawn Vite, nó chỉ trỏ tới `devUrl: http://localhost:5173` đã có sẵn. Nếu Vite chưa lên, cửa sổ sẽ trắng.
 - Khi `LIVA.exe` thoát, khối `finally` của `start_all.ps1:67-91` kill tiến trình Vite và mọi `llama-server` còn sót (giải phóng VRAM).
-- `LIVA.exe` **panic** nếu mở DB thất bại hoặc dẫn xuất khoá Stronghold lỗi. ~~"thiếu GGUF là app không lên"~~ — không đúng: việc nạp GGUF nằm ở task nền `load_configured_router_model`, thiếu file thì chỉ `tracing::error!` rồi `return` (`liva-native-core/src/lib.rs:257-264`), app vẫn lên bình thường, chỉ là chat không có model.
+- Nếu mở DB hoặc dẫn xuất khoá Stronghold thất bại, Tauri hiện MessageBox lỗi
+  boot kèm hướng khắc phục rồi dừng có chủ đích. Thiếu GGUF không chặn app:
+  việc nạp nằm ở task nền, chỉ chat không có model.
 
 ### 4.3 Profile B — chạy gateway lõi standalone (KHÔNG tự động)
 
@@ -425,7 +431,7 @@ cd E:\Project\LIVA
 cargo run --release -p liva-native-core
 ```
 
-Đổi host/cổng khi cần (mặc định `127.0.0.1:8002`, `main.rs:469-470`):
+Đổi host/cổng khi cần (mặc định `127.0.0.1:8002`, `liva-native-core/src/websocket.rs:286-405`):
 
 ```powershell
 $env:LIVA_SERVER_HOST = "127.0.0.1"
@@ -489,7 +495,10 @@ Cảnh báo an ninh: bind `0.0.0.0` (lộ ra toàn LAN), **không auth, không C
 | Triệu chứng | Nguyên nhân theo code | Xử lý |
 |---|---|---|
 | Cửa sổ LIVA trắng trơn | Vite chưa lên nhưng `tauri dev --no-dev-server` đã chạy | Đợi `:5173` sẵn sàng rồi mới bật Tauri (mục 4.2) |
-| `LIVA.exe` panic ngay lúc khởi động | Mở DB lỗi, hoặc dẫn xuất khoá Stronghold lỗi. ~~"`LlamaRouterManager::new` thất bại (thiếu GGUF / sai `ai.routerModel`)"~~ — sai: `new` không hề đọc GGUF nên không thể hỏng vì lý do đó (sửa 22/07/2026) | Kiểm tra `data/liva-config.json`, quyền ghi `data/agents/liva_core/` và Stronghold vault |
+| MessageBox “LIVA không thể khởi động” | Mở DB lỗi, hoặc dẫn xuất khoá Stronghold lỗi | Làm theo hint trong hộp thoại; không xoá DB/vault để “thử lại” |
+| Hint `database disk image is malformed` | SQLite hỏng | Không xoá file gốc; sao lưu toàn bộ thư mục dữ liệu rồi phục hồi theo runbook backup/restore |
+| Hint `readonly` / `permission denied` | Thư mục dữ liệu không ghi được hoặc `LIVA_HOME` sai | Cấp quyền ghi cho `%LOCALAPPDATA%\com.liva.cognitive-os`, hoặc sửa `LIVA_HOME`; không chạy app từ thư mục chỉ đọc |
+| Hint `database or disk is full` | Ổ chứa data/WAL hết chỗ | Giải phóng dung lượng; không xoá `-wal`/`-shm` khi LIVA còn chạy |
 | Chat không trả lời dù app lên bình thường | Thiếu GGUF / sai `ai.routerModel`: task nền bỏ qua và chỉ ghi log `Router model not found at ...` | Kiểm tra `data/liva-config.json` và `E:\AI_Models\*.gguf`, rồi `llm:swap_model` hoặc khởi động lại |
 | TTS im lặng hoàn toàn | `models/kokoro-v1.0.onnx` **không tồn tại** nên Kokoro không nạp được. ~~"hoặc thiếu `node_modules/kokoro-js/voices/af_heart.bin` (đọc **eager**, thiếu là hỏng cả `TtsManager`)"~~ — đó là hành vi cũ, đã sửa 22/07/2026: `from_bin` nay chỉ `tracing::warn!` rồi dùng vector rỗng (`tts/mod.rs:295-306`), Piper/VieNeu vẫn dựng được (test chống hồi quy `thieu_voice_kokoro_van_dung_duoc_tts`, `tts/mod.rs:500-512`) | Dùng Piper/VieNeu thay Kokoro. Chỉ khi thực sự muốn Kokoro mới cần đủ cả `.onnx` lẫn `af_heart.bin` |
 | TTS phát ra sai ngữ điệu / lỗi G2P | Không có `espeak-ng` trên PATH | Cài espeak-ng hoặc set `LIVA_ESPEAK_PATH` |
@@ -523,7 +532,7 @@ Quyết định đóng gói đang có hiệu lực (28/07/2026):
 |---|---|---|
 | Mục tiêu | **chỉ `nsis`** | MSI/WiX cài per-machine vào `Program Files` (chỉ đọc) trong khi NSIS cài per-user — hai bộ cài, hai ngữ nghĩa, không ai chọn |
 | Thư mục **cài** | `%LOCALAPPDATA%\LIVA` | NSIS: `StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"` — không cần quyền admin |
-| Thư mục **dữ liệu** | `%LOCALAPPDATA%\com.liva.cognitive-os` | **Phải khác thư mục cài**, nếu không trình gỡ xoá luôn ký ức và 2,28 GB model |
+| Thư mục **dữ liệu** | `%LOCALAPPDATA%\com.liva.cognitive-os` | **Phải khác thư mục cài**, nếu không trình gỡ xoá luôn ký ức và model |
 | WebView2 | `offlineInstaller` | mặc định của Tauri cần Internet lúc cài, mâu thuẫn với định vị offline |
 | Model | **không** đóng gói | 2,28 GB (bộ tối thiểu); tải ở lần chạy đầu qua cửa sổ thiết lập (`setup:fetch`), có cổng SHA-256 |
 | CUDA | không | xem mục 4.3 — bản CUDA kéo theo ~752 MB DLL của NVIDIA |
@@ -567,7 +576,7 @@ chạy đủ danh sách dịch vụ nền qua `boot::spawn_background_services` 
 - [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) — bảng lệnh `handle_command` và khung nhị phân đi qua WS `:8002`
 - [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) — chi tiết VAD/AEC/denoise/WakeGate, thứ chỉ tồn tại ở profile B
 - [Thị giác, quan sát thụ động và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md) — ngưỡng governor đứng sau task GPU downshift (mục 3.1)
-- [Frontend và vỏ Tauri](../01-ban-ve/08-frontend-va-vo-tauri.md) — cấu hình cửa sổ và bảng lệnh Tauri của `LIVA.exe`
+- [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) — cấu hình cửa sổ và bảng lệnh Tauri của `LIVA.exe`
 
 **Tài liệu khác dựa vào tài liệu này:**
 - [Kiểm thử và CI](04-kiem-thu-va-ci.md) — lấy cách khởi động tiến trình để chạy các binary verify

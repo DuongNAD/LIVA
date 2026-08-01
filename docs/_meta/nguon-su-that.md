@@ -1,11 +1,28 @@
 ---
 title: "Sổ đăng ký nguồn sự thật"
-updated: 2026-07-26
-commit: 45e2e58
+updated: 2026-08-01
+commit: 3688b5f
 status: living
 owns:
   - so-do-nguon-su-that
-covers: []
+covers:
+  - docs/_data/capabilities.json
+  - docs/_data/document-inventory.json
+  - docs/_generated/kiem-ke-tai-lieu.md
+  - docs/00-san-pham/tam-nhin-jarvis.md
+  - docs/01-kien-truc/cognitive-runtime.md
+  - docs/01-kien-truc/inventory-he-thong.md
+  - docs/03-he-thong-con/agent-tools.md
+  - docs/03-he-thong-con/memory.md
+  - docs/03-he-thong-con/persistence.md
+  - docs/03-he-thong-con/voice.md
+  - docs/03-he-thong-con/wake-word.md
+  - docs/05-chat-luong/action-policy.md
+  - docs/05-chat-luong/threat-model.md
+  - docs/05-chat-luong/voice-slo.md
+  - docs/05-chat-luong/wake-benchmark.md
+  - docs/06-ke-hoach/roadmap.md
+  - docs/07-dong-gop/quy-hoach-tai-lieu.md
 ---
 # Sổ đăng ký nguồn sự thật (Source-of-Truth Registry)
 
@@ -15,7 +32,7 @@ covers: []
 
 ## 1. Vì sao cần sổ này
 
-Bộ tài liệu LIVA có 18 tài liệu sống mô tả cùng một hệ thống. Trước khi có sổ này, **cùng một bảng bị chép ở nhiều file**: bảng biến môi trường xuất hiện cả trong tài liệu cấu hình lẫn tài liệu thoại lẫn tài liệu bảo mật; bảng 42 lệnh `handle_command` bị trích lại một phần trong bốn bản vẽ khác nhau; ngưỡng governor có mặt ở cả bản vẽ thị giác lẫn tài liệu tài nguyên.
+Bộ tài liệu LIVA có nhiều tài liệu sống mô tả cùng một hệ thống. Trước khi có sổ này, **cùng một bảng bị chép ở nhiều file**: bảng biến môi trường xuất hiện cả trong tài liệu cấu hình lẫn tài liệu thoại lẫn tài liệu bảo mật; catalog `handle_command` bị trích lại một phần trong bốn bản vẽ khác nhau; ngưỡng governor có mặt ở cả bản vẽ thị giác lẫn tài liệu tài nguyên.
 
 Hậu quả rất cụ thể: **code đổi một chỗ, tài liệu phải sửa năm chỗ — và luôn sót.** Bản chép sót trở thành thông tin sai, người đọc tin bản sai vì nó nằm ngay chỗ họ đang đọc, không ai biết bản nào mới hơn.
 
@@ -39,7 +56,28 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 
 ## 2. Bảng đăng ký
 
-47 khoá sự thật, thu thập từ `owns:` của toàn bộ tài liệu sống. Cột "Ai tham chiếu" liệt kê các tài liệu hiện có dòng `📌 Nguồn đầy đủ` trỏ về chủ sở hữu — đó chính là danh sách nơi cần rà lại khi sự thật thay đổi.
+79 khoá sự thật, thu thập từ `owns:` của toàn bộ tài liệu sống. Cột "Ai tham chiếu" liệt kê các tài liệu hiện có dòng `📌 Nguồn đầy đủ` trỏ về chủ sở hữu — đó chính là danh sách nơi cần rà lại khi sự thật thay đổi.
+
+### 2.0 Nguồn chuẩn v2 — sản phẩm, kiến trúc đích và roadmap
+
+| Khoá `owns` | Tài liệu sở hữu | Mô tả ngắn | Ai tham chiếu |
+|---|---|---|---|
+| `tam-nhin-jarvis` | [Tầm nhìn LIVA](../00-san-pham/tam-nhin-jarvis.md) | Định nghĩa “kiểu JARVIS” thành các năng lực có thể xây và nghiệm thu | README, roadmap |
+| `nguyen-tac-san-pham-jarvis` | [Tầm nhìn LIVA](../00-san-pham/tam-nhin-jarvis.md) | Local-first, planner không thi hành, proactive có consent, phản xạ tách suy luận | cognitive runtime |
+| `ma-tran-nang-luc-jarvis` | [Ma trận năng lực](../_generated/ma-tran-nang-luc.md) | Bảng trạng thái sinh từ registry JSON; không sửa tay | README, vision, roadmap |
+| `inventory-capability-module` | [Inventory hệ thống](../01-kien-truc/inventory-he-thong.md) | Bản đồ capability tới module, entry point, test và khoảng trống as-built | README, roadmap |
+| `inventory-disposition-tai-lieu` | [Kiểm kê tài liệu](../_generated/kiem-ke-tai-lieu.md) | Disposition, target và inbound-link count sinh từ registry | README, quy hoạch tài liệu |
+| `chuoi-xu-ly-thoai` | [Voice runtime](../03-he-thong-con/voice.md) | Chuỗi mic → VAD → STT → agent/LLM → TTS → loa và cancellation epoch | README, voice SLO |
+| `bang-backend-tts` | [Voice runtime](../03-he-thong-con/voice.md) | VieNeu/Piper/Kokoro, điều kiện dùng và fallback có cancellation | voice SLO |
+| `bang-engine-stt` | [Voice runtime](../03-he-thong-con/voice.md) | Nemotron streaming và Parakeet whole-utterance | wake architecture |
+| `bang-nguong-vad-aec-denoise` | [Voice SLO](../05-chat-luong/voice-slo.md) | Ngưỡng runtime VAD/AEC/denoise và nguồn cấu hình hiện hành | voice runtime |
+| `voice-slo` | [Voice SLO](../05-chat-luong/voice-slo.md) | Chỉ số, benchmark matrix và gate nâng voice lên working | roadmap |
+| `wake-word-viec-con-lai` | [Wake architecture](../03-he-thong-con/wake-word.md) | Đường wake hiện hành, modes và giới hạn “Hey Liva” | roadmap |
+| `wake-benchmark` | [Wake benchmark](../05-chat-luong/wake-benchmark.md) | Baseline, corpus và recall/FPPH gate cho classifier cá nhân | wake architecture |
+| `kien-truc-dich-cognitive-runtime` | [Cognitive Runtime](../01-kien-truc/cognitive-runtime.md) | Kiến trúc đích perception → context → policy → tool → observation → memory | roadmap |
+| `phan-cap-rui-ro-hanh-dong` | [Cognitive Runtime](../01-kien-truc/cognitive-runtime.md) | Bốn risk tier và chính sách mặc định cho hành động | roadmap |
+| `master-roadmap-jarvis` | [Master roadmap](../06-ke-hoach/roadmap.md) | Nguồn duy nhất cho milestone, dependency và acceptance gate còn mở | README |
+| `quy-hoach-tai-lieu-v2` | [Quy hoạch tài liệu](../07-dong-gop/quy-hoach-tai-lieu.md) | Cấu trúc đích, mapping, chiến lược di trú và docs gates | README, roadmap |
 
 ### 2.1 Bản vẽ kỹ thuật — `01-ban-ve/`
 
@@ -49,25 +87,33 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `ban-do-workspace` | [00 — Tổng quan hệ thống](../01-ban-ve/00-tong-quan-he-thong.md) | Cây thư mục repo, vai trò từng crate/package, thứ tự đọc | 08 |
 | `hai-profile-chay` | [01 — Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md) | Vỏ Tauri nhúng core vs binary standalone, bảng so sánh năng lực từng profile | 00, 02, 02-vh/01, 02-vh/03, 03-đg/01, 03-đg/02 |
 | `so-do-kien-truc-tong-the` | [01 — Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md) | Sơ đồ khối toàn hệ + chiều dữ liệu giữa UI ↔ core ↔ vệ tinh | 00, 02-vh/01, 02-vh/03, 03-đg/01 |
-| `bang-42-lenh-handle-command` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | 42 lệnh: payload, giá trị trả, `file:dòng` của match arm | 01, 04, 08, 09, 03-đg/02 |
+| `catalog-lenh-handle-command` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | Catalog lệnh theo miền; số lệnh là snapshot, nguồn thật nằm trong `commands/*` + dispatcher | 01, 04, 08, 09, 03-đg/02 |
 | `khung-nhi-phan-9-byte` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | Header `VoiceFrame` 9 byte, giới hạn 1 MiB, cách đóng/mở khung | 01, 04, 08, 09, 03-đg/02, 03-đg/03 |
 | `bang-opcode` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | 5 opcode nhị phân và ý nghĩa từng mã | 01, 08, 09, 03-đg/02, 03-đg/03 |
-| `chuoi-xu-ly-thoai` | [03 — Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) | Chuỗi mic → VAD → STT → LLM → TTS → loa, điểm chèn preemption | 01, 02, 04, 08 |
-| `bang-nguong-vad-aec-denoise` | [03 — Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) | Mọi ngưỡng số của VAD/AEC/denoise, mode wake, cửa sổ tỉnh, prefill | 02, 02-vh/01 |
-| `bang-backend-tts` | [03 — Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) | Piper / Kokoro / VieNeu: điều kiện bật, chất lượng, RTF | 01, 09, 03-đg/03 |
-| `bang-engine-stt` | [03 — Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) | Nemotron / Parakeet: ngôn ngữ, biến bật, đường dẫn model | 01, 09 |
 | `cau-hinh-llm` | [04 — Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md) | Router/expert, `n_ctx`, sampling, GPU layer, nguồn đường dẫn model | 02, 03-đg/02 |
 | `persona-va-chong-injection` | [04 — Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md) | Nội dung persona, cách dựng prompt, lớp chặn prompt-injection | 06 |
-| `may-trang-thai-agent` | [05 — Hệ agent, bộ nhớ và tiến hoá](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) | Các trạng thái agent và điều kiện chuyển, vòng đời nhiệm vụ | 00, 04 |
-| `state-graph-4-node` | [05 — Hệ agent, bộ nhớ và tiến hoá](../01-ban-ve/05-agent-bo-nho-va-tien-hoa.md) | StateGraph 4 node, luật rẽ nhánh từng node, cách router chọn nhánh | 04, 09 |
+| `may-trang-thai-agent` | [Agent và tool runtime](../03-he-thong-con/agent-tools.md) | Entry point, trạng thái và vòng đời agent voice hiện hành | 00, 04 |
+| `state-graph-agent` | [Agent và tool runtime](../03-he-thong-con/agent-tools.md) | StateGraph sáu node, reflex lane và luật rẽ nhánh | 04, 09 |
+| `tool-catalog-va-executor` | [Agent và tool runtime](../03-he-thong-con/agent-tools.md) | Catalog native/external MCP, selection và executor | action policy |
+| `skill-runtime-cuc-bo` | [Agent và tool runtime](../03-he-thong-con/agent-tools.md) | Skill store, version, ranking, signals và ranh giới chưa auto-exec | README |
+| `memory-runtime-as-built` | [Memory runtime](../03-he-thong-con/memory.md) | Checkpoint, conversational RAG, facts, projection worker và các tầng chưa có writer | README, roadmap |
+| `memory-scope-va-lineage` | [Memory runtime](../03-he-thong-con/memory.md) | Owner boundary, conversation/audience scope và lineage event → vector | agent runtime |
+| `memory-projection-consumer` | [Memory runtime](../03-he-thong-con/memory.md) | Batch, checkpoint, retry/DLQ và nghĩa chính xác của trạng thái consolidated | roadmap |
+| `memory-upgrade-plan` | [Memory runtime](../03-he-thong-con/memory.md) | Lộ trình M0–M5 và acceptance gates từ truthful UI tới semantic/multimodal memory | master roadmap |
+| `erd-sqlite` | [Persistence runtime](../03-he-thong-con/persistence.md) | ERD logic của 20 bảng SQLite hiện hành | memory, đánh giá cũ |
+| `bang-schema-du-lieu` | [Persistence runtime](../03-he-thong-con/persistence.md) | 20 bảng, miền dữ liệu, production writer và phạm vi mã hóa | memory, roadmap |
+| `persistence-runtime-as-built` | [Persistence runtime](../03-he-thong-con/persistence.md) | Data root, pool, PRAGMA, migration và durability hiện hành | README |
+| `data-lifecycle-upgrade-plan` | [Persistence runtime](../03-he-thong-con/persistence.md) | Lộ trình D0–D4 cho integrity, backup/restore, retention và degraded mode | master roadmap |
+| `action-policy-as-built` | [Action policy](../05-chat-luong/action-policy.md) | ExecPolicy, messaging confirmation, consent và gap contract thống nhất | roadmap |
+| `so-do-ma-hoa` | [Threat model](../05-chat-luong/threat-model.md) | DB device key, fact encryption và Stronghold key hierarchy | persistence |
+| `security-trust-boundaries` | [Threat model](../05-chat-luong/threat-model.md) | Principal, WebSocket/Tauri/MCP boundary và giả định local-user | README |
+| `security-data-at-rest` | [Threat model](../05-chat-luong/threat-model.md) | Ma trận bảo vệ facts, transcript, checkpoint, config và backup | persistence |
+| `security-upgrade-plan` | [Threat model](../05-chat-luong/threat-model.md) | Lộ trình S0–S5 từ credential path tới identity, artifact trust và audit | master roadmap |
 | `nguong-governor` | [06 — Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md) | Ngưỡng tải GPU/CPU, mức throttle, cách đo tải thật | 04, 08, 09, 02-vh/02, 03-đg/03 |
 | `canh-bao-passive-keylogger` | [06 — Thị giác, passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md) | Hook bàn phím/màn hình: phạm vi thu thập, rủi ro riêng tư, điều kiện bật | 03-đg/03 |
-| `erd-sqlite` | [07 — Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) | Sơ đồ ERD SQLite, quan hệ giữa các bảng | 00, 05, 03-đg/02 |
-| `bang-15-bang-du-lieu` | [07 — Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) | 15 bảng: schema từng cột, ai ghi ai đọc, bảng nào không có writer | 00, 04, 05, 03-đg/02 |
-| `so-do-ma-hoa` | [07 — Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) | Ba két bí mật, luồng mã hoá/giải mã, rủi ro bảo mật đi kèm | 01, 08 |
-| `bang-man-hinh-dashboard` | [08 — Frontend và vỏ Tauri](../01-ban-ve/08-frontend-va-vo-tauri.md) | Danh sách màn hình dashboard, component tương ứng, trạng thái hoàn thiện | 01 |
-| `bang-tauri-command` | [08 — Frontend và vỏ Tauri](../01-ban-ve/08-frontend-va-vo-tauri.md) | Lệnh `invoke` của Tauri: tên, tham số, handler Rust | 01, 02 |
-| `cau-hinh-cua-so` | [08 — Frontend và vỏ Tauri](../01-ban-ve/08-frontend-va-vo-tauri.md) | `tauri.conf.json`: kích thước, ghost mode, always-on-top, transparent | 02 |
+| `bang-man-hinh-dashboard` | [Frontend runtime](../03-he-thong-con/frontend.md) | Danh sách màn hình dashboard, component tương ứng, trạng thái hoàn thiện | 01 |
+| `bang-tauri-command` | [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) | Lệnh `invoke` của Tauri: tên, capability và handler Rust | 01, 02 |
+| `cau-hinh-cua-so` | [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) | `tauri.conf.json`: kích thước, ghost mode, always-on-top, transparent | 02 |
 | `bang-tich-hop-ngoai` | [09 — Tích hợp ngoài](../01-ban-ve/09-tich-hop-ngoai.md) | Telegram, MCP client/server, smart home, Google API: trạng thái thật từng cái | 01, 05 |
 | `bang-module-va-loc` | [10 — Phụ thuộc module và tra cứu](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) | LOC từng module, người gọi, mức độ nối dây | 01, 03, 02-vh/04 |
 | `so-do-phu-thuoc-module` | [10 — Phụ thuộc module và tra cứu](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) | Sơ đồ phụ thuộc giữa các module Rust, điểm nghẽn | 03, 04 |
@@ -87,6 +133,9 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `bang-test` | [04 — Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md) | File test nào tồn tại, cái nào chạy trong CI, subsystem nào không có test | 03, 08, 02-vh/01, 02-vh/02, 03-đg/02, 03-đg/03 |
 | `bang-binary-verify` | [04 — Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md) | 17 binary `verify_*`/`*_stress`/`*_bench`: dùng làm gì, chạy bằng lệnh nào | 06, 02-vh/02, 03-đg/03 |
 | `ci-pipeline` | [04 — Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md) | Workflow CI từng bước, những gì CI **không** gate, pre-commit hook + 3 cách bypass | 02-vh/01, 03-đg/02 |
+| `cai-dat-windows` | [05 — Cài đặt cho người dùng](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Luồng cài đặt Windows, preflight và tải model cho bản beta | README |
+| `go-va-nang-cap` | [05 — Cài đặt cho người dùng](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Cách gỡ, nâng cấp và giữ dữ liệu người dùng | — |
+| `khac-phuc-su-co-nguoi-dung` | [05 — Cài đặt cho người dùng](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Chẩn đoán lỗi phổ biến theo triệu chứng và bước phục hồi | — |
 
 ### 2.3 Đánh giá — `03-danh-gia/`
 
@@ -98,15 +147,20 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `bang-code-mo-coi` | [02 — Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) | Module chết, hàm `pub` 0 caller, 22 sự kiện UI mồ côi, 14 lệnh core không client gọi | 02, 03, 05, 07, 08, 09, 10, 02-vh/04 |
 | `lo-trinh-5-giai-doan` | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | 5 giai đoạn hành động và thứ tự ưu tiên | 00, 05, 06, 07, 03-đg/02 |
 | `huong-dan-sua-F1-F5` | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | Hướng dẫn sửa chi tiết 5 việc ưu tiên cao nhất | 04, 05, 03-đg/02 |
+| `de-xuat-openspace-g0-g4` | [04 — Đề xuất OpenSpace](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) | Phương án tích hợp G0–G4 tại thời điểm đánh giá | — |
+| `phan-ra-openspace-lay-va-tu-choi` | [04 — Đề xuất OpenSpace](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) | Phần OpenSpace nên lấy, trì hoãn hoặc từ chối | — |
 | `duong-co-so-do-luong` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | 8 cổng kiểm đo thật ngày 26/07/2026 kèm lệnh tái lập; mốc phát hiện hồi quy | 02-vh/04 |
-| `backlog-nang-cap-U1-U15` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | 15 mục nâng cấp chất lượng, nhóm A–E, mỗi mục có điều kiện nghiệm thu đo được | 03-đg/03 |
+| `backlog-nang-cap-U1-U15` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | 16 mục nâng cấp chất lượng, nhóm A–E (U1–U15 + U21 thêm 01/08/2026), mỗi mục có điều kiện nghiệm thu đo được. Khoá giữ nguyên tên cũ vì đổi tên khoá không thêm thông tin mà làm hỏng tra ngược | 03-đg/03 |
 | `goi-trinh-dien-U16-U20` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | Nhóm F — 5 mục biến năng lực đã có thành khoảnh khắc demo được, kèm nguyên tắc "giới hạn bởi kỹ thuật, không bởi IQ model" | — |
+| `nhan-tin-ra-ngoai-telegram-messenger` | [06 — Nhắn tin ra ngoài](../03-danh-gia/06-nhan-tin-ra-ngoai.md) | Hiện trạng Messenger/Telegram, outbox và việc nghiệm thu còn lại | roadmap |
 
 ### 2.4 Siêu dữ liệu — `_meta/`
 
 | Khoá `owns` | Tài liệu sở hữu | Mô tả ngắn | Ai tham chiếu |
 |---|---|---|---|
 | `so-do-nguon-su-that` | [Sổ đăng ký nguồn sự thật](nguon-su-that.md) *(chính file này)* | Bảng tra ngược "sự thật → tài liệu chủ" + quy tắc thêm/chuyển chủ | (chưa có tài liệu nào trỏ tới — nên thêm liên kết từ README) |
+| `luoc-do-front-matter` | [Hướng dẫn bảo trì](huong-dan-bao-tri.md) | Schema frontmatter, ý nghĩa và quy tắc cập nhật | mọi tài liệu living/index |
+| `quy-trinh-bao-tri-tai-lieu` | [Hướng dẫn bảo trì](huong-dan-bao-tri.md) | Quy trình kiểm tra stale, owns/covers, link và citation | contributor workflow |
 
 **Ghi chú ký hiệu:** trong cột "Ai tham chiếu", số trần (`00`–`10`) là tài liệu trong `01-ban-ve/`; `02-vh/NN` là `02-van-hanh/`; `03-đg/NN` là `03-danh-gia/`.
 

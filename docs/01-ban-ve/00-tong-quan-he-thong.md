@@ -1,7 +1,7 @@
 ---
 title: "Tổng quan hệ thống"
-updated: 2026-07-22
-commit: 5fc8e2d
+updated: 2026-07-30
+commit: 3688b5f
 status: living
 owns:
   - bang-chi-so-du-an
@@ -135,11 +135,14 @@ Cùng một `AppState` + `handle_command`, dựng ở hai điểm vào, nhưng c
 
 ### B. Bộ nhớ dài hạn có producer + projection consumer, chưa có semantic consolidator
 
-`db.rs` tạo đủ **15 bảng** (13 thường + 2 ảo FTS5/vec0) kèm tìm kiếm lai RRF. Đường hội thoại recall/persist trên cả voice, typed chat và Telegram/API. Mỗi lượt được embed ghi atomic một event pending và ba biểu diễn truy hồi; worker nền ở cả hai runtime kiểm projection theo batch, checkpoint và xử lý DLQ.
+Schema v5 tạo **20 bảng** (gồm FTS5/vec0) kèm tìm kiếm lai RRF; 14 bảng có production
+writer và sáu bảng còn schema/UI-only. Đường hội thoại recall/persist chạy trên voice, typed chat
+và Telegram/API. Mỗi lượt được embed ghi atomic một event pending và ba biểu diễn truy hồi; worker
+nền kiểm projection theo batch, checkpoint và xử lý DLQ.
 
 ⇒ Nhãn vẫn là **[MỘT PHẦN]**: producer, recall và projection finalization chạy thật; `turn_layer_nodes`/L3 chưa có writer và chưa có Reflection/semantic extraction.
 
-> 📌 Nguồn đầy đủ (ERD, chi tiết từng bảng trong 15 bảng, cột nào có writer): [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) · thiết kế bộ nhớ phân tầng: [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md)
+> 📌 Nguồn đầy đủ (ERD 20 bảng, production writer): [Persistence runtime](../03-he-thong-con/persistence.md) · snapshot lịch sử của thiết kế bộ nhớ phân tầng: [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md)
 
 ### C. Một lỗi ngữ nghĩa khiến hội thoại không có trí nhớ đa lượt
 
@@ -282,7 +285,7 @@ E:\Project\LIVA\
 
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 - [Kiến trúc tổng thể](01-kien-truc-tong-the.md) — bảng so sánh hai profile chạy và sơ đồ kiến trúc đầy đủ, dùng cho §3.A.
-- [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) — ERD và chi tiết 15 bảng SQLite, dùng cho §3.B và dòng "Bảng SQLite" trong bảng chỉ số.
+- [Persistence runtime](../03-he-thong-con/persistence.md) — ERD và danh mục 20 bảng SQLite hiện hành, dùng cho §3.B và dòng "Bảng SQLite" trong bảng chỉ số.
 - [Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — thiết kế bộ nhớ phân tầng và checkpoint agent.
 - [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — bảng 42 lệnh `handle_command`, dùng cho dòng "Lệnh IPC" trong bảng chỉ số.
 - [Đối chiếu tuyên bố và thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — bằng chứng cho mục "Điểm mạnh thực chất đã kiểm chứng".

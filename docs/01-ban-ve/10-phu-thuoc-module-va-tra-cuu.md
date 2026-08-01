@@ -1,7 +1,7 @@
 ---
 title: "Phụ thuộc module và tra cứu file"
-updated: 2026-07-26
-commit: 6b5b87b
+updated: 2026-07-30
+commit: 3688b5f
 status: living
 owns:
   - bang-module-va-loc
@@ -261,7 +261,7 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `…\src\db.rs` | SQLite (1 185 dòng) | `CustomSqliteManager` :15 · PRAGMA :30-48 · **`load_sqlite_vec`** :63 · `DatabasePool` :131 · `new` :137 · `new_in_memory` :159 · **`init_schemas`** :188-354 · `MetadataFilter` :377 · `set_fact` :467 · `get_fact` :501 · `upsert_vector` :536 · `search_similar_vectors` :626 · `search_fts_vectors` :720 · **`search_hybrid_vectors`** :839 |
 | `…\src\crypto.rs` | AES-256-GCM (133 dòng) | `Aes256Gcm16` :8 · **`new` không KDF** :15 · `encrypt` :23 · **`decrypt` fail-open** :50 |
 | `…\src\telegram.rs` | Bot (392 dòng) | `TelegramCommand` :8 · `new` :39 · `start` :54 · `is_authorized` :73 · `handle_command` :82 · `/latest` :145 · `/ls` :175 · `/cat` :218 · `handle_message` :274 · `process_voice_message` :317 · **`route_input_to_agent` đứt dây** :376 |
-| `…\src\mcp\server.rs` | MCP (183 dòng) | args struct :10-30 · `new` :33 · `list_tools` :39 (gọi từ `lib.rs:1575`) · **`resolve_path`** :67 · `call_tool` :79 (gọi từ `lib.rs:1592`) · `walk_dir` :121 · `control_smarthome` stub :176 |
+| `…\src\mcp\server.rs` | MCP (183 dòng) | args struct :10-30 · `new` :33 · `list_tools` :39 (gọi từ `liva-native-core/src/lib.rs:1467-1468`) · **`resolve_path`** :67 · `call_tool` :79 (gọi từ `liva-native-core/src/lib.rs:1489-1492`) · `walk_dir` :121 · `control_smarthome` stub :176 |
 | `…\src\mcp\client.rs` | MCP client stdio (1 143 dòng) | `McpStdioClient::connect` · `request` · `list_tools` · `call_tool` · `McpClientRegistry::get_or_connect` · `global_registry` · `load_config` |
 | `…\src\mcp\protocol.rs` | JSON-RPC (106 dòng) | `JsonRpcRequest` (id: String) :5 · `Tool` :72 · `CallToolRequest` :86 |
 | `…\src\integrations\smart_home.rs` | **STUB** (107 dòng) | enum :6,14 · `SmartHomeArgs` :21 · `get_metadata` :26 · `execute` :51 |
@@ -292,7 +292,9 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `E:\Project\LIVA\liva-native-core\Cargo.toml` | Deps + `[features]` :64-78 (`default = []` :65, **`experimental = []` :75**, `cuda` :76, `vulkan` :77, `openblas` :78) + 14 `[[bin]]` :80-148 |
 | `E:\Project\LIVA\liva-desktop\src-tauri\Cargo.toml` | Tauri deps + forward features :20-26 |
 | `E:\Project\LIVA\liva-desktop\src-tauri\tauri.conf.json` | 2 cửa sổ :14-42 · **CSP** :45 · bundle :48-58 |
-| `E:\Project\LIVA\liva-desktop\src-tauri\capabilities\default.json` | ACL 2 cửa sổ |
+| `E:\Project\LIVA\liva-desktop\src-tauri\capabilities\widget.json` | ACL cửa sổ widget |
+| `E:\Project\LIVA\liva-desktop\src-tauri\capabilities\dashboard.json` | ACL cửa sổ dashboard |
+| `E:\Project\LIVA\liva-desktop\src-tauri\capabilities\setup.json` | ACL cửa sổ setup |
 | `E:\Project\LIVA\data\liva-config.json` | **SSOT runtime** — `ai.routerModel` :19, `ai.mmprojModel` :20 |
 | `E:\Project\LIVA\models\README.md` | **Nguồn tin cậy cao nhất** về model & env flags |
 | `E:\Project\LIVA\.env.example` | Tài liệu env (lệch code ở ≥6 chỗ) |
@@ -336,7 +338,7 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 
 | Tôi muốn… | Mở trước | Rồi tới |
 |---|---|---|
-| Thêm một lệnh API mới | `lib.rs:236` (`handle_command`), nhánh mặc định `lib.rs:1483` | `main.rs:971` (`IpcRequest` qua WS), `main.rs:742` (legacy event) |
+| Thêm một lệnh API mới | `lib.rs:236` (`handle_command`), nhánh mặc định `lib.rs:1483` | `liva-native-core/src/websocket.rs:1422-1512` (`IpcRequest` qua WS), `liva-native-core/src/websocket.rs:829-1458` (legacy event) |
 | Sửa hành vi khởi động / thứ tự nạp model | `main.rs:51` (`async_main`) | `liva-desktop\src-tauri\src\lib.rs:261` (`run()` — trình tự khác, `vad/denoiser/turn_shadow/aec = None`) |
 | Đổi khung nhị phân voice (op code, header) | `webrtc\frame.rs:3-7`, `:17`, `:29` | `liva-ui\src\utils\speakerFrame.ts:36`, `liva-ui\src\composables\useVoicePipeline.ts:345-350` |
 | Sửa độ trễ / ngắt lời / barge-in | `webrtc\pipeline.rs:164` (`handle_vad_start`), `:437` (`cancel_active_operations`) | `webrtc\vad.rs:133`, `liva-ui\src\composables\useSpeakerPlayback.ts:180` (`stop`), `:207` (`flush`) |
@@ -348,7 +350,7 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 | Sửa hành vi khi đang chơi game / máy nặng tải | `governor.rs:55` (`from_env`), `:124` (`foreground_is_fullscreen`) | `main.rs:268-293` (vòng GPU downshift), `vision\capture.rs` |
 | Sửa avatar 3D / lipsync | `liva-ui\src\composables\use3DModel.ts:760` (`startAudioDrivenLipSync`) | `liva-ui\src\WidgetApp.vue:625-630`, `liva-ui\src\utils\HardwareDetector.ts:137` |
 | Sửa wake word | `wake.rs:57` (`from_env`), `:185` (`try_wake`) | `wake_model.rs:186` (`push_and_check`), `liva-ui\src\workers\LivaWakeWorker.ts:132` |
-| Đóng gói / cửa sổ / CSP | `liva-desktop\src-tauri\tauri.conf.json` :14-42, :45 | `capabilities\default.json`, `liva-ui\vite.config.ts:18-21` |
+| Đóng gói / cửa sổ / CSP | `liva-desktop\src-tauri\tauri.conf.json` :14-42, :45 | `capabilities\widget.json`, `capabilities\dashboard.json`, `capabilities\setup.json`, `liva-ui\vite.config.ts:18-21` |
 
 ---
 
@@ -372,7 +374,7 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 - [Sơ đồ kiến trúc tổng thể](01-kien-truc-tong-the.md) — hai profile chạy (standalone vs Tauri) giải thích vì sao `main.rs` và `src-tauri/src/lib.rs` khởi tạo `AppState` khác nhau
 - [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — bảng 42 lệnh `handle_command` và khung nhị phân 9 byte mà §3 chỉ trỏ toạ độ tới
 - [Đường ống thoại (voice pipeline)](03-duong-ong-thoai.md) — ngưỡng VAD/AEC/denoise, bảng backend TTS và engine STT
-- [Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) — ERD SQLite, 15 bảng, sơ đồ mã hoá đứng sau các toạ độ `db.rs` / `crypto.rs`
+- [Persistence runtime](../03-he-thong-con/persistence.md) và [Threat model](../05-chat-luong/threat-model.md) — schema v5 và mã hóa/keystore đứng sau các tọa độ `db.rs` / `crypto.rs`
 - [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — điều kiện tiên quyết build (CMake/LLVM, vì sao vision cần bản RELEASE)
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến `LIVA_*` và các chỗ `.env.example` lệch code
 

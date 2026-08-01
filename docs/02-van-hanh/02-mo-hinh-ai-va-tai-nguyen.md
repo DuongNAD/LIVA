@@ -1,7 +1,7 @@
 ---
 title: "Mô hình AI và tài nguyên"
-updated: 2026-07-22
-commit: 0b6560a
+updated: 2026-07-31
+commit: 3688b5f
 status: living
 owns:
   - bang-model
@@ -44,11 +44,27 @@ Tài liệu này trả lời bốn câu hỏi vận hành:
 
 ## 1. Nguồn sự thật của đường dẫn model
 
+`data/models-manifest.json` là nguồn sự thật duy nhất về **danh mục tải**:
+profile, group năng lực, kích thước, URL, SHA-256, vị trí LLM/resource và hướng
+dẫn tải tay. Cả `scripts/models.mjs` (máy dev) lẫn `liva-native-core/src/setup`
+(bản cài không có Node) đọc cùng manifest.
+
+Snapshot được tính trực tiếp từ manifest ngày 31/07/2026:
+
+| Profile | Số file | Tổng byte tham chiếu | Tự tải được | Ý nghĩa |
+|---|---:|---:|---:|---|
+| `minimal` | 13 | 2.451.859.081 B ≈ 2,28 GiB | 13 | đủ các group `required` |
+| `full` | 29 | 6.392.994.515 B ≈ 5,95 GiB | 26 | toàn bộ catalog; 3 entry cần làm tay |
+
+Mọi entry có `url` bắt buộc có SHA-256 và URL ghim revision; loader tải vào file
+`.part`, hỗ trợ resume, kiểm hash trước khi rename. CI kiểm invariant này bằng
+`npm run test:installer`.
+
 Có **hai** cơ chế xác định model, và chúng không phải một:
 
 | Loại model | Nguồn đường dẫn thật | Ghi chú |
 |---|---|---|
-| **LLM GGUF** (router + mmproj + expert) | `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel` / `ai.mmprojModel` / `ai.expertModel` — đọc ở **core**, không phải ở vỏ Tauri: `configured_router_model_path()` (`liva-native-core/src/lib.rs:203-222`, lấy `localModelsDir` ở dòng 214 và `routerModel` ở dòng 218) và `configured_mmproj_path()` (`liva-native-core/src/lib.rs:227-247`) | Fallback hằng số `DEFAULT_MODELS_DIR = "E:\\AI_Models"` (`liva-native-core/src/lib.rs:65`), `DEFAULT_ROUTER_MODEL = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"` (`liva-native-core/src/lib.rs:66`), `DEFAULT_EXPERT_MODEL = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"` (`liva-native-core/src/lib.rs:67`) |
+| **LLM GGUF** (router + mmproj + expert) | `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel` / `ai.mmprojModel` / `ai.expertModel`; bản cài chuẩn hoá đường dẫn dev tuyệt đối sang thư mục dữ liệu của người dùng | Fallback hiện hành: `DEFAULT_MODELS_DIR = "E:\\AI_Models"`, `DEFAULT_ROUTER_MODEL = "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf"`, `DEFAULT_EXPERT_MODEL = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"` |
 | **ONNX / Piper / VieNeu / VAD / wake** | biến `LIVA_*` → nếu không có thì default hardcode trong code, phần lớn đi qua `resolve_resource_path` | Tên biến và giá trị mặc định: xem tài liệu cấu hình |
 
 > 📌 Nguồn đầy đủ (bảng ~60 biến `LIVA_*`, giá trị mặc định, các chỗ lệch `.env.example` vs code): [Cấu hình và biến môi trường](01-cau-hinh-va-bien-moi-truong.md)
@@ -73,7 +89,7 @@ Tất cả weights (`*.onnx`, `*.onnx.data`, `*.gguf`, `*.bin`, `*.wav`) đều 
 | `parakeet_vi.onnx` | ✅ | **41,9 MB** (`models/README.md:11` ghi "1.1MB graph" — **sai số liệu**) | STT tiếng Việt chất lượng cao, FastConformer-CTC 0.6B **[MỘT PHẦN]** (opt-in `LIVA_STT_VI_ENGINE=parakeet`) | export NeMo từ `nvidia/parakeet-ctc-0.6b-Vietnamese` |
 | `parakeet_vi.onnx.data` | ✅ | **2.435.002.372 B ≈ 2,27 GiB** | weights external của Parakeet | ↑ |
 | `parakeet_vi_vocab.json` | ✅ | 10 KB | 1024 BPE token | ↑ |
-| `silero_vad_v6.onnx` | ✅ | 2,33 MB | VAD chính (được ưu tiên) **[MỘT PHẦN]** — chỉ nạp ở bin standalone | snakers4/silero-vad |
+| `silero_vad_v6.onnx` | ✅ | 2,33 MB | VAD chính (được ưu tiên) **[OK]** — cả Tauri và standalone dựng qua `VoiceRuntimeComponents::from_env` | snakers4/silero-vad |
 | `gtcrn_simple.onnx` | ✅ | 536 KB | Khử ồn trước VAD/STT (MIT) **[MỘT PHẦN]** | sherpa-onnx release |
 | `smart_turn_v3.2_cpu.onnx` | ✅ | 8,68 MB | End-of-turn shadow (BSD-2) **[MỘT PHẦN]** — cần `LIVA_TURN_SHADOW_ENABLED=1` | pipecat-ai/smart-turn-v3 |
 | `wakeword_melspec.onnx` | ✅ | 1,09 MB | mel-spectrogram cho pipeline wake **[MỘT PHẦN]** | livekit/rust-sdks (Apache-2.0) |
@@ -114,7 +130,7 @@ Khớp `data/liva-config.json` → `ai.localModelsDir = "E:\\AI_Models"`.
 | `Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf` | ✅ | 819 MB | Vision projector (`ai.mmprojModel` → `configured_mmproj_path()`, `liva-native-core/src/lib.rs:227-247`) | **[MỘT PHẦN]** — chỉ chạy ở build RELEASE |
 | `Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf` | ✅ | 445 MB | mmproj thay thế, nhẹ hơn | **[THIẾU]** — không config nào trỏ tới |
 | `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 6,72 GB | `ai.expertModel`, đồng thời là hằng số `DEFAULT_EXPERT_MODEL` (`liva-native-core/src/lib.rs:67`) | **[THIẾU]** — **chưa có code swap expert tự động** |
-| `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 4,22 GB | `DEFAULT_ROUTER_MODEL` (`liva-native-core/src/lib.rs:66`) | **[MỘT PHẦN]** — chỉ dùng khi `liva-config.json` vắng |
+| `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 4,22 GB | model kho rời; không còn là `DEFAULT_ROUTER_MODEL` | **[THIẾU]** — không config hiện hành trỏ tới |
 | Còn lại: `DeepSeek-R1-Distill-Qwen-14B/32B`, `Gemma-2-9B`, `Llama-3-8B`, `Qwen2.5-*`, `Qwythos-9B`, `gemma-4-26B-A4B*`, `gemma-4-E2B/E4B` | ✅ | 3 – 19,8 GB mỗi file | kho model rời | **[THIẾU]** — không config nào trỏ tới |
 
 ### 3.1 Cấu hình chết / trỏ sai (đã kiểm chứng)
@@ -223,7 +239,7 @@ Ba lý do độc lập, phải gỡ **cả ba** mới thấy GPU được dùng:
 2. **Build mặc định không bật `cuda`** — `default = []` (`liva-native-core/Cargo.toml:65`). Không có backend GPU thì `n_gpu_layers` truyền vào llama.cpp cũng vô nghĩa.
 3. **ORT cố ý KHÔNG bật CUDA** — mọi ONNX (STT, TTS, VAD, wake, denoise, turn, embedding) chạy CPU-only. Đây là quyết định có chủ đích, xem comment `stt/parakeet.rs:180-185` giải thích nguy cơ dính bẫy khởi tạo backend nêu ở `models/README.md:24`.
 
-Hệ quả: **task GPU downshift game-aware tự `return` ngay** vì `normal_layers == 0` (`liva-native-core/src/main.rs:293`, `liva-desktop/src-tauri/src/lib.rs:439`) — cơ chế nhường GPU cho game hiện **[MỘT PHẦN]**, có code nhưng không bao giờ chạy tới nhánh làm việc.
+Hệ quả: **task GPU downshift game-aware tự `return` ngay** vì `normal_layers == 0` (`liva-native-core/src/boot.rs:335-357`, `liva-desktop/src-tauri/src/lib.rs:439`) — cơ chế nhường GPU cho game hiện **[MỘT PHẦN]**, có code nhưng không bao giờ chạy tới nhánh làm việc.
 
 > 📌 Nguồn đầy đủ về ngưỡng governor và logic phát hiện tải nặng: [Thị giác passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
 
@@ -356,6 +372,11 @@ $env:CUDAARCHS = "120a-real"
 ---
 
 ## 8. Checklist trước khi chạy trên máy mới
+
+Với bản cài, không kiểm tay từng file: cửa sổ Setup tự mở khi thiếu group bắt
+buộc; `setup:status` giải thích năng lực bị mất, `setup:fetch` tải/verify và
+`setup:paths` chỉ đúng vị trí trên máy. Bảng dưới đây dành cho người build từ
+mã nguồn hoặc chẩn đoán sâu.
 
 | # | Kiểm tra | Cách xác minh | Hậu quả nếu thiếu |
 |---|---|---|---|

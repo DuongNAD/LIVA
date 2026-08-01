@@ -1,12 +1,12 @@
 ---
 title: "Tầng dữ liệu và bảo mật"
-updated: 2026-07-22
-commit: 7da2ebd
-status: living
-owns:
-  - erd-sqlite
-  - bang-15-bang-du-lieu
-  - so-do-ma-hoa
+updated: 2026-07-30
+commit: 3688b5f
+status: frozen
+owns: []
+superseded_by:
+  - docs/03-he-thong-con/persistence.md
+  - docs/05-chat-luong/threat-model.md
 covers:
   - data/*
   - liva-desktop/src-tauri/src/lib.rs
@@ -23,6 +23,11 @@ covers:
   - scripts/legacy/migration_stronghold.cjs
 ---
 # Tầng dữ liệu và bảo mật
+
+> **FROZEN — snapshot khảo sát ngày 22/07/2026.** Schema, data root, crypto và Stronghold đã thay
+> đổi sau thời điểm này. Nguồn chuẩn hiện hành cho database/migration/vòng đời dữ liệu là
+> [Persistence runtime](../03-he-thong-con/persistence.md); ranh giới tin cậy, mã hóa và kế hoạch
+> hardening là [Threat model](../05-chat-luong/threat-model.md).
 
 > **Runtime delta 23/07/2026:** schema v3 dùng partial index
 > `idx_events_pending_ts(timestamp, eventId) WHERE consolidation_status='pending'`.

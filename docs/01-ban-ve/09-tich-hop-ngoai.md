@@ -1,7 +1,7 @@
 ---
 title: "Tích hợp ngoài"
-updated: 2026-07-26
-commit: 6b5b87b
+updated: 2026-07-30
+commit: 3688b5f
 status: living
 owns:
   - bang-tich-hop-ngoai
@@ -37,7 +37,7 @@ covers:
 
 Chương này mô tả mọi điểm LIVA chạm ra thế giới bên ngoài quá trình chính: giao thức MCP (client + server nội bộ), bot Telegram, kỹ năng smart home, dịch vụ Python `liva-voice` (port 8765), client di động Capacitor, và MCP server TypeScript `obsidian_llm_wiki`.
 
-**Kết luận chủ đạo của chương (cập nhật 22/07/2026):** ~~ngoài `integrations::smart_home` (đã nối dây nhưng là stub) và lệnh Telegram `/stop`, **hầu như toàn bộ khu vực tích hợp ngoài của LIVA là code mồ côi**~~ — bản cũ đúng cho tới ngày 22/07/2026, khi hai điểm đứt dây lớn nhất được nối lại: MCP server nội bộ giờ có cổng vào thật (`mcp:list_tools` / `mcp:call_tool` trong `handle_command`, `lib.rs:1575, 1578`), và vòng hội thoại Telegram đã khép kín (`route_input_to_agent` gọi thẳng `chat:completion` rồi gửi trả lời về, `telegram.rs:387-460`). ~~Phần vẫn còn mồ côi: `mcp/client.rs` (`ProcessWrapper` 0 caller), …~~ — **`mcp/client.rs` cũng đã rời danh sách** ở rung G0 (25–26/07/2026): viết lại thành MCP client stdio đầy đủ, 7 call site, đã chạy với server `npx` thật (§9.1.1). Phần **vẫn còn mồ côi**: `liva-voice/` không tiến trình nào khởi động, `mobile_client/` PoC đóng băng — có struct, có test xanh, nhưng không có cổng vào hoặc không có consumer ở đầu ra.
+**Kết luận chủ đạo của chương (cập nhật 22/07/2026):** ~~ngoài `integrations::smart_home` (đã nối dây nhưng là stub) và lệnh Telegram `/stop`, **hầu như toàn bộ khu vực tích hợp ngoài của LIVA là code mồ côi**~~ — bản cũ đúng cho tới ngày 22/07/2026, khi hai điểm đứt dây lớn nhất được nối lại: MCP server nội bộ giờ có cổng vào thật (`mcp:list_tools` / `mcp:call_tool` trong `handle_command`, `liva-native-core/src/lib.rs:1467-1468, 1578`), và vòng hội thoại Telegram đã khép kín (`route_input_to_agent` gọi thẳng `chat:completion` rồi gửi trả lời về, `telegram.rs:387-460`). ~~Phần vẫn còn mồ côi: `mcp/client.rs` (`ProcessWrapper` 0 caller), …~~ — **`mcp/client.rs` cũng đã rời danh sách** ở rung G0 (25–26/07/2026): viết lại thành MCP client stdio đầy đủ, 7 call site, đã chạy với server `npx` thật (§9.1.1). Phần **vẫn còn mồ côi**: `liva-voice/` không tiến trình nào khởi động, `mobile_client/` PoC đóng băng — có struct, có test xanh, nhưng không có cổng vào hoặc không có consumer ở đầu ra.
 
 Nhãn trạng thái dùng xuyên suốt: **[OK]** đang chạy thật · **[MỘT PHẦN]** có code nhưng tắt/opt-in/chưa nối dây · **[THIẾU]** chưa có/stub.
 
@@ -48,7 +48,7 @@ Nhãn trạng thái dùng xuyên suốt: **[OK]** đang chạy thật · **[MỘ
 | Thành phần | File / vị trí | Giao thức | Trạng thái |
 |---|---|---|---|
 | MCP **client** (spawn server ngoài qua stdio) | `liva-native-core/src/mcp/client.rs` (1 143 dòng) | stdio + JSON-RPC đầy đủ: handshake, tương quan id, `tools/list`+`tools/call`, drain stderr, timeout, đọc `mcp_config.json` | **[OK]** (26/07/2026, rung G0) — 7 call site; đã chạy với server `npx` thật |
-| MCP **server** nội bộ `NativeMcpServer` | `liva-native-core/src/mcp/server.rs` (183 dòng) | không có transport JSON-RPC riêng; đi vào qua lớp lệnh IPC | **[MỘT PHẦN]** (22/07/2026) — `new()` lúc khởi động, giữ trong `AppState`, và **đã có cổng vào thật**: `handle_command` có `"mcp:list_tools"` (`lib.rs:1575`) + `"mcp:call_tool"` (`lib.rs:1578`). ~~chỉ được gọi trong `tests/integration_tests.rs`~~. Chưa client UI nào gọi |
+| MCP **server** nội bộ `NativeMcpServer` | `liva-native-core/src/mcp/server.rs` (183 dòng) | không có transport JSON-RPC riêng; đi vào qua lớp lệnh IPC | **[MỘT PHẦN]** (22/07/2026) — `new()` lúc khởi động, giữ trong `AppState`, và **đã có cổng vào thật**: `handle_command` có `"mcp:list_tools"` (`liva-native-core/src/lib.rs:1467-1468`) + `"mcp:call_tool"` (`liva-native-core/src/lib.rs:1470-1494`). ~~chỉ được gọi trong `tests/integration_tests.rs`~~. Chưa client UI nào gọi |
 | MCP **protocol** (JSON-RPC struct) | `liva-native-core/src/mcp/protocol.rs` (106 dòng) | JSON-RPC 2.0 (lệch spec) | **[THIẾU]** một nửa — `JsonRpc*` 0 caller |
 | MCP server **thật chạy** | `teamwork_projects/obsidian_llm_wiki/src/{index,server,vault}.ts` | MCP stdio, `@modelcontextprotocol/sdk` | **[OK] nhưng NGOÀI LIVA** — Node/TS, phục vụ IDE agent, không phải LIVA gọi |
 | Telegram bot | `liva-native-core/src/telegram.rs` | Bot API qua `teloxide` (long polling) | **[MỘT PHẦN]** — opt-in theo env, chỉ spawn trong binary stdio, **không spawn trong Tauri** |
@@ -177,8 +177,8 @@ impl NativeMcpServer {
 
 - `AppState.mcp_server: Arc<mcp::server::NativeMcpServer>` — `lib.rs:44`.
 - Khởi tạo: `main.rs:169-171` và `liva-desktop/src-tauri/src/lib.rs:347-349`, cùng default `LIVA_VAULT_PATH = "E:\Project\LIVA\teamwork_projects\obsidian_llm_wiki\vault"` (**hardcode absolute path máy tác giả**).
-- **Vẫn không có transport riêng:** không có JSON-RPC loop, không listener stdio/HTTP cho server này. Nhưng **từ 22/07/2026 nó đã được nối vào lớp lệnh**: ~~`handle_command` (`lib.rs:236`) không có nhánh nào tên `mcp:*` … Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **0 hit**~~ — nay `handle_command` (`lib.rs:320`) có hai nhánh `"mcp:list_tools"` (`lib.rs:1575`) và `"mcp:call_tool"` (`lib.rs:1578`), đặt ngay trước nhánh cuối `_ => Err(format!("Unknown command: {}", command))` (`lib.rs:1599`). Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **2 hit**, cả hai trong `lib.rs`. Khối comment ngay trên hai arm (`lib.rs:1568-1574`) ghi rõ ranh giới an toàn: mọi thao tác file vẫn đi qua `resolve_path`.
-- Caller của `call_tool`: `lib.rs:1592` (arm `mcp:call_tool`, dựng `mcp::protocol::CallToolRequest`) và `liva-native-core/tests/integration_tests.rs` (dòng 41, 62, 78, 88, 171, 181, 192, 203, cùng nhóm mới 579-625). `list_tools()` được gọi ở `lib.rs:1575` và trong test `integration_tests.rs:559, 565` — ~~**không có caller nào, kể cả test**~~ không còn đúng.
+- **Vẫn không có transport riêng:** không có JSON-RPC loop, không listener stdio/HTTP cho server này. Nhưng **từ 22/07/2026 nó đã được nối vào lớp lệnh**: ~~`handle_command` (`lib.rs:236`) không có nhánh nào tên `mcp:*` … Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **0 hit**~~ — nay `handle_command` (`lib.rs:320`) có hai nhánh `"mcp:list_tools"` (`liva-native-core/src/lib.rs:1467-1468`) và `"mcp:call_tool"` (`liva-native-core/src/lib.rs:1470-1494`), đặt ngay trước nhánh cuối `_ => Err(format!("Unknown command: {}", command))` (`liva-native-core/src/lib.rs:1544`). Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **2 hit**, cả hai trong `lib.rs`. Khối comment ngay trên hai arm (`liva-native-core/src/lib.rs:1460-1466`) ghi rõ ranh giới an toàn: mọi thao tác file vẫn đi qua `resolve_path`.
+- Caller của `call_tool`: `liva-native-core/src/lib.rs:1489-1492` (arm `mcp:call_tool`, dựng `mcp::protocol::CallToolRequest`) và `liva-native-core/tests/integration_tests.rs` (dòng 41, 62, 78, 88, 171, 181, 192, 203, cùng nhóm mới 579-625). `list_tools()` được gọi ở `liva-native-core/src/lib.rs:1467-1468` và trong test `integration_tests.rs:559, 565` — ~~**không có caller nào, kể cả test**~~ không còn đúng.
 
 ⇒ **LIVA đã expose 4 tool này ra lớp lệnh IPC/WebSocket**, kèm test `2.7 — mcp:list_tools / mcp:call_tool phải đi qua handle_command` (`integration_tests.rs:539`). Phần còn thiếu: **chưa client UI nào gọi hai lệnh đó**, và vẫn không có transport JSON-RPC để một MCP host bên ngoài nối vào.
 
@@ -207,7 +207,7 @@ impl JsonRpcResponse { pub fn success(id: String, result: Value) -> Self        
 
 **Sai lệch spec (đọc trực tiếp):** `JsonRpcRequest { id: String }` (`protocol.rs:5`) ép `id` **bắt buộc và chỉ nhận string** — JSON-RPC 2.0/MCP cho phép `id` là **number** hoặc `null`. Client MCP thật gửi `"id": 1` sẽ **fail deserialize**. Đồng thời không có struct nào cho `initialize` / `ServerCapabilities` / `resources/*` / `prompts/*`.
 
-Chỉ `Tool` / `ToolList` / `CallToolRequest` / `CallToolResult` / `ToolContent` được `server.rs` + `lib.rs` (arm `mcp:call_tool`, `lib.rs:1593`) + test dùng; toàn bộ nhóm `JsonRpc*` là **0 caller**.
+Chỉ `Tool` / `ToolList` / `CallToolRequest` / `CallToolResult` / `ToolContent` được `server.rs` + `lib.rs` (arm `mcp:call_tool`, `liva-native-core/src/lib.rs:1489-1494`) + test dùng; toàn bộ nhóm `JsonRpc*` là **0 caller**.
 
 ### 9.1.4 MCP server thật sự hoạt động — `teamwork_projects/obsidian_llm_wiki` **[OK] nhưng ngoài LIVA**
 
@@ -356,7 +356,7 @@ async fn route_input_to_agent(
 {"id":"tg_msg_{chat_id}","command":"telegram:message","payload":{"senderId":"…","text":"…"}}
 ```
 
-Trong `main.rs:334`, `ipc_tx` chính là **`tx` của kênh ghi stdout** (`main.rs:360-373` là stdout writer task). Nghĩa là một JSON dạng **request** bị bơm ra **luồng response** — trong khi `IpcResponse` có schema `id/status/data/error` (`lib.rs:54-62`), hoàn toàn **không khớp**.
+Trong `liva-native-core/src/boot.rs:418-425`, `ipc_tx` chính là **`tx` của kênh ghi stdout** (`liva-native-core/src/main.rs:158-171` là stdout writer task). Nghĩa là một JSON dạng **request** bị bơm ra **luồng response** — trong khi `IpcResponse` có schema `id/status/data/error` (`lib.rs:54-62`), hoàn toàn **không khớp**.
 
 Grep toàn repo (bỏ `node_modules`, `target`): **`"telegram:message"` vẫn chỉ xuất hiện đúng 1 lần, tại `telegram.rs:398` — nơi sinh ra nó. Không có consumer.** Tương tự, `"panic"` và `"voice:tts_stop"` gửi qua `ipc_tx` cũng chỉ đi ra stdout. Khác biệt so với bản trước: đây giờ chỉ là **kênh phụ**, không còn là đường sống duy nhất của câu trả lời.
 
@@ -404,20 +404,20 @@ if let Some(token) = telegram_token {
     });
 }
 ```
-(`main.rs:336-358`)
+(`liva-native-core/src/boot.rs:401-428`)
 
 - `.ok()` **không lọc chuỗi rỗng** → `TELEGRAM_BOT_TOKEN=` (đúng như trong `.env.example:219`) vẫn spawn bot với token rỗng.
 - **Quan trọng — không chạy dưới Tauri:** grep `telegram` trong `liva-desktop/src-tauri/src/` = **0 hit**. `src-tauri/src/lib.rs:370` dựng `AppState` riêng và không spawn `TelegramBotManager`. Đường chạy chính (`npm run dev` → `tauri dev`) **không có bot Telegram**.
 
 ### 9.2.6 Lệnh IPC liên quan Telegram
 
-`"telegram:send_text"` (`lib.rs:1543-1557`): đọc `payload["chatId"]` (parse `i64`), `payload["text"]`, `std::env::var("TELEGRAM_BOT_TOKEN")`, **tạo `Bot::new(token)` mới mỗi lần gọi**, `tokio::spawn` gửi, trả `{"success": true}` **ngay lập tức** — fire-and-forget, **không báo lỗi gửi**. Được test ở `src/bin/verify_integrations.rs:80-86`.
+`"telegram:send_text"` (`liva-native-core/src/commands/integrations.rs:53-74`): đọc `payload["chatId"]` (parse `i64`), `payload["text"]`, `std::env::var("TELEGRAM_BOT_TOKEN")`, **tạo `Bot::new(token)` mới mỗi lần gọi**, `tokio::spawn` gửi, trả `{"success": true}` **ngay lập tức** — fire-and-forget, **không báo lỗi gửi**. Được test ở `src/bin/verify_integrations.rs:80-86`.
 
 > 📌 Nguồn đầy đủ (bảng 44 lệnh `handle_command`): [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
 ### 9.2.7 Biến môi trường Telegram
 
-Điểm cần nhớ riêng cho chương này: `TELEGRAM_BOT_TOKEN` được đọc ở **3 nơi độc lập** (`main.rs:337`, `telegram.rs:323`, `lib.rs:1549`) thay vì một nguồn duy nhất; `TELEGRAM_ALLOWED_IDS` là CSV và **rỗng ⇒ chặn hết** (fail-closed). Nhóm `TELEGRAM_CHAT_ID` / `TELEGRAM_ADMIN_ID` / `REMOTE_CONTROL_ENABLED` / `ZALO_*` được khai báo nhưng **không có dòng Rust nào đọc** — chi tiết độ lệch `.env.example` ↔ code nằm ở tài liệu cấu hình.
+Điểm cần nhớ riêng cho chương này: `TELEGRAM_BOT_TOKEN` được đọc ở **3 nơi độc lập** (`liva-native-core/src/boot.rs:407-425`, `telegram.rs:323`, `lib.rs:1549`) thay vì một nguồn duy nhất; `TELEGRAM_ALLOWED_IDS` là CSV và **rỗng ⇒ chặn hết** (fail-closed). Nhóm `TELEGRAM_CHAT_ID` / `TELEGRAM_ADMIN_ID` / `REMOTE_CONTROL_ENABLED` / `ZALO_*` được khai báo nhưng **không có dòng Rust nào đọc** — chi tiết độ lệch `.env.example` ↔ code nằm ở tài liệu cấu hình.
 
 > 📌 Nguồn đầy đủ (bảng biến môi trường, lệch `.env.example` vs code): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 
@@ -430,8 +430,8 @@ UI: `ApiManagementView.vue:113-114, 165-168` chỉ ghi `.env`/vault; `SystemView
 | `/cat` đọc file tuỳ ý trên máy — kể cả `.env` chứa `LIVA_ENCRYPTION_KEY`, vault, khoá | `telegram.rs:218-268` | **Nghiêm trọng** |
 | `/ls` liệt kê thư mục tuỳ ý | `telegram.rs:175-217` | Cao |
 | Token đọc lại từ env thay vì dùng token trong `Bot` | `telegram.rs:323` | Trung bình |
-| `Bot::new()` mới mỗi lần `telegram:send_text` (không reuse connection pool) | `lib.rs:1550` | Thấp |
-| Token rỗng vẫn spawn bot | `main.rs:337` | Thấp |
+| `Bot::new()` mới mỗi lần `telegram:send_text` (không reuse connection pool) | `liva-native-core/src/commands/integrations.rs:65-72` | Thấp |
+| Token rỗng vẫn spawn bot | `liva-native-core/src/boot.rs:407-425` | Thấp |
 | Health check giả báo `telegram: online` | `lib.rs:583-609` | Trung bình (gây hiểu nhầm) |
 
 Điểm mâu thuẫn đáng chú ý: **MCP server cùng repo có `resolve_path` chống traversal, trong khi `/cat` của Telegram — cổng vào từ Internet — thì không có gì.**
@@ -462,10 +462,10 @@ Thiết bị hỗ trợ: **light / ac / fan**; hành động: **on / off**. Meta
    - ~~**Không nhận tiếng Việt** — "bật đèn" không khớp gì cả~~ — **đã sửa**. `route_intent` (`graph.rs:140-169`) có từ khoá tiếng Việt cho cả thiết bị (`đèn` → `light`; `điều hoà`/`điều hòa`/`máy lạnh` → `ac`; `quạt` → `fan`) lẫn hành động (`bật`/`mở` → `on`; `tắt`/`đóng` → `off`), và một nhánh vision ưu tiên cao nhất (`màn hình`, `screen`, `screenshot`). "bật đèn" nay khớp `Intent::SmartHome { device: "light", action: "on" }`.
    - Vẫn là **định tuyến theo từ khoá**, chưa phải tool-calling có schema do LLM sinh — chính doc-comment trong mã ghi nhận điều đó.
    - Graph này chạy thật: `webrtc/pipeline.rs:279` gọi `crate::agent::graph::build_pipeline_graph(...)` trong LLM task.
-2. **IPC command** `"integration:smart_home_control"` — `lib.rs:1558-1561`.
-3. **IPC command** `"integrations:list"` (`lib.rs:1562-1566`) và `"get_skills_list"` (`lib.rs:612-616`) — cả hai chỉ trả `[smart_home::get_metadata()]`.
+2. **IPC command** `"integration:smart_home_control"` — `liva-native-core/src/commands/integrations.rs:40-47`.
+3. **IPC command** `"integrations:list"` (`liva-native-core/src/commands/integrations.rs:40-50`) và `"get_skills_list"` (`lib.rs:612-616`) — cả hai chỉ trả `[smart_home::get_metadata()]`.
 
-> 📌 Nguồn đầy đủ về StateGraph 4 node và cách router chọn nhánh: [05 — Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) · về 3 lệnh IPC ở trên: [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
+> 📌 Nguồn đầy đủ về StateGraph sáu node và cách router chọn nhánh: [Agent và tool runtime](../03-he-thong-con/agent-tools.md) · về 3 lệnh IPC ở trên: [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
 Test: `smart_home.rs:69-106` (4 unit test) + `src/bin/verify_integrations.rs:51-73`.
 
@@ -617,7 +617,7 @@ Nơi dùng edge-tts (4 chỗ, tất cả trong `liva-voice/`): `liva_api.py:272-
 - `start_all.ps1` không khởi động service này;
 - không một dòng Rust/TS/Vue nào tham chiếu `8765`;
 - đường TTS thật là Rust: Piper (`liva-native-core/src/tts/piper.rs`), Kokoro, VieNeu opt-in (`tts/mod.rs:114-118, 151-185`) — hoàn toàn on-device;
-- `liva-native-core/src/main.rs:463-491` (`start_websocket_server`) là WebSocket thuần trên `LIVA_SERVER_PORT` (mặc định 8002), chỉ nhận path `/ws`, **không có route HTTP `/tts`**.
+- `liva-native-core/src/websocket.rs:286-405` (`start_websocket_server`) là WebSocket thuần trên `LIVA_SERVER_PORT` (mặc định 8002), chỉ nhận path `/ws`, **không có route HTTP `/tts`**.
 
 > 📌 Nguồn đầy đủ về bảng backend TTS (Piper/Kokoro/VieNeu) và bảng engine STT: [03 — Đường ống thoại](03-duong-ong-thoai.md)
 
@@ -694,8 +694,10 @@ export class WebSocketClient {
 
 - Cả 5 opcode và khung nhị phân 9 byte của mobile client **trùng khít định nghĩa lõi** trong `liva-native-core/src/webrtc/frame.rs:3-6` và `:10` (`OP_ACK_PLAYING` bị một khối comment tách xuống dòng 10; `encode()/decode()`, giới hạn payload 1 MB tại `frame.rs:21, :40`) — không lệch một byte nào.
   > 📌 Nguồn đầy đủ (khung nhị phân 9 byte + bảng opcode): [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
-- `liva-native-core/src/main.rs:527` `async fn handle_ws_connection(...)`; `:637` nhánh `OP_AUTH_HANDSHAKE` **echo nguyên frame về client** — đúng như `sendAuthHandshake()` chờ đợi.
-- `main.rs:463` `start_websocket_server`, `:469-474` bind `LIVA_SERVER_HOST` (mặc định **127.0.0.1**) : `LIVA_SERVER_PORT` (8002); `:491` chỉ nhận path `/ws`.
+- `liva-native-core/src/websocket.rs:433` `async fn handle_ws_connection(...)`; nhánh
+  `OP_AUTH_HANDSHAKE` echo frame để tương thích với `sendAuthHandshake()`. Identity đã
+  được chốt trước đó ở HTTP handshake/session principal.
+- `liva-native-core/src/websocket.rs:286-405` `start_websocket_server`, `:469-474` bind `LIVA_SERVER_HOST` (mặc định **127.0.0.1**) : `LIVA_SERVER_PORT` (8002); `:491` chỉ nhận path `/ws`.
 - Các lệnh JSON mà mobile gửi **đều tồn tại thật** trong `handle_command` (`lib.rs:320`): `ping` (`:330`), `add_task` (`:674`), `task_plan_chat` (`:792`), `memory:set_fact` (`:1064`), `memory:search_hybrid` (`:1108`), `voice:stt_stop` (`:1289`).
 
 URL mặc định: `ws://127.0.0.1:8002/ws` (`src/App.vue:70`). Vì core bind loopback, điện thoại thật phải đi qua `mobile_client/network_setup.ps1:1-22` → `adb reverse tcp:5173/3001/8002`. (Port 3001 là "Gateway API" của stack Node đã bị xoá — tàn dư.)
@@ -733,7 +735,7 @@ Cả 4 file **không được tracked trong bất kỳ npm script hay `.github/w
 
 | Điểm | Đánh giá |
 |---|---|
-| `sendAuthHandshake(seqId, token?)` | Core **echo nguyên frame** (`main.rs:637`) — **không xác thực gì**. Token nếu có cũng không được kiểm. |
+| `sendAuthHandshake(seqId, token?)` | Core echo frame (`liva-native-core/src/websocket.rs:569-578`) để tương thích. Token trong payload opcode không phải credential; auth thật dùng HTTP bearer khi non-loopback hoặc session ticket Tauri trên loopback. |
 | Vận chuyển | `ws://` thuần, **không TLS**; chỉ an toàn nhờ core bind `127.0.0.1` + `adb reverse` |
 | Quyền Android | Chỉ `INTERNET` — bề mặt tối thiểu (do mic chưa hiện thực) |
 | `minifyEnabled false` | Bundle JS đọc được nguyên vẹn trong APK |
@@ -745,7 +747,7 @@ Cả 4 file **không được tracked trong bất kỳ npm script hay `.github/w
 
 Bản kiểm kê này đã được rút gọn sau đợt 22/07/2026. ~~Chương này phát hiện **12 hạng mục mồ côi/đứt dây**~~ — ba mục đã rời danh sách:
 
-- `mcp/server.rs` + `mcp/protocol.rs` **không còn mồ côi**: `handle_command` gọi cả `list_tools()` (`lib.rs:1575`) lẫn `call_tool()` (`lib.rs:1592`, dùng `mcp::protocol::CallToolRequest`) — §9.1.2.
+- `mcp/server.rs` + `mcp/protocol.rs` **không còn mồ côi**: `handle_command` gọi cả `list_tools()` (`liva-native-core/src/lib.rs:1467-1468`) lẫn `call_tool()` (`liva-native-core/src/lib.rs:1489-1492`, dùng `mcp::protocol::CallToolRequest`) — §9.1.2.
 - `telegram:message` **vẫn không có consumer** (§9.2.4) nhưng **không còn là đứt dây nghiêm trọng nhất**: nó chỉ là kênh sự kiện phụ, còn vòng hội thoại đã khép kín qua `chat:completion`.
 - ~~`data/models.config.json` là config chết (§9.4.9)~~ — file **đã bị xoá 22/07/2026** (`92e79a3`); thư mục `data/` không còn nó.
 
@@ -770,7 +772,7 @@ Các hạng mục này được xếp hạng mức độ nghiêm trọng và g�
 
 - [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md) — bảng 44 lệnh `handle_command` (`telegram:send_text`, `integration:smart_home_control`, `integrations:list`, `mcp:list_tools`, `mcp:call_tool`), khung nhị phân 9 byte và bảng opcode mà `mobile_client` nói theo.
 - [03 — Đường ống thoại](03-duong-ong-thoai.md) — bảng backend TTS (Piper/Kokoro/VieNeu) và bảng engine STT, dùng để chứng minh `liva-voice`/edge-tts nằm ngoài đường thoại thật.
-- [05 — Hệ agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — StateGraph 4 node, nơi node `tool_exec` gọi `integrations::smart_home`.
+- [Agent và tool runtime](../03-he-thong-con/agent-tools.md) — StateGraph sáu node, nơi node `tool_exec` gọi `integrations::smart_home`.
 - [06 — Thị giác passive và governor](06-thi-giac-passive-va-governor.md) — ngưỡng governor thật, đối chiếu với `VRAMManager` sai thuật toán của `liva-voice`.
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường đầy đủ và độ lệch `.env.example` ↔ code (`TELEGRAM_*`, `ZALO_*`, `REMOTE_CONTROL_ENABLED`).
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — bảng rủi ro xếp hạng và bảng code mồ côi toàn repo.
@@ -778,7 +780,7 @@ Các hạng mục này được xếp hạng mức độ nghiêm trọng và g�
 **Tài liệu khác dựa vào tài liệu này:**
 
 - [01 — Kiến trúc tổng thể](01-kien-truc-tong-the.md) — lấy ranh giới "cái gì nằm trong tiến trình chính, cái gì là dịch vụ ngoài" từ bảng tích hợp §9.0.
-- [07 — Tầng dữ liệu và bảo mật](07-tang-du-lieu-va-bao-mat.md) — lấy bề mặt tấn công từ bên ngoài (`/cat`, `/ls`, `resolve_path` của MCP, `liva-voice` bind `0.0.0.0`).
+- [Threat model](../05-chat-luong/threat-model.md) — bề mặt WebSocket, MCP path, Telegram, model/DLL và network trust hiện hành.
 - [10 — Phụ thuộc module và tra cứu](10-phu-thuoc-module-va-tra-cuu.md) — lấy trạng thái sống/chết của các module `mcp/`, `telegram`, `integrations/` để đánh dấu trong bảng module.
 - [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy kết luận "edge-tts không phá vỡ tuyên bố 100% offline" (§9.4.9) và trạng thái remote control.
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy danh sách hạng mục mồ côi ở §9.6 (đã rút gọn 22/07/2026) làm đầu vào cho bảng xếp hạng.

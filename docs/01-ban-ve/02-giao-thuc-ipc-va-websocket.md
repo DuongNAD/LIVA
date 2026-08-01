@@ -1,10 +1,10 @@
 ---
 title: "Giao thức IPC và WebSocket"
-updated: 2026-07-27
-commit: 17f1774
+updated: 2026-07-31
+commit: 3688b5f
 status: living
 owns:
-  - bang-42-lenh-handle-command
+  - catalog-lenh-handle-command
   - khung-nhi-phan-9-byte
   - bang-opcode
 covers:
@@ -38,7 +38,7 @@ covers:
 4. [Kênh vận chuyển: WebSocket server & stdio IPC](#4-kênh-vận-chuyển-websocket-server--stdio-ipc)
 5. [Lớp nhị phân — khung `VoiceFrame`](#5-lớp-nhị-phân--khung-voiceframe)
 6. [Lớp text — hai giao thức trên cùng một socket](#6-lớp-text--hai-giao-thức-trên-cùng-một-socket)
-7. [`handle_command` — bảng 44 lệnh đầy đủ](#7-handle_command--bảng-44-lệnh-đầy-đủ)
+7. [`handle_command` — catalog lệnh theo miền](#7-handle_command--catalog-lệnh-theo-miền)
 8. [Khung streaming — hai định dạng khác nhau](#8-khung-streaming--hai-định-dạng-khác-nhau)
 9. [Lệnh UI gửi mà core không có handler](#9-lệnh-ui-gửi-mà-core-không-có-handler)
 10. [Đối chiếu THIẾT KẾ GỐC vs AS-BUILT](#10-đối-chiếu-thiết-kế-gốc-vs-as-built)
@@ -112,10 +112,10 @@ flowchart LR
     end
 
     subgraph CORE["liva-native-core"]
-        WS["start_websocket_server<br/>main.rs:463"]
-        STDIO["Vòng đọc stdin<br/>main.rs:375-450"]
+        WS["start_websocket_server<br/>liva-native-core/src/websocket.rs:286-405"]
+        STDIO["Vòng đọc stdin<br/>liva-native-core/src/main.rs:173-244"]
         TAURI["native_ipc_call(_stream)<br/>src-tauri/lib.rs:228-258"]
-        HC["handle_command<br/>lib.rs:320 — 44 lệnh"]
+        HC["handle_command<br/>dispatcher theo miền — 76 lệnh"]
         ACT["WebRTCActor<br/>webrtc/pipeline.rs"]
         ST["Arc&lt;AppState&gt;<br/>lib.rs:33-52"]
     end
@@ -168,14 +168,14 @@ pub struct AppState {
 | 8 | `denoiser` | `tokio::sync::Mutex<Option<GtcrnDenoiser>>` | có | `None` trong Tauri |
 | 9 | `turn_shadow` | `tokio::sync::Mutex<Option<SmartTurnClassifier>>` | có | `None` trong Tauri |
 | 10 | `aec` | `tokio::sync::Mutex<Option<SelfEchoCanceller>>` | có | `None` trong Tauri |
-| 11 | `mcp_server` | `Arc<NativeMcpServer>` | không | đã nối vào dispatcher: `mcp:list_tools` (`lib.rs:1575`) + `mcp:call_tool` (`lib.rs:1578`) |
+| 11 | `mcp_server` | `Arc<NativeMcpServer>` | không | đã nối vào dispatcher: `mcp:list_tools` (`liva-native-core/src/lib.rs:1467-1468`) + `mcp:call_tool` (`liva-native-core/src/lib.rs:1470-1494`) |
 | 12 | `vision` | `tokio::sync::Mutex<VisionManager>` | có | WGC qua `xcap` |
 | 13 | `embedder` | `tokio::sync::Mutex<Option<EmbeddingEngine>>` | có | model ONNX 384 chiều **tách khỏi** `llm` (`llm/embedder.rs`); `None` khi thiếu `models/embedding/` ⇒ RAG im lặng bỏ qua |
 
 Đặc điểm quan trọng đối với người viết client:
 
 - **Toàn bộ dùng `tokio::sync::Mutex`, không có `RwLock` nào.** Không có `Arc` bên trong trừ `mcp_server`.
-- Chia sẻ bằng `Arc<AppState>` clone cho từng task (`main.rs:274, 286, 313, 321, 346, 409`) và **cho mỗi kết nối WS** (`main.rs:478`).
+- Chia sẻ bằng `Arc<AppState>` clone cho từng task (`main.rs:274, 286, 313, 321, 346, 409`) và **cho mỗi kết nối WS** (`liva-native-core/src/websocket.rs:300-465`).
 - Chuỗi DSP của mic chạy trong `spawn_blocking`; các mutex đồng bộ bên trong
   `VoiceSessionAudio::process_mic` không chặn Tokio worker.
 - **Điểm nghẽn kiến trúc:** `state.llm` là **một** Mutex duy nhất cho chat + embed + vision + swap_model. Một lượt sinh token (blocking) khoá luôn mọi lệnh LLM khác ⇒ client **không nên** phát song song `chat:completion` và `vision:ask`.
@@ -281,7 +281,7 @@ Trình tự **giống hệt** gateway ở phần A và B của §3.2. Chỉ khá
   `liva-desktop/src-tauri/src/lib.rs#get_vault_key` — plugin `tauri_plugin_stronghold` và mật khẩu
   hard-code **đã gỡ** (H2, 23/07/2026).
 
-> 📌 Nguồn đầy đủ (bảng lệnh Tauri `invoke`, cấu hình cửa sổ, ghost mode): [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md)
+> 📌 Nguồn đầy đủ (bảng lệnh Tauri `invoke`, cấu hình cửa sổ, ghost mode): [Desktop Tauri](../03-he-thong-con/desktop-tauri.md)
 
 ---
 
@@ -289,7 +289,7 @@ Trình tự **giống hệt** gateway ở phần A và B của §3.2. Chỉ khá
 
 ### 4.1 Server và handshake
 
-`async fn start_websocket_server(state: Arc<AppState>) -> Result<(), String>` — `main.rs:463-525`.
+`WebSocketServer::bind_from_env()` + `WebSocketServer::run(state)` — `websocket.rs`.
 
 | Thuộc tính | Giá trị | Dòng |
 |---|---|---|
@@ -298,14 +298,19 @@ Trình tự **giống hệt** gateway ở phần A và B của §3.2. Chỉ khá
 | Log | `WebSocket server listening on ws://{addr}/ws` | — |
 | Kiểm path | `accept_hdr_async` callback từ chối **ngay ở tầng HTTP**: `path != "/ws"` → `Err(reject(StatusCode::NOT_FOUND, "invalid path"))` ⇒ `WebSocketStream` không bao giờ được dựng | 490-493 |
 | Kiểm `Origin` | allow-list `origin_allowed()`; không khớp → HTTP **403 `"origin not allowed"`** | 494-504 |
-| Auth | **Không token, không TLS** (đã có hàng rào `Origin`) | — |
+| Auth | Loopback mặc định remote; non-loopback bắt buộc Bearer 32–4096 visible ASCII byte; widget/dashboard đặc quyền dùng session ticket 256-bit TTL 30 giây, single-use do Tauri capability cấp | `websocket.rs` |
 
 **Allow-list `Origin`** (`liva-native-core/src/lib.rs#DEFAULT_WS_ALLOWED_ORIGINS`, kiểm ở `liva-native-core/src/lib.rs#origin_allowed`): `http://localhost:5173`, `http://127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS` (CSV). Hai quy tắc biên mà người viết client phải biết:
 
 - **Không có header `Origin` (`None`) thì CHO QUA** — chủ ý, vì client gốc (vỏ Tauri, `verify_duplex`, script kiểm thử) không gửi `Origin`. Hàng rào này nhắm vào **trang web**, nơi kẻ tấn công không đặt được `Origin`.
 - `Origin` **rỗng** (`""` / toàn khoảng trắng) thì **BỊ CHẶN** — đó là dấu hiệu trình duyệt bị sandbox.
 
-⚠️ **Cảnh báo bảo mật (đã thu hẹp 22/07/2026):** `OP_AUTH_HANDSHAKE` vẫn chỉ echo lại payload (§5.3), nên **không có xác thực theo danh tính ở bất kỳ tầng nào** — không token, không TLS. ~~"Không kiểm `Origin`… không có xác thực ở bất kỳ tầng nào"~~ là mô tả trước 22/07/2026: nay allow-list `Origin` đã chặn được một trang web bất kỳ mở `new WebSocket("ws://127.0.0.1:8002/ws")` rồi gọi `llm:swap_model`. Điều **vẫn đúng**: bất kỳ **tiến trình local** nào (không gửi `Origin`) cũng mở được socket và phát lệnh — bao gồm `llm:swap_model` (không validate đường dẫn) và `telegram:send_text`.
+`OP_AUTH_HANDSHAKE` vẫn chỉ echo payload (§5.3), không phải authentication. Danh tính command-plane
+được chốt ở HTTP upgrade: không có session thì là `WebSocketRemote`; `principal=` luôn bị 403;
+session đặc quyền chỉ hợp lệ trên loopback, được cấp qua capability Tauri widget/dashboard, lưu
+digest, TTL 30 giây và bị xóa khi dùng. Bearer/Origin được kiểm trước khi tiêu thụ session. Vì mọi
+lệnh legacy/generic đều đi qua allow-list của principal, tiến trình local không session không thể
+gọi lệnh dashboard như `llm:swap_model`.
 
 ### 4.2 `handle_ws_connection` — vòng đời một kết nối
 
@@ -313,7 +318,7 @@ Trình tự **giống hệt** gateway ở phần A và B của §3.2. Chỉ khá
 
 1. `ws_stream.split()` → `ws_sender` / `ws_receiver`.
 2. Ba kênh ra: speaker `VoiceFrame` (capacity 128), control `VoiceFrame` (capacity 16) và text (capacity 128). `OP_FLUSH`/handshake không xếp sau audio.
-3. `conversation_id = Uuid::new_v4()` — **ổn định suốt kết nối** để bộ nhớ hội thoại đọc lại được (`session_id` tăng mỗi lượt VAD nên không dùng làm khoá được) — `main.rs:543`.
+3. `conversation_id = Uuid::new_v4()` — **ổn định suốt kết nối** để bộ nhớ hội thoại đọc lại được (`session_id` tăng mỗi lượt VAD nên không dùng làm khoá được) — `liva-native-core/src/websocket.rs:451-465`.
 4. `VoiceSessionAudio::from_app_state(&state)` fork VAD/GTCRN stream state và tạo AEC riêng cho socket.
 5. `WebRTCActor::new(state, VoiceOutbound::new(...), conversation_id, voice_session.aec_handle())`
    → `(WebRTCPipelineHandle, WebRTCActor)`; TTS chỉ feed far-end reference vào AEC của socket này.
@@ -346,8 +351,8 @@ sequenceDiagram
 
 ### 4.3 stdio IPC — cùng schema, khác vận chuyển
 
-- **Vào:** mỗi dòng stdin là một JSON `IpcRequest` (`main.rs:375-450`, parse ở `:389`).
-- **Ra:** mỗi phản hồi là một JSON `IpcResponse` + `\n` + flush (`main.rs:361-373`).
+- **Vào:** mỗi dòng stdin là một JSON `IpcRequest` (`liva-native-core/src/main.rs:173-244`, parse ở `:389`).
+- **Ra:** mỗi phản hồi là một JSON `IpcResponse` + `\n` + flush (`liva-native-core/src/main.rs:158-171`).
 - **stdout là kênh dữ liệu thuần** — log đi stderr (bước 1 §3.2). Client **không** được kỳ vọng log trên stdout.
 
 Struct dây (`main.rs:13-28`):
@@ -427,17 +432,17 @@ Quy tắc mã hoá / giải mã (`frame.rs:20-56`):
 
 > **1 MiB = 1.048.576 byte**, áp dụng cho **payload**, không tính 9 byte header. Với PCM f32 mono 16 kHz, 1 MiB ≈ 262.144 mẫu ≈ 16,4 giây audio — thực tế client nên gửi chunk ~20-100 ms.
 
-**Framing kiểu stream:** server đọc trong vòng `while bytes_mut.len() >= 9 { VoiceFrame::decode(...) }` (`main.rs:626-635`) ⇒ **nhiều `VoiceFrame` có thể nằm trong một WebSocket binary message**, và một khung dở dang sẽ bị bỏ (`Ok(None)` → `break`) chứ **không** được nối sang message kế tiếp. ⇒ **Client PHẢI gửi trọn vẹn từng khung trong một WS message** (hoặc gửi nhiều khung nguyên vẹn trong một message), không được cắt khung ngang giữa hai message.
+**Framing kiểu stream:** server đọc trong vòng `while bytes_mut.len() >= 9 { VoiceFrame::decode(...) }` (`liva-native-core/src/websocket.rs:555-567`) ⇒ **nhiều `VoiceFrame` có thể nằm trong một WebSocket binary message**, và một khung dở dang sẽ bị bỏ (`Ok(None)` → `break`) chứ **không** được nối sang message kế tiếp. ⇒ **Client PHẢI gửi trọn vẹn từng khung trong một WS message** (hoặc gửi nhiều khung nguyên vẹn trong một message), không được cắt khung ngang giữa hai message.
 
 ### 5.3 Bảng 6 opcode — đầy đủ
 
 | Op | Hex | Hướng | Payload | Server xử lý | Client xử lý | Trạng thái |
 |---|---|---|---|---|---|---|
-| `OP_AUTH_HANDSHAKE` | `0x00` | C↔S | tuỳ ý (mobile gửi chuỗi UTF-8 `"auth_token"`) | **Echo nguyên payload + nguyên `seq_id`** (`main.rs:637-645`) — **không xác thực gì** | `mobile_client/src/services/WebSocketClient.ts:185` `sendAuthHandshake` (chờ frame `op=0x00` cùng `seqId`) | **[MỘT PHẦN]** chạy nhưng vô nghĩa về bảo mật |
-| `OP_MIC_IN` | `0x01` | C→S | PCM **f32 LE mono 16 kHz** thô, **không** header sample-rate | Cắt cho chia hết 4 (`len_rounded = (len/4)*4`, `main.rs:648`), `bytemuck::cast_slice` nếu con trỏ căn 4-byte, ngược lại decode thủ công `f32::from_le_bytes` (`main.rs:650-657`). Chuỗi trong **một** `spawn_blocking`: AEC → GTCRN → VAD (`main.rs:665-690`) | `liva-ui/src/composables/useVoicePipeline.ts:353` qua `serializeVoiceFrame(OP_MIC_IN, micSeqId, …)`; `mobile_client` cũng 9 byte | **[OK]** — cả hai client đúng hợp đồng (sửa 22/07/2026, xem §10.2) |
+| `OP_AUTH_HANDSHAKE` | `0x00` | C↔S | tuỳ ý (mobile gửi chuỗi UTF-8 `"auth_token"`) | Echo nguyên payload + `seq_id` để tương thích framing (`liva-native-core/src/websocket.rs:569-578`); xác thực thật đã diễn ra ở HTTP handshake/session principal trước đó | `mobile_client/src/services/WebSocketClient.ts:185` chờ frame cùng `seqId` | **[OK tương thích]** — không được xem opcode này là hàng rào auth |
+| `OP_MIC_IN` | `0x01` | C→S | PCM **f32 LE mono 16 kHz** thô, **không** header sample-rate | Cắt cho chia hết 4 (`len_rounded = (len/4)*4`, `liva-native-core/src/websocket.rs:415-430`), `bytemuck::cast_slice` nếu con trỏ căn 4-byte, ngược lại decode thủ công `f32::from_le_bytes` (`liva-native-core/src/websocket.rs:415-430`). Chuỗi trong **một** `spawn_blocking`: AEC → GTCRN → VAD (`liva-native-core/src/websocket.rs:707-790`) | `liva-ui/src/composables/useVoicePipeline.ts:353` qua `serializeVoiceFrame(OP_MIC_IN, micSeqId, …)`; `mobile_client` cũng 9 byte | **[OK]** — cả hai client đúng hợp đồng (sửa 22/07/2026, xem §10.2) |
 | `OP_SPEAKER_OUT` | `0x02` | S→C | `[u32 LE turn_epoch][u32 LE sample_rate][f32 LE PCM…]` | Tách thành frame 100 ms; `seq_id` là thứ tự chunk trong lượt. Sender lấy permit rồi kiểm lại cancellation epoch trước khi enqueue | UI parse epoch + sample rate; `SpeakerEpochGate` bỏ frame cũ | **[OK]** |
 | `OP_FLUSH` | `0x03` | S→C | rỗng; `seq_id = generation_epoch` | Gửi qua control queue riêng trong `cancel_active_operations()` sau khi tăng epoch | Nâng epoch watermark, dừng queue đang phát; frame có epoch thấp hơn bị bỏ | **[OK]** |
-| `OP_ACK_PLAYING` | `0x04` | C→S (thiết kế) | — | **Không nơi nào trong Rust đọc/ghi**; rơi vào `_ => {}` (`main.rs:791`) | Chỉ có hằng số trong TS (`WebSocketClient.ts:8`) và doc-comment giữ chỗ (`frame.rs:7-10`) | **[THIẾU]** code chết hai đầu |
+| `OP_ACK_PLAYING` | `0x04` | C→S (thiết kế) | — | **Không nơi nào trong Rust đọc/ghi**; rơi vào `_ => {}` (`liva-native-core/src/websocket.rs:825`) | Chỉ có hằng số trong TS (`WebSocketClient.ts:8`) và doc-comment giữ chỗ (`frame.rs:7-10`) | **[THIẾU]** code chết hai đầu |
 | `OP_WAKE_PROBE` | `0x05` | C→S | PCM **f32 LE mono 16 kHz** — MỘT câu ứng viên đã cắt sẵn (không phải luồng) | Từ chối ngoài khoảng 0,3–4,0 s trước khi tốn STT. Rồi `wake_gate.score_clip` (classifier) HOẶC `stt.transcribe_for_wake` + `wake_gate.matches_phrase`. **Không chạm pipeline**: không AEC/GTCRN/VAD, không `TurnAudioBuffer`, không `on_vad_end` | `useVoicePipeline.ts` gửi khi `LivaWakeWorker` cắt được một cụm; nghe sự kiện text trả về | **[OK]** — thêm 27/07/2026, xem [Đường ống thoại §9](03-duong-ong-thoai.md) |
 
 **Vì sao `OP_WAKE_PROBE` phải là opcode riêng chứ không tái dùng `OP_MIC_IN`:** khung `OP_MIC_IN`
@@ -462,8 +467,8 @@ payload = [f32 LE][f32 LE][f32 LE] …          // KHÔNG có sample_rate trong 
 
 - Sample rate **ngầm định 16.000 Hz mono** — server **không kiểm tra và không resample**. Nếu client gửi 48 kHz, VAD/STT vẫn chạy nhưng kết quả sai.
 - Biên độ: f32 chuẩn `[-1.0, 1.0]`.
-- Byte thừa (`len % 4 != 0`) bị **cắt bỏ im lặng** (`main.rs:648`).
-- Xử lý sau khi decode (`main.rs:665-690`, trong một `spawn_blocking`, dùng `blocking_lock()`):
+- Byte thừa (`len % 4 != 0`) bị **cắt bỏ im lặng** (`liva-native-core/src/websocket.rs:415-430`).
+- Xử lý sau khi decode (`liva-native-core/src/websocket.rs:707-790`, trong một `spawn_blocking`, dùng `blocking_lock()`):
 
 ```mermaid
 flowchart LR
@@ -522,7 +527,7 @@ Hành động client bắt buộc: nâng watermark lên `seq_id`, **xoá ngay h�
 
 > **Ghi chú mâu thuẫn nguồn (đã giải quyết):** một sơ đồ trình tự trong báo cáo khảo sát chú thích `OP_FLUSH` là "CHƯA CÓ TRONG CODE HIỆN TẠI". **Ba khu vực khảo sát độc lập** (`core-entry`, `webrtc`, `tts`) đều trích dẫn khối gửi `OP_FLUSH` (nay ở `pipeline.rs:461-466`), và `bin/verify_duplex.rs:126-145` assert `on_vad_start()` → nhận `OP_FLUSH` **< 10 ms**. Tài liệu này kết luận theo trích dẫn code: **`OP_FLUSH` được gửi thật**.
 
-#### `OP_AUTH_HANDSHAKE` (0x00) — echo
+#### `OP_AUTH_HANDSHAKE` (0x00) — echo tương thích, không phải hàng rào auth
 
 ```rust
 OP_AUTH_HANDSHAKE => {
@@ -535,11 +540,13 @@ OP_AUTH_HANDSHAKE => {
     let _ = outgoing_tx.send(handshake_frame).await;
 }
 ```
-(`main.rs:637-645`) — dùng được như **ping/pong đo RTT**, không dùng được như xác thực.
+(`liva-native-core/src/websocket.rs:569-578`) — dùng được như **ping/pong đo RTT**.
+Identity được chốt trước khi vào hàm này: Origin/path/bearer ở HTTP handshake, sau đó
+session ticket Tauri ánh xạ sang principal; mọi command lại qua allow-list theo principal.
 
 #### `OP_ACK_PLAYING` (0x04)
 
-Không có mã xử lý. Gửi lên sẽ rơi vào `_ => {}` (`main.rs:791`) và bị **nuốt im lặng** — client không nhận lỗi.
+Không có mã xử lý. Gửi lên sẽ rơi vào `_ => {}` (`liva-native-core/src/websocket.rs:825`) và bị **nuốt im lặng** — client không nhận lỗi.
 
 ### 5.5 Máy trạng thái pipeline (ngữ cảnh cho client)
 
@@ -649,7 +656,7 @@ Khác biệt then chốt so với Lớp A: `handle_command` được gọi **kè
 
 ---
 
-## 7. `handle_command` — bảng 44 lệnh đầy đủ
+## 7. `handle_command` — catalog lệnh theo miền
 
 Chữ ký (`liva-native-core/src/lib.rs:320-326`):
 
@@ -663,7 +670,51 @@ pub async fn handle_command(
 ) -> Result<serde_json::Value, String>
 ```
 
-Nhánh mặc định: `Err(format!("Unknown command: {}", command))` (`lib.rs:1599`).
+Nhánh mặc định: `Err(format!("Unknown command: {}", command))`.
+
+**Snapshot 31/07/2026: 76 lệnh có tên, thuộc 11 miền.** Con số được đếm từ
+`commands/*::{owns,handle}` và các arm MCP/skill còn ở dispatcher; không được dùng
+như một hằng số giao thức. Nguồn sự thật là danh sách lệnh ngay trong từng module:
+
+| Miền | Số lệnh | Lệnh hiện hành | Nguồn |
+|---|---:|---|---|
+| Cấu hình/trạng thái | 12 | `ping`, `echo`, `status`, `get_config`, `update_config`, `get_ai_config`, `get_voice_status`, `get_voice_profiles`, `get_system_status`, `get_skills_list`, `get_user_profile`, `get_avatar_models` | `commands/config.rs::OWNED` |
+| Task | 4 | `get_tasks`, `add_task`, `delete_task`, `update_task` | `commands/task.rs::OWNED` |
+| LLM/chat | 5 | `llm:swap_model`, `llm:embed`, `llm:health_check`, `chat:completion`, `task_plan_chat` | `commands/llm.rs::OWNED` |
+| Memory | 11 | `get_memory_data`, `memory:set_fact`, `memory:get_fact`, `delete_memory_fact`, `memory:delete_conversation`, `memory:delete_subject`, `memory:sweep_retention`, `consolidate_memory`, `reset_memory`, `memory:search_hybrid`, `memory:upsert_vector` | `commands/memory.rs::OWNED` |
+| Vision | 6 | `vision:capture`, `vision:add_region`, `vision:remove_region`, `vision:get_changed_regions`, `vision:set_config`, `vision:ask` | `commands/vision.rs::handle` |
+| Voice | 9 | `voice:stt_start`, `voice:stt_flush`, `voice:stt_chunk`, `voice:stt_stop`, `voice:set_language`, `voice:list_vieneu_voices`, `voice:set_vieneu_voice`, `voice:tts_speak`, `voice:tts_stop` | `commands/voice.rs::handle` |
+| Consent | 3 | `consent:get`, `consent:grant`, `consent:revoke` | `commands/consent.rs::handle` |
+| Setup | 3 | `setup:status`, `setup:fetch`, `setup:paths` | `commands/setup.rs::handle` |
+| Tích hợp | 3 | `telegram:send_text`, `integration:smart_home_control`, `integrations:list` | `commands/integrations.rs::OWNED` |
+| Danh bạ/nhắn tin | 8 | `contacts:list`, `contacts:upsert`, `contacts:delete`, `message:draft`, `message:confirm`, `message:cancel`, `message:pending`, `messenger:status` | `commands/messaging.rs::OWNED` |
+| MCP/skill store | 12 | `mcp:list_tools`, `mcp:call_tool`, `mcp_client:list_servers`, `mcp_client:list_tools`, `mcp_client:call_tool`, `skills:sync`, `skills:list`, `skills:search`, `skills:signal`, `skills:signals`, `skills:history`, `skills:pin_ids` | match cuối `handle_command` |
+
+Các hợp đồng quan trọng mới:
+
+- `memory:delete_conversation` mặc định `dryRun=true`; chỉ xoá khi gửi
+  `{"conversationId":"…","dryRun":false}`. Lệnh bị khoá owner `local`, xoá trong
+  transaction và trả số projection đã xoá cùng trạng thái WAL checkpoint.
+- `memory:delete_subject` cũng mặc định dry-run, local-only và Settings gửi
+  `dryRun:false` sau modal xác nhận. Non-local owner bị core từ chối.
+- `memory:sweep_retention` nhận `maxAgeDays` + `batchLimit≤25`; eligibility dựa
+  trên hoạt động mới nhất. Scheduler nền mặc định tắt.
+- `consolidate_memory` chỉ validation/finalization event→vector hiện hành;
+  không tạo fact, summary hay L3 semantic graph.
+- `message:draft` chỉ ghi bản nháp mã hoá vào SQLite; đường gửi duy nhất là
+  `message:confirm` với `draftId`. Bản nháp sống qua restart, hết hạn sau 300 giây
+  và không có lệnh `message:send` một nhịp.
+- `setup:fetch` stream tiến độ và kiểm SHA-256; `setup:paths` trả đúng các thư mục
+  trên máy đang chạy.
+- `llm:swap_model` hiện kiểm đường dẫn phải nằm dưới thư mục model được cấu hình;
+  khẳng định “không validate path” trong snapshot cũ đã hết đúng.
+
+<details>
+<summary>Snapshot 44 lệnh ngày 22/07/2026 — chỉ để truy nguyên, không dùng làm contract</summary>
+
+Các số dòng và cột “UI gọi?” dưới đây là ảnh chụp trước khi dispatcher được tách
+theo miền. Chúng được giữ lại để giải thích lịch sử, không phải danh sách đầy đủ
+hay toạ độ code hiện hành.
 
 Ký hiệu: `*` = bắt buộc. Cột "Dòng" là số dòng trong `liva-native-core/src/lib.rs`.
 
@@ -714,16 +765,21 @@ Ký hiệu: `*` = bắt buộc. Cột "Dòng" là số dòng trong `liva-native-
 | 43 | `mcp:list_tools` | — | `state.mcp_server.list_tools()` serialize thẳng ra JSON | 1575-1576 | **không** | **[MỘT PHẦN]** — core có, chưa client nào gọi |
 | 44 | `mcp:call_tool` | `{name*, arguments?}` — thiếu `arguments` ⇒ `{}` | kết quả `CallToolRequest` của `NativeMcpServer`; mọi thao tác file đi qua `resolve_path` (chặn path tuyệt đối và `..`, ghim dưới `LIVA_VAULT_PATH`) | 1578-1597 | **không** | **[MỘT PHẦN]** — core có, chưa client nào gọi |
 
+</details>
+
 ---
 
 ## 8. Khung streaming — hai định dạng khác nhau
 
-`tx` / `req_id` **chỉ có ý nghĩa** với `chat:completion` (#37) và `task_plan_chat` (#21). Hai lệnh này **không dùng chung định dạng chunk** — đây là điểm gây lỗi client nhiều nhất.
+`tx` / `req_id` có ý nghĩa với `chat:completion`, `task_plan_chat` và
+`setup:fetch`. Ba lệnh này không dùng chung hoàn toàn một payload dữ liệu; lớp
+vận chuyển `setup:fetch` giống `chat:completion` vì có bọc `IpcResponse`.
 
 | Lệnh | Chunk giữa chừng | Chunk cuối | Có bọc `IpcResponse`? |
 |---|---|---|---|
 | `chat:completion` | `{"id":"<req_id>","status":"ok","data":{"token":"…","done":false}}` | Trả qua **giá trị `Ok`** của `handle_command` → server bọc thành `IpcResponse{data:{text,done:true,usage:{…}}}` | **CÓ** |
 | `task_plan_chat` | `{"taskId":…,"message":"…","done":false}` | `{"taskId":…,"message":"…","done":true}` | **KHÔNG** — thiếu `id` và `status` |
+| `setup:fetch` | `{"id":"<req_id>","status":"ok","data":{"progress":{…},"done":false}}` | `IpcResponse{data:{downloaded,failed,skippedManual,status,done:true}}` | **CÓ** |
 
 ⇒ **Client phải parse hai dạng khung stream khác nhau trên cùng một socket.** Cách phân biệt an toàn: nếu JSON có field `status` → là `IpcResponse`; nếu có field `taskId` → là chunk `task_plan_chat`; nếu có field `event` → là sự kiện Lớp A.
 
@@ -733,9 +789,12 @@ Với Tauri, chunk stream không đi qua socket mà qua `window.emit(&format!("i
 
 ## 9. Lệnh UI gửi mà core không có handler
 
-**24 sự kiện** mà `liva-ui` gửi đi không khớp match arm nào trong `lib.rs`/`main.rs` (ví dụ `consolidate_memory`, `select_voice_profile`, `save_env_config`, `reset_memory`…) ⇒ rơi vào `_ => Err("Unknown command: …")` (`lib.rs:1599`).
-
-Phép đếm (22/07/2026): 41 tên xuất hiện trong `sendMsg("…")` khắp `liva-ui/src`, trừ đi 45 tên là match arm của `handle_command` (`lib.rs`) cộng các arm sự kiện riêng trong `main.rs`, còn **24**. Đây là phép đếm **gần đúng** — nó bỏ sót các lời gọi truyền tên qua biến, nên hãy coi 24 là cận dưới. ~~"22 sự kiện"~~ là con số cũ, tính trước khi `handle_command` có thêm hai arm `mcp:*` và trước khi UI thêm lệnh mới.
+Frontend vẫn có các tên sự kiện không khớp handler, nhưng phép đếm 24 ngày
+22/07/2026 đã bị loại bỏ: nó so chuỗi bằng grep, bỏ sót tên truyền qua biến và
+đã tính `reset_memory` là mồ côi dù core hiện sở hữu tên này. Khi sửa hợp đồng,
+phải kiểm bằng test adapter/dispatcher thay vì tiếp tục cập nhật một con số grep
+không đáng tin. Các ví dụ lịch sử còn đáng chú ý là `consolidate_memory`,
+`select_voice_profile` và `save_env_config`.
 
 **Điểm giao thức quan trọng:** với Lớp A, `Err` nay **có** sinh ra khung phản hồi — nhánh mặc định trả `{"event": "<tên>_error", "payload": {command, error}}` (`websocket.rs#handle_ws_connection`), nên client thấy được `Unknown command`. Nhưng 11 nhánh **có tên** (`get_config` … `user_voice_command`, §6.1) vẫn bọc bằng `if let Ok(res)` và vẫn nuốt lỗi im lặng. Người viết client mới **nên dùng Lớp B** (§6.3) để luôn có `id`/`status` chuẩn. Trạng thái: **[MỘT PHẦN]** ở phía core.
 
@@ -752,15 +811,15 @@ Nguồn thiết kế: [`docs/99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.m
 | Hạng mục thiết kế | Thiết kế gốc nói | AS-BUILT (code thật) | Kết luận |
 |---|---|---|---|
 | Giao thức | WebSocket WS/WSS | WebSocket, `tokio-tungstenite` 0.21 | **KHỚP** |
-| Port & endpoint | `8002`, `/ws`, đổi được bằng `LIVA_SERVER_PORT` | `main.rs:469-471`, `LIVA_SERVER_HOST` + `LIVA_SERVER_PORT`, path `/ws` | **KHỚP** (có thêm `LIVA_SERVER_HOST`) |
+| Port & endpoint | `8002`, `/ws`, đổi được bằng `LIVA_SERVER_PORT` | `liva-native-core/src/websocket.rs:286-405`, `LIVA_SERVER_HOST` + `LIVA_SERVER_PORT`, path `/ws` | **KHỚP** (có thêm `LIVA_SERVER_HOST`) |
 | Bind từ xa `0.0.0.0` | "remote deployments bind to `0.0.0.0:8002/ws`" | Mặc định `127.0.0.1`; đổi được bằng env nhưng **không có token/TLS** (chỉ có allow-list `Origin`, vô dụng với client native) | **LỆCH** — mở ra ngoài là không an toàn |
 | WSS / TLS qua `rustls` hoặc reverse proxy | có nêu | **Không có code TLS nào trong core** | **THIẾU** |
 | Header nhị phân 9 byte | `[op u8][seq u32 LE][len u32 LE]` | `frame.rs:25-28` y hệt | **KHỚP CHÍNH XÁC** |
 | Giới hạn payload 1.048.576 | có | `frame.rs:21`, `:40` | **KHỚP CHÍNH XÁC** |
 | 5 opcode `0x00`-`0x04` | có | `frame.rs:3-10` y hệt | **KHỚP** về hằng số |
-| `OP_AUTH_HANDSHAKE` "ping-pong authentication" | ngụ ý có xác thực | Echo nguyên payload, **không xác thực** (`main.rs:637-645`) | **LỆCH** |
-| `OP_ACK_PLAYING` theo dõi tiến độ phát | có đặc tả | **Không nơi nào trong Rust đọc/ghi**; `_ => {}` (`main.rs:791`) | **THIẾU** |
-| Payload `OP_MIC_IN` = f32 PCM 16 kHz mono | có | đúng, thêm quy tắc cắt `len/4*4` (`main.rs:648`) | **KHỚP** |
+| `OP_AUTH_HANDSHAKE` "ping-pong authentication" | ngụ ý opcode tự xác thực | Opcode chỉ echo để tương thích; auth thật nằm ở HTTP handshake + session principal (`liva-native-core/src/websocket.rs:118-185`, `liva-native-core/src/websocket.rs:300-405`) | **THIẾT KẾ CŨ ĐÃ ĐƯỢC THAY THẾ** |
+| `OP_ACK_PLAYING` theo dõi tiến độ phát | có đặc tả | **Không nơi nào trong Rust đọc/ghi**; `_ => {}` (`liva-native-core/src/websocket.rs:825`) | **THIẾU** |
+| Payload `OP_MIC_IN` = f32 PCM 16 kHz mono | có | đúng, thêm quy tắc cắt `len/4*4` (`liva-native-core/src/websocket.rs:415-430`) | **KHỚP** |
 | Payload `OP_SPEAKER_OUT` = f32 PCM **16 kHz** | thiết kế ghi 16 kHz | **Thực tế có prefix `[u32 LE sample_rate]`**, và sample rate lấy từ backend TTS đang chạy: `e.sample_rate()` (VieNeu) / `v.sample_rate()` (Piper) / `24000` (Kokoro) — `pipeline.rs:384-393, 345, 349, 365` | **LỆCH** — as-built giàu hơn thiết kế; **client phải đọc sample_rate từ payload**, không được giả định 16 kHz |
 | `OP_FLUSH` server→client khi barge-in | có | `pipeline.rs:461-466`, gửi ở `handle_vad_start`/`handle_vad_end`/`handle_interrupted` | **KHỚP** |
 | `IpcRequest` `{id, command, payload}` | có, ví dụ `chat:completion` | `main.rs:13-18` y hệt | **KHỚP** |
@@ -768,12 +827,12 @@ Nguồn thiết kế: [`docs/99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.m
 | Chunk stream `{"id","status","data":{"token","done"}}` | có | đúng với `chat:completion`; **`task_plan_chat` KHÔNG bọc `IpcResponse`** | **LỆCH MỘT PHẦN** |
 | Sự kiện `state_change` (`VadStart`, `LlmGenerating`, `TtsSpeaking`, `Idle`) | 5 lần xuất hiện trong sơ đồ trình tự | **Không có mã nào phát `state_change` ra socket**; `PipelineState` chỉ sống nội bộ (`pipeline.rs:8-17`) | **THIẾU** |
 | Sự kiện `stt_completed` gửi text về UI | có | Không có event `stt_completed` trên socket; text chỉ đi qua chuỗi `ai_stream_*` của `user_voice_command` | **THIẾU / thay bằng cơ chế khác** |
-| Sự kiện telemetry `system_status` đẩy định kỳ | có | **Chỉ tồn tại kiểu pull**: client phải gửi `{"event":"get_system_status"}` (`main.rs:840`); không có push định kỳ | **LỆCH** |
-| "Two frame types" (JSON text + binary) trên **một** kết nối | có | `send_task` `tokio::select!` multiplex (`main.rs:553-587`) | **KHỚP** |
-| Giữ stdin/stdout legacy, **dùng chung `Arc<AppState>`** | có | `main.rs:375-450` dùng chính `state` đã dựng ở bước 17 | **KHỚP** |
+| Sự kiện telemetry `system_status` đẩy định kỳ | có | **Chỉ tồn tại kiểu pull**: client phải gửi `{"event":"get_system_status"}` (`liva-native-core/src/websocket.rs:956-975`); không có push định kỳ | **LỆCH** |
+| "Two frame types" (JSON text + binary) trên **một** kết nối | có | `send_task` `tokio::select!` multiplex (`liva-native-core/src/websocket.rs:475-538`) | **KHỚP** |
+| Giữ stdin/stdout legacy, **dùng chung `Arc<AppState>`** | có | `liva-native-core/src/main.rs:173-244` dùng chính `state` đã dựng ở bước 17 | **KHỚP** |
 | Model phía server (router Gemma, TTS Kokoro) | "Gemma-4-E4B-it router model" + Kokoro | Router đã là **Qwen3-VL**; TTS định tuyến VieNeu → Piper → Kokoro | **LỆCH** — thiết kế lỗi thời (không ảnh hưởng hợp đồng dây, trừ `sample_rate` của `OP_SPEAKER_OUT`) |
 | Client "ultra-lightweight" không load model AI | có | `liva-ui` vẫn chạy **WakeWordWorker** phía client (`useVoicePipeline.ts:338-341`) | **LỆCH nhẹ** |
-| MCP server native | có | `NativeMcpServer` được khởi tạo **và đã nối vào dispatcher**: `mcp:list_tools` (`lib.rs:1575`) + `mcp:call_tool` (`lib.rs:1578`); ~~"không có nhánh `mcp:*` trong `handle_command`"~~ đúng cho tới trước 22/07/2026. Chưa client nào (UI hay mobile) gọi hai lệnh này. | **KHỚP** ở lớp lệnh, **[MỘT PHẦN]** ở phía client |
+| MCP server native | có | `NativeMcpServer` được khởi tạo **và đã nối vào dispatcher**: `mcp:list_tools` (`liva-native-core/src/lib.rs:1467-1468`) + `mcp:call_tool` (`liva-native-core/src/lib.rs:1470-1494`); ~~"không có nhánh `mcp:*` trong `handle_command`"~~ đúng cho tới trước 22/07/2026. Chưa client nào (UI hay mobile) gọi hai lệnh này. | **KHỚP** ở lớp lệnh, **[MỘT PHẦN]** ở phía client |
 
 > 📌 Nguồn đầy đủ về model: cấu hình LLM và persona ở [Hệ LLM và prompt](04-he-llm-va-prompt.md), bảng model + RAM/VRAM ở [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md), bảng backend TTS ở [Đường ống thoại](03-duong-ong-thoai.md). Đối chiếu **tuyên bố sản phẩm** (khác với đối chiếu thiết kế gốc ở bảng trên): [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md).
 
@@ -794,7 +853,7 @@ micSeqId = (micSeqId + 1) >>> 0;
 
 *(Giữ lại vì nó giải thích thiết kế của `voiceFrame.ts` và là bài học cho người viết client mới. Mô tả dưới đây KHÔNG còn là hiện trạng.)*
 
-~~"Thiết kế gốc và server đều dùng header 9 byte. `liva-ui` gửi header 1 byte."~~ Đoạn code cũ chỉ ghi `msg[0] = 0x01` rồi nối thẳng PCM — không có `seq_id`, không có `payload_len`. **Hậu quả cơ học** khi server decode (`main.rs:626-635` + `frame.rs:32-56`):
+~~"Thiết kế gốc và server đều dùng header 9 byte. `liva-ui` gửi header 1 byte."~~ Đoạn code cũ chỉ ghi `msg[0] = 0x01` rồi nối thẳng PCM — không có `seq_id`, không có `payload_len`. **Hậu quả cơ học** khi server decode (`liva-native-core/src/websocket.rs:555-567` + `frame.rs:32-56`):
 
 | Byte của message cũ | Server diễn giải là | Thực chất là |
 |---|---|---|
@@ -803,7 +862,7 @@ micSeqId = (micSeqId + 1) >>> 0;
 | `[5..9]` | `payload_len` (u32 LE) | **4 byte của mẫu PCM f32 thứ hai** |
 | `[9..]` | payload | audio bị lệch 9 byte |
 
-Vì `payload_len` được đọc từ **bit pattern của một mẫu f32 audio**, giá trị nó nhận gần như luôn vượt `1 MiB` ⇒ `decode` trả `Err("Payload exceeds 1MB limit")` ⇒ `error!("Frame decode error")` + `break` (`main.rs:630-633`) ⇒ khung bị vứt, không mẫu audio nào tới VAD. Chỉ khi mẫu thứ hai đúng bằng `0.0` (im lặng tuyệt đối) thì `payload_len = 0` và server "decode thành công" một khung rỗng — vẫn không có audio.
+Vì `payload_len` được đọc từ **bit pattern của một mẫu f32 audio**, giá trị nó nhận gần như luôn vượt `1 MiB` ⇒ `decode` trả `Err("Payload exceeds 1MB limit")` ⇒ `error!("Frame decode error")` + `break` (`liva-native-core/src/websocket.rs:555-567`) ⇒ khung bị vứt, không mẫu audio nào tới VAD. Chỉ khi mẫu thứ hai đúng bằng `0.0` (im lặng tuyệt đối) thì `payload_len = 0` và server "decode thành công" một khung rỗng — vẫn không có audio.
 
 Lỗi tồn tại lâu vì nó **bị che** bởi sự thật ở §1: luồng dev chuẩn không chạy gateway 8002, nên `liva-ui` không có server để nói chuyện và lỗi không bao giờ nổi lên. Đây là lý do §11 mục 2 nhấn mạnh test bằng `OP_AUTH_HANDSHAKE` — nó là cách rẻ nhất để phát hiện lệch header trước khi mất hàng giờ nghi ngờ micro.
 
@@ -851,7 +910,10 @@ sequenceDiagram
 
 ## 11. Checklist cho người viết client
 
-1. **Chọn kênh.** Muốn voice duplex → bắt buộc chạy binary `liva-native-core` thủ công, kết nối `ws://127.0.0.1:8002/ws`. Chỉ cần lệnh điều khiển → có thể dùng stdio hoặc Tauri `invoke`.
+1. **Chọn kênh.** Voice duplex dùng `ws://127.0.0.1:8002/ws`; gateway này được
+   mở bởi cả vỏ Tauri lẫn binary standalone. Chỉ chạy **một** vỏ tại một thời
+   điểm. Lệnh điều khiển có thể dùng WebSocket, stdio (standalone) hoặc Tauri
+   `invoke` (desktop).
 2. **Khung nhị phân LUÔN 9 byte header.** Không có ngoại lệ. Test bằng cách gửi `OP_AUTH_HANDSHAKE` và chờ echo cùng `seq_id`.
 3. **Gửi trọn khung trong một WS message.** Server không nối khung dở dang qua ranh giới message.
 4. **`OP_MIC_IN`: f32 LE, 16 kHz, mono, không header sample-rate.** Chunk nên ~20-100 ms; giới hạn cứng 1 MiB payload.
@@ -881,7 +943,7 @@ sequenceDiagram
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường đầy đủ; §3.2 chỉ ghi mặc định tại đúng chỗ đọc trong `main.rs`.
 - [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — bảng model và RAM/VRAM, dùng ở §10.1 khi nói router đã đổi sang Qwen3-VL.
 - [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md) — cách chạy đúng từng profile, tức cách để gateway 8002 thực sự sống.
-- [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md) — bảng lệnh Tauri `invoke` và cấu hình cửa sổ, bổ sung cho §3.3 và §8.
+- [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) — bảng lệnh Tauri `invoke` và cấu hình cửa sổ, bổ sung cho §3.3 và §8.
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — danh sách đầy đủ lệnh mồ côi hai chiều core ↔ client, nền cho §9.
 - [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — đối chiếu tuyên bố sản phẩm, khác với đối chiếu thiết kế gốc ở §10.
 - [Thiết kế gốc: LIVA Client-Server Design](../99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.md) — văn bản thiết kế được §10 đem ra đối chiếu.
@@ -890,16 +952,18 @@ sequenceDiagram
 **Tài liệu khác dựa vào tài liệu này:**
 
 - [Đường ống thoại](03-duong-ong-thoai.md) — lấy khung nhị phân 9 byte và ý nghĩa 5 opcode để mô tả chặng vận chuyển audio.
-- [Frontend và vỏ Tauri](08-frontend-va-vo-tauri.md) — lấy tên lệnh trong bảng 44 lệnh để nói màn hình nào gọi lệnh nào.
-- [Agent, bộ nhớ và tiến hoá](05-agent-bo-nho-va-tien-hoa.md) — lấy chữ ký `handle_command` và danh sách match arm (nay **có** `mcp:list_tools`/`mcp:call_tool`, vẫn **không** có `swarm:*`) để xác định module nào còn mồ côi.
+- [Frontend runtime](../03-he-thong-con/frontend.md) — lấy catalog màn hình và transport để nói màn hình nào gọi lệnh nào.
+- [Agent và tool runtime](../03-he-thong-con/agent-tools.md) — lấy ranh giới `handle_command`, MCP direct-call guard và trạng thái swarm experimental.
 - [Tích hợp ngoài](09-tich-hop-ngoai.md) — lấy hợp đồng `telegram:send_text` và cơ chế `ipc_tx` ghi ra stdout.
-- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy sự thật "WS 8002 không xác thực" và "`llm:swap_model` không validate path" làm C1/C2.
+- [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lưu lịch sử C1/C2 và trạng thái identity/authorization hiện hành.
 - [Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — lấy §10.2 (header 1 byte của `liva-ui`) làm một hạng mục sửa.
 - [Phụ thuộc module và tra cứu](10-phu-thuoc-module-va-tra-cuu.md) — lấy vị trí `lib.rs`/`main.rs`/`webrtc/` để dựng bản đồ tra cứu.
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
 
-- `liva-native-core/src/lib.rs` — chữ ký và **bảng 44 lệnh** ở §7; thêm/xoá một match arm là phải sửa bảng. Cả `origin_allowed()` + `DEFAULT_WS_ALLOWED_ORIGINS` ở §4.1.
+- `liva-native-core/src/lib.rs` và `liva-native-core/src/commands/*` — chữ ký,
+  routing và catalog theo miền ở §7; thêm/xoá lệnh phải sửa đúng hàng miền. Cả
+  `origin_allowed()` + `DEFAULT_WS_ALLOWED_ORIGINS` ở §4.1.
 - `liva-native-core/src/main.rs` — §3 (26 bước khởi động), §4 (server WS + stdio IPC), §5.4 (xử lý `OP_MIC_IN`), §6 (hai lớp text).
 - `liva-native-core/src/webrtc/frame.rs` — §5.1, §5.2 (khung 9 byte), §5.3 (bảng opcode). Đây là phần lõi tài liệu sở hữu.
 - `liva-native-core/src/webrtc/pipeline.rs` — §5.4 (`OP_SPEAKER_OUT`, `OP_FLUSH`), §5.5 (máy trạng thái pipeline).

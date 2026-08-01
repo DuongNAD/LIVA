@@ -1,7 +1,8 @@
 ---
 title: "Nhắn tin ra ngoài — hiện trạng, việc còn lại, và các bẫy đã trả giá"
-updated: 2026-07-29
-commit: 6a49386
+updated: 2026-08-01
+commit: 3688b5f
+stale-ok: 98efc55
 status: living
 owns:
   - nhan-tin-ra-ngoai-telegram-messenger
@@ -25,8 +26,8 @@ Hình dạng của tính năng: **danh bạ → soạn bản nháp → người 
 
 | Mảnh | Trạng thái | Ghi chú |
 |---|---|---|
-| Sổ danh bạ (`contacts`, schema v5) | **[OK]** | Bỏ dấu để tra, `(lookup_key, platform)` là khoá duy nhất |
-| Hộp chờ xác nhận | **[OK]** | Dùng-một-lần, hết hạn 300 s, có trần 32 bản nháp |
+| Sổ danh bạ (`contacts`, schema v5; DB hiện ở schema v7) | **[OK]** | Bỏ dấu để tra, `(lookup_key, platform)` là khoá duy nhất |
+| Hộp chờ xác nhận | **[OK]** | SQLite mã hóa; sống qua restart; dùng-một-lần, hết hạn 300 s, trần 32 |
 | `route_intent` hiểu "nhắn cho X bảo Y" | **[OK]** | Đặt trước mọi nhánh khác trong `agent/graph.rs` |
 | Thẻ xác nhận trong widget | **[OK]** | Hiện cả tên lẫn địa chỉ đích |
 | Gửi **Messenger** | **[OK]** | Đã gửi thật 27/07/2026 lúc 01:53, người nhận trả lời |
@@ -49,25 +50,23 @@ Nhãn trợ năng do chính Messenger sinh ra ghi "Tin nhắn do **Bạn gửi**
 
 ## 2. Việc còn lại, theo thứ tự
 
-### M1. Chặn danh bạ biến mất theo thư mục chạy — **làm trước tiên**
+### M1. Chặn danh bạ biến mất theo thư mục chạy — **đã xong**
 
-Lõi giải đường dẫn DB theo thư mục làm việc, nên tồn tại song song ba database `liva_core`: `data/agents/liva_core/` (chạy từ gốc repo), `liva-desktop/src-tauri/data/agents/liva_core/` (`npm run dev`, vì cwd của `tauri dev` là `src-tauri/`), và `liva-native-core/data/agents/liva_core/`.
+`data_dir()` nay neo vào `LIVA_HOME` hoặc `%LOCALAPPDATA%\com.liva.cognitive-os`,
+không còn theo cwd; `LIVA_DB_PATH` vẫn là override cao nhất. Boot còn dò và cảnh báo
+các database rơi rớt từ layout cũ thay vì âm thầm chọn một bản.
 
-Với bộ nhớ hội thoại thì đây là phiền toái. Với **sổ danh bạ** thì là mất dữ liệu thầm lặng: thêm liên hệ, khởi động LIVA bằng cách khác, danh bạ trống — và LIVA chỉ nói "chưa có ai tên đó". Đã cắn ba lần trong một buổi.
+### M2. Bản nháp phải sống sót qua khởi động lại lõi — **đã xong 31/07/2026**
 
-Chặn tạm: luôn đặt `LIVA_DB_PATH` trỏ vào một file cố định. Sửa gốc: giải đường dẫn theo vị trí của executable thay vì cwd. `liva-desktop/src-tauri/.taurignore` đã ghi cùng nguyên nhân này ở khía cạnh vòng lặp rebuild, nhưng **không** ghi hệ quả mất dữ liệu.
-
-### M2. Bản nháp phải sống sót qua khởi động lại lõi
-
-`messaging/outbox.rs` giữ bản nháp trong một `static OnceLock<Mutex<HashMap<…>>>` — RAM của tiến trình. Lõi restart là mọi bản nháp bốc hơi, và thông điệp lỗi khi đó **nói sai lý do**: nó đổ cho "đã gửi, đã huỷ, hoặc quá hạn 300 giây" trong khi thật ra bản nháp bị restart giết.
-
-Khi chạy qua `npm run dev` (watcher bật), lõi khởi động lại mỗi 1–2 phút ⇒ gần như không bao giờ bấm kịp nút xác nhận. Đây là lý do thật khiến tính năng "không chạy" suốt một buổi, và nó bị chẩn đoán nhầm nhiều lần.
-
-Việc: lưu bản nháp xuống SQLite, đọc lại lúc khởi động, giữ nguyên ba bất biến đang được test khoá; cân nhắc nới `TTL_SECS` từ 300 lên ~900; và tách thông điệp "chết vì restart" khỏi ba lý do kia.
+Schema v6 thêm `message_outbox`; nội dung tin nằm ở `text_ciphertext` dưới khóa dữ
+liệu hiện hành. `stage/take/cancel/pending` dùng transaction `IMMEDIATE`; `seq`
+AUTOINCREMENT giữ đúng thứ tự qua restart. `take` phân loại `Expired`, `Missing`,
+`Locked` và chỉ xóa hàng sau khi giải mã được. Test disk fixture đóng pool, mở lại,
+đọc ciphertext, consume một lần và từ chối lần hai.
 
 ### M3. Tách lớp hồ sơ trang, rồi thêm Zalo Web
 
-Nút thắt vừa gỡ (xem [§3.1](#31-input-dispatchkeyevent-bị-vứt-khi-cửa-sổ-không-phải-foreground)) **không thuộc về Messenger** — nó thuộc về cách bơm phím vào trình duyệt, nên dùng lại được cho mọi trang. Phần khác nhau giữa các trang chỉ có ba thứ:
+Nút thắt vừa gỡ (xem [§3.1](#31-inputdispatchkeyevent-bị-vứt-khi-cửa-sổ-không-phải-foreground)) **không thuộc về Messenger** — nó thuộc về cách bơm phím vào trình duyệt, nên dùng lại được cho mọi trang. Phần khác nhau giữa các trang chỉ có ba thứ:
 
 1. mẫu URL hội thoại (`messenger.com/t/{handle}`),
 2. bộ chọn ô soạn,
@@ -152,8 +151,8 @@ Mẫu chung: khi một nửa đường đi hoạt động còn nửa kia im lặ
 
 | Chỗ | Hỏng thế nào | Vá bằng |
 |---|---|---|
-| `stage` — chọn bản bị đuổi khi hộp đầy | `min_by_key` trên `created_at` đuổi **bản vừa tạo** thay vì bản cũ nhất | `Draft.seq`, số thứ tự tăng đơn điệu trong tiến trình |
-| `pending` — danh sách trả cho UI và cho LLM | tie-break bằng `draft_id` — thứ **NGẪU NHIÊN**, nên "mới nhất trước" trong doc-comment là một lời hứa sai | cùng `seq`, `b.seq.cmp(&a.seq)` |
+| `stage` — chọn bản bị đuổi khi hộp đầy | `min_by_key` trên `created_at` từng đuổi **bản vừa tạo** thay vì bản cũ nhất | SQLite `seq INTEGER PRIMARY KEY AUTOINCREMENT` |
+| `pending` — danh sách trả cho UI và cho LLM | tie-break bằng `draft_id` từng làm thứ tự ngẫu nhiên | `ORDER BY created_at DESC, seq DESC` |
 
 Vế thứ hai đáng vá chứ không phải chuyện thẩm mỹ: `message:pending` trả **đúng danh sách này** làm thẻ xác nhận gửi tin, và cả module tồn tại để chặn gửi nhầm người ([§3.3](#33-vì-sao-cổng-xác-nhận-không-được-bỏ)). Một danh sách tự nhận là mới-nhất-trước mà thật ra xếp ngẫu nhiên là đúng cách để người dùng bấm xác nhận nhầm bản nháp — *"nhắn cho Hiến, và nhắn cho Nam luôn"* là đủ để dính.
 

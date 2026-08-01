@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
-updated: 2026-07-22
-commit: 5fc8e2d
+updated: 2026-07-31
+commit: 3688b5f
 status: living
 owns:
   - bang-bien-moi-truong
@@ -84,33 +84,25 @@ LIVA có **hai profile chạy**: vỏ Tauri (`liva-desktop/src-tauri/src/lib.rs`
 
 > 📌 Nguồn đầy đủ: [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md)
 
-`liva-desktop/src-tauri/src/lib.rs:355-368` dựng `AppState` với **`vad: None`, `denoiser: None`, `turn_shadow: None`, `aec: None`** (hardcode, **không đọc env**). Desktop shell cũng:
-
-- **không** khởi tạo `WakeGate` (`wake::WakeGate::from_env()` chỉ xuất hiện tại `main.rs:551`),
-- **không** chạy `start_websocket_server`,
-- **không** chạy Telegram bot,
-- **không** đọc `LIVA_TOKIO_*`.
-
-⇒ Với đường chạy chính thức (`npm run dev` → `tauri dev`), các biến `LIVA_DENOISE_*`, `LIVA_TURN_*`, `LIVA_AEC_*`, `LIVA_VAD_*`, `LIVA_WAKE_*`, `LIVA_SERVER_*`, `TELEGRAM_*` **hoàn toàn không có tác dụng**. Desktop chỉ giữ: governor priority (`lib.rs:452-455`), GPU downshift (`lib.rs:414-440`), autoload router LLM (`lib.rs:403-406`), Stronghold.
+Hai entry point hiện cùng dùng `boot::build_app_state()` và `boot::spawn_background_services()`.
+Vì vậy WebSocket, Telegram, governor, model autoload và các dịch vụ nền không còn là hai bản dựng
+trôi lệch. `LIVA_SERVER_HOST`, `LIVA_SERVER_PORT` và `LIVA_WS_AUTH_TOKEN` áp dụng cho cả standalone
+lẫn Tauri. `LIVA_TOKIO_*` vẫn chỉ cấu hình runtime do standalone tự tạo.
 
 ```mermaid
 flowchart LR
-    subgraph GW["Gateway main.rs — [MỘT PHẦN] chỉ chạy khi gọi thủ công"]
-        G1["LIVA_TOKIO_*"] --> GX["AppState đầy đủ"]
-        G2["LIVA_DENOISE/TURN/AEC/VAD_*"] --> GX
+    subgraph SHARED["boot.rs — dùng chung"]
+        G2["LIVA_DENOISE/TURN/AEC/VAD_*"] --> GX["AppState + background services"]
         G3["LIVA_WAKE_*"] --> GX
-        G4["LIVA_SERVER_HOST/PORT"] --> GX
+        G4["LIVA_SERVER_HOST/PORT + WS_AUTH_TOKEN"] --> GX
         G5["TELEGRAM_*"] --> GX
     end
-    subgraph TA["Tauri lib.rs — [OK] đường chạy chính thức npm run dev"]
-        T1["LIVA_DB_*/ENCRYPTION_KEY"] --> TX["AppState rút gọn"]
-        T2["LIVA_STT/TTS_*"] --> TX
-        T3["LIVA_LLM_N_CTX / N_GPU_LAYERS"] --> TX
-        T4["LIVA_GAME_N_GPU_LAYERS"] --> TX
-        T5["LIVA_STRONGHOLD_*"] --> TX
-        TN["vad/denoiser/turn_shadow/aec<br/>= None (hardcode)"] --> TX
+    subgraph ENTRY["Hai entry point"]
+        M["main.rs"] --> GX
+        T["Tauri lib.rs"] --> GX
     end
-    style TN fill:#faa,stroke:#900
+    L["LIVA_TOKIO_*"] --> M
+    V["Stronghold env legacy migration"] --> T
 ```
 
 ---
@@ -123,25 +115,28 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 
 | Biến | Mặc định trong code | Bắt buộc? | Đọc tại | Tác dụng |
 |---|---|---|---|---|
-| `LIVA_DB_PATH` | `data/agents/liva_core/structured_memory.sqlite` | Không | `main.rs:61`, `liva-desktop/src-tauri/src/lib.rs:268` | Đường dẫn SQLite; parent dir được `create_dir_all` |
-| `LIVA_ENCRYPTION_KEY` | `"00000000000000000000000000000000"` (32 số 0) | **Không** (dù `.env.example:8` ghi "BẮT BUỘC") | `main.rs:63`, `lib.rs:270` | Khoá AES-256-GCM cho `crypto::EncryptionEngine` |
-| `LIVA_DB_IN_MEMORY` | `false` = dùng file trên đĩa | Không | `main.rs:73`, Tauri `lib.rs:277`, qua `env_flag` (`lib.rs:78`) | Bật in-memory khi `1/true/yes/on`; tắt khi `0/false/no/off`; không set hoặc giá trị lạ → **false** (an toàn). ✅ Đã sửa 21/07: trước đây dùng `.is_ok()` nên `=false` lại bật in-memory và mất sạch dữ liệu |
+| `LIVA_DB_PATH` | `data_dir()/agents/liva_core/structured_memory.sqlite` | Không | `boot.rs#build_app_state` | Đường dẫn SQLite neo vào data root, không phụ thuộc cwd; parent dir được tạo trước khi mở |
+| `LIVA_ENCRYPTION_KEY` | khóa thiết bị DPAPI tự sinh trên Windows | Không | `lib.rs#resolve_and_rekey`, `boot.rs#build_app_state` | Nếu đặt thì dùng khóa explicit; nếu bỏ trống, sinh khóa thiết bị và hiển thị escrow một lần. Khóa 32 số `0` chỉ là legacy/test và không được chọn làm khóa live |
+| `LIVA_DB_IN_MEMORY` | `false` = dùng file trên đĩa | Không | `boot.rs#build_app_state`, qua `env_flag` | Bật khi `1/true/yes/on`; tắt khi `0/false/no/off`; không set hoặc giá trị lạ → **false** (an toàn) |
 | `LIVA_STT_MODEL_DIR` | `models/nemotron-asr` | Không | `main.rs:95`, `lib.rs:302` | Thư mục Nemotron ASR; đi qua `resolve_resource_path` |
 | `LIVA_TTS_MODEL_PATH` | `models/kokoro-v1.0.onnx` | Không | `main.rs:101`, `lib.rs:308` | Model Kokoro; nạp **lazy** (`tts/engine.rs:24-32`) — thiếu file **không** làm hỏng `TtsManager` |
-| `LIVA_TTS_VOICE_PATH` | `node_modules/kokoro-js/voices/af_heart.bin` | **Trên thực tế: có** | `main.rs:107`, `lib.rs:314` | Voice embedding f32; **đọc EAGER** (`tts/mod.rs:290`) → thiếu ⇒ `TtsManager = None` ⇒ **mất luôn Piper/VieNeu** |
+| `LIVA_TTS_VOICE_PATH` | `node_modules/kokoro-js/voices/af_heart.bin` | Không | `boot.rs#build_app_state`, `tts/mod.rs#TtsManager::from_bin` | Voice fallback Kokoro; thiếu file chỉ ghi cảnh báo và dùng vector rỗng, không làm mất Piper/VieNeu |
+| `LIVA_MEMORY_RETENTION_DAYS` | `0` = tắt | Không | `memory_retention.rs#RetentionPolicy::from_env` | Số ngày không hoạt động trước khi hội thoại local đủ điều kiện xóa; 1–36.500 bật worker, 0/vắng là không tự xóa |
+| `LIVA_MEMORY_RETENTION_INTERVAL_SECS` | `3600` | Không | `memory_retention.rs#RetentionPolicy::from_env` | Nhịp sweeper; tối thiểu 60 giây; chỉ được đọc khi retention đã bật |
+| `LIVA_MEMORY_RETENTION_BATCH_SIZE` | `10` | Không | `memory_retention.rs#RetentionPolicy::from_env` | Số hội thoại tối đa mỗi batch, bị chặn trong 1–25 |
 | `LIVA_LLM_N_CTX` | `4096` | Không | `main.rs:127`, `lib.rs:334` | context llama.cpp; parse fail → 4096 |
 | `LIVA_LLM_N_GPU_LAYERS` | **`0`** (`.env.example:37` ghi `99` — lệch) | Không | `main.rs:131`, `lib.rs:338` | `u32`; parse fail → 0. **KHÔNG dùng `-1`** |
 | `LIVA_GAME_N_GPU_LAYERS` | `0` | Không | `main.rs:271`, `lib.rs:419` | Layer GPU khi phát hiện game; task tự `return` nếu `normal==0 \|\| game==normal` |
 | `LIVA_VAULT_PATH` | `E:\Project\LIVA\teamwork_projects\obsidian_llm_wiki\vault` (**hardcode tuyệt đối**) | Không | `main.rs:166`, `lib.rs:345` | Vault Obsidian cho `NativeMcpServer` |
 
-### 2.2 Nhóm B — chỉ gateway `main.rs` (KHÔNG có trong desktop shell)
+### 2.2 Nhóm B — dịch vụ nền dùng chung; `LIVA_TOKIO_*` chỉ standalone
 
 | Biến | Mặc định trong code | Bắt buộc? | Đọc tại | Tác dụng |
 |---|---|---|---|---|
 | `LIVA_EMBEDDING_MODEL_DIR` | `models/embedding` (fallback `../`, `../../`) | Không | `llm/embedder.rs` (`resolve_model_dir`) | Thư mục chứa `model.onnx` + `tokenizer.json` của model embedding **chuyên dụng 384 chiều**. Tách khỏi model chat có chủ đích — xem mục 2.3. Thiếu model ⇒ bộ nhớ dài hạn không ghi/tìm được, phần còn lại vẫn chạy |
 | `LIVA_EMBEDDING_THREADS` | `1` | Không | `llm/embedder.rs` (`load`) | Số luồng intra-op cho ONNX session của embedder |
 | `LIVA_MAX_HISTORY_MESSAGES` | `20` | Không | `agent/state.rs:12` (`max_history_messages`), dùng ở `agent/graph.rs` (2 chỗ) và `webrtc/pipeline.rs:270` | Số tin nhắn giữ lại trong lịch sử hội thoại, **không kể** tin `system`. Chốt chặn theo SỐ TIN NHẮN để prompt không phình vượt `LIVA_LLM_N_CTX` (F1+F2). `0` hoặc parse fail → 20. Thuộc nhóm B vì `build_pipeline_graph`/`WebRTCActor` **không được dựng** trong vỏ Tauri. Guard cứng theo TOKEN thì áp dụng cho mọi đường — xem `check_prompt_fits` (`llm/engine.rs:82`), không cấu hình qua env |
-| `LIVA_WS_ALLOWED_ORIGINS` | rỗng (chỉ dùng allow-list mặc định) | Không | `main.rs:478` qua `origin_allowed` (`lib.rs`) | Origin được phép nối WebSocket, ngăn cách bằng dấu phẩy. Mặc định đã cho: `http://localhost:5173`, `http://127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`. Handshake sai origin bị trả **403** ngay ở tầng HTTP. Không có header `Origin` (client native) thì cho qua — đánh đổi có chủ ý, xem F4 |
+| `LIVA_WS_ALLOWED_ORIGINS` | rỗng (chỉ dùng allow-list mặc định) | Không | `liva-native-core/src/websocket.rs:300-465` qua `origin_allowed` (`lib.rs`) | Origin được phép nối WebSocket, ngăn cách bằng dấu phẩy. Mặc định đã cho: `http://localhost:5173`, `http://127.0.0.1:5173`, `tauri://localhost`, `https://tauri.localhost`. Handshake sai origin bị trả **403** ngay ở tầng HTTP. Không có header `Origin` (client native) thì cho qua — đánh đổi có chủ ý, xem F4 |
 | `LIVA_TOKIO_WORKER_THREADS` | `available_parallelism()`, else `4` | Không | `main.rs:31` | Số worker thread Tokio |
 | `LIVA_TOKIO_MAX_BLOCKING_THREADS` | `512` | Không | `main.rs:36` | Kích thước blocking pool |
 | `LIVA_DENOISE_ENABLED` | **BẬT**; chỉ tắt khi `0` / `false` / `off` | Không | `main.rs:182` | GTCRN denoise chạy trước VAD/STT |
@@ -149,10 +144,11 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 | `LIVA_TURN_SHADOW_ENABLED` | tắt; **chỉ `"1"`** mới bật | Không | `main.rs:214` | Smart Turn v3.2 shadow mode (chỉ log, không đổi quyết định VAD) |
 | `LIVA_TURN_MODEL_PATH` | `models/smart_turn_v3.2_cpu.onnx` (+ `../`, `../../`) | Không | `webrtc/turn_shadow.rs:44-59` | Đường dẫn model shadow |
 | `LIVA_AEC_ENABLED` | tắt; **chỉ `"1"`** | Không | `main.rs:234` | Sonora AEC3 khử tiếng TTS của chính LIVA vọng lại mic |
-| `LIVA_SERVER_PORT` | `8002` | Không | `main.rs:451` | Cổng WebSocket `/ws` |
-| `LIVA_SERVER_HOST` | `127.0.0.1` | Không | `main.rs:452` | Địa chỉ bind |
-| `TELEGRAM_BOT_TOKEN` | không set = **tắt bot** | Không | `main.rs:320`, `lib.rs:1465`, `telegram.rs:323` | Bật `TelegramBotManager` |
-| `TELEGRAM_ALLOWED_IDS` | `""` (fail-closed) | Không | `main.rs:322` | CSV whitelist ID người dùng |
+| `LIVA_SERVER_PORT` | `8002` | Không | `websocket.rs#bind_from_env` | Cổng WebSocket `/ws` |
+| `LIVA_SERVER_HOST` | `127.0.0.1` | Không | `websocket.rs#bind_from_env` | Địa chỉ bind; loopback không yêu cầu token |
+| `LIVA_WS_AUTH_TOKEN` | không set | **Bắt buộc khi host non-loopback** | `websocket.rs#bind` | Bearer token 32–4096 visible ASCII byte; thiếu/yếu làm bind fail |
+| `TELEGRAM_BOT_TOKEN` | không set = **tắt bot** | Không | `liva-native-core/src/boot.rs:407-425`, `lib.rs:1465`, `telegram.rs:323` | Bật `TelegramBotManager` |
+| `TELEGRAM_ALLOWED_IDS` | `""` (fail-closed) | Không | `liva-native-core/src/boot.rs:411-425` | CSV whitelist ID người dùng |
 
 > ⚠️ **Bẫy CSP:** `tauri.conf.json` chỉ cho `connect-src` tới `localhost:5173`, `ws://localhost:5173`, `ws://localhost:8002`, `ws://127.0.0.1:8002` — **port 8002 hardcode trong CSP**, nên đổi `LIVA_SERVER_PORT` sẽ vỡ kết nối WS từ UI (dù ở chế độ Tauri core chạy in-process, không mở WS).
 
@@ -160,7 +156,7 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 
 Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa vật lý của các ngưỡng thoại (VAD/AEC/denoise/wake/turn) — vì sao chọn con số đó, chúng tác động thế nào tới độ trễ và barge-in — được giải thích ở tài liệu đường ống thoại.
 
-> 📌 Nguồn đầy đủ: [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md)
+> 📌 Nguồn đầy đủ: [Voice SLO](../05-chat-luong/voice-slo.md)
 
 | Biến | Mặc định trong code | Bắt buộc? | Đọc tại | Tác dụng |
 |---|---|---|---|---|
@@ -188,7 +184,7 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 | `LIVA_VAD_END_FRAMES` | **`22`** (≈0,7 s; giá trị `Default` của struct là 45 ≈ 1,44 s) | Không | `webrtc/vad.rs:49` | Số frame im lặng để chốt kết thúc lượt |
 | `LIVA_VAD_MODEL_PATH` | `models/silero_vad_v6.onnx` (+ `../`, `../../`) → fallback `<stt_dir>/silero_vad.onnx` | Không | `webrtc/vad.rs:64-79` | Model VAD |
 | `LIVA_WAKE_MODE` | **`Off`** | Không | `wake.rs:58-67` | `asr_prefix\|asr\|on`; `trained_model\|trained\|model`; `hybrid\|both`; còn lại → Off |
-| `LIVA_WAKE_PHRASES` | `liva,hey liva,ê liva,này liva,liva ơi,laiva,leva,lyva,li goa` | Không | `wake.rs:72` | CSV cụm đánh thức (đã bỏ dấu + ghép chữ khi so) |
+| `LIVA_WAKE_PHRASES` | `hey liva` | Không | `wake.rs:72` | Câu gọi duy nhất được phát hành; CSV chỉ dùng để ghi đè thử nghiệm có chủ đích |
 | `LIVA_WAKE_WINDOW_SECS` | `45` | Không | `wake.rs:80` | Thời gian mở gate sau khi bắt được wake word |
 | `LIVA_WAKE_MODEL_PATHS` | rỗng | Không | `wake.rs:86` | CSV đường dẫn classifier `.onnx`; rỗng ⇒ STT-only |
 | `LIVA_WAKE_THRESHOLD` | **`0.68`** — `.env.example:97` và `models/README.md:18` ghi `0.77` | Không | `wake.rs:92-95` | Ngưỡng classifier wake |
@@ -201,8 +197,8 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 
 | Biến | Mặc định trong code | Bắt buộc? | Đọc tại | Tác dụng |
 |---|---|---|---|---|
-| `LIVA_STRONGHOLD_PASSWORD` | `"LIVA_DEFAULT_SECURE_PASSWORD"` | Không | `liva-desktop/src-tauri/src/lib.rs:124` | Mật khẩu vault Stronghold |
-| `LIVA_STRONGHOLD_SALT` | `"LIVA_STRONGHOLD_PERSISTENT_SALT_KEY"` | Không | `lib.rs:126` và **lặp lại** ở `lib.rs:384` (trong closure Argon2id của plugin) | Salt derive khoá Argon2id |
+| `LIVA_STRONGHOLD_PASSWORD` | không set | Không; **chỉ migration legacy** | `liva-desktop/src-tauri/src/lib.rs#legacy_vault_key` | Thử mở snapshot Stronghold đời cũ để re-encrypt bằng key DPAPI mới |
+| `LIVA_STRONGHOLD_SALT` | salt legacy cố định | Không; **chỉ migration legacy** | `lib.rs#legacy_vault_key` | Không tham gia write path Stronghold hiện hành |
 
 ### 2.5 Nhóm E — chỉ trong bin probe / test (**code chết ở đường chạy thật**)
 
@@ -236,12 +232,11 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 | # | Hạng mục | `.env.example` nói | Code thật | Hậu quả |
 |---|---|---|---|---|
 | 1 | `LIVA_LLM_MODEL_DIR` | `E:\AI_Models` (`.env.example:28`) | **không có reader nào ở runtime** (chỉ `router_stress.rs:68`, `integration_tests.rs:213`) | Sửa biến này **không đổi gì**; đường dẫn model thật lấy từ `data/liva-config.json` |
-| 2 | 5 biến VieNeu | **vắng hoàn toàn** | `tts/mod.rs:157`, `:163`, `:178`; `tts/vieneu/mod.rs:126`, `:211` | Người dùng không biết cách bật VieNeu-TTS |
-| 3 | `LIVA_WAKE_THRESHOLD` | `0.77` (`.env.example:97`, `models/README.md:18`) | **`0.68`** (`wake.rs:92-95`) | Không đặt env ⇒ ngưỡng thấp hơn khuyến nghị ⇒ nhiều false-positive hơn |
-| 4 | `LIVA_LLM_N_GPU_LAYERS` | `99` (`.env.example:37`) | **`0`** (`main.rs:131`) | Không có `.env` ⇒ **LLM chạy CPU thuần ngay cả trên build CUDA** |
-| 5 | `LIVA_DB_IN_MEMORY` | `false` (`.env.example:24`) | `.is_ok()` (`main.rs:70`) — **chỉ cần biến tồn tại** | Export `LIVA_DB_IN_MEMORY=false` ⇒ DB vẫn thành in-memory ⇒ **mất dữ liệu mỗi lần khởi động** |
-| 6 | `LIVA_ENCRYPTION_KEY` | "BẮT BUỘC" (`.env.example:8`) | có default 32 số `0` (`main.rs:63`) | Không đặt vẫn chạy, nhưng **khoá mã hoá là hằng số công khai** |
-| 7 | Header nguồn sự thật | "`main.rs` + `lib.rs`" (`.env.example:4-5`) | nhiều biến nằm ở `governor.rs`, `wake.rs`, `stt/mod.rs`, `tts/mod.rs`, `webrtc/*.rs`, `vision/capture.rs` | Đọc `.env.example` không đủ để biết toàn bộ bề mặt cấu hình |
+| 2 | `LIVA_WAKE_THRESHOLD` | `0.77` | default code là `0.68` | Vì không có dotenv, không export thì dùng 0,68; dòng example chỉ có tác dụng khi người vận hành export thật |
+| 3 | `LIVA_LLM_N_GPU_LAYERS` | `99` | default code là `0` | Vì không có dotenv, không export thì LLM vẫn CPU-only ngay cả trên build CUDA |
+
+Các lệch cũ về `LIVA_DB_IN_MEMORY`, khóa mặc định công khai, VieNeu vắng trong example và
+`LIVA_TTS_VOICE_PATH` làm mất toàn bộ TTS đã được sửa trong code/example; không còn là rủi ro hiện hành.
 
 ### 3.2 Biến CHẾT trong `.env.example` — không một dòng Rust nào đọc
 
@@ -323,15 +318,15 @@ flowchart TD
     C -- "Không" --> D["return None → bỏ qua nạp model<br/>(log: provider is not 'local')"]
     C -- "Có" --> E["dir = ai.localModelsDir<br/>else DEFAULT_MODELS_DIR"]
     E --> F["model = ai.routerModel<br/>else DEFAULT_ROUTER_MODEL"]
-    F --> G{"file tồn tại?"}
-    G -- "Không" --> H["tracing::error!<br/>&quot;Router model not found at ...&quot;<br/>lib.rs:174-179"]
-    G -- "Có" --> I["set_mmproj_path(configured_mmproj_path())<br/>lib.rs:184"]
-    I --> J["llm_manager.swap_model(...)<br/>lib.rs:189"]
+    F --> G["verify_model_artifact()<br/>canonical root + target"]
+    G --> H{"dest có trong manifest nhúng<br/>và SHA-256 khớp?"}
+    H -- "Không" --> I["Từ chối trước native parser"]
+    H -- "Có" --> J["llm_manager.swap_model(...)"]
     K["configured_mmproj_path()<br/>lib.rs:143"] --> L{"ai.mmprojModel rỗng?"}
     L -- "rỗng/vắng" --> M["None → tắt đường vision"]
     L -- "có" --> N["dir.join(mmproj)"]
-    N --> I
-    M --> I
+    N --> G
+    M --> J
 ```
 
 ### 4.3 Bảng khoá `liva-config.json` — có reader hay không
@@ -343,12 +338,12 @@ Giá trị cột "Giá trị hiện tại" lấy từ file thật `E:\Project\LI
 | Khoá | Giá trị hiện tại | Reader Rust | Trạng thái |
 |---|---|---|---|
 | `ai.provider` | `"local"` | `lib.rs:124`, `lib.rs:146` | **[OK]** — `!= "local"` ⇒ bỏ hẳn nạp model local |
-| `ai.localModelsDir` | `E:\AI_Models` | `lib.rs:130`, `lib.rs:155` | **[OK]** |
-| `ai.routerModel` | `Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf` | `lib.rs:134` | **[OK]** — router LLM đang chạy thật |
-| `ai.mmprojModel` | `Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf` | `lib.rs:159` (lọc `!s.is_empty()`) | **[OK]** — bật đường `vision:ask` |
+| `ai.localModelsDir` | `E:\AI_Models` | `configured_models_dir`, `artifact_trust::verify_model_artifact` | **[OK]** — root được canonicalize; config vẫn có thể đổi nên đây chưa phải operator-owned root bất biến |
+| `ai.routerModel` | `Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf` | `configured_router_model_path`, `load_configured_router_model` | **[OK]** — chỉ nạp nếu dest + SHA-256 khớp manifest nhúng |
+| `ai.mmprojModel` | `Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf` | `configured_mmproj_path`, `load_configured_router_model` | **[OK]** — dùng cùng canonical/hash gate trước đường `vision:ask` |
 | `ai.expertModel` | `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` | chỉ xuất hiện ở default `lib.rs:379`, `:444` | **[MỘT PHẦN]** — **chưa có code swap expert tự động** |
 | `ai.cloudBaseUrl` | `""` | không có reader (`lib.rs:374`, `:439` chỉ là default echo) | **[THIẾU]** |
-| `ai.cloudApiKey` | `""` | ↑ | **[THIẾU]** |
+| `ai.cloudApiKey` | **không còn hợp lệ** | `update_config` từ chối; `get_config` redact legacy | **[ĐÃ XÓA]** — secret ở Stronghold `ai/cloud_api_key` |
 | `ai.cloudModel` | `""` | ↑ | **[THIẾU]** |
 | `ai.temperature` | `0.3` | **không** — sinh văn bản lấy `payload["temperature"]` từ request (`lib.rs:764`, `:1339`, `:1402`) | **[THIẾU]** reader từ config |
 | `ai.maxTokens` | `2048` | không có reader | **[THIẾU]** |
@@ -433,7 +428,7 @@ grep `proactive|geolocation|digest` trên `liva-native-core/src` → **chỉ 2 h
 
 Ba chủ đề dưới đây liên quan trực tiếp tới việc "đặt biến xong rồi có chạy được không", nhưng bảng đầy đủ thuộc về tài liệu khác. Chỉ giữ lại phần **ảnh hưởng tới cấu hình**:
 
-- **Model:** hầu hết model trong `models/` có thật trên đĩa, **trừ `kokoro-v1.0.onnx` (KHÔNG có)** — nên default của `LIVA_TTS_MODEL_PATH` trỏ vào file không tồn tại; ngược lại `node_modules/kokoro-js/voices/af_heart.bin` (default của `LIVA_TTS_VOICE_PATH`) có thật và **đọc EAGER**, thiếu là mất toàn bộ TTS. Router LLM thật là `Qwen3-VL-2B-Instruct-Q4_K_M.gguf` ở `E:\AI_Models`, lấy từ `data/liva-config.json` chứ **không** từ env.
+- **Model:** Kokoro và voice fallback có thể thiếu mà không làm mất Piper/VieNeu; từng backend tự degrade theo model của nó. Router LLM thật lấy từ `data/liva-config.json`, không từ `LIVA_LLM_MODEL_DIR`.
 - **Feature flag:** `cuda` / `vulkan` là pass-through tới `llama-cpp-2`; `openblas = []` là **flag rỗng**. Không có `#[cfg(feature=…)]` nào trong source. Chỉ khi build `--features cuda` thì `LIVA_LLM_N_GPU_LAYERS` / `LIVA_GAME_N_GPU_LAYERS` mới có tác dụng thật; ORT (STT/VAD/TTS ONNX) cố ý chạy CPU-only.
 - **Điều kiện tiên quyết:** Rust ≥ 1.85, CMake + MSVC, LLVM + `LIBCLANG_PATH`, **mạng ở lần build đầu** (crate `ort` tải ONNX Runtime), `espeak-ng` và `ffmpeg` trên PATH. Vision **chỉ chạy ở build `--release`** — đây là ràng buộc runtime, không phải feature flag.
 
@@ -475,12 +470,12 @@ File loại trừ cho Gemini Code Assist (70 dòng) là **bản sao lỗi thời
 Trước khi báo cáo "cấu hình X đã bật", hãy xác nhận theo thứ tự:
 
 1. **Có `.env` không?** Nếu có, nó **vẫn không được nạp** — phải export biến vào shell.
-2. **Điểm vào nào đang chạy?** `tauri dev` (Tauri lib.rs) hay gateway `main.rs`? Nếu là Tauri thì mọi biến VAD/wake/denoise/AEC/server/Telegram **vô hiệu** (mục 1.2).
+2. **Điểm vào nào đang chạy?** `tauri dev` hay gateway standalone? Cả hai dùng chung `boot.rs`; chỉ các biến dựng Tokio runtime (`LIVA_TOKIO_*`) là standalone-only.
 3. **Đường dẫn model LLM** đọc từ `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel`, **không** từ `LIVA_LLM_MODEL_DIR`.
 4. **GPU:** không có `.env` ⇒ `LIVA_LLM_N_GPU_LAYERS=0` ⇒ CPU thuần dù build CUDA.
 5. **Vision:** cần build `--release` **và** `ai.mmprojModel` không rỗng.
-6. **TTS:** thiếu `node_modules/kokoro-js/voices/af_heart.bin` ⇒ `TtsManager = None` ⇒ mất **cả** Piper lẫn VieNeu, không chỉ Kokoro.
-7. **Đừng bao giờ** export `LIVA_DB_IN_MEMORY=false` — biến tồn tại là đủ để mất dữ liệu.
+6. **TTS:** thiếu voice Kokoro chỉ làm fallback đó suy giảm; kiểm riêng model của backend muốn dùng.
+7. **Retention:** mặc định tắt. Chỉ export `LIVA_MEMORY_RETENTION_DAYS` số dương sau khi đã dry-run bằng `memory:sweep_retention`.
 
 ---
 
@@ -490,7 +485,7 @@ Trước khi báo cáo "cấu hình X đã bật", hãy xác nhận theo thứ t
 
 **Tài liệu này dựa vào (nguồn sự thật ở nơi khác):**
 - [Kiến trúc tổng thể](../01-ban-ve/01-kien-truc-tong-the.md) — định nghĩa hai profile chạy (vỏ Tauri vs gateway lõi), cơ sở cho mục 1.2 "biến nào có tác dụng ở điểm vào nào".
-- [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) — ý nghĩa vật lý của các ngưỡng VAD/AEC/denoise/wake/turn mà nhóm C chỉ liệt kê giá trị mặc định.
+- [Voice SLO](../05-chat-luong/voice-slo.md) — ý nghĩa vật lý của các ngưỡng VAD/AEC/denoise/wake/turn mà nhóm C chỉ liệt kê giá trị mặc định.
 - [Mô hình AI và tài nguyên](02-mo-hinh-ai-va-tai-nguyen.md) — bảng model đầy đủ, RAM/VRAM, điều kiện tiên quyết build, phân tích ba feature flag.
 - [Triển khai và runtime](03-trien-khai-va-runtime.md) — bảng tiến trình và cách chạy đúng để biết profile nào đang sống.
 - [Kiểm thử và CI](04-kiem-thu-va-ci.md) — pre-commit hook và CI pipeline đọc `AI_*` / `SKIP_AI_HOOK`.
@@ -500,7 +495,7 @@ Trước khi báo cáo "cấu hình X đã bật", hãy xác nhận theo thứ t
 - [Mô hình AI và tài nguyên](02-mo-hinh-ai-va-tai-nguyen.md) — lấy đường dẫn model từ `LIVA_STT/TTS/LLM_*` và khối `ai` của `liva-config.json`.
 - [Triển khai và runtime](03-trien-khai-va-runtime.md) — lấy sự thật "không có dotenv" để giải thích vì sao chạy `npm run dev` là chạy bằng default hardcode.
 - [Thị giác passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md) — lấy `LIVA_GAME_MODE`, `LIVA_GAME_PRIORITY`, `LIVA_GAME_N_GPU_LAYERS`, `LIVA_VISION_REGION/CROP`.
-- [Tầng dữ liệu và bảo mật](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) — lấy `LIVA_ENCRYPTION_KEY`, `LIVA_DB_PATH`, `LIVA_DB_IN_MEMORY`, `LIVA_STRONGHOLD_*`.
+- [Persistence runtime](../03-he-thong-con/persistence.md) và [Threat model](../05-chat-luong/threat-model.md) — data root, DB overrides, encryption key và Stronghold boundary hiện hành.
 - [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — dùng bảng lệch `.env.example` vs code làm bằng chứng.
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — xếp hạng rủi ro từ các biến chết, khoá `liva-config.json` không reader, `.aiexclude` lỗi thời.
 - [Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — các mục sửa `.env.example`, bật dotenv, đồng bộ ngưỡng wake.

@@ -1,0 +1,773 @@
+{
+  "schema_version": 1,
+  "updated": "2026-07-31",
+  "canonical_document": "docs/_generated/kiem-ke-tai-lieu.md",
+  "disposition_definitions": {
+    "KEEP": "Giữ nguyên trong giai đoạn chuyển tiếp; nội dung vẫn có một vai trò rõ ràng.",
+    "SPLIT": "Tách nội dung sang một hoặc nhiều tài liệu subsystem/contract có chủ sở hữu rõ ràng.",
+    "GENERATE": "Không duy trì bảng bằng tay; sinh từ code hoặc registry.",
+    "FREEZE": "Giữ như snapshot lịch sử, không cập nhật để khớp runtime mới.",
+    "MERGE": "Nhập phần còn giá trị vào canonical owner rồi giữ redirect trong một chu kỳ release."
+  },
+  "documents": [
+    {
+      "path": "docs/README.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Mục lục chuyển tiếp và điểm vào duy nhất của bộ tài liệu."
+    },
+    {
+      "path": "docs/_generated/kiem-ke-tai-lieu.md",
+      "disposition": "GENERATE",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Báo cáo được sinh từ registry kiểm kê và link Markdown thực tế."
+    },
+    {
+      "path": "docs/_generated/ma-tran-nang-luc.md",
+      "disposition": "GENERATE",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Ma trận được sinh từ capability registry."
+    },
+    {
+      "path": "docs/_meta/ban-do-code-tai-lieu.md",
+      "disposition": "GENERATE",
+      "wave": "D",
+      "targets": [],
+      "rationale": "Bản đồ code và tài liệu phải được sinh từ frontmatter covers."
+    },
+    {
+      "path": "docs/_meta/huong-dan-bao-tri.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Runbook bảo trì metadata và kiểm tra tài liệu."
+    },
+    {
+      "path": "docs/_meta/nguon-su-that.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Registry quyền sở hữu nội dung đang được docs-check thực thi."
+    },
+    {
+      "path": "docs/00-san-pham/tam-nhin-jarvis.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Canonical owner cho tầm nhìn và nguyên tắc sản phẩm."
+    },
+    {
+      "path": "docs/01-ban-ve/00-tong-quan-he-thong.md",
+      "disposition": "MERGE",
+      "wave": "C-foundation",
+      "targets": [
+        "docs/03-he-thong-con/runtime-native.md"
+      ],
+      "rationale": "Tổng quan as-built cần nhập vào subsystem runtime, tránh cạnh tranh với product vision."
+    },
+    {
+      "path": "docs/01-ban-ve/01-kien-truc-tong-the.md",
+      "disposition": "SPLIT",
+      "wave": "C-foundation",
+      "targets": [
+        "docs/01-kien-truc/as-built.md",
+        "docs/03-he-thong-con/runtime-native.md"
+      ],
+      "rationale": "Đang trộn topology as-built, target design và runtime composition."
+    },
+    {
+      "path": "docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md",
+      "disposition": "SPLIT",
+      "wave": "C-contracts",
+      "targets": [
+        "docs/02-hop-dong/tauri-ipc.md",
+        "docs/02-hop-dong/websocket.md"
+      ],
+      "rationale": "Hai contract có vòng đời và consumer khác nhau."
+    },
+    {
+      "path": "docs/01-ban-ve/03-duong-ong-thoai.md",
+      "disposition": "FREEZE",
+      "wave": "C-voice-complete",
+      "targets": [
+        "docs/03-he-thong-con/voice.md",
+        "docs/05-chat-luong/voice-slo.md"
+      ],
+      "rationale": "Đã tách canonical voice runtime và SLO; giữ khảo sát chi tiết như snapshot lịch sử."
+    },
+    {
+      "path": "docs/01-ban-ve/04-he-llm-va-prompt.md",
+      "disposition": "SPLIT",
+      "wave": "C-agent",
+      "targets": [
+        "docs/03-he-thong-con/llm-routing.md",
+        "docs/02-hop-dong/prompt-context.md"
+      ],
+      "rationale": "Model routing và prompt contract cần chủ sở hữu độc lập."
+    },
+    {
+      "path": "docs/01-ban-ve/05-agent-bo-nho-va-tien-hoa.md",
+      "disposition": "FREEZE",
+      "wave": "C-agent-tools-complete",
+      "targets": [
+        "docs/03-he-thong-con/agent-tools.md",
+        "docs/03-he-thong-con/memory.md",
+        "docs/05-chat-luong/action-policy.md"
+      ],
+      "rationale": "Đã tách agent/tool runtime, memory và action policy; evolution còn lại là snapshot experimental."
+    },
+    {
+      "path": "docs/01-ban-ve/06-thi-giac-passive-va-governor.md",
+      "disposition": "FREEZE",
+      "wave": "C-vision-complete",
+      "targets": [
+        "docs/03-he-thong-con/vision.md",
+        "docs/03-he-thong-con/context-broker.md",
+        "docs/05-chat-luong/resource-governor.md"
+      ],
+      "rationale": "Đã tách perception đang chạy, proactive experimental và resource policy sang ba nguồn chuẩn độc lập."
+    },
+    {
+      "path": "docs/01-ban-ve/07-tang-du-lieu-va-bao-mat.md",
+      "disposition": "FREEZE",
+      "wave": "C-security-complete",
+      "targets": [
+        "docs/03-he-thong-con/persistence.md",
+        "docs/05-chat-luong/threat-model.md"
+      ],
+      "rationale": "Đã tách data contract và threat model; bản 07 giữ làm snapshot lịch sử."
+    },
+    {
+      "path": "docs/01-ban-ve/08-frontend-va-vo-tauri.md",
+      "disposition": "FREEZE",
+      "wave": "C-desktop-complete",
+      "targets": [
+        "docs/03-he-thong-con/frontend.md",
+        "docs/03-he-thong-con/desktop-tauri.md"
+      ],
+      "rationale": "Đã tách Vue rendering/transport và Tauri security boundary thành hai nguồn chuẩn."
+    },
+    {
+      "path": "docs/01-ban-ve/09-tich-hop-ngoai.md",
+      "disposition": "SPLIT",
+      "wave": "C-integrations",
+      "targets": [
+        "docs/03-he-thong-con/messaging.md",
+        "docs/03-he-thong-con/os-control.md",
+        "docs/03-he-thong-con/external-integrations.md"
+      ],
+      "rationale": "Các adapter có identity, consent và mức trưởng thành khác nhau."
+    },
+    {
+      "path": "docs/01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md",
+      "disposition": "GENERATE",
+      "wave": "D",
+      "targets": [],
+      "rationale": "Dependency/file lookup phải sinh từ GitNexus và source tree."
+    },
+    {
+      "path": "docs/01-kien-truc/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md",
+      "disposition": "KEEP",
+      "wave": "C-security-complete",
+      "targets": [],
+      "rationale": "Quyết định accepted cho mã hóa transcript/checkpoint, dense recall và key-compatible backup."
+    },
+    {
+      "path": "docs/01-kien-truc/cognitive-runtime.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Canonical owner cho kiến trúc đích Cognitive Runtime."
+    },
+    {
+      "path": "docs/01-kien-truc/inventory-he-thong.md",
+      "disposition": "KEEP",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Bản đồ capability tới module, luồng và bằng chứng as-built."
+    },
+    {
+      "path": "docs/03-he-thong-con/agent-tools.md",
+      "disposition": "KEEP",
+      "wave": "C-agent-tools-complete",
+      "targets": [],
+      "rationale": "Canonical as-built cho StateGraph, reflex lane, tool selector, MCP executor và skill runtime."
+    },
+    {
+      "path": "docs/03-he-thong-con/context-broker.md",
+      "disposition": "KEEP",
+      "wave": "C-vision-complete",
+      "targets": [],
+      "rationale": "Canonical owner cho ranh giới proactive observation, consent và cảnh báo passive keylogger."
+    },
+    {
+      "path": "docs/03-he-thong-con/desktop-tauri.md",
+      "disposition": "KEEP",
+      "wave": "C-desktop-complete",
+      "targets": [],
+      "rationale": "Canonical owner cho Tauri boot, window capability, native IPC và session boundary."
+    },
+    {
+      "path": "docs/03-he-thong-con/frontend.md",
+      "disposition": "KEEP",
+      "wave": "C-desktop-complete",
+      "targets": [],
+      "rationale": "Canonical as-built cho Vue entries, widget/dashboard và dual transport."
+    },
+    {
+      "path": "docs/03-he-thong-con/memory.md",
+      "disposition": "KEEP",
+      "wave": "C-memory-complete",
+      "targets": [],
+      "rationale": "Canonical as-built cho checkpoint, conversational RAG, facts, projection worker và kế hoạch semantic memory."
+    },
+    {
+      "path": "docs/03-he-thong-con/persistence.md",
+      "disposition": "KEEP",
+      "wave": "C-security-complete",
+      "targets": [],
+      "rationale": "Canonical as-built cho data root, SQLite schema, migration, durability và vòng đời dữ liệu."
+    },
+    {
+      "path": "docs/03-he-thong-con/voice.md",
+      "disposition": "KEEP",
+      "wave": "C-voice-complete",
+      "targets": [],
+      "rationale": "Canonical as-built cho capture, transport, STT, TTS và cancellation."
+    },
+    {
+      "path": "docs/03-he-thong-con/wake-word.md",
+      "disposition": "KEEP",
+      "wave": "C-voice-complete",
+      "targets": [],
+      "rationale": "Canonical as-built và giới hạn sản phẩm của wake word."
+    },
+    {
+      "path": "docs/03-he-thong-con/vision.md",
+      "disposition": "KEEP",
+      "wave": "C-vision-complete",
+      "targets": [],
+      "rationale": "Canonical as-built cho capture, region diff, vision ask và UI screen watch."
+    },
+    {
+      "path": "docs/05-chat-luong/action-policy.md",
+      "disposition": "KEEP",
+      "wave": "C-agent-tools-complete",
+      "targets": [],
+      "rationale": "Canonical owner cho guardrail hiện hành và acceptance contract của side effect."
+    },
+    {
+      "path": "docs/05-chat-luong/resource-governor.md",
+      "disposition": "KEEP",
+      "wave": "C-vision-complete",
+      "targets": [],
+      "rationale": "Canonical owner cho ngưỡng CPU/GPU/fullscreen và chính sách nhường tài nguyên."
+    },
+    {
+      "path": "docs/05-chat-luong/threat-model.md",
+      "disposition": "KEEP",
+      "wave": "C-security-complete",
+      "targets": [],
+      "rationale": "Canonical owner cho trust boundaries, crypto/keystore coverage và kế hoạch hardening."
+    },
+    {
+      "path": "docs/05-chat-luong/voice-slo.md",
+      "disposition": "KEEP",
+      "wave": "C-voice-complete",
+      "targets": [],
+      "rationale": "Canonical owner cho runtime thresholds, SLO và acceptance voice."
+    },
+    {
+      "path": "docs/05-chat-luong/wake-benchmark.md",
+      "disposition": "KEEP",
+      "wave": "C-voice-complete",
+      "targets": [],
+      "rationale": "Canonical owner cho corpus và acceptance benchmark wake."
+    },
+    {
+      "path": "docs/02-van-hanh/01-cau-hinh-va-bien-moi-truong.md",
+      "disposition": "KEEP",
+      "wave": "C-operations",
+      "targets": [
+        "docs/04-van-hanh/cau-hinh.md"
+      ],
+      "rationale": "Nội dung vận hành còn cần dùng; chỉ đổi vị trí sau khi sửa citation."
+    },
+    {
+      "path": "docs/02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md",
+      "disposition": "GENERATE",
+      "wave": "D",
+      "targets": [
+        "docs/04-van-hanh/mo-hinh-ai.md"
+      ],
+      "rationale": "Bảng model phải sinh từ models-manifest; phần policy tài nguyên chuyển sang runbook."
+    },
+    {
+      "path": "docs/02-van-hanh/03-trien-khai-va-runtime.md",
+      "disposition": "SPLIT",
+      "wave": "C-operations",
+      "targets": [
+        "docs/04-van-hanh/trien-khai.md",
+        "docs/04-van-hanh/preflight.md"
+      ],
+      "rationale": "Tách quy trình phát hành khỏi chẩn đoán runtime/preflight."
+    },
+    {
+      "path": "docs/02-van-hanh/04-kiem-thu-va-ci.md",
+      "disposition": "KEEP",
+      "wave": "C-quality",
+      "targets": [
+        "docs/05-chat-luong/kiem-thu-va-ci.md"
+      ],
+      "rationale": "Runbook còn dùng; di chuyển sau khi CI links được cập nhật."
+    },
+    {
+      "path": "docs/02-van-hanh/05-cai-dat-cho-nguoi-dung.md",
+      "disposition": "KEEP",
+      "wave": "C-operations",
+      "targets": [
+        "docs/04-van-hanh/cai-dat.md"
+      ],
+      "rationale": "Hướng dẫn beta cần còn truy cập được trong toàn bộ đợt di trú."
+    },
+    {
+      "path": "docs/02-van-hanh/06-backup-restore-sqlite.md",
+      "disposition": "KEEP",
+      "wave": "C-operations",
+      "targets": [],
+      "rationale": "Runbook canonical cho online backup, offline restore và rollback SQLite."
+    },
+    {
+      "path": "docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md",
+      "disposition": "FREEZE",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Snapshot khảo sát đã ghi rõ ngày và trạng thái đóng băng."
+    },
+    {
+      "path": "docs/03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md",
+      "disposition": "FREEZE",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Đối chiếu tại một thời điểm; capability registry đã thay vai trò trạng thái sống."
+    },
+    {
+      "path": "docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md",
+      "disposition": "MERGE",
+      "wave": "C-quality",
+      "targets": [
+        "docs/06-ke-hoach/roadmap.md",
+        "docs/05-chat-luong/risk-register.md"
+      ],
+      "rationale": "Việc mở nhập vào roadmap; risk bền nhập vào risk register."
+    },
+    {
+      "path": "docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md",
+      "disposition": "FREEZE",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Roadmap cũ đã bị master roadmap thay thế; giữ làm lịch sử F/P."
+    },
+    {
+      "path": "docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md",
+      "disposition": "FREEZE",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Đề xuất point-in-time, không phải kiến trúc hay roadmap hiện hành."
+    },
+    {
+      "path": "docs/03-danh-gia/05-nang-cap-toan-dien.md",
+      "disposition": "SPLIT",
+      "wave": "C-roadmap",
+      "targets": [
+        "docs/06-ke-hoach/roadmap.md",
+        "docs/99-luu-tru/bao-cao-lich-su/nang-cap-toan-dien-2026-07.md"
+      ],
+      "rationale": "Việc còn mở nhập master roadmap; bằng chứng U1–U20 đóng băng."
+    },
+    {
+      "path": "docs/03-danh-gia/06-nhan-tin-ra-ngoai.md",
+      "disposition": "SPLIT",
+      "wave": "C-integrations",
+      "targets": [
+        "docs/03-he-thong-con/messaging.md",
+        "docs/06-ke-hoach/epics/messaging-reliability.md"
+      ],
+      "rationale": "Tách as-built messaging khỏi backlog outbox/Telegram."
+    },
+    {
+      "path": "docs/03-danh-gia/07-wake-word-viec-con-lai.md",
+      "disposition": "FREEZE",
+      "wave": "C-voice-complete",
+      "targets": [
+        "docs/03-he-thong-con/wake-word.md",
+        "docs/05-chat-luong/wake-benchmark.md"
+      ],
+      "rationale": "Đã tách architecture và benchmark wake; giữ số đo 27/07/2026 như snapshot lịch sử."
+    },
+    {
+      "path": "docs/04-quy-trinh/KNOWLEDGE_BASE.md",
+      "disposition": "MERGE",
+      "wave": "C-contribution",
+      "targets": [
+        "docs/07-dong-gop/tri-thuc-va-vault.md"
+      ],
+      "rationale": "Con trỏ Vault nên nằm trong hướng dẫn đóng góp thay vì một knowledge base thứ hai."
+    },
+    {
+      "path": "docs/04-quy-trinh/NEW_feature_template.md",
+      "disposition": "KEEP",
+      "wave": "C-contribution",
+      "targets": [
+        "docs/07-dong-gop/mau-de-xuat-tinh-nang.md"
+      ],
+      "rationale": "Template còn hữu ích; đổi vị trí sau khi cập nhật link."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/_meta/optimize-architecture-review.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        ".agents/skills/dev-design/SKILL.md"
+      ],
+      "rationale": "Workflow agent phải do skill quản lý, không duy trì prompt song song."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/_meta/optimize-code-review.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        ".agents/skills/dev-review/SKILL.md"
+      ],
+      "rationale": "Workflow review đã có skill canonical."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/_meta/optimize-readme.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        "docs/07-dong-gop/quy-hoach-tai-lieu.md"
+      ],
+      "rationale": "Quy tắc cập nhật README thuộc governance docs, không cần meta prompt riêng."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/_meta/optimize-spring-cleaning.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        ".agents/skills/liva-technical-debt-triage/SKILL.md"
+      ],
+      "rationale": "Cleanup phải dùng debt triage và impact analysis hiện hành."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/architecture-review.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        ".agents/skills/dev-design/SKILL.md"
+      ],
+      "rationale": "Nội dung còn giá trị nhập vào skill review kiến trúc."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/code-review-prompt.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        ".agents/skills/dev-review/SKILL.md"
+      ],
+      "rationale": "Code review được điều phối bằng skill và GitNexus."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/openspace-g0-mcp-client-prompt.md",
+      "disposition": "FREEZE",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Prompt triển khai point-in-time cho đề xuất OpenSpace."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/readme-generation-prompt.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        "docs/07-dong-gop/quy-hoach-tai-lieu.md"
+      ],
+      "rationale": "Quy tắc README phải nằm cùng governance và source ownership."
+    },
+    {
+      "path": "docs/04-quy-trinh/prompts/spring-cleaning-prompt.md",
+      "disposition": "MERGE",
+      "wave": "C-agent-workflow",
+      "targets": [
+        ".agents/skills/liva-technical-debt-triage/SKILL.md"
+      ],
+      "rationale": "Prompt dọn dẹp cũ được thay bằng quy trình debt triage có acceptance test."
+    },
+    {
+      "path": "docs/06-ke-hoach/roadmap.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Canonical owner duy nhất cho milestone và việc còn làm."
+    },
+    {
+      "path": "docs/07-dong-gop/quy-hoach-tai-lieu.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Canonical owner cho chiến lược di trú tài liệu."
+    },
+    {
+      "path": "docs/ai/design/README.md",
+      "disposition": "MERGE",
+      "wave": "A",
+      "targets": [
+        "docs/01-kien-truc/cognitive-runtime.md"
+      ],
+      "rationale": "Pointer tương thích cho ai-devkit; nội dung thiết kế vẫn do tài liệu kiến trúc chuẩn sở hữu."
+    },
+    {
+      "path": "docs/ai/implementation/README.md",
+      "disposition": "MERGE",
+      "wave": "A",
+      "targets": [
+        "docs/_generated/ma-tran-nang-luc.md"
+      ],
+      "rationale": "Pointer tương thích, không phải tài liệu triển khai song song."
+    },
+    {
+      "path": "docs/ai/planning/README.md",
+      "disposition": "MERGE",
+      "wave": "A",
+      "targets": [
+        "docs/06-ke-hoach/roadmap.md"
+      ],
+      "rationale": "Pointer tương thích cho ai-devkit; roadmap là canonical owner."
+    },
+    {
+      "path": "docs/ai/requirements/README.md",
+      "disposition": "MERGE",
+      "wave": "A",
+      "targets": [
+        "docs/00-san-pham/tam-nhin-jarvis.md"
+      ],
+      "rationale": "Pointer tương thích cho ai-devkit; yêu cầu sản phẩm không được chép lại."
+    },
+    {
+      "path": "docs/ai/testing/README.md",
+      "disposition": "MERGE",
+      "wave": "A",
+      "targets": [
+        "docs/02-van-hanh/04-kiem-thu-va-ci.md"
+      ],
+      "rationale": "Pointer tương thích cho ai-devkit; test contract nằm ở tài liệu CI chuẩn."
+    },
+    {
+      "path": "docs/99-luu-tru/khao-sat-kiem-thu-va-ci-2026-07-22.md",
+      "disposition": "FREEZE",
+      "wave": "A",
+      "targets": [
+        "docs/02-van-hanh/04-kiem-thu-va-ci.md"
+      ],
+      "rationale": "Snapshot khảo sát cũ được tách khỏi tài liệu CI living sau khi nhiều nhận định đã được giải quyết."
+    },
+    {
+      "path": "docs/99-luu-tru/README.md",
+      "disposition": "KEEP",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Mục lục và cảnh báo cho khu vực lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_Acceptance_Report_2026.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Báo cáo acceptance lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_Architecture_Audit_2026.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Audit kiến trúc lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Nghiên cứu OSS point-in-time."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/architecture-review/architecture-review-report-2026-05-31-20-12.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Báo cáo review lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/architecture-review/architecture-review-report-2026-05-31.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Báo cáo review lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/liva_test_report.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Kết quả test point-in-time."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/spring-cleaning/spring-cleaning-report-2026-05-31.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Báo cáo cleanup lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/LIVA_NATIVE_MIGRATION_PLAN.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Kế hoạch migration Rust đã hoàn thành."
+    },
+    {
+      "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/parakeet_vi_integration_plan.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Kế hoạch tích hợp model đã hoàn thành hoặc bị thay thế."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/01_System_Overview.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Kiến trúc Node.js đã nghỉ hưu."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/02_Memory_Subsystem.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Thiết kế memory Node.js lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/03_Agent_Control_Flow.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Agent control flow Node.js lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/04_Evolution_Singularity.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Thiết kế evolution Node.js lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/05_Security_Guardrails.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Guardrail thuộc kiến trúc đã nghỉ hưu; chỉ dùng làm tham khảo lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/06_Hardware_UX_Optimization.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Tối ưu phần cứng/UX của stack cũ."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/07_Hybrid_Cloud_Architecture.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Kiến trúc hybrid cloud của stack cũ."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/AI_CONTEXT.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Agent context cũ đã được AGENTS.md thay thế."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/Architectural_Teardown_Proposal.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Đề xuất teardown point-in-time."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/PROJECT.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Mô tả dự án thuộc stack Node.js đã nghỉ hưu."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/STARTUP_GUIDE.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Hướng dẫn khởi động stack cũ, không được dùng vận hành."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/TEST_READY.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Checklist test của stack cũ."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/codebase_architecture.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Codebase architecture Node.js lịch sử."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/personality_architecture_report.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Báo cáo personality point-in-time."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/skills_development_guide.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Skill guide cũ đã được skill governance hiện hành thay thế."
+    },
+    {
+      "path": "docs/99-luu-tru/kien-truc-nodejs-v29/streaming_optimization.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Tối ưu streaming của stack cũ."
+    },
+    {
+      "path": "docs/99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Thiết kế client/server gốc."
+    },
+    {
+      "path": "docs/99-luu-tru/thiet-ke-goc/ORIGINAL_REQUEST.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Yêu cầu gốc được bảo toàn nguyên trạng."
+    }
+  ]
+}

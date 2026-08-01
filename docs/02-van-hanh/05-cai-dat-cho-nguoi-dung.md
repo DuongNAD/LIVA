@@ -1,7 +1,7 @@
 ---
 title: "Cài đặt và sử dụng LIVA (cho người dùng)"
-updated: 2026-07-28
-commit: 2b12125
+updated: 2026-07-31
+commit: 3688b5f
 status: living
 owns:
   - cai-dat-windows
@@ -9,7 +9,9 @@ owns:
   - khac-phuc-su-co-nguoi-dung
 covers:
   - liva-desktop/src-tauri/tauri.conf.json
-  - liva-desktop/src-tauri/capabilities/default.json
+  - liva-desktop/src-tauri/capabilities/widget.json
+  - liva-desktop/src-tauri/capabilities/dashboard.json
+  - liva-desktop/src-tauri/capabilities/setup.json
   - liva-native-core/src/setup/mod.rs
   - liva-native-core/src/commands/setup.rs
   - liva-native-core/src/setup_cli.rs
@@ -32,7 +34,7 @@ cần cài Node, Python, Rust hay Git. Nếu bạn muốn build LIVA từ mã ng
 | Yêu cầu | Mức | Ghi chú |
 |---|---|---|
 | Windows | 10 hoặc 11, 64-bit | Chưa có bản macOS/Linux |
-| Ổ trống | **~4 GB** | Ứng dụng ~250 MB; phần còn lại là model AI (2,28 GB bộ tối thiểu) |
+| Ổ trống | **~4 GB tối thiểu; ~7 GB nếu tải full** | Ứng dụng ~250 MB; model minimal 2,28 GiB, full 5,95 GiB |
 | RAM | 8 GB tối thiểu, 16 GB thì dễ thở | Model chạy trên RAM, không phải trên mây |
 | Mạng | Chỉ cần **lúc tải model lần đầu** | Sau đó rút mạng LIVA vẫn chạy |
 | Card đồ hoạ | Không bắt buộc | Xem mục 6 về tính năng nhìn màn hình |
@@ -78,8 +80,8 @@ Cửa sổ này liệt kê từng khả năng và tình trạng của nó:
 | Cắt lượt nói (VAD) | Không biết bạn nói xong lúc nào |
 
 Bấm **Tải model**. Bộ tối thiểu là **13 file, 2,28 GB** — với đường truyền
-20 Mbps thì chừng 15–20 phút. Bộ đầy đủ (thêm giọng tiếng Anh, giọng VieNeu,
-wake-word, mô hình nhìn ảnh) là 26 file, 3,65 GB.
+20 Mbps thì chừng 15–20 phút. Bộ đầy đủ là **29 file, 5,95 GiB**; 26 file có
+nguồn tự tải và 3 file tuỳ chọn cần chuẩn bị thủ công.
 
 Bốn điều nên biết:
 
@@ -183,7 +185,10 @@ trình gỡ dọn).
 | Cửa sổ trắng trơn | WebView2 hỏng | Cài lại [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
 | Tải model hỏng giữa chừng | Mạng đứt | Bấm Tải lại — phần đã tải được giữ |
 | Nhìn màn hình rất chậm (~80 giây) | Đang chạy trên CPU | Cần bản dựng có CUDA + card NVIDIA; xem mục 8 |
-| Báo "không mở được cơ sở dữ liệu" | Bản cài hỏng | Cài lại; dữ liệu ở `data\` không bị ảnh hưởng |
+| Hộp thoại “LIVA không thể khởi động” | Lỗi DB, quyền thư mục dữ liệu hoặc khoá mã hoá | Làm đúng hướng dẫn trong hộp thoại; **không xoá** DB/vault |
+| Báo database `malformed` | File SQLite hỏng | Đóng LIVA, sao lưu toàn bộ `%LOCALAPPDATA%\com.liva.cognitive-os`, rồi phục hồi từ backup; cài lại app không sửa được dữ liệu hỏng |
+| Báo `readonly` / `permission denied` | Thư mục dữ liệu không ghi được | Cấp quyền ghi cho thư mục dữ liệu hoặc sửa `LIVA_HOME`; không chuyển DB vào `Program Files` |
+| Báo ổ đĩa đầy | Không còn chỗ cho DB/WAL/model | Giải phóng dung lượng; **không xoá** file `-wal`/`-shm` khi LIVA đang chạy |
 
 `espeak-ng` **không** đi kèm bộ cài. Nó là phần mềm ngoài với giấy phép riêng
 và LIVA vẫn nói được tiếng Việt không cần nó trong phần lớn trường hợp — chỉ

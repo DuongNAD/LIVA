@@ -3,10 +3,10 @@ title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-07-29
 commit: 272d791
 stale-ok: 0fd816c
-status: living
-owns:
-  - lo-trinh-5-giai-doan
-  - huong-dan-sua-F1-F5
+status: frozen
+owns: []
+superseded_by:
+  - docs/06-ke-hoach/roadmap.md
 covers:
   - .github/workflows/test.yml
   - liva-desktop/src-tauri/src/lib.rs

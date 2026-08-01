@@ -192,6 +192,14 @@ LIVA's agent runtime transforms a standard chatbot into an **Agentic AI** capabl
 
 **Start here: [`docs/README.md`](docs/README.md)** — the navigation index for the whole documentation set.
 
+The documentation is migrating to a single-source structure. The canonical product
+and planning entry points are:
+
+- [`docs/00-san-pham/tam-nhin-jarvis.md`](docs/00-san-pham/tam-nhin-jarvis.md) — product vision and safety principles;
+- [`docs/_generated/ma-tran-nang-luc.md`](docs/_generated/ma-tran-nang-luc.md) — generated capability status;
+- [`docs/01-kien-truc/cognitive-runtime.md`](docs/01-kien-truc/cognitive-runtime.md) — target cognitive architecture;
+- [`docs/06-ke-hoach/roadmap.md`](docs/06-ke-hoach/roadmap.md) — the one active master roadmap.
+
 The docs were re-planned on 2026-07-21 against a full code survey, and are organised in four tiers:
 
 | Folder | What's in it |
@@ -377,13 +385,16 @@ cd liva-native-core; cargo build; cd ..
 ```
 
 ### Step 5: How to Use
-- **Basic Interaction:** Click the chat bar to type commands or use the Microphone to talk. With `LIVA_WAKE_MODE=asr_prefix`, just say "LIVA, ..." — always-on listening only forwards sentences that start with the wake word.
+- **Basic Interaction:** Click the chat bar to type commands or use the Microphone to talk. With `LIVA_WAKE_MODE=asr_prefix`, start a complete sentence with “Hey Liva”. For example: “Hey Liva, play some music for me”. Bare “Hey Liva” is not reliable with the current model, so the beta UX does not present it as a standalone command.
 - **Memory Dashboard:** Open the Dashboard on the UI to observe data flowing between L1 and L2. You can see what the AI is thinking and which Tools it's using in the background.
 - **Ghost Mode:** The interface is transparent. You can interact with other applications underneath LIVA without interruption.
 
 ---
 
 ## 🔮 Future Roadmap
+
+> This section is a concise public summary. The canonical milestones, dependencies
+> and acceptance gates live in [`docs/06-ke-hoach/roadmap.md`](docs/06-ke-hoach/roadmap.md).
 
 ### Near-term — closing the gap between design and behaviour
 

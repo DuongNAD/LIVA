@@ -2,9 +2,11 @@
 title: "Wake word — việc còn lại sau bản vá 27/07/2026"
 updated: 2026-07-29
 commit: 0fd816c
-status: living
-owns:
-  - wake-word-viec-con-lai
+status: frozen
+owns: []
+superseded_by:
+  - docs/03-he-thong-con/wake-word.md
+  - docs/05-chat-luong/wake-benchmark.md
 covers:
   - liva-native-core/src/wake.rs
   - liva-native-core/src/wake_model.rs
@@ -17,6 +19,11 @@ covers:
   - scripts/e2e-wake-probe.mjs
 ---
 # Wake word — việc còn lại sau bản vá 27/07/2026
+
+> **ĐÓNG BĂNG 30/07/2026.** Số đo và bối cảnh dưới đây được giữ nguyên như bằng chứng lịch sử.
+> Canonical hiện hành:
+> [Wake architecture](../03-he-thong-con/wake-word.md) và
+> [Wake benchmark](../05-chat-luong/wake-benchmark.md).
 
 [⬆ Mục lục](../README.md) · [◀ Nhắn tin ra ngoài](06-nhan-tin-ra-ngoai.md)
 

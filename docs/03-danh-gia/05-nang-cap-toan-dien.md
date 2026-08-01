@@ -429,6 +429,50 @@ Nó **chạy và trả lời đúng** với kernel sm_120. Nhưng đắt hơn v�
 
 ---
 
+#### ◐ Việc 1 ĐÃ XONG TỪ 31/07 nhưng KHÔNG AI GHI SỐ — đo lại 02/08/2026
+
+`tauri build` đã chạy ngày 31/07/2026. Installer tồn tại, chưa từng được ghi vào đây:
+
+| | |
+|---|---|
+| `target/release/bundle/nsis/LIVA_25.0.0_x64-setup.exe` | **224,4 MB** |
+| `target/release/liva-desktop.exe` | 68,6 MB |
+| `target/release/liva-native-core.exe` | 45,5 MB |
+| Thời gian build | **không ai ghi lại** — không truy ngược được |
+| DLL NVIDIA trong bundle | **không có cái nào** |
+
+**🔴 Và đây là bản CPU, tức installer hiện có KHÔNG có vision dùng được.** Đối chiếu [U1a](#u1a--vision-trên-cuda-đo-xong): CPU cho `vision:ask` **~80 s/lượt**, CUDA cho **1,2–1,4 s**. Một trong ba trụ cột được quảng bá sẽ không dùng được trên bản mà beta tester nhận.
+
+**Cách xác định, kèm chứng dương tính — đừng tin một kết quả âm tính chưa được kiểm chứng.** Bộ dò chuỗi trong binary chỉ có nghĩa nếu nó chứng minh được là *chạy được*, nên phải dò cả những chuỗi **bắt buộc phải có**:
+
+| Chuỗi | Kết quả | Vai trò |
+|---|---|---|
+| `ggml`, `llama_`, `liva`, `LIVA_LLM_N_GPU_LAYERS`, `ggml_backend` | **5/5 THẤY** | chứng dương tính — bộ dò hoạt động |
+| `cudart` | không | phụ thuộc bắt buộc nếu link CUDA |
+| `ggml_cuda`, `CUDA0`, `no CUDA-capable` | không | dấu vết runtime CUDA |
+| `cublas` | *thấy* | **bất thường đã ghi nhận** — nhiều khả năng là tên backend trong bảng đăng ký của ggml, vì `cudart` mới là thứ không thể thiếu khi link thật |
+
+Kích thước củng cố kết luận: 45,5 MB nằm ở dải CPU mà [U1b](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) đo (**43,4 MB**), cách xa CUDA ghim `sm_120` (**74,5 MB**).
+
+⇒ **Quyết định phát hành ở U1b vẫn chưa được thi hành.** U1b chốt "MỘT bản CUDA phục vụ được mọi máy — có GPU thì 1,4 s, không có thì rơi về CPU", giá là ~830 MB. Bản đang có đi ngược lại: nhẹ hơn nhiều nhưng **không có vision**. Phải chọn có ý thức trước khi giao cho ai.
+
+#### ◐ Việc 4: hai artifact di sản ĐÃ XÁC NHẬN, nhưng **đừng xoá vội**
+
+| File | Ngày | Dấu vết |
+|---|---|---|
+| `release/desktop-client.exe` (11,2 MB) | 25/06 | chứa **Electron + Node**, **không** có `liva-native-core` ⇒ đúng là bản thời Node.js |
+| `release/desktop-client-setup.exe` (2,5 MB) | 25/06 | không dấu vết nào (stub NSIS), cùng ngày ⇒ di sản theo liên đới |
+
+⚠️ **Cả hai đều `gitignore`.** Xoá là **mất vĩnh viễn** — git không khôi phục được. U2 viết "xoá hoặc chuyển vào lưu trữ"; với file gitignored thì **chuyển** là lựa chọn duy nhất an toàn. Cần người quyết, không tự làm.
+
+`release/liva-mobile.apk` (27/06) là thứ khác, **không** thuộc phạm vi U2.
+
+#### Còn lại của U2 — chỉ người dùng làm được
+
+Việc 2 và 3 (cài trên máy/VM chưa từng có LIVA, ghi lại chính xác thông điệp ở từng bước) **không thể suy luận từ code**, và nghiệm thu nói thẳng điều đó. Đây là phần chặn beta còn lại.
+
+---
+
 ### U3 — Lệnh `preflight` báo trạng thái tài nguyên — **[MỘT PHẦN]** CLI xong 26/07/2026, UI còn nợ
 
 **Vì sao.** Khi khởi động lõi ngày 26/07/2026, thiếu voice embedding Kokoro chỉ tạo ra **một dòng WARN** lẫn giữa hàng trăm dòng log ONNX. Người dùng thật sẽ không thấy. Đã biết ít nhất ba thứ **suy giảm im lặng**: model embedding thiếu → RAG thành no-op; voice Kokoro thiếu → mất một backend TTS; model LLM sai đường dẫn → không có não.

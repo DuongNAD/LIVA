@@ -152,6 +152,18 @@ impl NativeMcpServer {
                         .to_string(),
                     input_schema: schema_for!(crate::integrations::os_control::MediaArgs),
                 },
+                // Tool DUY NHẤT đi ra Internet. Mô tả nói thẳng "hiện tại,
+                // ngoài trời" để tách khỏi `control_smarthome` — câu "bật điều
+                // hoà cho mát" nói về thiết bị trong nhà, không phải thời tiết,
+                // và hai thứ đó dùng chung rất nhiều từ (nóng, lạnh, mát).
+                Tool {
+                    name: "get_weather".to_string(),
+                    description: "Thời tiết HIỆN TẠI ngoài trời ở một địa điểm — nhiệt độ, \
+                         mưa nắng, độ ẩm. KHÔNG điều khiển thiết bị nào. \
+                         Current outdoor weather at a location. Needs Internet."
+                        .to_string(),
+                    input_schema: schema_for!(crate::integrations::weather::WeatherArgs),
+                },
             ],
         }
     }
@@ -199,6 +211,16 @@ impl NativeMcpServer {
                 "tạm dừng · dừng nhạc lại · phát tiếp đi · bật nhạc lên · bài kế tiếp · \
                  chuyển bài · qua bài khác · quay lại bài trước · pause the music · \
                  next song · resume playback",
+            ),
+            (
+                "get_weather",
+                // "hôm nay thế nào" và "có nên mang ô không" là hai cách hỏi
+                // KHÔNG chứa chữ "thời tiết" — mà đó lại là cách người ta hỏi
+                // thật. Thiếu chúng thì truy hồi trượt đúng ca phổ biến nhất.
+                "thời tiết hôm nay thế nào · hà nội hôm nay nóng không · ngoài trời \
+                 mưa không · có nên mang ô không · nhiệt độ bây giờ bao nhiêu · \
+                 trời hôm nay ra sao · mai có mưa không · what's the weather · \
+                 is it raining outside · how hot is it today",
             ),
         ]
     }
@@ -414,6 +436,22 @@ impl NativeMcpServer {
                         content: vec![ToolContent::Text { text }],
                         is_error: false,
                     },
+                    Err(e) => CallToolResult {
+                        content: vec![ToolContent::Text { text: e }],
+                        is_error: true,
+                    },
+                },
+            ),
+            "get_weather" => Ok(
+                match crate::integrations::weather::get_weather(req.arguments).await {
+                    Ok(text) => CallToolResult {
+                        content: vec![ToolContent::Text { text }],
+                        is_error: false,
+                    },
+                    // `is_error: true` chứ không phải trả chuỗi rỗng: mất mạng
+                    // phải đọc được thành "không lấy được vì cần Internet",
+                    // không được biến thành một câu trả lời trống trông như
+                    // LIVA không hiểu câu hỏi.
                     Err(e) => CallToolResult {
                         content: vec![ToolContent::Text { text: e }],
                         is_error: true,

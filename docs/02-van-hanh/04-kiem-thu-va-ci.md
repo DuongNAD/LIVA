@@ -1,7 +1,7 @@
 ---
 title: "Kiểm thử và CI"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-01
+commit: e6391eb
 status: living
 owns:
   - bang-test
@@ -60,7 +60,9 @@ không phải một API; bằng chứng hợp lệ là output mới của chính
 Trình tự gate hiện hành:
 
 1. checkout full history để stale-doc checker đối chiếu được commit;
-2. docs structure/citations;
+2. docs structure/citations — `docs-check.mjs` kiểm front-matter, `covers` có thật,
+   lỗi thời (LỖI ở `docs/03-danh-gia`), `owns` duy nhất, **và từ `98efc55` cả liên kết
+   `#anchor` nội bộ**; `docs-citations.mjs` kiểm trích dẫn mã nguồn;
 3. `npm ci`;
 4. AI DevKit lint bản ghim `0.47.0`;
 5. `npm audit --audit-level=high`;
@@ -79,6 +81,16 @@ Trình tự gate hiện hành:
 Các gate supply-chain chạy trên **toàn workspace**, gồm cả dev tooling vì chính
 tooling xử lý file/diff không tin cậy trong CI. Không dùng `npm audit
 --omit=dev` để che advisory.
+
+**Lần chạy đầy đủ đầu tiên có toàn bộ gate mới: `e6391eb` (01/08/2026) — 25 bước,
+kết luận `success`.** Hai điều rút ra khi đọc kết quả:
+
+- **`cargo audit` chỉ đỏ vì *vulnerability*.** Ở lần chạy đó nó exit 0 kèm **22
+  warning** `unmaintained`/`unsound` từ cây Tauri/GTK. Con số này trôi theo RustSec
+  chứ không theo mã LIVA, nên nó đổi **không** tự động là hồi quy — phải xem mục mới
+  có với tới mã của dự án không đã. Đừng biến nó thành hạn ngạch.
+- **`cargo fmt --all -- --check` là gate cứng từ `98efc55`.** Trước đó không có, và
+  `CLAUDE.md` từng ghi "No fmt gate" — câu đó đúng cho tới commit ấy.
 
 ## 3. Coverage UI
 

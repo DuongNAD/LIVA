@@ -123,7 +123,7 @@ Router đổi từ **Qwen3-VL-2B** sang **gemma-4-E4B-it-qat-UD-Q4_K_XL** (`6723
 | Dòng | Còn dùng được? |
 |---|---|
 | Test Rust · Clippy · Format · Typecheck · ESLint · Coverage · npm/cargo audit · docs | ✅ không phụ thuộc model |
-| **TTFT** | ❌ **đo trên Qwen** — gemma chậm hơn ~2,2× mỗi token, con số 667 ms/18 ms **chắc chắn đã lệch**. Chưa đo lại |
+| **TTFT** | ✅ **đã đo lại trên gemma 02/08**: p50 **30 ms** · p95 32 ms · min 29 · max 33 (CUDA, 20 lượt). Qwen 29/07 là 18 ms ⇒ chậm hơn **12 ms**, cả hai đều dưới ngưỡng cảm nhận |
 | **E2E WebSocket** | ✅ vẫn 8/8 — bộ này chỉ kiểm giao thức và phân quyền, không chạm model |
 
 **Số mới đo được ở lần đổi này** (`e2e-vision-ipc.mjs --release`, CUDA, 3 lượt):
@@ -136,6 +136,8 @@ Router đổi từ **Qwen3-VL-2B** sang **gemma-4-E4B-it-qat-UD-Q4_K_XL** (`6723
 | Thông lượng text | 167,8 tok/s | 75,6 tok/s |
 
 ⚠️ **Đừng đọc "gemma chậm hơn 2,2× mỗi token" thành "gemma chậm hơn".** Ở vision nó **nhanh hơn 1,75×** vì cần ít hơn 4,4× token ảnh; ở câu suy luận nó xong nhanh hơn theo đồng hồ dù tok/s thấp hơn. **tok/s không phải độ trễ** — đây là chỗ dễ kết luận ngược nhất trong cả bảng.
+
+⚠️ **Hai con số thông lượng trong tài liệu này KHÁC NHAU và cả hai đều đúng:** `model_compare` cho **75,6 tok/s**, `ttft_bench` cho **92,9 tok/s**. Chúng đo hai thứ khác nhau — độ dài prompt, trần token mỗi lượt và nội dung câu hỏi đều khác. Đừng ghép chúng thành một con số "thông lượng của gemma"; luôn dẫn kèm tên công cụ đã đo.
 
 📌 Lý do đổi và bảng so chất lượng 5 mục: `bin/model_compare.rs` (`b9fd7a5`).
 

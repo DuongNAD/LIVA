@@ -1,8 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-02
-commit: 32fd1f5
-stale-ok: e69f47d
+commit: 6723114
 status: living
 owns:
   - duong-co-so-do-luong
@@ -116,6 +115,29 @@ Bảng này đo sau khi hạ **253 file** đang treo trong cây làm việc thà
 | E2E WebSocket | `node scripts/e2e-gateway-ci.mjs` (tự dựng + tự chạy binary debug) | **8/8 đạt** | = |
 | E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | *chưa đo lại* — số gần nhất **6/6** (26/07) | không đo |
 | **TTFT** ([U9](#u9--một-con-số-ttft-đo-được)) | `.\target\release\ttft_bench.exe 20` | *chưa đo lại* — số gần nhất **p50 667 ms CPU · 18 ms CUDA** (29/07) | không đo |
+
+### 🔄 ĐỔI ROUTER 02/08/2026 — một phần bảng trên đã hết hiệu lực
+
+Router đổi từ **Qwen3-VL-2B** sang **gemma-4-E4B-it-qat-UD-Q4_K_XL** (`6723114`). Mọi con số phụ thuộc model trong bảng trên **đo trên Qwen**, nên phải đọc kèm mốc này:
+
+| Dòng | Còn dùng được? |
+|---|---|
+| Test Rust · Clippy · Format · Typecheck · ESLint · Coverage · npm/cargo audit · docs | ✅ không phụ thuộc model |
+| **TTFT** | ❌ **đo trên Qwen** — gemma chậm hơn ~2,2× mỗi token, con số 667 ms/18 ms **chắc chắn đã lệch**. Chưa đo lại |
+| **E2E WebSocket** | ✅ vẫn 8/8 — bộ này chỉ kiểm giao thức và phân quyền, không chạm model |
+
+**Số mới đo được ở lần đổi này** (`e2e-vision-ipc.mjs --release`, CUDA, 3 lượt):
+
+| | Qwen3-VL-2B | gemma-4-E4B |
+|---|---|---|
+| `vision:ask` p50 | 1 539 ms | **877 ms** |
+| Token ảnh mỗi màn hình | 2 279 | **513** |
+| Lớp trên CUDA0 | 29 | 43 |
+| Thông lượng text | 167,8 tok/s | 75,6 tok/s |
+
+⚠️ **Đừng đọc "gemma chậm hơn 2,2× mỗi token" thành "gemma chậm hơn".** Ở vision nó **nhanh hơn 1,75×** vì cần ít hơn 4,4× token ảnh; ở câu suy luận nó xong nhanh hơn theo đồng hồ dù tok/s thấp hơn. **tok/s không phải độ trễ** — đây là chỗ dễ kết luận ngược nhất trong cả bảng.
+
+📌 Lý do đổi và bảng so chất lượng 5 mục: `bin/model_compare.rs` (`b9fd7a5`).
 
 **Ba dòng KHÔNG đo lại phiên này, nói rõ thay vì bỏ lửng:** E2E bộ nhớ (cần model embedding + DB trên đĩa), TTFT (cần build release + CUDA), và **mật độ `.unwrap()`** — dòng này bị bỏ có chủ đích, xem ghi chú dưới bảng quy mô.
 

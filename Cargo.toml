@@ -25,10 +25,23 @@ opt-level = 3
 [profile.dev.package.blake2b_simd]
 opt-level = 3
 
+# `artifact_trust` băm SHA-256 TOÀN BỘ file model trước khi cho nạp. Với router
+# 4,2 GB (gemma-4-E4B từ 02/08/2026) `sha2` không tối ưu chậm tới mức lõi debug
+# KHÔNG nạp xong model trong 400 giây — mọi câu chat trong cửa sổ đó trả về
+# "No model loaded", và UI hiện "đã xảy ra lỗi" nên trông y như hỏng thật.
+# Đối chiếu: `sha256sum` (C, tối ưu) băm đúng file đó hết 10 giây.
+# Cùng lớp vấn đề với `rust-argon2`/`blake2b_simd` ngay trên, chỉ khác là nó
+# không lộ ra cho tới khi model đủ to.
+[profile.dev.package.sha2]
+opt-level = 3
+
 [profile.test.package.rust-argon2]
 opt-level = 3
 
 [profile.test.package.blake2b_simd]
+opt-level = 3
+
+[profile.test.package.sha2]
 opt-level = 3
 
 [patch.crates-io]

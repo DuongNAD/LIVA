@@ -201,8 +201,32 @@ Write-Host "[2/2] Dang kich hoat LIVA Desktop Shell..." -ForegroundColor Green
 $TauriPath = Join-Path $ProjectRoot "liva-desktop"
 Push-Location -Path $TauriPath
 
+# Bat CUDA cho ban dev khi may CO toolkit.
+#
+# Vi sao truoc day khong co: `tauri dev` khong truyen `--features cuda`, nen ban
+# debug KHONG co backend GPU nao duoc bien dich vao. Hau qua do ngay 02/08/2026:
+# `n_gpu_layers` du duoc dat 99 thi 43/43 lop van chay tren CPU, va `vision:ask`
+# mat 64 giay thay vi 877 ms. Nguoi dung khong co cach nao biet, vi log chi noi
+# "assigned to device CPU" giua hang tram dong llama.cpp.
+#
+# TU DO nvcc thay vi ghim cung: may KHONG co CUDA toolkit ma them `--features
+# cuda` thi build GAY HAN, tuc lam hong dev cho moi nguoi khong co card NVIDIA.
+# Do la ly do khong dat mac dinh cung.
+#
+# Ep tay: LIVA_DEV_CUDA=0 de tat, =1 de bat du khong tim thay nvcc.
+$CudaArgs = @()
+$WantCuda = $env:LIVA_DEV_CUDA
+if ($WantCuda -eq '0') {
+    Write-Host "      CUDA: TAT theo LIVA_DEV_CUDA=0. LLM se chay tren CPU." -ForegroundColor DarkGray
+} elseif ($WantCuda -eq '1' -or (Get-Command nvcc -ErrorAction SilentlyContinue)) {
+    $CudaArgs = @('--features', 'cuda')
+    Write-Host "      CUDA: BAT. Lan build dau lau khoang 6 phut." -ForegroundColor Green
+} else {
+    Write-Host "      CUDA: khong thay nvcc. LLM chay tren CPU; dat LIVA_DEV_CUDA=1 de ep bat." -ForegroundColor DarkGray
+}
+
 try {
-    & npx.cmd tauri dev --no-dev-server
+    & npx.cmd tauri dev --no-dev-server @CudaArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Tauri dev exited with code $LASTEXITCODE."
     }

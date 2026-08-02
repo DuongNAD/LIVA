@@ -98,6 +98,85 @@ pub struct Boot {
 ///
 /// Chặn luồng (mở DB, nạp model ONNX/GGUF). Cả hai vỏ đều gọi nó ở giai đoạn
 /// khởi động tuần tự, đúng như mã cũ, nên không đổi hành vi.
+/// Bao nhiêu lớp LLM đẩy lên GPU khi người dùng KHÔNG đặt
+/// `LIVA_LLM_N_GPU_LAYERS`.
+///
+/// # Vì sao không ghim cứng, cả 0 lẫn 99
+///
+/// Mặc định cũ là **0** — di sản từ thời build chỉ có CPU, không có dòng nào
+/// biện minh. Hậu quả đo được ngày 02/08/2026: bản dựng CÓ CUDA vẫn để toàn bộ
+/// 4 GB trọng số nằm ở RAM, `vision:ask` mất **64 s** thay vì **877 ms** — người
+/// dùng phải tự biết mà đặt một biến môi trường không ai nói cho họ.
+///
+/// Nhưng ghim **99** cũng sai, và sai theo kiểu tệ hơn. [U1b] đã đo ca "build
+/// CUDA, máy KHÔNG có GPU" → rơi về CPU sạch. Ca **chưa ai đo** là "có GPU
+/// nhưng quá nhỏ": ở đó llama.cpp nhiều khả năng **CUDA OOM cứng** chứ không
+/// rơi về CPU — và đó đúng là cấu hình của beta tester chạy laptop.
+///
+/// Nên quyết định bằng **số đo**: hỏi VRAM trống qua NVML (đã có sẵn cho ô VRAM
+/// Guard trên Dashboard), so với kích thước thật của model + projector. Không
+/// đọc được VRAM ⇒ **0**, vì không biết thì đừng đánh cược.
+///
+/// [U1b]: ../../docs/03-danh-gia/05-nang-cap-toan-dien.md
+fn gpu_layers_mac_dinh() -> u32 {
+    let can = [
+        crate::configured_router_model_path(),
+        crate::configured_mmproj_path(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|p| std::fs::metadata(p).ok().map(|m| m.len()))
+    .sum::<u64>();
+
+    let Some((tong, dang_dung)) = crate::governor::gpu_vram_bytes() else {
+        tracing::info!(
+            "GPU: không đọc được VRAM (không có NVIDIA/driver) ⇒ chạy LLM trên CPU. \
+             Ép bằng LIVA_LLM_N_GPU_LAYERS nếu bạn biết máy mình kham được."
+        );
+        return 0;
+    };
+    let trong = tong.saturating_sub(dang_dung);
+    let layers = gpu_layers_theo_vram(trong, can);
+    tracing::info!(
+        "GPU: VRAM trống {} MiB · model+projector {} MiB · dự phòng {} MiB ⇒ n_gpu_layers={}",
+        trong / (1024 * 1024),
+        can / (1024 * 1024),
+        DU_PHONG_VRAM / (1024 * 1024),
+        layers
+    );
+    layers
+}
+
+/// Chỗ chừa cho KV cache + compute buffer, ngoài phần trọng số.
+///
+/// 2 GiB là số **thận trọng có chủ đích**, không phải số đo: đo thật ngày
+/// 02/08 cho compute buffer 565 MiB ở `n_ctx` mặc định, nhưng KV cache lớn theo
+/// `LIVA_LLM_N_CTX` mà hàm này không biết trước. Chọn sai về phía rộng thì mất
+/// tốc độ; chọn sai về phía hẹp thì **OOM lúc đang phục vụ**, tệ hơn nhiều.
+const DU_PHONG_VRAM: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Tách khỏi [`gpu_layers_mac_dinh`] để test được mà không cần GPU thật.
+///
+/// `can == 0` nghĩa là không đọc nổi kích thước model ⇒ trả 0: cùng nguyên tắc
+/// "không biết thì đừng đánh cược".
+fn gpu_layers_theo_vram(vram_trong: u64, can: u64) -> u32 {
+    if can == 0 {
+        return 0;
+    }
+    // `checked_add` chứ KHÔNG `saturating_add`: bão hoà làm `can + dự phòng`
+    // quấn về `u64::MAX`, rồi `vram_trong < u64::MAX` thành false và hàm trả 99
+    // — tức "không đủ" bị đọc ngược thành "đủ". Test
+    // `khong_tran_khi_can_gan_u64_max` bắt được đúng ca đó ở bản đầu.
+    let Some(can_tong) = can.checked_add(DU_PHONG_VRAM) else {
+        return 0;
+    };
+    if vram_trong < can_tong {
+        return 0;
+    }
+    // 99 = "tất cả các lớp". llama.cpp tự kẹp xuống số lớp thật của model.
+    99
+}
+
 pub fn build_app_state() -> Result<Boot, BootError> {
     // Mặc định neo vào `data_dir()` — KHÔNG phải đường dẫn tương đối theo cwd.
     //
@@ -207,7 +286,7 @@ pub fn build_app_state() -> Result<Boot, BootError> {
     let llm_n_gpu_layers = std::env::var("LIVA_LLM_N_GPU_LAYERS")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(0);
+        .unwrap_or_else(gpu_layers_mac_dinh);
     let llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
         .map_err(|e| BootError::new("Không khởi tạo được engine LLM (llama.cpp)", e))?;
 
@@ -555,5 +634,38 @@ mod tests {
         )
         .await
         .expect("stop_background_services phải trả về, không được treo");
+    }
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    /// Ba ca quyết định, và ca thứ hai là ca beta tester chạy laptop — thứ
+    /// `LIVA_LLM_N_GPU_LAYERS=99` ghim cứng sẽ làm OOM.
+    #[test]
+    fn gpu_layers_chi_bat_khi_vram_du_ca_du_phong() {
+        // Máy case: 16 GiB trống, model+projector ~5 GiB ⇒ thừa sức.
+        assert_eq!(super::gpu_layers_theo_vram(16 * GIB, 5 * GIB), 99);
+
+        // Laptop 6 GiB: đủ chứa trọng số nhưng KHÔNG đủ dự phòng 2 GiB.
+        // Đây chính là ca sẽ OOM nếu ghim cứng 99.
+        assert_eq!(super::gpu_layers_theo_vram(6 * GIB, 5 * GIB), 0);
+
+        // Sát ranh giới: cần đúng bằng trống ⇒ vẫn từ chối, vì `<` là so với
+        // can + dự phòng chứ không phải với can.
+        assert_eq!(super::gpu_layers_theo_vram(5 * GIB, 5 * GIB), 0);
+        assert_eq!(super::gpu_layers_theo_vram(7 * GIB, 5 * GIB), 99);
+    }
+
+    #[test]
+    fn khong_biet_kich_thuoc_model_thi_khong_danh_cuoc() {
+        // `can == 0` = không đọc nổi metadata file. Dù VRAM có bao nhiêu cũng
+        // không được bật — bật ở đây là đoán, và đoán sai thì OOM.
+        assert_eq!(super::gpu_layers_theo_vram(64 * GIB, 0), 0);
+    }
+
+    #[test]
+    fn khong_tran_khi_can_gan_u64_max() {
+        // `can + DU_PHONG` phải dùng saturating_add: tràn sẽ quấn về số nhỏ và
+        // biến điều kiện thành "đủ VRAM", đúng ngược ý.
+        assert_eq!(super::gpu_layers_theo_vram(u64::MAX, u64::MAX), 0);
     }
 }

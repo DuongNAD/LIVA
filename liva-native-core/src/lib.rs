@@ -91,7 +91,7 @@ pub const DEFAULT_MODELS_DIR: &str = "E:\\AI_Models";
 /// Ràng buộc đó được một test giữ: `setup::tests::router_mac_dinh_khop_manifest`.
 /// Trước 28/07/2026 hằng này còn là `gemma-4-E4B-…`, một model đã không còn nằm
 /// trong danh sách tải từ khi router chuyển sang Qwen3-VL.
-pub const DEFAULT_ROUTER_MODEL: &str = "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf";
+pub const DEFAULT_ROUTER_MODEL: &str = "gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
 pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
 
 /// Đọc một biến môi trường dạng cờ bật/tắt.

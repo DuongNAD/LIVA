@@ -116,12 +116,24 @@
       "required": false,
       "broken": "LIVA_STT_VI_ENGINE=parakeet sẽ không chạy; Nemotron vẫn nghe được (WER kém hơn ~3×).",
       "note": "KHÔNG tải tự động được — phải tự export từ NeMo trong WSL, xem models/README.md."
+    },
+    "chat-alt": {
+      "name": "Chat — router thay thế (không tải mặc định)",
+      "required": false,
+      "broken": "Không ảnh hưởng gì khi thiếu: đây là router DỰ PHÒNG, chỉ cần khi bạn tự trỏ ai.routerModel sang nó.",
+      "note": "Giữ trong manifest để verify_model_artifact vẫn tin nó. Xoá hẳn thì đổi config về Qwen sẽ bị từ chối nạp, và thông điệp đọc như một cảnh báo bảo mật chứ không như “bạn đang dùng model cũ”."
+    },
+    "vision-alt": {
+      "name": "Vision — projector thay thế (không tải mặc định)",
+      "required": false,
+      "broken": "Không ảnh hưởng gì khi thiếu. Đi kèm chat-alt.",
+      "note": "Projector PHẢI khớp router: mmproj của model này không dùng được cho model kia."
     }
   },
   "files": [
     {
-      "group": "chat",
-      "profile": "minimal",
+      "group": "chat-alt",
+      "profile": "none",
       "llm": true,
       "dest": "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
       "url": "https://huggingface.co/unsloth/Qwen3-VL-2B-Instruct-GGUF/resolve/8dcb98e52a1d1d02dce9249e5ab15bae8121c666/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
@@ -130,8 +142,8 @@
       "sha256": "858fcf2a39dc73b26dd86592cb0a5f949b59d1edb365d1dea98e46b02e955e56"
     },
     {
-      "group": "vision",
-      "profile": "full",
+      "group": "vision-alt",
+      "profile": "none",
       "llm": true,
       "dest": "Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf",
       "url": "https://huggingface.co/unsloth/Qwen3-VL-2B-Instruct-GGUF/resolve/8dcb98e52a1d1d02dce9249e5ab15bae8121c666/mmproj-F16.gguf",
@@ -139,6 +151,28 @@
       "exactSize": true,
       "note": "Q8_0 (445 MB) cũng chạy được và nhẹ hơn, nhưng data/liva-config.json đang trỏ mmproj-F16 nên tải đúng cái config nói.",
       "sha256": "cd5a851d3928697fa1bd76d459d2cc409b6cf40c9d9682b2f5c8e7c6a9f9630f"
+    },
+    {
+      "group": "chat",
+      "profile": "minimal",
+      "llm": true,
+      "dest": "gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+      "url": "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+      "bytes": 4215695776,
+      "exactSize": true,
+      "note": "Router từ 02/08/2026. QAT 4-bit. URL ghim commit SHA, KHÔNG dùng main: bản dưới main từng đổi và một file cùng KÍCH THƯỚC nhưng khác hash đã lọt qua phép kiểm size.",
+      "sha256": "df0fd4ee07072c607c29a0a1cb4f98918426cca12f45a2776bdd6ee6d09a4de3"
+    },
+    {
+      "group": "vision",
+      "profile": "full",
+      "llm": true,
+      "dest": "gemma-4-E4B-it-qat-GGUF/mmproj-F16.gguf",
+      "url": "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265/mmproj-F16.gguf",
+      "bytes": 990372672,
+      "exactSize": true,
+      "note": "Projector PHẢI lấy từ CÙNG repo QAT. mmproj của repo không-QAT trùng kích thước từng byte (990372672) nhưng khác hash — dùng nhầm sẽ không báo lỗi, chỉ làm chất lượng kém đi âm thầm.",
+      "sha256": "6a255159ee4b01b304f633a57f017dd7d5a69d30fff52abb2614bf0813cef034"
     },
     {
       "group": "stt",

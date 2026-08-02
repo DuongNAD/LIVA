@@ -6,9 +6,9 @@
     "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
     "localModelsDir": "E:\\AI_Models",
     "maxTokens": 2048,
-    "mmprojModel": "Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf",
+    "mmprojModel": "gemma-4-E4B-it-qat-GGUF/mmproj-F16.gguf",
     "provider": "local",
-    "routerModel": "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
+    "routerModel": "gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
     "temperature": 0.3,
     "topP": 0.9
   },

@@ -495,14 +495,30 @@ impl LlamaRouterManager {
             }
         };
 
-        // ChatML with a BARE media marker; mtmd wraps it with the model's
-        // <|vision_start|>…<|vision_end|> tokens — do not hand-write those.
-        let prompt = format!(
-            "<|im_start|>system\n{sys}<|im_end|>\n<|im_start|>user\n{marker} {q}<|im_end|>\n<|im_start|>assistant\n",
-            sys = super::persona::PERSONA_LIVA,
-            marker = mtmd_default_marker(),
-            q = question,
-        );
+        // Đi qua `compile_prompt` để prompt thị giác dùng ĐÚNG họ template mà
+        // `swap_model` đã nhận diện, thay vì hard-code một họ.
+        //
+        // **Bug đã sửa 02/08/2026, tìm ra bằng `gemma4_probe`.** Bản cũ ghi cứng
+        // ChatML (`<|im_start|>…<|im_end|>`) — đúng khi Qwen3-VL là model VL duy
+        // nhất, sai ngay khi có model thứ hai. Với gemma-4 nó vẫn "chạy" (model
+        // đủ khoẻ để trả lời), nên KHÔNG có lỗi nào được ném ra; triệu chứng duy
+        // nhất là chuỗi `<|im_end|>` rò vào câu trả lời người dùng đọc được, vì
+        // `VisibleOutputFilter` dựng theo đuôi prompt nên nó canh sai token dừng.
+        // Đây đúng loại hỏng "trông vẫn ổn" mà chỉ một phép khẳng định tường
+        // minh về template mới bắt được.
+        //
+        // Marker media để TRẦN: mtmd tự bọc nó bằng token thị giác của model —
+        // đừng viết tay `<|vision_start|>…`.
+        let prompt = super::prompt::compile_prompt(&[
+            super::ChatMessage {
+                role: "system".to_string(),
+                content: super::persona::PERSONA_LIVA.to_string(),
+            },
+            super::ChatMessage {
+                role: "user".to_string(),
+                content: format!("{} {}", mtmd_default_marker(), question),
+            },
+        ])?;
         let mut output_filter =
             super::output_filter::VisibleOutputFilter::from_prompt_tail(&prompt);
         let input = MtmdInputText {

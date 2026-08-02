@@ -108,7 +108,7 @@ async fn embed(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let engine = llm_manager
         .engine
         .as_mut()
-        .ok_or_else(|| "No model loaded".to_string())?;
+        .ok_or_else(|| crate::llm::engine::ERR_NO_MODEL.to_string())?;
     let mut embeddings = Vec::new();
     for text in inputs {
         let emb = llm::get_embedding(&engine.model, &mut engine.context, &text)?;

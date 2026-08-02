@@ -439,6 +439,29 @@ fn decode_f32_payload(payload: &[u8]) -> Vec<f32> {
     }
 }
 
+/// Đổi một lỗi sinh-chữ thành câu LIVA nói ra.
+///
+/// **Vì sao tách khỏi chỗ dùng.** Bản cũ gộp mọi thất bại vào một nhánh `_ =>`
+/// duy nhất, kể cả [`crate::llm::engine::ERR_NO_MODEL`] — thứ **không phải
+/// hỏng**: router nạp bất đồng bộ lúc boot, nên mọi câu hỏi tới trong cửa sổ đó
+/// đều rơi vào đây. Ngày 02/08/2026, sau khi đổi router sang model 4,2 GB, cửa
+/// sổ ấy dài ra và người dùng chat trúng vào đó; LIVA đáp "đã xảy ra lỗi trong
+/// quá trình xử lý" nên họ đi tìm một hỏng hóc không tồn tại.
+///
+/// Nhánh `match` cũ nằm giữa một hàm rất dài nên **không test được**, và một
+/// nhánh không test được thì lần dọn dẹp sau sẽ gộp lại y như cũ. Hàm thuần này
+/// tồn tại để có chỗ khoá hành vi bằng test.
+///
+/// `None` = tác vụ `spawn_blocking` chết (panic/huỷ) — đó mới là hỏng thật.
+fn loi_chat_thanh_cau_noi(loi: Option<&str>) -> String {
+    match loi {
+        Some(e) if e.contains(crate::llm::engine::ERR_NO_MODEL) => {
+            "Mình đang nạp mô hình, đợi vài giây rồi nhắn lại giúp mình nhé.".to_string()
+        }
+        _ => "Xin lỗi, đã xảy ra lỗi trong quá trình xử lý.".to_string(),
+    }
+}
+
 async fn handle_ws_connection(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     state: Arc<AppState>,
@@ -1355,11 +1378,8 @@ async fn handle_ws_connection(
 
                                     let (final_text, tra_loi_ok) = match completion_res {
                                         Ok(Ok(output)) => (output.text, true),
-                                        _ => (
-                                            "Xin lỗi, đã xảy ra lỗi trong quá trình xử lý."
-                                                .to_string(),
-                                            false,
-                                        ),
+                                        Ok(Err(ref e)) => (loi_chat_thanh_cau_noi(Some(e)), false),
+                                        Err(_) => (loi_chat_thanh_cau_noi(None), false),
                                     };
 
                                     // Lưu lượt này thành ký ức — cùng vị trí với graph (sau khi
@@ -1552,8 +1572,8 @@ async fn handle_ws_connection(
 mod security_tests {
     use super::{
         WebSocketSessionAuthority, auth_token_for_ip, authorize_websocket_event,
-        bearer_token_matches, wake_probe_classifier_direct_accept, websocket_principal,
-        websocket_session_digest,
+        bearer_token_matches, loi_chat_thanh_cau_noi, wake_probe_classifier_direct_accept,
+        websocket_principal, websocket_session_digest,
     };
     use crate::CommandPrincipal;
     use std::net::{IpAddr, Ipv4Addr};
@@ -1720,5 +1740,43 @@ mod security_tests {
     fn wake_probe_ton_trong_nguong_model_cao_hon_nguong_an_toan() {
         assert!(!wake_probe_classifier_direct_accept(Some(0.95), 0.96));
         assert!(wake_probe_classifier_direct_accept(Some(0.97), 0.96));
+    }
+
+    /// Khoá đúng chỗ bản cũ làm sai: "chưa nạp model" phải nói là ĐANG NẠP, và
+    /// mọi thứ khác mới là "đã xảy ra lỗi".
+    ///
+    /// Test này tồn tại vì chế độ hỏng cũ **không sinh ra lỗi nào** — LIVA vẫn
+    /// trả lời trôi chảy, chỉ là nói sai bản chất, nên không cổng nào bắt được.
+    #[test]
+    fn chua_nap_model_khong_bi_goi_la_loi() {
+        let dang_nap = loi_chat_thanh_cau_noi(Some(crate::llm::engine::ERR_NO_MODEL));
+        assert!(
+            dang_nap.contains("đang nạp"),
+            "phải nói đang nạp, được: {dang_nap}"
+        );
+        assert!(
+            !dang_nap.contains("lỗi"),
+            "không được gọi việc khởi động là lỗi, được: {dang_nap}"
+        );
+
+        // Chuỗi thật từ engine có thể có tiền tố/hậu tố — so bằng `contains`,
+        // nên một lỗi BỌC ERR_NO_MODEL vẫn phải được phân loại là đang nạp.
+        let boc = loi_chat_thanh_cau_noi(Some(&format!(
+            "llm error: {} (router)",
+            crate::llm::engine::ERR_NO_MODEL
+        )));
+        assert!(boc.contains("đang nạp"), "được: {boc}");
+    }
+
+    #[test]
+    fn hong_that_van_bao_la_loi() {
+        for ca in [
+            Some("Failed to load GGUF file"),
+            Some("Prompt qua dai: 9000 token"),
+            None, // spawn_blocking chết — hỏng thật
+        ] {
+            let s = loi_chat_thanh_cau_noi(ca);
+            assert!(s.contains("đã xảy ra lỗi"), "ca {ca:?} → {s}");
+        }
     }
 }

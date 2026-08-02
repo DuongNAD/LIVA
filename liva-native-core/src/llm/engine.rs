@@ -12,6 +12,19 @@ use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+/// Lỗi khi CHƯA có model nào được nạp.
+///
+/// Tách thành hằng số vì nó **không phải lỗi** theo nghĩa người dùng: router
+/// được nạp bất đồng bộ lúc boot (`boot.rs`), nên mọi câu hỏi tới trong cửa sổ
+/// đó đều rơi vào đây. Nơi hiển thị **phải phân biệt được** nó với hỏng thật —
+/// gộp chung sẽ nói với người dùng rằng hệ thống lỗi trong khi nó chỉ đang khởi
+/// động, và đó đúng là chuyện đã xảy ra ngày 02/08/2026 sau khi đổi router sang
+/// một model 4,2 GB.
+///
+/// So khớp bằng hằng số này, đừng gõ lại chuỗi: nơi sinh và nơi phân loại mà
+/// trôi khỏi nhau thì thông điệp lại âm thầm sai như cũ.
+pub const ERR_NO_MODEL: &str = "No model loaded";
+
 /// Image input for [`LlamaRouterManager::answer_with_image`].
 pub enum VisionImage<'a> {
     /// Raw RGB pixels (`width*height*3` bytes), e.g. from a screen capture.
@@ -252,7 +265,7 @@ impl LlamaRouterManager {
             return Err("Cannot generate completions on a vocab-only model".to_string());
         }
 
-        let engine = self.engine.as_mut().ok_or("No model loaded")?;
+        let engine = self.engine.as_mut().ok_or(ERR_NO_MODEL)?;
 
         // Tokenize prompt
         let prompt_tokens = engine
@@ -450,7 +463,7 @@ impl LlamaRouterManager {
         // A vision turn always starts a fresh sequence, so drop any KV-prefix
         // reuse state before borrowing the engine.
         self.last_tokens.clear();
-        let engine = self.engine.as_mut().ok_or("No model loaded")?;
+        let engine = self.engine.as_mut().ok_or(ERR_NO_MODEL)?;
 
         // Lazily build the multimodal context from the projector.
         if engine.mtmd.is_none() {

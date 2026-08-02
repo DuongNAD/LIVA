@@ -2,6 +2,7 @@
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-02
 commit: 6723114
+stale-ok: 533f3c6
 status: living
 owns:
   - duong-co-so-do-luong

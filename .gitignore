@@ -9,6 +9,8 @@
 **/.gitnexus/
 **/.agents/
 **/target/
+# Workspace members use the repository-root Cargo.lock only.
+liva-native-core/Cargo.lock
 
 # ==========================================
 # 2. SECRETS & CREDENTIALS

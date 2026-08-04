@@ -97,6 +97,21 @@ test('đường dẫn gõ nhầm NGOÀI gitlink vẫn phải báo hỏng', () =>
   assert.equal(ket[0].loai, 'file-khong-ton-tai')
 })
 
+test('citation checker chỉ lập chỉ mục file được git theo dõi', () => {
+  const rel = `tools/wakeword/work/_test-citations-untracked-${process.pid}.rs`
+  const abs = path.join(REPO, rel)
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  fs.writeFileSync(abs, 'pub fn untracked_only() {}\n')
+
+  try {
+    const ket = doVoiTaiLieu(`File sinh cục bộ không được tính là nguồn: \`${rel}:1\``)
+    assert.equal(ket.length, 1, 'file không track phải vắng khỏi chỉ mục citation')
+    assert.equal(ket[0].loai, 'file-khong-ton-tai')
+  } finally {
+    fs.rmSync(abs, { force: true })
+  }
+})
+
 test('citation checker bỏ qua đúng snapshot FREEZE từ document inventory', () => {
   const raw = execFileSync('node', ['scripts/docs-citations.mjs', '--json'], {
     cwd: REPO,

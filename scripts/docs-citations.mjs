@@ -164,8 +164,24 @@ const stripCode = (text) => {
 
 const IGNORE_DIRS = new Set([
   'node_modules', 'target', 'dist', '.git', 'models', '.gitnexus', 'docs',
-  'venv', '__pycache__', '.venv',
+  'venv', '__pycache__', '.venv', 'work', 'coverage', 'release',
 ])
+
+// Chỉ file trong git index mới có mặt nhất quán trên máy dev và CI. Giữ `null`
+// làm tín hiệu fallback cho tarball/sandbox không có git; trong repo bình thường,
+// cách này tránh đọc mọi virtualenv, worktree sinh dữ liệu và artifact cục bộ.
+const TRACKED_FILES = (() => {
+  try {
+    return new Set(
+      execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' })
+        .split('\0')
+        .filter(Boolean)
+        .map((rel) => rel.replace(/\\/g, '/')),
+    )
+  } catch {
+    return null
+  }
+})()
 
 const index = new Map() // hậu tố đường dẫn -> [rel...]
 const addToIndex = (rel) => {
@@ -186,7 +202,13 @@ const walk = (dir) => {
     else addToIndex(rel)
   }
 }
-walk('.')
+if (TRACKED_FILES) {
+  for (const rel of TRACKED_FILES) {
+    if (!rel.split('/').some((part) => IGNORE_DIRS.has(part))) addToIndex(rel)
+  }
+} else {
+  walk('.')
+}
 
 const docCache = new Map()
 const docFile = (rel) => {
@@ -213,6 +235,7 @@ const ungVien = (raw) => {
   if (NGOAI_REPO_GITLINK.some((re) => re.test(p))) return { ngoaiRepo: true, ds: [] }
   const hits = index.get(p)
   if (hits?.length) return { ds: hits }
+  if (TRACKED_FILES && !TRACKED_FILES.has(p)) return { ds: [] }
   return { ds: docFile(p) ? [p] : [] }
 }
 

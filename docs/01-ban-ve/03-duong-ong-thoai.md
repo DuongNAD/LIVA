@@ -775,9 +775,10 @@ fn detokenize(vocab: &[String], ids: &[usize]) -> String                    // p
   `language` bắt đầu bằng `vi`.
 - Files trên đĩa (**đều có thật**): `models/parakeet_vi.onnx` + `parakeet_vi.onnx.data` (2,48 GB) +
   `parakeet_vi_vocab.json`.
-- Số liệu **tài liệu** (`models/README.md:11`): WER FLEURS-vi **5,15** vs Nemotron **14,45**.
-  `docs/.../LIVA_OSS_Research_2026-07.md:69` cảnh báo 14,45 đo **TRƯỚC** khi sửa bug tokenizer decode,
-  **cần đo lại**.
+- Số đo **qua đúng đường ống STT sản xuất của LIVA** trên 100 câu FLEURS `vi_vn`
+  ([báo cáo và lệnh tái lập](../05-chat-luong/wer-fleurs-vi.md)): Parakeet đạt **12,00% WER**,
+  Nemotron đạt **15,01% WER** — Parakeet tốt hơn khoảng **1,25×** về WER và nhanh hơn khoảng
+  **5,4×** về thời gian xử lý (RTF **0,077** so với **0,414**).
 
 ### 10.3 Định tuyến engine
 

@@ -4,7 +4,6 @@
   *A Versatile Personal Assistant (Jarvis) - A Foundation for a Cognitive OS*
 
   [![GitHub stars](https://img.shields.io/github/stars/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/stargazers)
-  [![GitHub forks](https://img.shields.io/github/forks/DuongNAD/LIVA?style=social)](https://github.com/DuongNAD/LIVA/network/members)
   [![License](https://img.shields.io/badge/License-Custom_All_Rights_Reserved-red.svg)](LICENSE)
 
 </div>
@@ -13,7 +12,7 @@
 Hello! I'm **Nguyen Anh Duong**, currently a student at **FPT University Hanoi**. 
 **LIVA** is currently a Personal AI Assistant (inspired by Jarvis from Iron Man). This project is my passion and marks my first steps on the journey to research and build a true **Cognitive Operating System (Cognitive OS)** in the future.
 
-Since this is a large-scale project built by a single individual, there will inevitably be shortcomings. I highly appreciate and welcome support, feedback, and **code contributions (Pull Requests)** from the community to jointly optimize, upgrade, and perfect this project!
+Since this is a large-scale project built by a single individual, there will inevitably be shortcomings. Feedback and issue reports are welcome. Source-code use and modification remain subject to the repository's **Personal & Internal Use License**.
 
 ---
 
@@ -424,22 +423,14 @@ These are designed and partly built, but **not shipped behaviour** today. They w
 
 ---
 
-## 🤝 Contributing
-Transforming **LIVA** from a personal assistant into a complete **Cognitive OS** is a long journey. I highly welcome and appreciate any support from the developer community:
+## 🤝 Feedback and permitted use
+Feedback and issue reports are welcome. The current license permits downloading, using, and modifying LIVA for personal or internal use, but it does not permit redistributing original or modified source code.
 
-- **Issues:** If you encounter bugs, please open an Issue.
-- **Optimization:** Help is needed to improve Rust (Tauri) performance, refine System Prompts, or optimize `llama.cpp` speed and memory management.
-- **Pull Requests:** Write new agent skills or MCP integrations (e.g., Smarthome control, new API integrations) or upgrade the 2D Dashboard.
+- **Bug reports and feature proposals:** Open an Issue without including proprietary source-code copies.
+- **Private modifications:** Keep modifications within the personal or internal-use scope stated in [`LICENSE`](LICENSE).
+- **Code submissions:** Public forks or Pull Requests are not accepted under the current license because they require redistributing source code.
 
-### How to contribute
-If you want to propose upgrades or modify the source code, please follow the standard open-source workflow:
-1. **Fork** this project to your GitHub account.
-2. Create a new branch for your feature: `git checkout -b feature/AmazingFeature`
-3. Commit your changes: `git commit -m 'feat: Add AmazingFeature'`
-4. Push to your branch: `git push origin feature/AmazingFeature`
-5. Open a **Pull Request (PR)** to the original LIVA repository. I will review, discuss, and merge your code into the main project!
-
-*(Despite some commercial restrictions, you are completely free to contribute code back to this main repository so we can build a stronger LIVA together!)*
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the policy boundary. If the project adopts a contribution-compatible license later, that document will be updated with a code-contribution workflow.
 
 ---
 

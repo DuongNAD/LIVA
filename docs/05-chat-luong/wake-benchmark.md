@@ -127,6 +127,27 @@ Toolchain huấn luyện dùng repository chính thức
 `tools/wakeword/toolchain.json`; cấu hình production dùng `conv_attention`, 25.000
 mẫu mỗi lớp và 100.000 bước.
 
+### 6.1. Ma trận negative corpus công khai
+
+Corpus công khai được dùng để tăng độ đa dạng của lớp âm, không thay thế dữ liệu mic mục tiêu:
+
+| Nguồn | Vai trò | Split |
+| --- | --- | --- |
+| FLEURS `vi_vn` | hội thoại tiếng Việt không gọi LIVA | train/validation/test gốc |
+| Speech Commands v2 | từ khóa tiếng Anh và near-confusion | train/validation/test gốc; train cân đều 6 shard |
+| MUSAN noise | nhiễu phi lời nói | hash theo nguồn 80/10/10 |
+
+`tools/wakeword/public-datasets.json` ghim commit và CC BY 4.0. Downloader đọc Parquet
+theo batch, chuẩn hóa WAV mono 16 kHz/16-bit, loại clip dưới 0,5 giây, loại exact phrase
+`hey liva`, dedup theo SHA-256 và ghi provenance. Public `test` chỉ dùng holdout; public
+`validation` được đưa vào `negative_test` cho upstream training/eval và không được dùng
+trong benchmark Rust độc lập.
+
+Năm ứng viên: `control_medium`, `fleurs_medium`, `commands_medium`, `hybrid_medium` và
+`hybrid_large`. Bộ chọn xếp hạng theo recall chủ máy rồi FPPH, nhưng luôn chặn phát hành
+khi chưa có owner hard-negative và ít nhất một giờ negative môi trường thật. Không có
+đường tự động chép ứng viên thắng vào `models/`.
+
 Đường probe và quyết định core được neo tại
 `liva-native-core/src/wake.rs#WakeGate::score_clip` và
 `liva-native-core/src/wake.rs#WakeGate::matches_phrase`.

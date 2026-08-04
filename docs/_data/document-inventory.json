@@ -260,6 +260,13 @@
       "rationale": "Canonical owner cho guardrail hiện hành và acceptance contract của side effect."
     },
     {
+      "path": "docs/05-chat-luong/beta-thuc-dia.md",
+      "disposition": "KEEP",
+      "wave": "C-quality",
+      "targets": [],
+      "rationale": "Kênh thu nhận thủ công và bằng chứng thực địa thay cho telemetry trong beta."
+    },
+    {
       "path": "docs/05-chat-luong/resource-governor.md",
       "disposition": "KEEP",
       "wave": "C-vision-complete",
@@ -286,6 +293,13 @@
       "wave": "C-voice-complete",
       "targets": [],
       "rationale": "Canonical owner cho corpus và acceptance benchmark wake."
+    },
+    {
+      "path": "docs/05-chat-luong/wer-fleurs-vi.md",
+      "disposition": "KEEP",
+      "wave": "C-voice-complete",
+      "targets": [],
+      "rationale": "Bằng chứng WER tái lập qua đúng đường ống STT sản xuất trên FLEURS vi_vn."
     },
     {
       "path": "docs/02-van-hanh/01-cau-hinh-va-bien-moi-truong.md",
@@ -339,6 +353,13 @@
       "wave": "C-operations",
       "targets": [],
       "rationale": "Runbook canonical cho online backup, offline restore và rollback SQLite."
+    },
+    {
+      "path": "docs/02-van-hanh/release-v1.0.0-smoke-test.md",
+      "disposition": "KEEP",
+      "wave": "C-operations",
+      "targets": [],
+      "rationale": "Bằng chứng dựng installer v1.0.0 và checklist nghiệm thu trên Windows sạch."
     },
     {
       "path": "docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md",

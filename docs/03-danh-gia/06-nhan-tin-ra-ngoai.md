@@ -1,8 +1,8 @@
 ---
 title: "Nhắn tin ra ngoài — hiện trạng, việc còn lại, và các bẫy đã trả giá"
-updated: 2026-08-01
-commit: 3688b5f
-stale-ok: e69f47d
+updated: 2026-08-04
+commit: 596e8b6
+stale-ok: 596e8b6
 status: living
 owns:
   - nhan-tin-ra-ngoai-telegram-messenger
@@ -28,7 +28,8 @@ Hình dạng của tính năng: **danh bạ → soạn bản nháp → người 
 |---|---|---|
 | Sổ danh bạ (`contacts`, schema v5; DB hiện ở schema v7) | **[OK]** | Bỏ dấu để tra, `(lookup_key, platform)` là khoá duy nhất |
 | Hộp chờ xác nhận | **[OK]** | SQLite mã hóa; sống qua restart; dùng-một-lần, hết hạn 300 s, trần 32 |
-| `route_intent` hiểu "nhắn cho X bảo Y" | **[OK]** | Đặt trước mọi nhánh khác trong `agent/graph.rs` |
+| `route_intent` hiểu "nhắn cho X bảo Y" | **[OK]** | Đặt trước mọi nhánh khác trong `agent/graph.rs`. Từ `596e8b6` còn tách được hậu tố nền tảng (`"… bằng Messenger"`), và chỉ cắt khi cụm đó nằm sát mốc nội dung để không nuốt tên người có chữ "bằng"/"qua" ở giữa |
+| Đối thoại nhiều lượt bằng giọng (`messaging/voice_dialogue.rs`) | **[OK]** | Thêm `596e8b6`. Thiếu nền tảng hoặc thiếu nội dung thì **hỏi lại và nhớ phần đã có** sang lượt sau, thay vì bỏ câu lệnh. Câu trả lời không rõ ⇒ **không tự gửi**. Bằng chứng: 4 test ở `tests/voice_messaging_dialogue.rs` + 2 test qua socket thật ở `tests/websocket_transport.rs` (`voice_message_dialogue_asks_platform_and_remembers_the_request`, `…creates_then_cancels_a_draft_without_sending`) |
 | Thẻ xác nhận trong widget | **[OK]** | Hiện cả tên lẫn địa chỉ đích |
 | Gửi **Messenger** | **[OK]** | Đã gửi thật 27/07/2026 lúc 01:53, người nhận trả lời |
 | Gửi **Telegram** | **[MỘT PHẦN]** | Code xong, **chưa chạy lần nào** — máy chưa có `TELEGRAM_BOT_TOKEN` |

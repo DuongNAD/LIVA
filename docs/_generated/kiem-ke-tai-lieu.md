@@ -1,7 +1,7 @@
 ---
 title: "Kiểm kê và disposition tài liệu LIVA"
 updated: 2026-07-31
-commit: 3688b5f
+commit: 596e8b6
 status: index
 owns:
   - inventory-disposition-tai-lieu
@@ -20,12 +20,12 @@ covers:
 
 | Disposition | Số tài liệu |
 |---|---:|
-| KEEP | 29 |
+| KEEP | 32 |
 | SPLIT | 7 |
 | GENERATE | 5 |
 | FREEZE | 39 |
 | MERGE | 16 |
-| **Tổng** | **96** |
+| **Tổng** | **99** |
 
 ## Quy ước
 
@@ -67,6 +67,7 @@ covers:
 | `docs/02-van-hanh/04-kiem-thu-va-ci.md` | **KEEP** | C-quality | 18 | `docs/05-chat-luong/kiem-thu-va-ci.md` | Runbook còn dùng; di chuyển sau khi CI links được cập nhật. |
 | `docs/02-van-hanh/05-cai-dat-cho-nguoi-dung.md` | **KEEP** | C-operations | 4 | `docs/04-van-hanh/cai-dat.md` | Hướng dẫn beta cần còn truy cập được trong toàn bộ đợt di trú. |
 | `docs/02-van-hanh/06-backup-restore-sqlite.md` | **KEEP** | C-operations | 3 | — | Runbook canonical cho online backup, offline restore và rollback SQLite. |
+| `docs/02-van-hanh/release-v1.0.0-smoke-test.md` | **KEEP** | C-operations | 1 | — | Bằng chứng dựng installer v1.0.0 và checklist nghiệm thu trên Windows sạch. |
 | `docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md` | **FREEZE** | B | 12 | — | Snapshot khảo sát đã ghi rõ ngày và trạng thái đóng băng. |
 | `docs/03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md` | **FREEZE** | B | 22 | — | Đối chiếu tại một thời điểm; capability registry đã thay vai trò trạng thái sống. |
 | `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` | **MERGE** | C-quality | 25 | `docs/06-ke-hoach/roadmap.md`<br>`docs/05-chat-luong/risk-register.md` | Việc mở nhập vào roadmap; risk bền nhập vào risk register. |
@@ -96,10 +97,12 @@ covers:
 | `docs/04-quy-trinh/prompts/readme-generation-prompt.md` | **MERGE** | C-agent-workflow | 2 | `docs/07-dong-gop/quy-hoach-tai-lieu.md` | Quy tắc README phải nằm cùng governance và source ownership. |
 | `docs/04-quy-trinh/prompts/spring-cleaning-prompt.md` | **MERGE** | C-agent-workflow | 1 | `.agents/skills/liva-technical-debt-triage/SKILL.md` | Prompt dọn dẹp cũ được thay bằng quy trình debt triage có acceptance test. |
 | `docs/05-chat-luong/action-policy.md` | **KEEP** | C-agent-tools-complete | 8 | — | Canonical owner cho guardrail hiện hành và acceptance contract của side effect. |
+| `docs/05-chat-luong/beta-thuc-dia.md` | **KEEP** | C-quality | 0 | — | Kênh thu nhận thủ công và bằng chứng thực địa thay cho telemetry trong beta. |
 | `docs/05-chat-luong/resource-governor.md` | **KEEP** | C-vision-complete | 4 | — | Canonical owner cho ngưỡng CPU/GPU/fullscreen và chính sách nhường tài nguyên. |
 | `docs/05-chat-luong/threat-model.md` | **KEEP** | C-security-complete | 23 | — | Canonical owner cho trust boundaries, crypto/keystore coverage và kế hoạch hardening. |
 | `docs/05-chat-luong/voice-slo.md` | **KEEP** | C-voice-complete | 6 | — | Canonical owner cho runtime thresholds, SLO và acceptance voice. |
 | `docs/05-chat-luong/wake-benchmark.md` | **KEEP** | C-voice-complete | 5 | — | Canonical owner cho corpus và acceptance benchmark wake. |
+| `docs/05-chat-luong/wer-fleurs-vi.md` | **KEEP** | C-voice-complete | 1 | — | Bằng chứng WER tái lập qua đúng đường ống STT sản xuất trên FLEURS vi_vn. |
 | `docs/06-ke-hoach/roadmap.md` | **KEEP** | A | 18 | — | Canonical owner duy nhất cho milestone và việc còn làm. |
 | `docs/07-dong-gop/quy-hoach-tai-lieu.md` | **KEEP** | A | 5 | — | Canonical owner cho chiến lược di trú tài liệu. |
 | `docs/99-luu-tru/bao-cao-lich-su/architecture-review/architecture-review-report-2026-05-31-20-12.md` | **FREEZE** | archive | 0 | — | Báo cáo review lịch sử. |

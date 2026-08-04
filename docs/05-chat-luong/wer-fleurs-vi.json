@@ -1,0 +1,31 @@
+{
+  "dataset": "google/fleurs vi_vn test",
+  "manifest": "data/benchmarks/fleurs-vi/fleurs-vi-test.jsonl",
+  "production_api": "liva_native_core::stt::SttManager::feed_audio(audio, true)",
+  "results": [
+    {
+      "engine": "nemotron",
+      "samples": 100,
+      "substitutions": 326,
+      "deletions": 58,
+      "insertions": 70,
+      "reference_words": 3024,
+      "wer_percent": 15.013227513227513,
+      "audio_seconds": 1279.7999999999997,
+      "elapsed_seconds": 530.0097448,
+      "real_time_factor": 0.41413482169088933
+    },
+    {
+      "engine": "parakeet",
+      "samples": 100,
+      "substitutions": 234,
+      "deletions": 48,
+      "insertions": 81,
+      "reference_words": 3024,
+      "wer_percent": 12.003968253968255,
+      "audio_seconds": 1279.7999999999997,
+      "elapsed_seconds": 97.9244728,
+      "real_time_factor": 0.07651544991404909
+    }
+  ]
+}

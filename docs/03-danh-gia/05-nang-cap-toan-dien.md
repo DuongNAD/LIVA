@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-08-02
-commit: 6723114
-stale-ok: 533f3c6
+updated: 2026-08-04
+commit: 596e8b6
+stale-ok: 596e8b6
 status: living
 owns:
   - duong-co-so-do-luong
@@ -117,6 +117,24 @@ Bảng này đo sau khi hạ **253 file** đang treo trong cây làm việc thà
 | E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | *chưa đo lại* — số gần nhất **6/6** (26/07) | không đo |
 | **TTFT** ([U9](#u9--một-con-số-ttft-đo-được)) | `.\target\release\ttft_bench.exe 20` | *chưa đo lại* — số gần nhất **p50 667 ms CPU · 18 ms CUDA** (29/07) | không đo |
 
+#### Đo lại 04/08/2026 tại `596e8b6` — chỉ những dòng đã đổi
+
+Bảng trên giữ nguyên vì nó là **ảnh chụp có ngày** của `260c643`. Dưới đây là các cổng cho kết quả khác khi chạy lại ở `596e8b6`; cổng nào không có tên ở đây thì kết quả không đổi.
+
+| Cổng | Kết quả 04/08/2026 | So 02/08 |
+|---|---|---|
+| Test Rust | **635 pass · 0 fail · 3 ignored**, 31 binary test | ↑ từ 625 |
+| Test + Coverage UI | **299 pass / 30 file** — **73,85 % stmt · 55,84 % branch · 63,86 % func · 75,88 % line** | ↑ cả bốn |
+| Lỗ hổng npm | **exit 1 — 5 lỗ hổng (3 high)**: fast-uri, ip-address, undici, hono, postcss | ↓ **không phải hồi quy của repo** |
+| Test vỏ Tauri | **12 pass · 0 fail** (chạy trực tiếp, không qua CI) | số cụ thể thay cho "xanh" |
+
+**Về dòng npm:** `package-lock.json` không đổi giữa hai lần đo. Kiểm bằng cách stash toàn bộ cây rồi chạy lại trên HEAD sạch — **cũng đỏ**. Đây là advisory mới công bố trong hai ngày, cùng hiện tượng trôi số đã ghi cho `cargo audit`, và phải vá bằng một commit nâng phụ thuộc riêng chứ không phải bằng cách sửa mã nguồn.
+
+**Hai bẫy đo đạc mới, cùng họ với các bẫy ở [§0.2](#02-ba-cái-bẫy-đã-cắn-trong-phiên-2707--đọc-để-khỏi-mất-buổi):**
+
+1. **`docs-citations.mjs` chết vì hết heap, không phải vì tài liệu sai.** Nó duyệt cây bằng `readdirSync` với `IGNORE_DIRS` cố định (`node_modules`, `target`, `models`…) **không có `venv`**. Từ khi `tools/wakeword/venv` tồn tại (240 gói site-packages), lệnh này nổ `JavaScript heap out of memory` ở mặc định 4 GB. Với `node --max-old-space-size=12288` thì **exit 0, 0 neo hỏng**. CI clone sạch nên không có `venv` ⇒ **CI không dính**; đây là lỗi chỉ xuất hiện trên máy dev.
+2. **`liva-native-core/Cargo.lock` là rác thời tiền-workspace.** Chạy `cargo audit` từ thư mục đó quét **319 crate** và báo **"1 vulnerability"** (crossbeam-epoch, RUSTSEC-2026-0204). Chạy từ gốc — như CI làm — quét **857 crate** và cho **0 vulnerability**. Cùng loại rác với `liva-native-core/target/`; luôn chạy `cargo audit` từ gốc workspace.
+
 ### 🔄 ĐỔI ROUTER 02/08/2026 — một phần bảng trên đã hết hiệu lực
 
 Router đổi từ **Qwen3-VL-2B** sang **gemma-4-E4B-it-qat-UD-Q4_K_XL** (`6723114`). Mọi con số phụ thuộc model trong bảng trên **đo trên Qwen**, nên phải đọc kèm mốc này:
@@ -186,7 +204,9 @@ Worktree tái hiện **chính xác** thứ CI thấy — kể cả gitlink rỗn
 
 **[U10](#u10--tách-handle_command) đã đi xa hơn bảng cũ ghi.** `handle_command` nay **140 dòng** trong `lib.rs`, định tuyến **8 miền qua `::owns()`** (`config`, `integrations`, `llm`, `memory`, `messaging`, `setup`, `skill_store`, `task`) và chỉ còn **5 nhánh chuỗi inline**. Thư mục `commands/` là **12 module · 2 890 dòng**. `lib.rs` **1 550** · `db.rs` **1 641** · `main.rs` **266** dòng.
 
-**Hotspot còn lại** — 12 file > 1 000 dòng trong `liva-native-core/src` + `liva-ui/src` (phạm vi đếm này hẹp hơn phạm vi của [A31-04](02-no-ky-thuat-va-rui-ro.md), nên **hai con số không so thẳng được**): `agent/graph.rs` 1 871 · `WidgetApp.vue` 1 837 · `MemoryViewer.vue` 1 773 · `websocket.rs` 1 724 · `db.rs` 1 641 · `lib.rs` 1 550 · `llm/tool_calling.rs` 1 537 · `tts/vieneu/mod.rs` 1 167.
+**Hotspot còn lại** — 12 file > 1 000 dòng trong `liva-native-core/src` + `liva-ui/src` (phạm vi đếm này hẹp hơn phạm vi của [A31-04](02-no-ky-thuat-va-rui-ro.md), nên **hai con số không so thẳng được**). Đo lại 04/08/2026 tại `596e8b6`: `agent/graph.rs` **1 947** · `websocket.rs` **1 912** · `WidgetApp.vue` **1 811** · `MemoryViewer.vue` **1 667** · `db.rs` 1 641 · `lib.rs` 1 550 · `llm/tool_calling.rs` 1 537 · `tts/vieneu/mod.rs` 1 167.
+
+Ba dịch chuyển đáng ghi so với bảng 02/08, và **hai trong ba là đi lùi**: `agent/graph.rs` +76 và `websocket.rs` +188 do đường nhắn tin bằng giọng (`596e8b6`) — tính năng mới đắp thẳng vào đúng hai file đã nằm đầu bảng hotspot. Chỉ `MemoryViewer.vue` giảm (1 773 → 1 667). Việc tách MemoryViewer **không phải là thứ đã cứu coverage** — bốn component con chỉ gánh 164 dòng; phần có tác dụng là **8 test mới**, đưa `functions` từ 23,8 % lên 60 %.
 
 **Mật độ panic — số CŨ, đo 29/07 tại `c6ec120`, KHÔNG đo lại ở `260c643`:** `.unwrap()` xuất hiện **96 lần trong code production** (106 lúc vào phiên 29/07, −10 sau [U7](#u7--dọn-unwrap-trên-đường-thoại)) và ~436 lần trong khối `#[cfg(test)]`.
 
@@ -461,6 +481,7 @@ Nó **chạy và trả lời đúng** với kernel sm_120. Nhưng đắt hơn v�
 | | |
 |---|---|
 | `target/release/bundle/nsis/LIVA_25.0.0_x64-setup.exe` | **224,4 MB** |
+| ↳ dựng lại 03/08 sau khi hạ version về `1.0.0`: `LIVA_1.0.0_x64-setup.exe` | **229,99 MiB**, SHA-256 `72DF20B5…CB34` — xem [báo cáo phát hành](../02-van-hanh/release-v1.0.0-smoke-test.md) |
 | `target/release/liva-desktop.exe` | 68,6 MB |
 | `target/release/liva-native-core.exe` | 45,5 MB |
 | Thời gian build | **không ai ghi lại** — không truy ngược được |

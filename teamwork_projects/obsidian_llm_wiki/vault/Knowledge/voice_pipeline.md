@@ -3,7 +3,7 @@ title: "voice_pipeline"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-07-31T13:00:00Z"
+last_update: "2026-08-02T18:00:00+07:00"
 ---
 
 # Knowledge: Voice Pipeline
@@ -36,6 +36,19 @@ now the unified Rust core:
 - `wake_liva_en_v2.onnx` has only synthetic/augmented validation evidence. Production calibration
   requires opt-in recordings of the owner's real `Hey Liva` plus ordinary-speech/noise hard
   negatives; synthetic recall/FPPH alone must not be presented as real-room accuracy.
+- Runtime benchmark on 2026-08-02 measured 1/24 owner-positive clips at threshold 0.58
+  (4.17% recall); most misses scored 0.002–0.032, so lowering the threshold is prohibited.
+- A rejected core probe is acknowledged back to `LivaWakeWorker` and releases its cooldown
+  immediately. An accepted probe keeps cooldown to prevent duplicate activation.
+- Personalization requires both owner positives and owner hard negatives. The preparation step
+  splits each class by original recording before replication and injects separate 8xxxxx/9xxxxx
+  ranges; training fails closed when the negative enrollment directory is missing or undersized.
+- Public negative augmentation pins CC BY 4.0 revisions of Vietnamese FLEURS, Speech Commands v2
+  and MUSAN. It canonicalizes mono PCM16/16 kHz, filters the exact wake phrase, rejects clips below
+  0.5 seconds, deduplicates audio and keeps speaker/source groups in one split. Five isolated
+  control/FLEURS/Commands/hybrid variants can be trained, but public data never substitutes for
+  owner hard negatives or the one-hour real ambient benchmark. Candidate selection never copies
+  an artifact into `models/`; production promotion remains a manual, fail-closed decision.
 - The widget reconnects its local gateway with bounded exponential backoff and waits for voice
   cleanup before reconnecting. Unmount disables and clears reconnect timers.
 - Turn cancellation uses a generation epoch. Speaker PCM carries that epoch, control frames have a

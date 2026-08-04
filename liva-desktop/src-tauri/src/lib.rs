@@ -169,6 +169,20 @@ fn thieu_model_bat_buoc() -> bool {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BeMatKhoiDong {
+    Setup,
+    Dashboard,
+}
+
+fn chon_be_mat_khoi_dong(thieu_model_bat_buoc: bool) -> BeMatKhoiDong {
+    if thieu_model_bat_buoc {
+        BeMatKhoiDong::Setup
+    } else {
+        BeMatKhoiDong::Dashboard
+    }
+}
+
 /// Nhãn salt cố định (domain-separation) khi dùng env password KHÔNG kèm
 /// `LIVA_STRONGHOLD_SALT`. KHÔNG còn là bí mật (password giờ ngẫu nhiên/máy hoặc
 /// do người dùng cấp) — chỉ để tách miền khoá.
@@ -659,6 +673,27 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
 
+            // Chọn bề mặt người dùng TRƯỚC khi khởi động dịch vụ nền. Model
+            // autoload có thể mất nhiều giây trên máy yếu; để đoạn này ở cuối
+            // làm máy cài mới chỉ thấy Widget trong lúc boot và tưởng app hỏng.
+            match chon_be_mat_khoi_dong(thieu_model_bat_buoc()) {
+                BeMatKhoiDong::Setup => {
+                    if let Some(dashboard) = handle.get_webview_window("dashboard") {
+                        if let Err(e) = dashboard.hide() {
+                            tracing::warn!("Không ẩn được Dashboard trước setup: {e}");
+                        }
+                    }
+                    if let Err(e) = mo_cua_so_setup(&handle) {
+                        tracing::error!("{e}");
+                    }
+                }
+                BeMatKhoiDong::Dashboard => {
+                    if let Err(e) = open_dashboard(handle.clone()) {
+                        tracing::error!("Không mở được Dashboard: {e}");
+                    }
+                }
+            }
+
             // Dịch vụ nền DÙNG CHUNG với gateway: WebSocket, tự nạp model,
             // phóng chiếu bộ nhớ, hạ lớp GPU khi chơi game, giải phóng TTS lúc
             // rảnh, bot Telegram, governor ưu tiên CPU. Danh sách sống ở
@@ -821,12 +856,6 @@ pub fn run() {
             // — và người dùng không có cách nào biết vì sao, vì cách sửa duy
             // nhất trước đây là một script Node trong cây mã nguồn.
             // (`liva-desktop` là edition 2021 — không có let-chains như lõi.)
-            if thieu_model_bat_buoc() {
-                if let Err(e) = mo_cua_so_setup(&handle) {
-                    tracing::error!("{e}");
-                }
-            }
-
             println!("✅ [LIVA Tauri] Desktop shell ready. Widget + Dashboard windows active.");
             Ok(())
         })
@@ -1022,6 +1051,18 @@ mod h2_migration_tests {
         assert!(
             !source.contains(&forbidden),
             "recovery key chỉ được giao one-time qua local secure dialog"
+        );
+    }
+
+    #[test]
+    fn thieu_model_bat_buoc_chi_hien_setup() {
+        assert_eq!(
+            super::chon_be_mat_khoi_dong(true),
+            super::BeMatKhoiDong::Setup
+        );
+        assert_eq!(
+            super::chon_be_mat_khoi_dong(false),
+            super::BeMatKhoiDong::Dashboard
         );
     }
 }

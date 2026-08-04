@@ -403,6 +403,9 @@ const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean 
           })
           .catch((err) => {
             logger.error(`[useGateway] Tauri IPC error: ${event}`, err);
+            if (event === 'vision:ask') {
+              finishVision('', err instanceof Error ? err.message : String(err));
+            }
           });
       });
     }

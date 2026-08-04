@@ -67,6 +67,7 @@ pub enum PipelineEvent {
     VadStart,
     VadEnd(Vec<f32>), // Raw audio samples
     Interrupted,
+    SpeakText(String),
     SttCompleted {
         session_id: u64,
         result: Result<Option<String>, String>,
@@ -111,6 +112,15 @@ impl WebRTCPipelineHandle {
         self.event_tx
             .try_send(PipelineEvent::Interrupted)
             .map_err(|e| format!("Failed to queue Interrupted: {}", e))
+    }
+
+    pub fn speak_text(&self, text: String) -> Result<(), String> {
+        if text.trim().is_empty() {
+            return Err("Không thể phát câu TTS rỗng".to_string());
+        }
+        self.event_tx
+            .try_send(PipelineEvent::SpeakText(text))
+            .map_err(|e| format!("Failed to queue SpeakText: {e}"))
     }
 }
 
@@ -189,6 +199,9 @@ impl WebRTCActor {
                 PipelineEvent::Interrupted => {
                     self.handle_interrupted().await;
                 }
+                PipelineEvent::SpeakText(text) => {
+                    self.handle_speak_text(text).await;
+                }
                 PipelineEvent::SttCompleted { session_id, result } => {
                     self.handle_stt_completed(session_id, result).await;
                 }
@@ -260,6 +273,20 @@ impl WebRTCActor {
         self.transition_to(PipelineState::Idle);
     }
 
+    async fn handle_speak_text(&mut self, text: String) {
+        self.cancel_active_operations().await;
+        self.transition_to(PipelineState::LlmGenerating);
+
+        let session_id = self.session_id;
+        let (text_tx, text_rx) = mpsc::channel(1);
+        if text_tx.send(text).await.is_err() {
+            self.transition_to(PipelineState::Idle);
+            return;
+        }
+        drop(text_tx);
+        self.spawn_tts_receiver(session_id, text_rx);
+    }
+
     async fn handle_stt_completed(
         &mut self,
         session_id: u64,
@@ -298,12 +325,9 @@ impl WebRTCActor {
                 .expect("WebSocket conversation id must be valid");
         let event_tx = self.event_tx.clone();
         let state_clone = Arc::clone(&self.state_shared);
-        let outgoing = self.outgoing.clone();
         let active_session_id_llm = Arc::clone(&self.active_session_id);
-        let active_session_id_tts = Arc::clone(&self.active_session_id);
-        let session_aec = Arc::clone(&self.session_aec);
 
-        let (llm_chunk_tx, mut llm_chunk_rx) = mpsc::channel::<String>(100);
+        let (llm_chunk_tx, llm_chunk_rx) = mpsc::channel::<String>(100);
 
         // Spawn LLM Task
         let state_llm = Arc::clone(&state_clone);
@@ -369,9 +393,16 @@ impl WebRTCActor {
         });
         self.llm_handle = Some(llm_handle);
 
+        self.spawn_tts_receiver(session_id, llm_chunk_rx);
+    }
+
+    fn spawn_tts_receiver(&mut self, session_id: u64, mut text_rx: mpsc::Receiver<String>) {
         // Spawn TTS Task
-        let state_tts = Arc::clone(&state_clone);
-        let event_tx_tts = event_tx.clone();
+        let state_tts = Arc::clone(&self.state_shared);
+        let event_tx_tts = self.event_tx.clone();
+        let outgoing = self.outgoing.clone();
+        let active_session_id_tts = Arc::clone(&self.active_session_id);
+        let session_aec = Arc::clone(&self.session_aec);
         let tts_handle = tokio::task::spawn_blocking(move || {
             let mut chunker = crate::tts::TtsChunker::new();
             let mut seq_id = 0u32;
@@ -435,7 +466,7 @@ impl WebRTCActor {
             };
 
             let mut run_tts = || -> Result<(), String> {
-                while let Some(token) = llm_chunk_rx.blocking_recv() {
+                while let Some(token) = text_rx.blocking_recv() {
                     if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id
                     {
                         return Err("Session cancelled".to_string());
@@ -541,6 +572,23 @@ mod outbound_tests {
             seq_id: 0,
             payload: Bytes::new(),
         }
+    }
+
+    #[test]
+    fn cau_tra_loi_truc_tiep_duoc_xep_vao_actor_tts() {
+        let (event_tx, mut event_rx) = mpsc::channel(1);
+        let (_state_tx, state_rx) = watch::channel(PipelineState::Idle);
+        let handle = WebRTCPipelineHandle { event_tx, state_rx };
+
+        handle
+            .speak_text("Bạn muốn nhắn bằng Messenger hay Telegram?".to_string())
+            .unwrap();
+
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(PipelineEvent::SpeakText(text))
+                if text == "Bạn muốn nhắn bằng Messenger hay Telegram?"
+        ));
     }
 
     #[tokio::test]

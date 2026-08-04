@@ -55,6 +55,10 @@ export default defineConfig({
         'src/components/dashboard/VisionView.vue': {
           lines: 50,
         },
+        'src/components/dashboard/MemoryViewer.vue': { functions: 50 },
+        'src/components/dashboard/SettingsView.vue': { functions: 50 },
+        'src/components/dashboard/TaskManager.vue': { functions: 50 },
+        'src/composables/useSpeakerPlayback.ts': { functions: 50 },
       },
     },
   }

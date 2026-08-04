@@ -462,6 +462,153 @@ fn loi_chat_thanh_cau_noi(loi: Option<&str>) -> String {
     }
 }
 
+/// Client có thể gửi Close đúng lúc writer vừa lấy một response khỏi channel.
+/// Tungstenite đã tự chuyển socket sang trạng thái closing nên lần gửi kế tiếp
+/// trả `SendAfterClosing`; đây là race teardown, không phải lỗi protocol đầu vào.
+fn la_race_dong_websocket(error: &tokio_tungstenite::tungstenite::Error) -> bool {
+    matches!(
+        error,
+        tokio_tungstenite::tungstenite::Error::Protocol(
+            tokio_tungstenite::tungstenite::error::ProtocolError::SendAfterClosing
+        )
+    )
+}
+
+/// Xử lý một lượt hội thoại nhắn tin bằng giọng nói.
+///
+/// `None` nghĩa là câu nói không thuộc luồng nhắn tin và không có hội thoại
+/// nhắn tin nào đang chờ. Mọi đường gửi thật đều đi qua `message:confirm`;
+/// `Draft` chỉ ghi outbox và đọc lại cho người dùng xác nhận.
+async fn xu_ly_luot_nhan_tin_bang_giong(
+    state: Arc<AppState>,
+    dialogue: &mut crate::messaging::VoiceMessageDialogue,
+    user_text: &str,
+) -> Option<String> {
+    use crate::messaging::VoiceMessageAction;
+    use crate::messaging::contacts::Platform;
+
+    let action = match crate::agent::graph::route_intent(user_text) {
+        crate::agent::graph::Intent::SendMessage {
+            recipient,
+            body,
+            platform,
+        } => {
+            // Một lệnh nhắn tin đầy đủ mới thay thế hội thoại dở trước đó.
+            dialogue.clear();
+            let platform = platform.and_then(|value| Platform::parse(&value).ok());
+            Some(dialogue.begin(recipient, body, platform))
+        }
+        _ if dialogue.is_pending() => dialogue.follow_up(user_text),
+        _ => None,
+    }?;
+
+    let response = match action {
+        VoiceMessageAction::AskPlatform => "Bạn muốn nhắn bằng Messenger hay Telegram?".to_string(),
+        VoiceMessageAction::AskBody => "Bạn muốn nhắn nội dung gì?".to_string(),
+        VoiceMessageAction::RepeatConfirmation => {
+            "Bạn nói “gửi đi” để xác nhận, hoặc nói “hủy” để bỏ bản nháp.".to_string()
+        }
+        VoiceMessageAction::Draft {
+            recipient,
+            body,
+            platform,
+        } => {
+            let result = crate::commands::messaging::handle(
+                state,
+                "message:draft",
+                serde_json::json!({
+                    "to": recipient,
+                    "text": body,
+                    "platform": platform.as_str(),
+                }),
+            )
+            .await;
+
+            match result {
+                Ok(value) if value.get("needsConfirm").and_then(|v| v.as_bool()) == Some(true) => {
+                    let Some(draft_id) = value
+                        .pointer("/draft/draft_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                    else {
+                        dialogue.clear();
+                        return Some(
+                            "Mình đã tạo bản nháp nhưng không đọc được mã xác nhận, nên chưa gửi."
+                                .to_string(),
+                        );
+                    };
+                    dialogue.await_confirmation(draft_id);
+                    let display_name = value
+                        .pointer("/draft/display_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&recipient);
+                    let draft_text = value
+                        .pointer("/draft/text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&body);
+                    let platform_name = match platform {
+                        Platform::Messenger => "Messenger",
+                        Platform::Telegram => "Telegram",
+                    };
+                    format!(
+                        "Mình sẽ gửi cho {display_name} qua {platform_name}: “{draft_text}”. Bạn nói “gửi đi” để xác nhận hoặc “hủy”."
+                    )
+                }
+                Ok(value) if value.get("ambiguous").and_then(|v| v.as_bool()) == Some(true) => {
+                    dialogue.clear();
+                    format!(
+                        "Có nhiều người tên {recipient} trên nền tảng này. Bạn hãy nói rõ tên người nhận hơn."
+                    )
+                }
+                Ok(_) => {
+                    dialogue.clear();
+                    format!(
+                        "Chưa có ai tên {recipient} trên nền tảng này trong danh bạ, nên mình chưa gửi."
+                    )
+                }
+                Err(error) => {
+                    dialogue.clear();
+                    format!("Mình không tạo được bản nháp cho {recipient}: {error}")
+                }
+            }
+        }
+        VoiceMessageAction::Confirm { draft_id } => {
+            match crate::commands::messaging::handle(
+                state,
+                "message:confirm",
+                serde_json::json!({ "draftId": draft_id }),
+            )
+            .await
+            {
+                Ok(value) if value.get("sent").and_then(|v| v.as_bool()) == Some(true) => value
+                    .get("detail")
+                    .and_then(|v| v.as_str())
+                    .map(|detail| format!("{detail}."))
+                    .unwrap_or_else(|| "Tin nhắn đã được gửi.".to_string()),
+                Ok(_) => "Hệ thống chưa xác nhận được việc gửi tin nhắn.".to_string(),
+                Err(error) => format!("Mình chưa gửi được tin nhắn: {error}"),
+            }
+        }
+        VoiceMessageAction::Cancel { draft_id } => {
+            match crate::commands::messaging::handle(
+                state,
+                "message:cancel",
+                serde_json::json!({ "draftId": draft_id }),
+            )
+            .await
+            {
+                Ok(value) if value.get("cancelled").and_then(|v| v.as_bool()) == Some(true) => {
+                    "Mình đã hủy bản nháp, chưa gửi tin nhắn.".to_string()
+                }
+                Ok(_) => "Bản nháp không còn tồn tại; mình không gửi gì thêm.".to_string(),
+                Err(error) => format!("Mình chưa hủy được bản nháp: {error}"),
+            }
+        }
+    };
+
+    Some(response)
+}
+
 async fn handle_ws_connection(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     state: Arc<AppState>,
@@ -498,6 +645,9 @@ async fn handle_ws_connection(
         voice_session.aec_handle(),
     );
     let actor_handle = AbortOnDropTask::new(tokio::spawn(actor.run()));
+    let voice_message_dialogue = Arc::new(tokio::sync::Mutex::new(
+        crate::messaging::VoiceMessageDialogue::default(),
+    ));
 
     enum DataMessage {
         Speaker(Option<VoiceFrame>),
@@ -524,7 +674,11 @@ async fn handle_ws_connection(
                             match frame.encode() {
                                 Ok(bytes) => {
                                     if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
-                                        error!("Failed to send binary frame to client: {}", e);
+                                        if la_race_dong_websocket(&e) {
+                                            info!("WebSocket writer stopped during client close");
+                                        } else {
+                                            error!("Failed to send binary frame to client: {}", e);
+                                        }
                                         break;
                                     }
                                 }
@@ -549,7 +703,11 @@ async fn handle_ws_connection(
                         match frame.encode() {
                             Ok(bytes) => {
                                 if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
-                                    error!("Failed to send binary frame to client: {}", e);
+                                    if la_race_dong_websocket(&e) {
+                                        info!("WebSocket writer stopped during client close");
+                                    } else {
+                                        error!("Failed to send binary frame to client: {}", e);
+                                    }
                                     break;
                                 }
                             }
@@ -559,7 +717,11 @@ async fn handle_ws_connection(
                     DataMessage::Speaker(None) => speaker_open = false,
                     DataMessage::Text(Some(text)) => {
                         if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(text)).await {
-                            error!("Failed to send text frame to client: {}", e);
+                            if la_race_dong_websocket(&e) {
+                                info!("WebSocket writer stopped during client close");
+                            } else {
+                                error!("Failed to send text frame to client: {}", e);
+                            }
                             break;
                         }
                     }
@@ -899,6 +1061,8 @@ async fn handle_ws_connection(
                         let state_clone = state.clone();
                         let text_tx_clone = text_tx.clone();
                         let memory_scope = memory_scope.clone();
+                        let voice_message_dialogue = Arc::clone(&voice_message_dialogue);
+                        let pipeline_handle_clone = pipeline_handle.clone();
 
                         tokio::spawn(async move {
                             match event_name.as_str() {
@@ -1213,70 +1377,18 @@ async fn handle_ws_connection(
                                         return;
                                     }
 
-                                    // Nhắn tin ra ngoài → dựng bản nháp, KHÔNG gửi.
-                                    //
-                                    // Đặt ở ĐÂY chứ không chỉ ở `agent::graph` là bắt buộc: đường
-                                    // này KHÔNG đi qua graph. Widget gõ chữ gửi `user_voice_command`,
-                                    // và nhánh đó gọi thẳng LLM — nên `route_intent` không được hỏi
-                                    // một lần nào. Bản đầu chỉ nối vào graph, và kết quả đo thật là
-                                    // LIVA trả lời "Chào Minh Hiến, mình nhắn bạn ngủ đi nhé" —
-                                    // tức nó DIỄN câu nhắn tin thay vì soạn tin. Không có test đơn
-                                    // vị nào bắt được chuyện đó vì mỗi nửa đều đúng.
-                                    //
-                                    // Câu trả lời ở đây soạn sẵn, KHÔNG cho LLM diễn đạt lại: model
-                                    // 2B rất dễ biến "chưa gửi" thành "đã gửi rồi nhé", mà đây đúng
-                                    // là chỗ không được nói sai.
-                                    if let crate::agent::graph::Intent::SendMessage {
-                                        recipient,
-                                        body,
-                                    } = crate::agent::graph::route_intent(&user_text)
-                                    {
-                                        let cau = if body.trim().is_empty() {
-                                            format!("Bạn muốn nhắn gì cho {recipient}?")
-                                        } else {
-                                            let payload = serde_json::json!({
-                                                "to": recipient, "text": body,
-                                            });
-                                            match crate::commands::messaging::handle(
-                                                state_clone.clone(),
-                                                "message:draft",
-                                                payload,
-                                            )
-                                            .await
-                                            {
-                                                Ok(v)
-                                                    if v.get("needsConfirm")
-                                                        .and_then(|b| b.as_bool())
-                                                        == Some(true) =>
-                                                {
-                                                    format!(
-                                                        "Mình đã soạn tin cho {}: \"{}\". Bạn đọc lại rồi bấm xác nhận nhé — mình chưa gửi.",
-                                                        v.pointer("/draft/display_name")
-                                                            .and_then(|s| s.as_str())
-                                                            .unwrap_or(&recipient),
-                                                        v.pointer("/draft/text")
-                                                            .and_then(|s| s.as_str())
-                                                            .unwrap_or(&body),
-                                                    )
-                                                }
-                                                Ok(v)
-                                                    if v.get("ambiguous")
-                                                        .and_then(|b| b.as_bool())
-                                                        == Some(true) =>
-                                                {
-                                                    format!(
-                                                        "Có nhiều người tên {recipient} trong danh bạ. Bạn muốn nhắn cho ai?"
-                                                    )
-                                                }
-                                                Ok(_) => format!(
-                                                    "Chưa có ai tên {recipient} trong danh bạ nên mình chưa nhắn được. Bạn thêm liên hệ này trước nhé."
-                                                ),
-                                                Err(e) => format!(
-                                                    "Mình không soạn được tin cho {recipient}: {e}"
-                                                ),
-                                            }
-                                        };
-
+                                    // Hội thoại nhắn tin nhiều lượt. Trạng thái nằm theo từng
+                                    // WebSocket; chỉ `message:confirm` mới được gửi thật.
+                                    let cau_nhan_tin = {
+                                        let mut dialogue = voice_message_dialogue.lock().await;
+                                        xu_ly_luot_nhan_tin_bang_giong(
+                                            state_clone.clone(),
+                                            &mut dialogue,
+                                            &user_text,
+                                        )
+                                        .await
+                                    };
+                                    if let Some(cau) = cau_nhan_tin {
                                         let _ = text_tx_clone
                                             .send(
                                                 serde_json::json!({
@@ -1286,6 +1398,11 @@ async fn handle_ws_connection(
                                                 .to_string(),
                                             )
                                             .await;
+                                        if let Err(error) =
+                                            pipeline_handle_clone.speak_text(cau.clone())
+                                        {
+                                            warn!("Không xếp được câu trả lời TTS: {error}");
+                                        }
                                         let _ = text_tx_clone
                                             .send(
                                                 serde_json::json!({
@@ -1555,6 +1672,7 @@ async fn handle_ws_connection(
                 }
             }
             tokio_tungstenite::tungstenite::Message::Close(_) => {
+                send_task.abort();
                 break;
             }
             _ => {}
@@ -1572,12 +1690,24 @@ async fn handle_ws_connection(
 mod security_tests {
     use super::{
         WebSocketSessionAuthority, auth_token_for_ip, authorize_websocket_event,
-        bearer_token_matches, loi_chat_thanh_cau_noi, wake_probe_classifier_direct_accept,
-        websocket_principal, websocket_session_digest,
+        bearer_token_matches, la_race_dong_websocket, loi_chat_thanh_cau_noi,
+        wake_probe_classifier_direct_accept, websocket_principal, websocket_session_digest,
     };
     use crate::CommandPrincipal;
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
+
+    #[test]
+    fn gui_sau_close_duoc_phan_loai_la_race_shutdown() {
+        use tokio_tungstenite::tungstenite::{Error, error::ProtocolError};
+
+        assert!(la_race_dong_websocket(&Error::Protocol(
+            ProtocolError::SendAfterClosing,
+        )));
+        assert!(!la_race_dong_websocket(&Error::Protocol(
+            ProtocolError::ReceivedAfterClosing,
+        )));
+    }
 
     #[test]
     fn non_loopback_bat_buoc_token_du_manh() {

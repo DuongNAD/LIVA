@@ -71,6 +71,36 @@ test("PowerShell ép Python UTF-8 để CLI không vỡ trên Windows cp1252", (
   assert.match(script, /\$env:PYTHONUTF8\s*=\s*"1"/u);
 });
 
+test("wake matrix resume skips variants with complete export and evaluation artifacts", () => {
+  const script = readFileSync("scripts/train-wakeword-matrix.ps1", "utf8");
+
+  assert.match(script, /ValidateSet\([^)]*"Resume"/su);
+  assert.match(script, /function Test-VariantCompleted/u);
+  assert.match(script, /function Resume-Experiment/u);
+  assert.match(script, /\$modelPath\s*=\s*[^\n]+\.onnx/u);
+  assert.match(script, /\$evalPath\s*=\s*[^\n]+_eval\.json/u);
+  assert.match(
+    script,
+    /Test-Path -LiteralPath \$modelPath\) -and \(Test-Path -LiteralPath \$evalPath/u,
+  );
+  assert.doesNotMatch(script, /Get-Process\s+-Id/u);
+});
+
+test("wake benchmark passes its explicit argument list through Invoke-Checked", () => {
+  const script = readFileSync("scripts/train-wakeword-matrix.ps1", "utf8");
+  const benchmarkBlock = script.match(
+    /function Benchmark-Variants \{(?<body>[\s\S]*?)\n\}/u,
+  );
+
+  assert.ok(benchmarkBlock);
+  assert.match(benchmarkBlock.groups.body, /\$benchmarkArgs\s*=\s*@\(/u);
+  assert.match(
+    benchmarkBlock.groups.body,
+    /& \$benchmarkPath @benchmarkArgs/u,
+  );
+  assert.doesNotMatch(benchmarkBlock.groups.body, /\$args\b/u);
+});
+
 test("toolchain train pin PyTorch CUDA và từ chối chạy chậm trên CPU", () => {
   const toolchain = JSON.parse(
     readFileSync("tools/wakeword/toolchain.json", "utf8"),
@@ -93,6 +123,8 @@ test("toolchain có pha personalization từ enrollment giọng thật", () => {
   assert.match(script, /"Personalize"/u);
   assert.match(script, /prepare-wake-enrollment\.mjs/u);
   assert.match(script, /Prepare-Enrollment/u);
+  assert.match(script, /NegativeEnrollmentDir/u);
+  assert.match(script, /--negative-source/u);
 });
 
 test("personalization tach recording truoc khi nhan ban, khong ro ri train/test", () => {
@@ -148,6 +180,82 @@ test("personalization tach recording truoc khi nhan ban, khong ro ri train/test"
       [...trainMarkers].some((marker) => testMarkers.has(marker)),
       false,
     );
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("personalization inject hard negatives cua chu may va tach train test", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "liva-wake-hard-negative-"));
+  const positiveDir = join(tempRoot, "positive");
+  const negativeDir = join(tempRoot, "negative");
+  const modelDir = join(tempRoot, "wake_liva_en_v2");
+  mkdirSync(positiveDir, { recursive: true });
+  mkdirSync(negativeDir, { recursive: true });
+
+  try {
+    for (let index = 0; index < 5; index += 1) {
+      writeFileSync(
+        join(positiveDir, `positive_${index}.wav`),
+        makePcm16MonoWav(20 + index),
+      );
+      writeFileSync(
+        join(negativeDir, `negative_${index}.wav`),
+        makePcm16MonoWav(80 + index),
+      );
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/prepare-wake-enrollment.mjs",
+        "--source",
+        positiveDir,
+        "--negative-source",
+        negativeDir,
+        "--model-dir",
+        modelDir,
+        "--minimum",
+        "5",
+        "--negative-minimum",
+        "5",
+        "--train-copies",
+        "8",
+        "--test-copies",
+        "2",
+        "--negative-train-copies",
+        "6",
+        "--negative-test-copies",
+        "2",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const negativeTrain = readdirSync(join(modelDir, "negative_train")).filter(
+      (name) => /^clip_9[0-4]\d{4}\.wav$/u.test(name),
+    );
+    const negativeTest = readdirSync(join(modelDir, "negative_test")).filter(
+      (name) => /^clip_9[5-9]\d{4}\.wav$/u.test(name),
+    );
+    assert.equal(negativeTrain.length, 6);
+    assert.equal(negativeTest.length, 2);
+
+    const markers = (directory, files) =>
+      new Set(files.map((name) => readFileSync(join(directory, name)).at(-1)));
+    const trainMarkers = markers(join(modelDir, "negative_train"), negativeTrain);
+    const testMarkers = markers(join(modelDir, "negative_test"), negativeTest);
+    assert.equal(
+      [...trainMarkers].some((marker) => testMarkers.has(marker)),
+      false,
+    );
+
+    const manifest = JSON.parse(
+      readFileSync(join(modelDir, "enrollment-manifest.json"), "utf8"),
+    );
+    assert.equal(manifest.negative_source_recordings, 5);
+    assert.equal(manifest.negative_train_recordings, 4);
+    assert.equal(manifest.negative_test_recordings, 1);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

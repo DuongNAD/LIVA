@@ -20,6 +20,9 @@
 
 pub mod contacts;
 pub mod outbox;
+mod voice_dialogue;
+
+pub use voice_dialogue::{VoiceMessageAction, VoiceMessageDialogue};
 
 use contacts::Platform;
 use outbox::Draft;

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 /**
  * Worker này KHÔNG còn nhận dạng wake word — nó cắt câu để core xác minh.
@@ -22,7 +22,7 @@ function silentFrame(): Float32Array {
   return new Float32Array(FRAME);
 }
 
-describe("LivaWakeWorker", () => {
+describe('LivaWakeWorker', () => {
   let originalSelf: any;
   let postMessageMock: any;
   let closeMock: any;
@@ -30,14 +30,14 @@ describe("LivaWakeWorker", () => {
   const feed = async (onmessage: any, frames: Float32Array[]) => {
     for (const frame of frames) {
       // Sao chép: worker nhận quyền sở hữu buffer trong môi trường thật.
-      await onmessage({ data: { type: "audio", data: { audio: new Float32Array(frame).buffer } } });
+      await onmessage({ data: { type: 'audio', data: { audio: new Float32Array(frame).buffer } } });
     }
   };
 
   const candidates = () =>
     postMessageMock.mock.calls
       .map((call: any[]) => call[0])
-      .filter((msg: any) => msg?.type === "candidate");
+      .filter((msg: any) => msg?.type === 'candidate');
 
   beforeEach(() => {
     vi.resetModules();
@@ -56,35 +56,35 @@ describe("LivaWakeWorker", () => {
     globalThis.self = originalSelf;
   });
 
-  it("báo loaded rồi ready sau init", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('báo loaded rồi ready sau init', async () => {
+    await import('../../src/workers/LivaWakeWorker');
 
-    expect(postMessageMock).toHaveBeenCalledWith({ type: "loaded" });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'loaded' });
 
     const onmessage = (globalThis.self as any).onmessage;
     expect(onmessage).toBeDefined();
 
-    await onmessage({ data: { type: "init", data: { config: { speechFloor: 0.02 } } } });
+    await onmessage({ data: { type: 'init', data: { config: { speechFloor: 0.02 } } } });
 
     expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "ready", success: true }),
+      expect.objectContaining({ type: 'ready', success: true })
     );
   });
 
-  it("im lặng thuần thì không bao giờ phát cụm ứng viên", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('im lặng thuần thì không bao giờ phát cụm ứng viên', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
-    await onmessage({ data: { type: "init" } });
+    await onmessage({ data: { type: 'init' } });
 
     await feed(onmessage, Array.from({ length: 60 }, silentFrame));
 
     expect(candidates()).toHaveLength(0);
   });
 
-  it("cụm nói ~640 ms rồi im thì phát ra đúng một ứng viên", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('cụm nói ~640 ms rồi im thì phát ra đúng một ứng viên', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
-    await onmessage({ data: { type: "init" } });
+    await onmessage({ data: { type: 'init' } });
 
     await feed(onmessage, [
       ...Array.from({ length: 20 }, () => speechFrame()), // 640 ms
@@ -100,10 +100,10 @@ describe("LivaWakeWorker", () => {
     expect(found[0].audio.byteLength / 4).toBeGreaterThan((640 / 1000) * 16000);
   });
 
-  it("tiếng động chớp nhoáng dưới minUtteranceMs bị loại", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('tiếng động chớp nhoáng dưới minUtteranceMs bị loại', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
-    await onmessage({ data: { type: "init" } });
+    await onmessage({ data: { type: 'init' } });
 
     await feed(onmessage, [
       ...Array.from({ length: 3 }, () => speechFrame()), // ~96 ms
@@ -113,10 +113,10 @@ describe("LivaWakeWorker", () => {
     expect(candidates()).toHaveLength(0);
   });
 
-  it("đoạn giọng quá ngắn 320 ms không được gửi sang STT", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('đoạn giọng quá ngắn 320 ms không được gửi sang STT', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
-    await onmessage({ data: { type: "init" } });
+    await onmessage({ data: { type: 'init' } });
 
     await feed(onmessage, [
       ...Array.from({ length: 10 }, () => speechFrame()), // 320 ms
@@ -126,13 +126,13 @@ describe("LivaWakeWorker", () => {
     expect(candidates()).toHaveLength(0);
   });
 
-  it("cắt phần mở đầu khi người dùng nói một mạch quá dài", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('cắt phần mở đầu khi người dùng nói một mạch quá dài', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
     // maxUtteranceMs nhỏ để test nhanh. Phải hạ minProbeMs theo, nếu không sàn
     // độ dài tối thiểu sẽ nới ngược lại đúng phần vừa cắt.
     await onmessage({
-      data: { type: "init", data: { config: { maxUtteranceMs: 500, minProbeMs: 0 } } },
+      data: { type: 'init', data: { config: { maxUtteranceMs: 500, minProbeMs: 0 } } },
     });
 
     await feed(onmessage, [
@@ -152,10 +152,10 @@ describe("LivaWakeWorker", () => {
    * cần ~1,96 s mới chạy, STT cần ≳1,3 s mới ra chữ. Một cụm "hey Liva" chỉ dài
    * ~0,7 s nên nếu không nới ngược thì cả hai tầng đều im lặng.
    */
-  it("nới ngược vào vòng đệm cho đủ minProbeMs", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('nới ngược vào vòng đệm cho đủ minProbeMs', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
-    await onmessage({ data: { type: "init" } });
+    await onmessage({ data: { type: 'init' } });
 
     await feed(onmessage, [
       ...Array.from({ length: 90 }, silentFrame), // ~2,9 s nền phòng có sẵn
@@ -169,10 +169,10 @@ describe("LivaWakeWorker", () => {
     expect(sentMs).toBeGreaterThanOrEqual(2300);
   });
 
-  it("cooldown chặn cụm thứ hai đến quá sớm", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('cooldown chặn cụm thứ hai đến quá sớm', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
-    await onmessage({ data: { type: "init" } });
+    await onmessage({ data: { type: 'init' } });
 
     const utterance = [
       ...Array.from({ length: 20 }, () => speechFrame()),
@@ -184,32 +184,53 @@ describe("LivaWakeWorker", () => {
     expect(candidates()).toHaveLength(1);
   });
 
-  it("xử lý pause, resume, reset, setThreshold, terminate", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('core từ chối probe thì mở cổng ngay cho câu Hey Liva kế tiếp', async () => {
+    await import('../../src/workers/LivaWakeWorker');
+    const onmessage = (globalThis.self as any).onmessage;
+    await onmessage({ data: { type: 'init' } });
+
+    const utterance = [
+      ...Array.from({ length: 20 }, () => speechFrame()),
+      ...Array.from({ length: 8 }, silentFrame),
+    ];
+    await feed(onmessage, utterance);
+    await feed(onmessage, utterance);
+    expect(candidates()).toHaveLength(1);
+
+    await onmessage({
+      data: { type: 'probeResult', data: { accepted: false } },
+    });
+    await feed(onmessage, utterance);
+
+    expect(candidates()).toHaveLength(2);
+  });
+
+  it('xử lý pause, resume, reset, setThreshold, terminate', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
 
-    await onmessage({ data: { type: "pause" } });
-    expect(postMessageMock).toHaveBeenCalledWith({ type: "paused" });
+    await onmessage({ data: { type: 'pause' } });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'paused' });
 
-    await onmessage({ data: { type: "resume" } });
-    expect(postMessageMock).toHaveBeenCalledWith({ type: "resumed" });
+    await onmessage({ data: { type: 'resume' } });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'resumed' });
 
-    await onmessage({ data: { type: "reset" } });
-    expect(postMessageMock).toHaveBeenCalledWith({ type: "reset" });
+    await onmessage({ data: { type: 'reset' } });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'reset' });
 
-    await onmessage({ data: { type: "setThreshold", data: { threshold: 0.03 } } });
-    expect(postMessageMock).toHaveBeenCalledWith({ type: "thresholdChanged", threshold: 0.03 });
+    await onmessage({ data: { type: 'setThreshold', data: { threshold: 0.03 } } });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'thresholdChanged', threshold: 0.03 });
 
-    await onmessage({ data: { type: "terminate" } });
-    expect(postMessageMock).toHaveBeenCalledWith({ type: "terminated" });
+    await onmessage({ data: { type: 'terminate' } });
+    expect(postMessageMock).toHaveBeenCalledWith({ type: 'terminated' });
     expect(closeMock).toHaveBeenCalled();
   });
 
-  it("pause thì không cắt câu nữa", async () => {
-    await import("../../src/workers/LivaWakeWorker");
+  it('pause thì không cắt câu nữa', async () => {
+    await import('../../src/workers/LivaWakeWorker');
     const onmessage = (globalThis.self as any).onmessage;
-    await onmessage({ data: { type: "init" } });
-    await onmessage({ data: { type: "pause" } });
+    await onmessage({ data: { type: 'init' } });
+    await onmessage({ data: { type: 'pause' } });
 
     await feed(onmessage, [
       ...Array.from({ length: 20 }, () => speechFrame()),

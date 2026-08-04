@@ -1,6 +1,6 @@
 [package]
 name = "liva-desktop"
-version = "25.0.0"
+version = "1.0.0"
 description = "LIVA Cognitive OS — Tauri v2 Desktop Shell"
 authors = ["DuongNAD"]
 edition = "2021"
@@ -41,4 +41,3 @@ tracing = "0.1"
 # `env-filter` không phải default feature — xem ghi chú cùng chỗ trong
 # liva-native-core/Cargo.toml.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-

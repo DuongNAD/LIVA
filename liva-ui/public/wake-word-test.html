@@ -25,22 +25,33 @@
     </div>
 
     <p>
-      <strong>Hướng dẫn:</strong> Nói một câu đầy đủ, ví dụ “Hey Liva, bật nhạc lên giúp tôi”.
-      Trang này chỉ đo năng lượng, không xác minh từ khóa; kết quả phát hiện
-      giọng nói không chứng minh wake word hoạt động.
+      <strong>Hướng dẫn:</strong> Nói một câu đầy đủ, ví dụ “Hey Liva, bật nhạc lên giúp tôi”. Trang
+      này chỉ đo năng lượng, không xác minh từ khóa; kết quả phát hiện giọng nói không chứng minh
+      wake word hoạt động.
     </p>
 
     <section class="enrollment">
       <h2>Thu corpus “Hey Liva” cá nhân</h2>
       <p>
-        Mỗi lần bấm, hãy nói đúng “Hey Liva” với tốc độ và khoảng cách khác nhau.
-        Trang chỉ ghi khi bạn bấm nút; audio được tải xuống máy, không tự gửi đi đâu.
+        Mỗi lần bấm, hãy nói đúng “Hey Liva” với tốc độ và khoảng cách khác nhau. Trang chỉ ghi khi
+        bạn bấm nút; audio được tải xuống máy, không tự gửi đi đâu.
       </p>
       <button id="btnRecordSample" class="btn-record">Ghi một mẫu 2,5 giây</button>
       <strong id="enrollmentCount">0/20 mẫu đã tải</strong>
+      <h3>Hard negatives của chính giọng bạn</h3>
+      <p>
+        Đọc câu gợi ý bên dưới nhưng không nói “Hey Liva”. Các mẫu này dạy model phân biệt câu gọi
+        với giọng nói bình thường và những cụm gần âm.
+      </p>
+      <p><strong id="negativePrompt">“Liva”</strong></p>
+      <button id="btnRecordNegative" class="btn-record-negative">
+        Ghi một mẫu negative 2,5 giây
+      </button>
+      <strong id="negativeEnrollmentCount">0/20 mẫu negative đã tải</strong>
       <p class="privacy-note">
         Đây là dữ liệu sinh trắc học giọng nói. Lưu vào
-        <code>data/wake-enrollment/positive/</code>; thư mục này đã bị Git bỏ qua.
+        <code>data/wake-enrollment/positive/</code> và <code>data/wake-enrollment/negative/</code>;
+        hai thư mục đã bị Git bỏ qua.
       </p>
     </section>
 

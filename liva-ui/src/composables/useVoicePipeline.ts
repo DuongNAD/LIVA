@@ -1,10 +1,9 @@
-import { ref, shallowRef, triggerRef, watch, type Ref, onUnmounted } from "vue";
-import { logger } from "../utils/logger";
-import { pack } from "msgpackr";
-import { serializeVoiceFrame, OP_MIC_IN, OP_WAKE_PROBE } from "../utils/voiceFrame";
+import { ref, shallowRef, triggerRef, watch, type Ref, onUnmounted } from 'vue';
+import { logger } from '../utils/logger';
+import { serializeVoiceFrame, OP_MIC_IN, OP_WAKE_PROBE } from '../utils/voiceFrame';
 
 export function wakeConfidencePercent(score: unknown): string {
-  if (typeof score !== "number" || !Number.isFinite(score)) return "0.0%";
+  if (typeof score !== 'number' || !Number.isFinite(score)) return '0.0%';
   return `${(Math.min(1, Math.max(0, score)) * 100).toFixed(1)}%`;
 }
 
@@ -68,7 +67,8 @@ let detectedCallback: (() => void) | null = null;
  * giờ đánh thức trên đúng những máy đã từng chỉnh núm đó.
  */
 const WAKE_FLOOR_STORAGE_KEY = 'liva_wake_speech_floor';
-const savedFloorVal = typeof localStorage !== 'undefined' ? localStorage.getItem(WAKE_FLOOR_STORAGE_KEY) : null;
+const savedFloorVal =
+  typeof localStorage !== 'undefined' ? localStorage.getItem(WAKE_FLOOR_STORAGE_KEY) : null;
 const wakeWordThreshold = ref(savedFloorVal ? parseFloat(savedFloorVal) : 0.015);
 
 // ═══════════════════════════════════════════════════════
@@ -96,7 +96,7 @@ function isWakeWordMuted(): boolean {
   return speakerActive || Date.now() < wakeWordMutedUntil;
 }
 const diagnosticsPanelRef = ref<HTMLElement | null>(null);
-const pipelineError = ref("");
+const pipelineError = ref('');
 const pipelineErrorKind = ref<VoicePipelineErrorKind>('none');
 
 interface MicFailure {
@@ -110,22 +110,33 @@ interface MicFailure {
  * dội thẳng nó ra màn hình thì người dùng đọc được đúng một chuỗi tiếng Anh cụt.
  */
 function classifyMicError(err: unknown): MicFailure {
-  const name = typeof err === 'object' && err !== null && 'name' in err
-    ? String((err as { name: unknown }).name)
-    : '';
+  const name =
+    typeof err === 'object' && err !== null && 'name' in err
+      ? String((err as { name: unknown }).name)
+      : '';
 
   switch (name) {
     case 'NotAllowedError':
     case 'PermissionDeniedError': // tên cũ, còn gặp ở webview nhân Chromium cũ
-      return { kind: 'permission', message: 'Micro chưa được cấp quyền, hoặc bị trình duyệt/hệ điều hành chặn.' };
+      return {
+        kind: 'permission',
+        message: 'Micro chưa được cấp quyền, hoặc bị trình duyệt/hệ điều hành chặn.',
+      };
     case 'SecurityError':
-      return { kind: 'permission', message: 'Trang không chạy trong ngữ cảnh bảo mật (https hoặc localhost) nên không xin được micro.' };
+      return {
+        kind: 'permission',
+        message:
+          'Trang không chạy trong ngữ cảnh bảo mật (https hoặc localhost) nên không xin được micro.',
+      };
     case 'NotFoundError':
     case 'DevicesNotFoundError':
       return { kind: 'no-device', message: 'Không tìm thấy thiết bị micro nào trên máy.' };
     case 'OverconstrainedError':
     case 'ConstraintNotSatisfiedError':
-      return { kind: 'no-device', message: 'Không micro nào đáp ứng được cấu hình thu (1 kênh, 16 kHz).' };
+      return {
+        kind: 'no-device',
+        message: 'Không micro nào đáp ứng được cấu hình thu (1 kênh, 16 kHz).',
+      };
     case 'NotReadableError':
     case 'TrackStartError':
     case 'AbortError':
@@ -175,23 +186,23 @@ function initWorker(): Promise<boolean> {
       resolve(ready);
     };
     settleWorkerInit = complete;
-    wakeWordWorker = new Worker(
-      new URL('../workers/LivaWakeWorker.ts', import.meta.url),
-      { type: 'module' }
-    );
+    wakeWordWorker = new Worker(new URL('../workers/LivaWakeWorker.ts', import.meta.url), {
+      type: 'module',
+    });
 
     wakeWordWorker.onmessage = (event) => {
       const { type, success } = event.data;
 
       if (type === '__log') {
         const { level, args } = event.data;
-        const fn = logger[level as "debug" | "info" | "warn" | "error"] ?? logger.info;
+        const fn = logger[level as 'debug' | 'info' | 'warn' | 'error'] ?? logger.info;
         fn('[WakeWord]', ...args);
         return;
       }
 
       if (type === 'loaded') {
-        const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(WAKE_FLOOR_STORAGE_KEY) : null;
+        const saved =
+          typeof localStorage !== 'undefined' ? localStorage.getItem(WAKE_FLOOR_STORAGE_KEY) : null;
         const initConfig = saved ? { speechFloor: parseFloat(saved) } : undefined;
         wakeWordWorker?.postMessage({ type: 'init', data: { config: initConfig } });
       } else if (type === 'ready') {
@@ -278,8 +289,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   let startInFlight: Promise<void> | null = null;
   let lifecycleGeneration = 0;
 
-  const SpeechRecognitionAPI = ((globalThis as unknown as Record<string, unknown>).SpeechRecognition || 
-    (globalThis as unknown as Record<string, unknown>).webkitSpeechRecognition) as { new(): SpeechRecognitionInstance } | undefined;
+  const SpeechRecognitionAPI = ((globalThis as unknown as Record<string, unknown>)
+    .SpeechRecognition ||
+    (globalThis as unknown as Record<string, unknown>).webkitSpeechRecognition) as
+    | { new (): SpeechRecognitionInstance }
+    | undefined;
 
   function activateWebSpeechFallback() {
     if (webSpeechFallbackActive.value) return;
@@ -338,11 +352,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
           if (text) {
             logger.info('[VoicePipeline] Web Speech transcript received:', text);
             if (wsRef && wsRef.readyState === WebSocket.OPEN) {
-              const packed = pack({ event: 'web_speech_transcription', payload: { text } });
-              const msg = new Uint8Array(1 + packed.byteLength);
-              msg[0] = 0x02; // MessagePack event
-              msg.set(new Uint8Array(packed), 1);
-              wsRef.send(msg);
+              wsRef.send(JSON.stringify({ event: 'user_voice_command', payload: { text } }));
             }
           }
         }
@@ -390,7 +400,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       }
     }
   });
-  
+
   let analyser: AnalyserNode | null = null;
   let volumeBuffer: Uint8Array | null = null;
   let volumeRAF: number | null = null;
@@ -408,11 +418,13 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       logger.warn('[WakeWord]', 'Socket core chưa mở — không xác minh được cụm ứng viên.');
       return;
     }
-    wsRef.send(serializeVoiceFrame(
-      OP_WAKE_PROBE,
-      wakeProbeSeqId,
-      new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength),
-    ));
+    wsRef.send(
+      serializeVoiceFrame(
+        OP_WAKE_PROBE,
+        wakeProbeSeqId,
+        new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength)
+      )
+    );
     wakeProbeSeqId = (wakeProbeSeqId + 1) >>> 0;
   };
 
@@ -432,10 +444,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
     if (parsed.event === 'wake_word_triggered') {
       logger.info('[WakeWord]', 'Core xác nhận cụm đánh thức:', parsed.payload?.transcript ?? '');
+      sendToWorker('probeResult', { accepted: true });
       if (diagnosticsPanelRef.value) {
         diagnosticsPanelRef.value.style.setProperty(
           '--confidence-level',
-          wakeConfidencePercent(parsed.payload?.score),
+          wakeConfidencePercent(parsed.payload?.score)
         );
       }
       detectedCallback?.();
@@ -443,11 +456,16 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       // Không phải lỗi — đây là cổng đang làm đúng việc của nó. Nhưng phải log
       // ra transcript, vì "sao nó không thức" là câu hỏi không thể trả lời nếu
       // không biết core nghe ra cái gì.
-      logger.info('[WakeWord]', 'Bỏ qua, không phải cụm đánh thức. Nghe ra:', parsed.payload?.transcript || '(không ra chữ)');
+      logger.info(
+        '[WakeWord]',
+        'Bỏ qua, không phải cụm đánh thức. Nghe ra:',
+        parsed.payload?.transcript || '(không ra chữ)'
+      );
+      sendToWorker('probeResult', { accepted: false });
       if (diagnosticsPanelRef.value) {
         diagnosticsPanelRef.value.style.setProperty(
           '--confidence-level',
-          wakeConfidencePercent(parsed.payload?.score),
+          wakeConfidencePercent(parsed.payload?.score)
         );
       }
     }
@@ -463,7 +481,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     // addEventListener; thiếu nó chỉ mất phán quyết đánh thức, không được phép
     // làm hỏng cả việc dựng pipeline.
     if (typeof ws?.addEventListener !== 'function') {
-      logger.warn('[WakeWord]', 'Socket không hỗ trợ addEventListener — bỏ qua kênh xác minh wake word.');
+      logger.warn(
+        '[WakeWord]',
+        'Socket không hỗ trợ addEventListener — bỏ qua kênh xác minh wake word.'
+      );
       return;
     }
     ws.addEventListener('message', onCoreMessage);
@@ -483,14 +504,6 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         state.value = 'ACTIVE';
         resetActiveTimeout();
         cb();
-        // Notify backend for analytics/logging
-        if (wsRef && wsRef.readyState === WebSocket.OPEN) {
-          const packed = pack({ event: 'wake_word_triggered', payload: {} });
-          const msg = new Uint8Array(1 + packed.byteLength);
-          msg[0] = 0x02; // MessagePack event
-          msg.set(new Uint8Array(packed), 1);
-          wsRef.send(msg);
-        }
       }
     };
   }
@@ -517,19 +530,18 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       },
       () => {
         if (startInFlight === pending) startInFlight = null;
-      },
+      }
     );
     return pending;
   }
 
   async function startPipelineOnce(ws: WebSocket, generation: number) {
-
     wsRef = ws;
     attachCoreListener(ws);
-    pipelineError.value = "";
+    pipelineError.value = '';
     pipelineErrorKind.value = 'none';
 
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       const errStr = 'Trình duyệt/webview này không mở được micro (thiếu getUserMedia).';
       logger.warn('[VoicePipeline]', 'Mic unavailable: unsupported —', errStr);
       pipelineError.value = errStr;
@@ -576,7 +588,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         throw err; // catch ngoài lo phần dọn tài nguyên, ở một chỗ duy nhất
       }
 
-      const AudioCtx = globalThis.AudioContext || (globalThis as unknown as Record<string, unknown>).webkitAudioContext as typeof AudioContext;
+      const AudioCtx =
+        globalThis.AudioContext ||
+        ((globalThis as unknown as Record<string, unknown>)
+          .webkitAudioContext as typeof AudioContext);
       audioContext = new AudioCtx({ sampleRate: 16000 });
       source = audioContext.createMediaStreamSource(mediaStream);
 
@@ -585,7 +600,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       volumeBuffer = new Uint8Array(analyser.frequencyBinCount);
 
       await audioContext.audioWorklet.addModule(
-        new URL('../worklets/mic-capture.worklet.js', import.meta.url),
+        new URL('../worklets/mic-capture.worklet.js', import.meta.url)
       );
       if (generation !== lifecycleGeneration) {
         await releaseAudioResources();
@@ -601,7 +616,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         },
       });
       if (generation !== lifecycleGeneration) {
-        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream.getTracks().forEach((track) => track.stop());
         mediaStream = null;
         wsRef = null;
         return;
@@ -637,17 +652,23 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         }
 
         // 2. VALVE: Send to WebSocket if ACTIVE or PROCESSING (Full-Duplex Barge-in)
-        if ((state.value === 'ACTIVE' || state.value === 'PROCESSING') && wsRef && wsRef.readyState === WebSocket.OPEN) {
+        if (
+          (state.value === 'ACTIVE' || state.value === 'PROCESSING') &&
+          wsRef &&
+          wsRef.readyState === WebSocket.OPEN
+        ) {
           // Hợp đồng VoiceFrame: header 9 byte (op, seq LE, len LE) + payload
           // PCM f32 LE. Trước đây chỗ này chỉ ghi 1 byte header, nên core đọc
           // 4 byte PCM đầu làm seqId và 4 byte kế làm payloadSize — ra số rác
           // thường vượt 1 MiB ⇒ mọi khung mic bị từ chối và barge-in từ trình
           // duyệt không thể hoạt động.
-          wsRef.send(serializeVoiceFrame(
-            OP_MIC_IN,
-            micSeqId,
-            new Uint8Array(inputData.buffer, inputData.byteOffset, inputData.byteLength),
-          ));
+          wsRef.send(
+            serializeVoiceFrame(
+              OP_MIC_IN,
+              micSeqId,
+              new Uint8Array(inputData.buffer, inputData.byteOffset, inputData.byteLength)
+            )
+          );
           micSeqId = (micSeqId + 1) >>> 0;
 
           if (rms >= SILENCE_THRESHOLD) {
@@ -672,10 +693,16 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       // Autoplay / Interaction Guard: Resume AudioContext on user click or keydown
       const resumeContext = () => {
         if (audioContext && audioContext.state === 'suspended') {
-          audioContext.resume().then(() => {
-            logger.info('[VoicePipeline]', 'AudioContext resumed successfully via user interaction.');
-            cleanup();
-          }).catch(e => logger.warn('[VoicePipeline]', 'Failed to resume AudioContext:', e));
+          audioContext
+            .resume()
+            .then(() => {
+              logger.info(
+                '[VoicePipeline]',
+                'AudioContext resumed successfully via user interaction.'
+              );
+              cleanup();
+            })
+            .catch((e) => logger.warn('[VoicePipeline]', 'Failed to resume AudioContext:', e));
         } else {
           cleanup();
         }
@@ -698,10 +725,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       isReady.value = true;
       monitorVolume();
       logger.info('[VoicePipeline]', 'Started 24/7 Omni-Duplex Pipeline');
-
     } catch (err: unknown) {
-      const failure: MicFailure = micFailure
-        ?? { kind: 'failure', message: err instanceof Error ? err.message : String(err) };
+      const failure: MicFailure = micFailure ?? {
+        kind: 'failure',
+        message: err instanceof Error ? err.message : String(err),
+      };
 
       await releaseAudioResources();
       wsRef = null;
@@ -746,7 +774,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }
 
     if (mediaStream) {
-      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream.getTracks().forEach((t) => t.stop());
       mediaStream = null;
     }
 
@@ -761,7 +789,10 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
   function monitorVolume() {
     if (state.value === 'OFF' || !analyser || !volumeBuffer) {
-      if (volumeRAF !== null) { cancelAnimationFrame(volumeRAF); volumeRAF = null; }
+      if (volumeRAF !== null) {
+        cancelAnimationFrame(volumeRAF);
+        volumeRAF = null;
+      }
       return;
     }
 
@@ -771,7 +802,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       sum += volumeBuffer[i];
     }
     const avg = sum / volumeBuffer.length / 255;
-    
+
     // shallowRef: update value without deep reactive proxy overhead
     volumeLevel.value = avg;
     triggerRef(volumeLevel);
@@ -787,7 +818,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     lifecycleGeneration += 1;
     state.value = 'OFF';
     isReady.value = false;
-    pipelineError.value = "";
+    pipelineError.value = '';
     pipelineErrorKind.value = 'none';
 
     if (diagnosticsPanelRef.value) {
@@ -922,7 +953,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     pipelineErrorKind,
     activateWebSpeechFallback,
     deactivateWebSpeechFallback,
-    webSpeechFallbackActive
+    webSpeechFallbackActive,
   };
 }
 
@@ -930,8 +961,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 // Khởi tạo Worker ngay khi module được load vào trình duyệt thay vì đợi user click mic
 // Điều này giúp loại bỏ hoàn toàn độ trễ khởi động khi bật Voice Pipeline
 if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
-  initWorker().catch(err => {
+  initWorker().catch((err) => {
     logger.warn('[VoicePipeline] Pre-warming failed:', err);
   });
 }
-

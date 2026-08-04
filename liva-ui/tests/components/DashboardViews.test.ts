@@ -201,7 +201,7 @@ vi.mock("../../src/composables/useGateway", () => ({
 // Mock useI18n
 vi.mock("../../src/composables/useI18n", () => ({
   useI18n: () => ({
-    t: (key: string) => `translated_${key}`,
+    t: (key: string) => key === "lang_code" ? "en-US" : `translated_${key}`,
     currentLang: ref("en-US"),
   }),
 }));
@@ -313,6 +313,60 @@ describe("Dashboard Views", () => {
     }
   });
 
+  it("covers MemoryViewer filters, actions, formatting, and restart guard", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    memoryDataRef.value = {
+      facts: [
+        { key: "name", value: "Alice", importance: 0.5, updatedAt: "2026-06-22", category: "user" },
+        { key: "locked", value: "", locked: true },
+      ],
+      events: [{ eventId: "e1", rawUserMsg: "xin chao", rawAiReply: "hello", domain: "chat" }],
+      vectors: [{ vecId: "v1", content: "Alice likes books", type: "fact", domain: "user" }],
+      l0: [{ id: "l1", content: "working memory", role: "user" }],
+      l0_5: "session",
+    } as any;
+    const wrapper = mount(MemoryViewer);
+    const vm = wrapper.vm as any;
+
+    vm.factQuery = "alice";
+    vm.eventQuery = "chat";
+    vm.vectorQuery = "books";
+    vm.l0Query = "working";
+    expect(vm.filteredFacts).toHaveLength(1);
+    expect(vm.filteredEvents).toHaveLength(1);
+    expect(vm.filteredVectors).toHaveLength(1);
+    expect(vm.filteredL0).toHaveLength(1);
+    expect(vm.lockedCount).toBe(1);
+    expect(vm.l0_5Size).toBe("7 B");
+
+    vm.deleteFact("locked");
+    vm.deleteFact("name");
+    expect(gatewayMock.sendMsg).toHaveBeenCalledWith("delete_memory_fact", { key: "name" });
+    expect(vm.formatPercent(null)).toBe("100%");
+    expect(vm.formatPercent(0.456)).toBe("46%");
+    expect(vm.formatTime(null)).toBe("—");
+    expect(vm.formatISO(null)).toBe("—");
+
+    vm.refreshMemory();
+    expect(vm.isRefreshing).toBe(true);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(vm.isRefreshing).toBe(false);
+    vm.triggerConsolidation();
+    expect(gatewayMock.sendMsg).toHaveBeenCalledWith("consolidate_memory", { force: true });
+    await vi.advanceTimersByTimeAsync(12600);
+
+    await vm.khoiDongLai();
+    expect(vm.dangHoiKhoiDongLai).toBe(true);
+    await vm.khoiDongLai();
+    await flushPromises();
+    expect(vm.loiKhoiDongLai).toContain("desktop app");
+
+    wrapper.unmount();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("should mount and exercise SettingsView.vue", async () => {
     const wrapper = mount(SettingsView);
     expect(wrapper.exists()).toBe(true);
@@ -344,6 +398,101 @@ describe("Dashboard Views", () => {
         }
       }
     }
+  });
+
+  it("covers SettingsView save, rollback, reset success, and reset timeout", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(SettingsView);
+    const vm = wrapper.vm as any;
+
+    for (const [index, input] of wrapper.findAll(".settings-section input").slice(0, 7).entries()) {
+      if (input.attributes("type") === "checkbox") {
+        await input.setValue(!input.element.checked);
+      } else {
+        await input.setValue(index + 1);
+      }
+      await vi.advanceTimersByTimeAsync(600);
+    }
+    const topics = wrapper.find("#digestFocusTopics");
+    await topics.setValue("AI, Rust");
+    await topics.trigger("blur");
+    await vi.advanceTimersByTimeAsync(600);
+
+    const saving = vm.saveSettings();
+    await vi.advanceTimersByTimeAsync(600);
+    await saving;
+    expect(gatewayMock.updateConfig).toHaveBeenCalled();
+    expect(vm.isSaving).toBe(false);
+
+    const geoBefore = vm.isGeoEnabled;
+    gatewayMock.updateConfig.mockImplementationOnce(() => { throw new Error("save failed"); });
+    await vm.saveSettings();
+    expect(vm.isGeoEnabled).toBe(!geoBefore);
+
+    vm.openResetConfirm();
+    vm.confirmReset();
+    const successCallback = gatewayMock.onMemoryResetResult.mock.calls.at(-1)?.[0];
+    successCallback({ success: true });
+    expect(vm.isResetting).toBe(false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(vm.showResetConfirm).toBe(false);
+
+    vm.openResetConfirm();
+    vm.confirmReset();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(vm.resetResult.success).toBe(false);
+    vm.cancelReset();
+    expect(vm.resetResult).toBeNull();
+
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
+  it("covers TaskManager CRUD, filters, planning callback, and helpers", async () => {
+    vi.useFakeTimers();
+    tasksListRef.value = [
+      { id: "1", title: "pending", status: "pending", priority: "high", created_at: 1 },
+      { id: "2", title: "active", status: "in_progress", priority: "medium", created_at: 2 },
+      { id: "3", title: "done", status: "completed", priority: "low", created_at: 3 },
+    ] as any;
+    const wrapper = mount(TaskManager);
+    const vm = wrapper.vm as any;
+
+    expect(vm.normalizeStatus("In Progress")).toBe("in-progress");
+    expect(vm.normalizeStatus("finished")).toBe("done");
+    expect(vm.stats).toMatchObject({ total: 3, pending: 1, inProgress: 1, done: 1 });
+    vm._filter = "done";
+    expect(vm.filteredTasks).toHaveLength(1);
+
+    vm.newTitle = "new task";
+    vm.newDesc = "plan it";
+    vm.addTask();
+    expect(gatewayMock.sendMsg).toHaveBeenCalledWith("add_task", expect.objectContaining({ title: "new task" }));
+    await vi.advanceTimersByTimeAsync(500);
+    vm.quickAdd("quick");
+    vm.closePlanning();
+    vm.startPlanning(tasksListRef.value[0]);
+    vm.planInput = "next step";
+    vm.sendPlanMessage();
+    expect(gatewayMock.sendMsg).toHaveBeenCalledWith("task_plan_chat", expect.any(Object));
+    vm.executeTask(tasksListRef.value[0]);
+    vm.completeTask(tasksListRef.value[0]);
+    vm.deleteTask(tasksListRef.value[0].id);
+    vm.closePlanning();
+
+    const reply = gatewayMock.onTaskPlanReply.mock.calls.at(-1)?.[0];
+    vm.startPlanning(tasksListRef.value[1]);
+    reply({ taskId: "2", message: "done", done: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(vm.activePlanId).toBeNull();
+    expect(vm.statusIcon("done")).toBe("✅");
+    expect(vm.priorityBadge("high")).toBe("badge-danger");
+    expect(vm.priorityBadge("low")).toBe("badge-info");
+    expect(vm.fmtDate()).toBe("");
+    expect(vm.fmtDate(1)).not.toBe("");
+
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 
   it("should mount and exercise SkillsView.vue", async () => {

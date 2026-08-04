@@ -158,6 +158,7 @@ models/wake_fixtures/
 # to hundreds of GB; neither may enter Git even when individual extensions
 # are not covered by the generic model/audio rules above.
 data/wake-enrollment/
+data/benchmarks/
 tools/wakeword/work/
 docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/
 # VieNeu-TTS large weights (.onnx/.bin already covered above; these are not).

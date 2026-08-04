@@ -27,9 +27,14 @@ test('enrollment export tạo WAV PCM16 mono 16 kHz hợp lệ', () => {
 
 test('trang microphone có enrollment rõ ràng và không tự ghi âm ngầm', () => {
   const html = readFileSync('liva-ui/public/wake-word-test.html', 'utf8')
+  const script = readFileSync('liva-ui/public/wake-word-test.js', 'utf8')
 
   assert.match(html, /id="btnRecordSample"/u)
   assert.match(html, /id="enrollmentCount"/u)
+  assert.match(html, /id="btnRecordNegative"/u)
+  assert.match(html, /id="negativeEnrollmentCount"/u)
   assert.match(html, /Hey Liva/u)
-  assert.match(html, /chỉ ghi khi bạn bấm/u)
+  assert.match(html, /chỉ ghi khi\s+bạn bấm/u)
+  assert.match(html, /data\/wake-enrollment\/negative/u)
+  assert.match(script, /hey_liva_negative_/u)
 })

@@ -8,9 +8,9 @@
  *
  * Core từ chối mọi khung ngắn hơn 9 byte và mọi `payloadSize` vượt 1 MiB.
  *
- * ⚠️ Đừng nhầm với tiền tố **1 byte** `0x02` mà `useVoicePipeline.ts` dùng cho
- * sự kiện MessagePack — đó là giao thức khác, đi qua nhánh khác. Chỉ đường
- * audio (`OP_MIC_IN`) mới dùng khung 9 byte này.
+ * Mọi dữ liệu nhị phân client gửi lên core đều phải dùng khung 9 byte này.
+ * Các sự kiện điều khiển và transcript phải gửi dưới dạng JSON text, không được
+ * tự thêm tiền tố MessagePack một byte vì core sẽ đọc nhầm thành VoiceFrame.
  */
 
 /** VoiceFrame header size: opcode (u8) + seqId (u32 LE) + payloadSize (u32 LE). */

@@ -58,6 +58,18 @@ test('cấu hình thật trong repo phải hợp lệ', () => {
   assert.deepEqual(loi, [], 'cấu hình bộ cài đang có lỗi')
 })
 
+test('bản phát hành Windows mang version v1.0.0', () => {
+  const conf = JSON.parse(fs.readFileSync(path.join(REPO, CONF), 'utf8'))
+  assert.equal(conf.version, '1.0.0')
+})
+
+test('dashboard khởi tạo ẩn để policy first-run chọn đúng cửa sổ', () => {
+  const conf = JSON.parse(fs.readFileSync(path.join(REPO, CONF), 'utf8'))
+  const dashboard = conf.app.windows.find((window) => window.label === 'dashboard')
+  assert.ok(dashboard, 'thiếu cấu hình cửa sổ dashboard')
+  assert.equal(dashboard.visible, false)
+})
+
 test('bắt được MSI lọt vào targets', () => {
   const { loi } = chay((c) => {
     c.bundle.targets = 'all'

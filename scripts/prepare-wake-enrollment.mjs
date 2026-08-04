@@ -16,6 +16,8 @@ const DEFAULT_SOURCE = "data/wake-enrollment/positive";
 const DEFAULT_MODEL_DIR = "tools/wakeword/work/output/wake_liva_en_v2";
 const TRAIN_PREFIX = 800_000;
 const TEST_PREFIX = 850_000;
+const NEGATIVE_TRAIN_PREFIX = 900_000;
+const NEGATIVE_TEST_PREFIX = 950_000;
 const MAX_COPIES_PER_SPLIT = 50_000;
 
 function fail(message) {
@@ -33,10 +35,14 @@ function parsePositiveInteger(raw, option) {
 function parseArgs(argv) {
   const options = {
     source: DEFAULT_SOURCE,
+    negativeSource: null,
     modelDir: DEFAULT_MODEL_DIR,
     minimum: 20,
+    negativeMinimum: 20,
     trainCopies: 10_000,
     testCopies: 1_000,
+    negativeTrainCopies: 10_000,
+    negativeTestCopies: 1_000,
   };
 
   for (let index = 0; index < argv.length; index += 2) {
@@ -49,11 +55,17 @@ function parseArgs(argv) {
       case "--source":
         options.source = value;
         break;
+      case "--negative-source":
+        options.negativeSource = value;
+        break;
       case "--model-dir":
         options.modelDir = value;
         break;
       case "--minimum":
         options.minimum = parsePositiveInteger(value, option);
+        break;
+      case "--negative-minimum":
+        options.negativeMinimum = parsePositiveInteger(value, option);
         break;
       case "--train-copies":
         options.trainCopies = parsePositiveInteger(value, option);
@@ -61,15 +73,27 @@ function parseArgs(argv) {
       case "--test-copies":
         options.testCopies = parsePositiveInteger(value, option);
         break;
+      case "--negative-train-copies":
+        options.negativeTrainCopies = parsePositiveInteger(value, option);
+        break;
+      case "--negative-test-copies":
+        options.negativeTestCopies = parsePositiveInteger(value, option);
+        break;
       default:
         fail(`Unknown option: ${option}`);
     }
   }
   if (options.minimum < 2) fail("--minimum must be at least 2");
+  if (options.negativeMinimum < 2)
+    fail("--negative-minimum must be at least 2");
   if (options.trainCopies > MAX_COPIES_PER_SPLIT)
     fail("--train-copies exceeds the safe limit");
   if (options.testCopies > MAX_COPIES_PER_SPLIT)
     fail("--test-copies exceeds the safe limit");
+  if (options.negativeTrainCopies > MAX_COPIES_PER_SPLIT)
+    fail("--negative-train-copies exceeds the safe limit");
+  if (options.negativeTestCopies > MAX_COPIES_PER_SPLIT)
+    fail("--negative-test-copies exceeds the safe limit");
   return options;
 }
 
@@ -147,6 +171,34 @@ function replicate(recordings, directory, prefix, copies) {
   }
 }
 
+function recordingsAt(source, minimum, label) {
+  if (!existsSync(source) || !statSync(source).isDirectory()) {
+    fail(`${source}: ${label} enrollment directory does not exist`);
+  }
+  const recordings = readdirSync(source, { withFileTypes: true })
+    .filter(
+      (entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".wav"),
+    )
+    .map((entry) => join(source, entry.name))
+    .sort((left, right) => left.localeCompare(right, "en"));
+  if (recordings.length < minimum) {
+    fail(
+      `${label} enrollment requires at least ${minimum} valid WAV recordings; found ${recordings.length}`,
+    );
+  }
+  recordings.forEach(inspectWav);
+  return recordings;
+}
+
+function splitRecordings(recordings) {
+  const test = recordings.filter((_, index) => index % 5 === 0);
+  const train = recordings.filter((_, index) => index % 5 !== 0);
+  if (train.length === 0 || test.length === 0) {
+    fail("Enrollment split must contain both train and test recordings");
+  }
+  return { train, test };
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
   const source = resolve(options.source);
@@ -154,28 +206,9 @@ function main() {
   if (basename(modelDir) !== "wake_liva_en_v2") {
     fail("--model-dir must end in wake_liva_en_v2");
   }
-  if (!existsSync(source) || !statSync(source).isDirectory()) {
-    fail(`${source}: enrollment directory does not exist`);
-  }
-
-  const recordings = readdirSync(source, { withFileTypes: true })
-    .filter(
-      (entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".wav"),
-    )
-    .map((entry) => join(source, entry.name))
-    .sort((left, right) => left.localeCompare(right, "en"));
-  if (recordings.length < options.minimum) {
-    fail(
-      `Enrollment requires at least ${options.minimum} valid WAV recordings; found ${recordings.length}`,
-    );
-  }
-  recordings.forEach(inspectWav);
-
-  const testRecordings = recordings.filter((_, index) => index % 5 === 0);
-  const trainRecordings = recordings.filter((_, index) => index % 5 !== 0);
-  if (trainRecordings.length === 0 || testRecordings.length === 0) {
-    fail("Enrollment split must contain both train and test recordings");
-  }
+  const recordings = recordingsAt(source, options.minimum, "Positive");
+  const { train: trainRecordings, test: testRecordings } =
+    splitRecordings(recordings);
 
   const trainDir = join(modelDir, "positive_train");
   const testDir = join(modelDir, "positive_test");
@@ -186,13 +219,57 @@ function main() {
   replicate(trainRecordings, trainDir, TRAIN_PREFIX, options.trainCopies);
   replicate(testRecordings, testDir, TEST_PREFIX, options.testCopies);
 
+  let negativeManifest = {};
+  if (options.negativeSource) {
+    const negativeSource = resolve(options.negativeSource);
+    const negativeRecordings = recordingsAt(
+      negativeSource,
+      options.negativeMinimum,
+      "Negative",
+    );
+    const { train: negativeTrain, test: negativeTest } =
+      splitRecordings(negativeRecordings);
+    const negativeTrainDir = join(modelDir, "negative_train");
+    const negativeTestDir = join(modelDir, "negative_test");
+    mkdirSync(negativeTrainDir, { recursive: true });
+    mkdirSync(negativeTestDir, { recursive: true });
+    removePriorInjection(
+      negativeTrainDir,
+      /^clip_9[0-4]\d{4}(?:_r\d+)?\.wav$/u,
+    );
+    removePriorInjection(
+      negativeTestDir,
+      /^clip_9[5-9]\d{4}(?:_r\d+)?\.wav$/u,
+    );
+    replicate(
+      negativeTrain,
+      negativeTrainDir,
+      NEGATIVE_TRAIN_PREFIX,
+      options.negativeTrainCopies,
+    );
+    replicate(
+      negativeTest,
+      negativeTestDir,
+      NEGATIVE_TEST_PREFIX,
+      options.negativeTestCopies,
+    );
+    negativeManifest = {
+      negative_source_recordings: negativeRecordings.length,
+      negative_train_recordings: negativeTrain.length,
+      negative_test_recordings: negativeTest.length,
+      negative_train_copies: options.negativeTrainCopies,
+      negative_test_copies: options.negativeTestCopies,
+    };
+  }
+
   const manifest = {
-    schema_version: 1,
+    schema_version: 2,
     source_recordings: recordings.length,
     train_recordings: trainRecordings.length,
     test_recordings: testRecordings.length,
     train_copies: options.trainCopies,
     test_copies: options.testCopies,
+    ...negativeManifest,
     split_rule:
       "sorted recordings where index % 5 == 0 are test; all others are train",
   };

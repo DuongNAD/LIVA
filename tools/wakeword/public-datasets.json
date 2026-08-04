@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "target_phrase": "hey liva",
+  "datasets": [
+    {
+      "id": "fleurs_vi",
+      "repo_id": "google/fleurs",
+      "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+      "config": "vi_vn",
+      "format": "parquet_files",
+      "path_prefix": "parquet-data",
+      "parquet_files": {
+        "train": ["vi_vn/train-00000-of-00001.parquet"],
+        "validation": ["vi_vn/validation-00000-of-00001.parquet"],
+        "test": ["vi_vn/test-00000-of-00001.parquet"]
+      },
+      "license": "cc-by-4.0",
+      "commercial_use": true,
+      "attribution": "FLEURS, Google Research, arXiv:2205.12446",
+      "role": "negative_speech",
+      "split_strategy": "native",
+      "text_field": "transcription",
+      "group_field": "id",
+      "max_samples": {
+        "train": 1000,
+        "validation": 300,
+        "test": 300
+      }
+    },
+    {
+      "id": "speech_commands_v2",
+      "repo_id": "google/speech_commands",
+      "revision": "a751309c0fd613e8a5d30d77900f30e8b42bc2da",
+      "config": "v0.02",
+      "format": "parquet_files",
+      "path_prefix": "v0.02",
+      "parquet_files": {
+        "train": [
+          "train-00000-of-00006.parquet",
+          "train-00001-of-00006.parquet",
+          "train-00002-of-00006.parquet",
+          "train-00003-of-00006.parquet",
+          "train-00004-of-00006.parquet",
+          "train-00005-of-00006.parquet"
+        ],
+        "validation": ["validation-00000-of-00001.parquet"],
+        "test": ["test-00000-of-00001.parquet"]
+      },
+      "license": "cc-by-4.0",
+      "commercial_use": true,
+      "attribution": "Speech Commands v0.02, Pete Warden / Google, arXiv:1804.03209",
+      "role": "negative_keyword",
+      "split_strategy": "native",
+      "text_field": "label",
+      "group_field": "speaker_id",
+      "max_samples": {
+        "train": 6000,
+        "validation": 800,
+        "test": 4000
+      },
+      "max_samples_per_file": {
+        "train": 1000
+      }
+    },
+    {
+      "id": "musan_noise",
+      "repo_id": "corypaik/musan",
+      "revision": "76f9882cfa4475efe11508ac9aa32722f84ca5b7",
+      "config": "noise",
+      "format": "parquet_files",
+      "path_prefix": "noise",
+      "parquet_files": {
+        "train": [
+          "train-00000-of-00002.parquet",
+          "train-00001-of-00002.parquet"
+        ]
+      },
+      "license": "cc-by-4.0",
+      "commercial_use": true,
+      "attribution": "MUSAN / OpenSLR SLR17, Snyder, Chen and Povey, arXiv:1510.08484; preserve per-clip license mapping",
+      "role": "negative_noise",
+      "split_strategy": "hash_80_10_10",
+      "text_field": "source",
+      "group_field": "path",
+      "max_samples": {
+        "train": 1500,
+        "validation": 250,
+        "test": 250
+      }
+    }
+  ]
+}

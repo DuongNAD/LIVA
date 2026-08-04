@@ -304,12 +304,14 @@ describe("WidgetApp.vue", () => {
     await wrapper.vm.$nextTick();
     await vi.advanceTimersByTimeAsync(500);
     expect(socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw).event))
-      .toContain("user_typing");
+      .not.toContain("user_typing");
 
     vm.sendMessage();
     expect(vm.messages.at(-1)).toMatchObject({ role: "user", text: "xin chào LIVA" });
     expect(socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw).event))
       .toContain("user_voice_command");
+    expect(socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw).event))
+      .not.toContain("user_typing_cancelled");
 
     (window as any).sendLIVAMessage("mở dashboard");
     vm.openDashboard();

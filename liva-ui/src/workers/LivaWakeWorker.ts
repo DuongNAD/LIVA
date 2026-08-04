@@ -49,7 +49,7 @@ function post(message: unknown, transfer?: Transferable[]) {
   else scope.postMessage(message);
 }
 
-function log(level: "info" | "warn" | "error", ...args: unknown[]) {
+function log(level: 'info' | 'warn' | 'error', ...args: unknown[]) {
   post({ type: '__log', level, args });
 }
 
@@ -203,7 +203,10 @@ function processAudioFrame(audioData: Float32Array): WakeCandidate | null {
 
   const now = Date.now();
   if (now - lastDebugLogTime > 1000) {
-    log('info', `[WakeWorker] RMS đỉnh 1 s qua: ${peakRmsInSecond.toFixed(4)} (sàn ${config.speechFloor})`);
+    log(
+      'info',
+      `[WakeWorker] RMS đỉnh 1 s qua: ${peakRmsInSecond.toFixed(4)} (sàn ${config.speechFloor})`
+    );
     peakRmsInSecond = 0;
     lastDebugLogTime = now;
   }
@@ -271,7 +274,10 @@ self.onmessage = async (event: MessageEvent) => {
       }
       resetSegmentation();
       isReady = true;
-      log('info', `[WakeWorker] Sẵn sàng — sàn RMS ${config.speechFloor}, cắt câu ${config.minUtteranceMs}–${config.maxUtteranceMs} ms`);
+      log(
+        'info',
+        `[WakeWorker] Sẵn sàng — sàn RMS ${config.speechFloor}, cắt câu ${config.minUtteranceMs}–${config.maxUtteranceMs} ms`
+      );
       post({ type: 'ready', success: true });
       break;
     }
@@ -282,12 +288,20 @@ self.onmessage = async (event: MessageEvent) => {
       const candidate = processAudioFrame(audioData);
 
       if (candidate) {
-        log('info', `[WakeWorker] Cụm ứng viên ${candidate.speechMs.toFixed(0)} ms → gửi core xác minh`);
+        log(
+          'info',
+          `[WakeWorker] Cụm ứng viên ${candidate.speechMs.toFixed(0)} ms → gửi core xác minh`
+        );
         // Chuyển quyền sở hữu buffer thay vì sao chép: câu ứng viên tới 3 s là
         // 192 KB, cấu trúc sao chép mặc định của postMessage sẽ nhân đôi nó.
         post(
-          { type: 'candidate', audio: candidate.audio.buffer, speechMs: candidate.speechMs, peakRms: candidate.peakRms },
-          [candidate.audio.buffer],
+          {
+            type: 'candidate',
+            audio: candidate.audio.buffer,
+            speechMs: candidate.speechMs,
+            peakRms: candidate.peakRms,
+          },
+          [candidate.audio.buffer]
         );
       }
       break;
@@ -331,6 +345,17 @@ self.onmessage = async (event: MessageEvent) => {
         config.speechFloor = newFloor;
         log('info', `[WakeWorker] Sàn RMS đặt thành: ${newFloor}`);
         post({ type: 'thresholdChanged', threshold: newFloor });
+      }
+      break;
+    }
+
+    case 'probeResult': {
+      // Cooldown chỉ chống gửi dồn khi core còn đang xác minh. Một probe đã bị
+      // từ chối không được tiếp tục khóa câu “Hey Liva” thật nói ngay sau tiếng
+      // TV/người khác. Khi accepted, pipeline sẽ chuyển ACTIVE nên giữ cooldown
+      // cũ để tránh một frame trễ tạo probe thứ hai.
+      if (data?.accepted === false) {
+        lastCandidateTime = 0;
       }
       break;
     }

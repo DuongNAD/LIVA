@@ -159,6 +159,10 @@ path = "src/bin/parakeet_probe.rs"
 test = false
 
 [[bin]]
+name = "wer_bench"
+path = "src/bin/wer_bench.rs"
+
+[[bin]]
 name = "vieneu_probe"
 path = "src/bin/vieneu_probe.rs"
 test = false

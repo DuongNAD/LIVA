@@ -3,12 +3,19 @@ param(
     [string]$Action = "Doctor",
     [string]$ModelPath = "",
     [string]$EnrollmentDir = "",
+    [string]$NegativeEnrollmentDir = "",
     [ValidateRange(2, 1000)]
     [int]$EnrollmentMinimum = 20,
     [ValidateRange(1, 50000)]
     [int]$EnrollmentTrainCopies = 10000,
     [ValidateRange(1, 50000)]
-    [int]$EnrollmentTestCopies = 1000
+    [int]$EnrollmentTestCopies = 1000,
+    [ValidateRange(2, 1000)]
+    [int]$NegativeEnrollmentMinimum = 20,
+    [ValidateRange(1, 50000)]
+    [int]$NegativeEnrollmentTrainCopies = 10000,
+    [ValidateRange(1, 50000)]
+    [int]$NegativeEnrollmentTestCopies = 1000
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,13 +89,21 @@ function Prepare-Enrollment {
     if ([string]::IsNullOrWhiteSpace($sourceDir)) {
         $sourceDir = Join-Path $repoRoot "data\wake-enrollment\positive"
     }
+    $negativeSourceDir = $NegativeEnrollmentDir
+    if ([string]::IsNullOrWhiteSpace($negativeSourceDir)) {
+        $negativeSourceDir = Join-Path $repoRoot "data\wake-enrollment\negative"
+    }
     Invoke-Checked {
         node scripts/prepare-wake-enrollment.mjs `
             --source $sourceDir `
+            --negative-source $negativeSourceDir `
             --model-dir $modelDir `
             --minimum $EnrollmentMinimum `
             --train-copies $EnrollmentTrainCopies `
-            --test-copies $EnrollmentTestCopies
+            --test-copies $EnrollmentTestCopies `
+            --negative-minimum $NegativeEnrollmentMinimum `
+            --negative-train-copies $NegativeEnrollmentTrainCopies `
+            --negative-test-copies $NegativeEnrollmentTestCopies
     }
 }
 

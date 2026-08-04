@@ -109,7 +109,11 @@ pub enum Intent {
     ///
     /// `body` được phép RỖNG — "nhắn cho Hiến đi" là câu hợp lệ, chỉ là chưa nói
     /// nội dung. Nhánh thi hành sẽ hỏi lại thay vì gửi một tin trống.
-    SendMessage { recipient: String, body: String },
+    SendMessage {
+        recipient: String,
+        body: String,
+        platform: Option<String>,
+    },
     /// Còn lại → trả lời bằng LLM.
     Chat,
 }
@@ -128,12 +132,12 @@ pub enum Intent {
 ///
 /// 1. **Cò:** (`nhắn`|`gửi`) [`tin`] [`nhắn`] `cho`. So khớp trên dạng đã bỏ dấu
 ///    nên "nhan cho" từ STT vẫn ăn.
-/// 2. **Mốc nội dung:** từ đầu tiên trong {`bảo`, `rằng`, `là`, `nói`} hoặc dấu
+/// 2. **Mốc nội dung:** từ đầu tiên trong {`bảo`, `rằng`, `là`, `nói`, `hỏi`} hoặc dấu
 ///    hai chấm. Trước mốc là tên, sau mốc là nội dung.
 /// 3. **Bỏ đại từ mở đầu nội dung:** "bảo **nó** ngủ đi" → "ngủ đi".
 ///
 /// Không có mốc thì toàn bộ phần sau cò là tên, nội dung rỗng.
-fn tach_nhan_tin(text: &str) -> Option<(String, String)> {
+fn tach_nhan_tin(text: &str) -> Option<(String, String, Option<String>)> {
     let goc: Vec<&str> = text.split_whitespace().collect();
     if goc.is_empty() {
         return None;
@@ -177,8 +181,8 @@ fn tach_nhan_tin(text: &str) -> Option<(String, String)> {
     // câu KHÔNG dấu nào — tức STT trả về trần — mới chấp nhận mốc không dấu.
     // Người gõ có dấu thì gõ có dấu cả câu; người đọc cho STT thì mất dấu cả
     // câu. Trường hợp lẫn lộn hiếm, và nếu trượt thì thẻ xác nhận đỡ.
-    const MOC_CO_DAU: [&str; 4] = ["bảo", "rằng", "là", "nói"];
-    const MOC_KHONG_DAU: [&str; 4] = ["bao", "rang", "la", "noi"];
+    const MOC_CO_DAU: [&str; 5] = ["bảo", "rằng", "là", "nói", "hỏi"];
+    const MOC_KHONG_DAU: [&str; 5] = ["bao", "rang", "la", "noi", "hoi"];
     let cau_co_dau = goc.iter().any(|t| {
         t.chars().any(|c| {
             crate::wake::normalize_for_match(&c.to_string()) != c.to_lowercase().to_string()
@@ -221,7 +225,30 @@ fn tach_nhan_tin(text: &str) -> Option<(String, String)> {
         None => (goc.len(), goc.len()),
     };
 
-    let ten = goc[bat_dau..het_ten]
+    // Nền tảng là hậu tố tùy chọn của tên: "Minh Hiền bằng Messenger".
+    // Chỉ cắt khi cả cụm nằm sát mốc nội dung để không nuốt các tên có từ
+    // "bằng"/"qua" ở giữa.
+    let mut het_nguoi_nhan = het_ten;
+    let mut platform = None;
+    if het_ten >= bat_dau + 3 {
+        for k in (bat_dau + 1)..(het_ten - 1) {
+            let la_tu_noi = matches!(gap[k].as_str(), "bang" | "qua" | "tren");
+            if !la_tu_noi || k + 2 != het_ten {
+                continue;
+            }
+            platform = match gap[k + 1].as_str() {
+                "messenger" | "messager" | "facebook" => Some("messenger".to_string()),
+                "telegram" => Some("telegram".to_string()),
+                _ => None,
+            };
+            if platform.is_some() {
+                het_nguoi_nhan = k;
+            }
+            break;
+        }
+    }
+
+    let ten = goc[bat_dau..het_nguoi_nhan]
         .join(" ")
         .trim_end_matches(':')
         .trim()
@@ -246,7 +273,7 @@ fn tach_nhan_tin(text: &str) -> Option<(String, String)> {
     }
     let noi_dung = goc.get(i..).unwrap_or(&[]).join(" ").trim().to_string();
 
-    Some((ten, noi_dung))
+    Some((ten, noi_dung, platform))
 }
 
 /// Tách câu thành các "từ" theo ranh giới ký tự chữ-số Unicode.
@@ -301,8 +328,12 @@ pub fn route_intent(text: &str) -> Intent {
     // Đặt đầu tiên là cách duy nhất để phần thân tin nhắn không bị nhánh khác
     // cướp. Đổi lại, cái giá phải trả là câu "chụp màn hình gửi cho Nam" sẽ
     // thành nhắn tin — chấp nhận được, vì bản nháp hiện ra để người dùng huỷ.
-    if let Some((recipient, body)) = tach_nhan_tin(text) {
-        return Intent::SendMessage { recipient, body };
+    if let Some((recipient, body, platform)) = tach_nhan_tin(text) {
+        return Intent::SendMessage {
+            recipient,
+            body,
+            platform,
+        };
     }
 
     // Vision ưu tiên cao nhất: hỏi về màn hình thì không thể là lệnh thiết bị.
@@ -751,13 +782,24 @@ pub fn build_pipeline_graph(
                     state.context.insert("action".to_string(), json!(action));
                     state.current_node = "tool_exec".to_string();
                 }
-                Intent::SendMessage { recipient, body } => {
+                Intent::SendMessage {
+                    recipient,
+                    body,
+                    platform,
+                } => {
                     state
                         .context
                         .insert("message_to".to_string(), json!(recipient));
                     state
                         .context
                         .insert("message_text".to_string(), json!(body));
+                    if let Some(platform) = platform {
+                        state
+                            .context
+                            .insert("message_platform".to_string(), json!(platform));
+                    } else {
+                        state.context.remove("message_platform");
+                    }
                     state.current_node = "message_draft".to_string();
                 }
                 // Đi qua ĐÚNG đường `mcp_call` mà nhánh LLM dùng, thay vì dựng
@@ -890,6 +932,11 @@ pub fn build_pipeline_graph(
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
+            let platform = state
+                .context
+                .get("message_platform")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
 
             let noi_dung = if text.trim().is_empty() {
                 // Không có nội dung thì hỏi lại, KHÔNG dựng bản nháp rỗng.
@@ -898,7 +945,10 @@ pub fn build_pipeline_graph(
                      Hãy hỏi lại họ muốn nhắn gì."
                 )
             } else {
-                let payload = json!({ "to": to, "text": text });
+                let payload = match platform {
+                    Some(platform) => json!({ "to": to, "text": text, "platform": platform }),
+                    None => json!({ "to": to, "text": text }),
+                };
                 match crate::commands::messaging::handle(ss, "message:draft", payload).await {
                     Ok(v) if v.get("needsConfirm").and_then(|b| b.as_bool()) == Some(true) => {
                         format!(
@@ -1189,7 +1239,9 @@ mod tach_nhan_tin_tests {
     use super::{Intent, route_intent, tach_nhan_tin};
 
     fn tach(s: &str) -> (String, String) {
-        tach_nhan_tin(s).unwrap_or_else(|| panic!("phai tach duoc: {s}"))
+        let (recipient, body, _) =
+            tach_nhan_tin(s).unwrap_or_else(|| panic!("phai tach duoc: {s}"));
+        (recipient, body)
     }
 
     #[test]
@@ -1198,6 +1250,28 @@ mod tach_nhan_tin_tests {
         let (ten, noi_dung) = tach("nhắn tin cho Minh hiến bảo nó ngủ đi");
         assert_eq!(ten, "Minh hiến");
         assert_eq!(noi_dung, "ngủ đi", "dai tu 'no' phai bi bo khoi noi dung");
+    }
+
+    #[test]
+    fn tach_nguoi_nhan_nen_tang_va_noi_dung_tu_cau_messenger() {
+        for cau in [
+            "nhắn tin cho Minh Hiền bằng Messenger bảo nó chiều đi bắt pokemon k",
+            "nhắn tin cho Minh Hiền bằng Messager bảo nó chiều đi bắt pokemon k",
+            "Nhắn tin cho Minh Hiền bằng messenger hỏi nó chiều đi bắt pokemon k",
+        ] {
+            match route_intent(cau) {
+                Intent::SendMessage {
+                    recipient,
+                    body,
+                    platform,
+                } => {
+                    assert_eq!(recipient, "Minh Hiền", "sai nguoi nhan o: {cau}");
+                    assert_eq!(body, "chiều đi bắt pokemon k", "sai noi dung o: {cau}");
+                    assert_eq!(platform.as_deref(), Some("messenger"), "sai nen o: {cau}");
+                }
+                khac => panic!("phai la SendMessage, nhan duoc {khac:?}"),
+            }
+        }
     }
 
     #[test]
@@ -1265,7 +1339,9 @@ mod tach_nhan_tin_tests {
     #[test]
     fn than_tin_nhan_khong_bi_nhanh_khac_cuop() {
         match route_intent("nhắn cho Nam bảo bật nhạc lên") {
-            Intent::SendMessage { recipient, body } => {
+            Intent::SendMessage {
+                recipient, body, ..
+            } => {
                 assert_eq!(recipient, "Nam");
                 assert_eq!(body, "bật nhạc lên");
             }

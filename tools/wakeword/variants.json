@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "base_model_dir": "tools/wakeword/work/output/wake_liva_en_v2",
+  "public_corpus_dir": "tools/wakeword/work/public-corpus",
+  "variant_output_dir": "tools/wakeword/work/variants",
+  "owner_positive_dir": "data/wake-enrollment/positive-clean",
+  "owner_negative_dir": "data/wake-enrollment/negative",
+  "promotion_gates": {
+    "minimum_owner_recall": 0.9,
+    "maximum_fpph": 1.0,
+    "minimum_ambient_negative_hours": 1.0
+  },
+  "variants": [
+    {
+      "id": "control_medium",
+      "model_name": "wake_liva_en_v3_control_medium",
+      "datasets": [],
+      "model_size": "medium",
+      "steps": 100000,
+      "adversarial_negative_batch": 50,
+      "requires_owner_hard_negatives_for_promotion": true
+    },
+    {
+      "id": "fleurs_medium",
+      "model_name": "wake_liva_en_v3_fleurs_medium",
+      "datasets": ["fleurs_vi"],
+      "model_size": "medium",
+      "steps": 100000,
+      "adversarial_negative_batch": 50,
+      "requires_owner_hard_negatives_for_promotion": true
+    },
+    {
+      "id": "commands_medium",
+      "model_name": "wake_liva_en_v3_commands_medium",
+      "datasets": ["speech_commands_v2"],
+      "model_size": "medium",
+      "steps": 100000,
+      "adversarial_negative_batch": 50,
+      "requires_owner_hard_negatives_for_promotion": true
+    },
+    {
+      "id": "hybrid_medium",
+      "model_name": "wake_liva_en_v3_hybrid_medium",
+      "datasets": ["fleurs_vi", "speech_commands_v2", "musan_noise"],
+      "model_size": "medium",
+      "steps": 100000,
+      "adversarial_negative_batch": 75,
+      "requires_owner_hard_negatives_for_promotion": true
+    },
+    {
+      "id": "hybrid_large",
+      "model_name": "wake_liva_en_v3_hybrid_large",
+      "datasets": ["fleurs_vi", "speech_commands_v2", "musan_noise"],
+      "model_size": "large",
+      "steps": 100000,
+      "adversarial_negative_batch": 75,
+      "requires_owner_hard_negatives_for_promotion": true
+    }
+  ]
+}

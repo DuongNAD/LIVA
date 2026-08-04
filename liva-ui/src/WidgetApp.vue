@@ -167,31 +167,6 @@ const isThinking = ref(false);
 const inputText = ref("");
 const isCollapsed = ref(true);
 
-let typingDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let lastSentTypingText = "";
-
-watch(inputText, (newVal) => {
-  if (typingDebounceTimer) {
-    clearTimeout(typingDebounceTimer);
-  }
-
-  const cleanVal = newVal.trim();
-
-  if (cleanVal.length === 0) {
-    if (lastSentTypingText !== "") {
-      lastSentTypingText = "";
-      sendMsg("user_typing_cancelled");
-    }
-    return;
-  }
-
-  if (cleanVal.length >= 5 && cleanVal !== lastSentTypingText) {
-    typingDebounceTimer = setTimeout(() => {
-        sendMsg("user_typing", { text: cleanVal });
-    }, 500);
-  }
-});
-
 // Theme Toggle
 const isLightMode = ref(globalThis.localStorage?.getItem("theme") === "light");
 const toggleTheme = () => {
@@ -1220,7 +1195,6 @@ onUnmounted(() => {
     zonesInterval = null;
   }
   // [Audit H-3, H-5] Clean zombie timers
-  if (typingDebounceTimer) { clearTimeout(typingDebounceTimer); typingDebounceTimer = null; }
   if (sensingTimeout) { clearTimeout(sensingTimeout); sensingTimeout = null; }
 });
 

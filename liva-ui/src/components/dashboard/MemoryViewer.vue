@@ -18,11 +18,15 @@ import type {
   MemoryVectorItem,
 } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
+import MemoryViewerHeader from "./memory/MemoryViewerHeader.vue";
+import MemoryViewerStats from "./memory/MemoryViewerStats.vue";
+import MemoryViewerTabs from "./memory/MemoryViewerTabs.vue";
+import type { MemoryTab } from "./memory/memoryTypes";
 
 const gateway = useGateway();
 const { currentLang } = useI18n();
 
-const activeTab = ref<"l0" | "l0_5" | "facts" | "events" | "vectors">("facts");
+const activeTab = ref<MemoryTab>("facts");
 
 // Search & Filtering State
 const l0Query = ref("");
@@ -293,140 +297,30 @@ onDeactivated(() => {
 
 <template>
   <div class="memory-viewer animate-fadeIn">
-    <!-- Header -->
-    <div class="page-header">
-      <div class="header-row">
-        <div>
-          <h1 class="section-title">🧠 {{ currentLang === 'vi-VN' ? 'Không gian Trí nhớ' : 'Memory Space' }}</h1>
-          <p class="page-desc">
-            {{ currentLang === 'vi-VN' 
-              ? `Hệ thống ký ức hợp nhất — ${totalMemories} mục nhớ trên 5 tầng (L0 RAM, L0.5 Phiên, L1 Vector, L2 Sự kiện, L3 Sự thật).`
-              : `Unified Hierarchical Memory — ${totalMemories} memories across 5 layers (L0 RAM, L0.5 Session, L1 Vectors, L2 Events, L3 Facts).`
-            }}
-          </p>
-        </div>
-        <div class="header-actions">
-          <button class="btn btn-secondary btn-sm" @click="triggerConsolidation" :disabled="isConsolidating">
-            <span v-if="isConsolidating" class="spinner"></span>
-            <span v-else>⚡ {{ currentLang === 'vi-VN' ? 'Kiểm tra projection' : 'Validate projections' }}</span>
-          </button>
-          <button class="btn btn-secondary btn-sm" @click="refreshMemory" :disabled="isRefreshing">
-            <span v-if="isRefreshing" class="spinner"></span>
-            <span v-else>🔄 {{ currentLang === 'vi-VN' ? 'Làm mới' : 'Refresh' }}</span>
-          </button>
-          <button
-            class="btn btn-secondary restart-btn"
-            :class="{ arming: dangHoiKhoiDongLai }"
-            :disabled="dangKhoiDongLai"
-            @click="khoiDongLai"
-          >
-            <span v-if="dangKhoiDongLai">⏳ {{ currentLang === 'vi-VN' ? 'Đang khởi động lại…' : 'Restarting…' }}</span>
-            <span v-else-if="dangHoiKhoiDongLai">⚠️ {{ currentLang === 'vi-VN' ? 'Bấm lần nữa để khởi động lại' : 'Click again to restart' }}</span>
-            <span v-else>♻️ {{ currentLang === 'vi-VN' ? 'Khởi động lại LIVA' : 'Restart LIVA' }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Trí nhớ nhìn thấy được (U18): chỉ ra thứ VỪA được ghi thêm kể từ lần
-         mở panel gần nhất. Đây là bằng chứng "LIVA có nhớ" mà trước nay chỉ
-         nằm trong output của scripts/e2e-memory.mjs. -->
-    <div v-if="suKienMoi > 0" class="vua-nho-banner">
-      🧠
-      <strong>{{ currentLang === 'vi-VN' ? `LIVA vừa nhớ thêm ${suKienMoi} điều` : `LIVA just remembered ${suKienMoi} more` }}</strong>
-      <span class="vua-nho-hint">
-        {{ currentLang === 'vi-VN'
-          ? 'Bấm "Khởi động lại LIVA" rồi hỏi lại — ký ức nằm trong SQLite, không phải RAM.'
-          : 'Hit “Restart LIVA” then ask again — memory lives in SQLite, not RAM.' }}
-      </span>
-    </div>
-
-    <div v-if="loiKhoiDongLai" class="vua-nho-banner loi">⚠️ {{ loiKhoiDongLai }}</div>
-
-    <!-- Quick Stats Grid -->
-    <div class="stats-grid five-cols">
-      <div class="stat-card l0-stat" @click="activeTab = 'l0'" :class="{ active: activeTab === 'l0' }">
-        <div class="stat-icon">🧠</div>
-        <div class="stat-info">
-          <h3>{{ l0Count }}</h3>
-          <p>{{ currentLang === 'vi-VN' ? 'Trí nhớ RAM L0' : 'L0 RAM Cache' }}</p>
-        </div>
-      </div>
-      <div
-        class="stat-card l0-5-stat"
-        :class="{ active: activeTab === 'l0_5', 'chua-noi-day': l0_5ChuaNoiDay }"
-        @click="activeTab = 'l0_5'"
-      >
-        <div class="stat-icon">📑</div>
-        <div class="stat-info">
-          <h3>{{ l0_5Size }}</h3>
-          <p>
-            {{ currentLang === 'vi-VN' ? 'Phiên L0.5' : 'L0.5 Session' }}
-            <span v-if="l0_5ChuaNoiDay" class="chua-co-badge">{{ currentLang === 'vi-VN' ? 'chưa có' : 'not wired' }}</span>
-          </p>
-        </div>
-      </div>
-      <div class="stat-card facts-stat" @click="activeTab = 'facts'" :class="{ active: activeTab === 'facts' }">
-        <div class="stat-icon">💾</div>
-        <div class="stat-info">
-          <h3>{{ factsCount }}</h3>
-          <p>{{ currentLang === 'vi-VN' ? 'Sự thật L3' : 'L3 Facts' }}</p>
-        </div>
-      </div>
-      <div class="stat-card events-stat" @click="activeTab = 'events'" :class="{ active: activeTab === 'events' }">
-        <div class="stat-icon">⚡</div>
-        <div class="stat-info">
-          <h3>{{ eventsCount }}</h3>
-          <p>{{ currentLang === 'vi-VN' ? 'Sự kiện L2' : 'L2 Events' }}</p>
-        </div>
-      </div>
-      <div class="stat-card vectors-stat" @click="activeTab = 'vectors'" :class="{ active: activeTab === 'vectors' }">
-        <div class="stat-icon">🌐</div>
-        <div class="stat-info">
-          <h3>{{ vectorsCount }}</h3>
-          <p>{{ currentLang === 'vi-VN' ? 'Vector L1' : 'L1 Vectors' }}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab Selection Navigation -->
-    <div class="tab-nav">
-      <button 
-        class="tab-btn" 
-        :class="{ active: activeTab === 'l0' }" 
-        @click="activeTab = 'l0'"
-      >
-        🧠 {{ currentLang === 'vi-VN' ? 'L0 RAM Cache' : 'L0 RAM Cache' }}
-      </button>
-      <button 
-        class="tab-btn" 
-        :class="{ active: activeTab === 'l0_5' }" 
-        @click="activeTab = 'l0_5'"
-      >
-        📑 {{ currentLang === 'vi-VN' ? 'L0.5 Phiên' : 'L0.5 Session' }}
-      </button>
-      <button 
-        class="tab-btn" 
-        :class="{ active: activeTab === 'vectors' }" 
-        @click="activeTab = 'vectors'"
-      >
-        🌐 {{ currentLang === 'vi-VN' ? 'L1 Vector' : 'L1 Vectors' }}
-      </button>
-      <button 
-        class="tab-btn" 
-        :class="{ active: activeTab === 'events' }" 
-        @click="activeTab = 'events'"
-      >
-        🕰️ {{ currentLang === 'vi-VN' ? 'L2 Sự kiện' : 'L2 Events' }}
-      </button>
-      <button 
-        class="tab-btn" 
-        :class="{ active: activeTab === 'facts' }" 
-        @click="activeTab = 'facts'"
-      >
-        💾 {{ currentLang === 'vi-VN' ? 'L3 Sự thật' : 'L3 Facts' }}
-      </button>
-    </div>
+    <MemoryViewerHeader
+      :current-lang="currentLang"
+      :total-memories="totalMemories"
+      :is-consolidating="isConsolidating"
+      :is-refreshing="isRefreshing"
+      :is-restarting="dangKhoiDongLai"
+      :is-restart-armed="dangHoiKhoiDongLai"
+      :recent-memories="suKienMoi"
+      :restart-error="loiKhoiDongLai"
+      @consolidate="triggerConsolidation"
+      @refresh="refreshMemory"
+      @restart="khoiDongLai"
+    />
+    <MemoryViewerStats
+      v-model:active-tab="activeTab"
+      :current-lang="currentLang"
+      :l0-count="l0Count"
+      :l05-size="l0_5Size"
+      :l05-not-wired="l0_5ChuaNoiDay"
+      :facts-count="factsCount"
+      :events-count="eventsCount"
+      :vectors-count="vectorsCount"
+    />
+    <MemoryViewerTabs v-model:active-tab="activeTab" :current-lang="currentLang" />
 
 
 

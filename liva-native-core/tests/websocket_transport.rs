@@ -39,6 +39,33 @@ fn test_state() -> Arc<AppState> {
     })
 }
 
+async fn receive_text_event(
+    client: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    expected_event: &str,
+) -> serde_json::Value {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let message = client
+                .next()
+                .await
+                .expect("server closed before expected event")
+                .expect("receive WebSocket event");
+            let Message::Text(text) = message else {
+                continue;
+            };
+            let value: serde_json::Value =
+                serde_json::from_str(&text).expect("server text must be JSON");
+            if value.get("event").and_then(|event| event.as_str()) == Some(expected_event) {
+                return value;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for expected event")
+}
+
 #[tokio::test]
 async fn reusable_server_binds_and_echoes_voice_handshake() {
     let server = liva_native_core::websocket::WebSocketServer::bind("127.0.0.1:0")
@@ -79,6 +106,137 @@ async fn reusable_server_binds_and_echoes_voice_handshake() {
     assert_eq!(actual.op_code, expected.op_code);
     assert_eq!(actual.seq_id, expected.seq_id);
     assert_eq!(actual.payload, expected.payload);
+
+    client.close(None).await.expect("close client");
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn voice_message_dialogue_asks_platform_and_remembers_the_request() {
+    let server = liva_native_core::websocket::WebSocketServer::bind("127.0.0.1:0")
+        .await
+        .expect("bind reusable WebSocket server");
+    let address = server.local_addr();
+    let server_task = tokio::spawn(server.run(test_state()));
+    let (mut client, _) = connect_async(format!("ws://{address}/ws"))
+        .await
+        .expect("connect to reusable server");
+
+    client
+        .send(Message::Text(
+            serde_json::json!({
+                "event": "user_voice_command",
+                "payload": {
+                    "text": "nhắn tin cho Minh Hiển hỏi nó chiều đi bắt pokemon k"
+                }
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("send initial voice command");
+    let prompt = receive_text_event(&mut client, "ai_spoken_response").await;
+    assert_eq!(
+        prompt
+            .pointer("/payload/text")
+            .and_then(|text| text.as_str()),
+        Some("Bạn muốn nhắn bằng Messenger hay Telegram?")
+    );
+
+    client
+        .send(Message::Text(
+            serde_json::json!({
+                "event": "user_voice_command",
+                "payload": { "text": "Messenger" }
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("answer platform prompt");
+    let result = receive_text_event(&mut client, "ai_spoken_response").await;
+    let response = result
+        .pointer("/payload/text")
+        .and_then(|text| text.as_str())
+        .expect("spoken response text");
+    assert!(
+        response.contains("Chưa có ai tên Minh Hiển"),
+        "the second turn must reuse the original recipient: {response}"
+    );
+
+    client.close(None).await.expect("close client");
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn voice_message_dialogue_creates_then_cancels_a_draft_without_sending() {
+    let state = test_state();
+    {
+        let connection = state.db.writer.get().expect("writer connection");
+        liva_native_core::messaging::contacts::upsert(
+            &connection,
+            "Minh Hiển",
+            liva_native_core::messaging::contacts::Platform::Messenger,
+            "123456789",
+            "",
+        )
+        .expect("insert Messenger contact");
+    }
+    let server = liva_native_core::websocket::WebSocketServer::bind("127.0.0.1:0")
+        .await
+        .expect("bind reusable WebSocket server");
+    let address = server.local_addr();
+    let server_task = tokio::spawn(server.run(Arc::clone(&state)));
+    let (mut client, _) = connect_async(format!("ws://{address}/ws"))
+        .await
+        .expect("connect to reusable server");
+
+    client
+        .send(Message::Text(
+            serde_json::json!({
+                "event": "user_voice_command",
+                "payload": {
+                    "text": "nhắn tin cho Minh Hiển bằng Messenger hỏi nó chiều đi bắt pokemon k"
+                }
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("send complete voice command");
+    let confirmation = receive_text_event(&mut client, "ai_spoken_response").await;
+    let confirmation_text = confirmation
+        .pointer("/payload/text")
+        .and_then(|text| text.as_str())
+        .expect("confirmation text");
+    assert!(confirmation_text.contains("Minh Hiển"));
+    assert!(confirmation_text.contains("chiều đi bắt pokemon k"));
+    assert!(confirmation_text.contains("gửi đi"));
+    assert!(confirmation_text.contains("hủy"));
+
+    client
+        .send(Message::Text(
+            serde_json::json!({
+                "event": "user_voice_command",
+                "payload": { "text": "hủy đi" }
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("cancel draft by voice");
+    let cancellation = receive_text_event(&mut client, "ai_spoken_response").await;
+    assert_eq!(
+        cancellation
+            .pointer("/payload/text")
+            .and_then(|text| text.as_str()),
+        Some("Mình đã hủy bản nháp, chưa gửi tin nhắn.")
+    );
+
+    let pending_count: i64 = state
+        .db
+        .writer
+        .get()
+        .expect("writer connection")
+        .query_row("SELECT COUNT(*) FROM message_outbox", [], |row| row.get(0))
+        .expect("count pending drafts");
+    assert_eq!(pending_count, 0, "cancel must remove the only draft");
 
     client.close(None).await.expect("close client");
     server_task.abort();

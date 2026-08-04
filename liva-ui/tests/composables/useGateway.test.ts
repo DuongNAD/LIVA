@@ -134,6 +134,31 @@ describe('useGateway — sendMsg guards', () => {
   });
 });
 
+describe('useGateway — Tauri vision errors', () => {
+  it('finishes vision immediately when native IPC rejects', async () => {
+    vi.resetModules();
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    const invoke = vi.fn().mockRejectedValue(
+      new Error('Vision requires a release build (debug CRT assertion in the mmproj loader)'),
+    );
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke }));
+
+    try {
+      const { useGateway: useTauriGateway } = await import('../../src/composables/useGateway');
+      const gw = useTauriGateway();
+      gw.askVision();
+      expect(gw.visionBusy.value).toBe(true);
+
+      await vi.waitFor(() => expect(gw.visionBusy.value).toBe(false));
+      expect(gw.visionError.value).toContain('Vision requires a release build');
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      vi.doUnmock('@tauri-apps/api/core');
+      vi.resetModules();
+    }
+  });
+});
+
 describe('useGateway — destroy', () => {
   beforeEach(() => {
     vi.clearAllMocks();

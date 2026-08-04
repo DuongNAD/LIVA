@@ -24,7 +24,7 @@
     "check:installer": "node scripts/check-installer-config.mjs",
     "test:installer": "node --test scripts/check-installer-config.test.mjs",
     "installer:windows": "npm run check:installer && npm run build:ui && cd liva-desktop && npx tauri build",
-    "docs:check": "node --test scripts/docs-capabilities.test.mjs scripts/docs-inventory.test.mjs scripts/docs-citations.test.mjs scripts/wake-ux-copy.test.mjs scripts/wake-training.test.mjs scripts/wake-enrollment.test.mjs && node scripts/docs-capabilities.mjs --check && node scripts/docs-inventory.mjs --check && node scripts/docs-check.mjs",
+    "docs:check": "node --test scripts/docs-capabilities.test.mjs scripts/docs-inventory.test.mjs scripts/docs-citations.test.mjs scripts/license-policy.test.mjs scripts/wake-ux-copy.test.mjs scripts/wake-training.test.mjs scripts/wake-enrollment.test.mjs && node scripts/docs-capabilities.mjs --check && node scripts/docs-inventory.mjs --check && node scripts/docs-check.mjs",
     "docs:capabilities": "node scripts/docs-capabilities.mjs",
     "docs:capabilities:check": "node scripts/docs-capabilities.mjs --check",
     "test:docs-capabilities": "node --test scripts/docs-capabilities.test.mjs",
@@ -45,7 +45,8 @@
     "test:skills": "node --test scripts/audit-liva-skills.test.mjs",
     "gitnexus:index": "node .gitnexus/run.cjs analyze --force --pdg --embeddings",
     "prepare": "husky",
-    "test:citations": "node --test scripts/docs-citations.test.mjs"
+    "test:citations": "node --test scripts/docs-citations.test.mjs",
+    "test:license-policy": "node --test scripts/license-policy.test.mjs"
   },
   "dependencies": {
     "sqlite-vec": "^0.1.9"

@@ -264,9 +264,11 @@ fn thu_thap() -> Vec<Muc> {
     //    hai dòng đó nói về giá trị mặc định trong code, không phải cái app dùng.
     //
     //    Đây là một cái bẫy thật, không phải giả thiết: `config_file_path()` dò
-    //    cwd rồi hai cấp trên, hụt thì rơi về `DEFAULT_ROUTER_MODEL` — hiện vẫn
-    //    là `gemma-4-E4B`, tức KHÔNG phải router thật của dự án (Qwen3-VL). Chạy
-    //    preflight từ sai thư mục sẽ thấy một dòng ✓ trỏ vào model sai.
+    //    cwd rồi hai cấp trên, hụt thì rơi về `DEFAULT_ROUTER_MODEL`. Chạy
+    //    preflight từ sai thư mục sẽ thấy một dòng ✓ nói về hằng số trong mã chứ
+    //    không phải về model mà app đang thật sự nạp — hai thứ đó trùng nhau
+    //    HÔM NAY (cùng là `gemma-4-E4B` từ 02/08/2026) nên cái bẫy vô hình; ngày
+    //    chúng lệch nhau lại là ngày dòng ✓ này nói dối mà không ai thấy.
     let cfg = liva_native_core::config_file_path();
     let co_cfg = cfg.exists();
     muc.push(if co_cfg {

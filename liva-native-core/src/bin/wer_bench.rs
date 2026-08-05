@@ -6,8 +6,9 @@
 
 use liva_native_core::stt::SttManager;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const DEFAULT_MIN_SAMPLES: usize = 100;
 
@@ -73,6 +74,7 @@ impl WordErrors {
 #[derive(Debug, Serialize)]
 struct EngineResult {
     engine: &'static str,
+    active_engine: &'static str,
     samples: usize,
     substitutions: usize,
     deletions: usize,
@@ -82,6 +84,8 @@ struct EngineResult {
     audio_seconds: f64,
     elapsed_seconds: f64,
     real_time_factor: f64,
+    end_of_turn_latency_p50_ms: f64,
+    end_of_turn_latency_p95_ms: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,6 +93,8 @@ struct BenchmarkReport {
     dataset: &'static str,
     manifest: String,
     production_api: &'static str,
+    parakeet_model_sha256: Option<String>,
+    parakeet_model_revision: Option<String>,
     results: Vec<EngineResult>,
 }
 
@@ -294,6 +300,88 @@ fn validate_engine_assets(engine: Engine, model_dir: &Path) -> Result<(), String
     Ok(())
 }
 
+fn percentile(samples: &[Duration], percentile: f64) -> Duration {
+    if samples.is_empty() {
+        return Duration::ZERO;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    let rank = ((percentile / 100.0) * sorted.len() as f64).ceil().max(1.0) as usize;
+    sorted[(rank - 1).min(sorted.len() - 1)]
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("đọc model {:?}: {e}", path))?;
+    Ok(Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ParakeetProvenance {
+    sha256: String,
+    revision: String,
+}
+
+fn parakeet_provenance(
+    model_path: &Path,
+    manifest_path: &Path,
+) -> Result<ParakeetProvenance, String> {
+    let manifest_raw = std::fs::read_to_string(manifest_path)
+        .map_err(|error| format!("đọc manifest model {:?}: {error}", manifest_path))?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_raw)
+        .map_err(|error| format!("parse manifest model {:?}: {error}", manifest_path))?;
+    let entry = manifest["files"]
+        .as_array()
+        .and_then(|files| {
+            files
+                .iter()
+                .find(|entry| entry["dest"] == "models/parakeet_vi.onnx")
+        })
+        .ok_or_else(|| "manifest thiếu entry models/parakeet_vi.onnx".to_string())?;
+    let url = entry["url"]
+        .as_str()
+        .ok_or_else(|| "entry Parakeet thiếu url".to_string())?;
+    let revision = url
+        .split_once("/resolve/")
+        .and_then(|(_, tail)| tail.split('/').next())
+        .filter(|revision| {
+            revision.len() == 40 && revision.chars().all(|ch| ch.is_ascii_hexdigit())
+        })
+        .ok_or_else(|| format!("URL Parakeet không chứa revision cố định: {url}"))?;
+    let expected_sha256 = entry["sha256"]
+        .as_str()
+        .ok_or_else(|| "entry Parakeet thiếu sha256".to_string())?;
+    let sha256 = sha256_file(model_path)?;
+    if !sha256.eq_ignore_ascii_case(expected_sha256) {
+        return Err(format!(
+            "SHA-256 Parakeet không khớp manifest: thực tế {sha256}, mong đợi {expected_sha256}"
+        ));
+    }
+
+    Ok(ParakeetProvenance {
+        sha256,
+        revision: revision.to_string(),
+    })
+}
+
+fn validate_active_engine(
+    requested: Engine,
+    active: &str,
+    fallback_reason: Option<&str>,
+) -> Result<(), String> {
+    if requested != Engine::Parakeet || active == "Parakeet-vi" {
+        return Ok(());
+    }
+    Err(format!(
+        "yêu cầu benchmark Parakeet nhưng runtime đang dùng {active}{}",
+        fallback_reason
+            .map(|reason| format!(" · đã lùi engine: {reason}"))
+            .unwrap_or_default()
+    ))
+}
+
 fn run_engine(
     engine: Engine,
     model_dir: &Path,
@@ -307,12 +395,19 @@ fn run_engine(
     let started = Instant::now();
     let mut aggregate = WordErrors::default();
     let mut audio_seconds = 0.0f64;
+    let mut end_of_turn_latencies = Vec::with_capacity(samples.len());
     for (index, sample) in samples.iter().enumerate() {
         let (sample_rate, audio) = read_wav_pcm16_mono(&sample.audio)?;
         audio_seconds += audio.len() as f64 / sample_rate as f64;
+        let vad_ended = Instant::now();
         let hypothesis = stt
             .feed_audio(&audio, true)?
             .ok_or_else(|| format!("STT không trả final transcript cho {:?}", sample.audio))?;
+        if index == 0 {
+            let (active, fallback_reason) = stt.active_vietnamese_engine();
+            validate_active_engine(engine, active, fallback_reason)?;
+        }
+        end_of_turn_latencies.push(vad_ended.elapsed());
         aggregate.add(align_words(
             &normalize_words(&sample.transcript),
             &normalize_words(&hypothesis),
@@ -327,8 +422,11 @@ fn run_engine(
     } else {
         100.0 * aggregate.total() as f64 / aggregate.reference_words as f64
     };
+    let (active_engine, fallback_reason) = stt.active_vietnamese_engine();
+    validate_active_engine(engine, active_engine, fallback_reason)?;
     Ok(EngineResult {
         engine: engine.name(),
+        active_engine,
         samples: samples.len(),
         substitutions: aggregate.substitutions,
         deletions: aggregate.deletions,
@@ -338,6 +436,10 @@ fn run_engine(
         audio_seconds,
         elapsed_seconds,
         real_time_factor: elapsed_seconds / audio_seconds,
+        end_of_turn_latency_p50_ms: percentile(&end_of_turn_latencies, 50.0).as_secs_f64()
+            * 1_000.0,
+        end_of_turn_latency_p95_ms: percentile(&end_of_turn_latencies, 95.0).as_secs_f64()
+            * 1_000.0,
     })
 }
 
@@ -403,6 +505,17 @@ fn usage() -> &'static str {
 fn run() -> Result<(), String> {
     let args = parse_args(std::env::args())?;
     let samples = read_manifest(&args.manifest, args.limit, args.min_samples)?;
+    let parakeet_provenance = if args.engines.contains(&Engine::Parakeet) {
+        let model = std::env::var_os("LIVA_PARAKEET_MODEL_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("models/parakeet_vi.onnx"));
+        Some(parakeet_provenance(
+            &model,
+            Path::new("data/models-manifest.json"),
+        )?)
+    } else {
+        None
+    };
     let mut results = Vec::new();
     for engine in args.engines {
         results.push(run_engine(engine, &args.model_dir, &samples)?);
@@ -411,6 +524,10 @@ fn run() -> Result<(), String> {
         dataset: "google/fleurs vi_vn test",
         manifest: args.manifest.display().to_string(),
         production_api: "liva_native_core::stt::SttManager::feed_audio(audio, true)",
+        parakeet_model_sha256: parakeet_provenance
+            .as_ref()
+            .map(|provenance| provenance.sha256.clone()),
+        parakeet_model_revision: parakeet_provenance.map(|provenance| provenance.revision),
         results,
     };
     let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
@@ -489,5 +606,96 @@ mod tests {
         assert_eq!(args.engines, vec![Engine::Nemotron, Engine::Parakeet]);
         assert_eq!(args.limit, 100);
         assert_eq!(args.min_samples, 100);
+        let samples: Vec<Duration> = (1..=100).map(Duration::from_millis).collect();
+
+        assert_eq!(percentile(&samples, 50.0), Duration::from_millis(50));
+        assert_eq!(percentile(&samples, 95.0), Duration::from_millis(95));
+        assert_eq!(percentile(&[], 95.0), Duration::ZERO);
+    }
+
+    #[test]
+    fn report_serializes_parakeet_sha256_and_manifest_revision() {
+        let expected = "aa5658c3499fc991780e44ad5ccd9d4393d1266727a281cb3e4ca39be42334c4";
+        let revision = "240d82cc243f7cf47d100b293c7dff96e65a04c2";
+        let report = BenchmarkReport {
+            dataset: "test",
+            manifest: "test.jsonl".to_string(),
+            production_api: "SttManager::feed_audio",
+            parakeet_model_sha256: Some(expected.to_string()),
+            parakeet_model_revision: Some(revision.to_string()),
+            results: Vec::new(),
+        };
+        let value = serde_json::to_value(report).unwrap();
+        assert_eq!(value["parakeet_model_sha256"], expected);
+        assert_eq!(value["parakeet_model_revision"], revision);
+    }
+
+    #[test]
+    fn hashes_the_exact_model_file_used_by_the_benchmark() {
+        let path = std::env::temp_dir().join(format!("liva-wer-hash-{}.onnx", std::process::id()));
+        std::fs::write(&path, b"abc").unwrap();
+        let digest = sha256_file(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn parakeet_benchmark_rejects_a_silent_fallback() {
+        let error = validate_active_engine(
+            Engine::Parakeet,
+            "Nemotron",
+            Some("missing external weights"),
+        )
+        .unwrap_err();
+        assert!(error.contains("Nemotron"));
+        assert!(error.contains("missing external weights"));
+        assert!(validate_active_engine(Engine::Parakeet, "Parakeet-vi", None).is_ok());
+    }
+
+    #[test]
+    fn parakeet_provenance_reads_revision_from_the_matching_manifest_entry() {
+        let root = std::env::temp_dir().join(format!("liva-wer-provenance-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let model = root.join("parakeet_vi.onnx");
+        let manifest = root.join("models-manifest.json");
+        std::fs::write(&model, b"abc").unwrap();
+        std::fs::write(
+            &manifest,
+            r#"{"files":[{"dest":"models/parakeet_vi.onnx","url":"https://huggingface.co/OpenVoiceOS/model/resolve/240d82cc243f7cf47d100b293c7dff96e65a04c2/model.onnx","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]}"#,
+        )
+        .unwrap();
+
+        let provenance = parakeet_provenance(&model, &manifest).unwrap();
+
+        assert_eq!(
+            provenance.revision,
+            "240d82cc243f7cf47d100b293c7dff96e65a04c2"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parakeet_provenance_rejects_a_model_that_does_not_match_the_manifest() {
+        let root = std::env::temp_dir().join(format!(
+            "liva-wer-provenance-mismatch-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let model = root.join("parakeet_vi.onnx");
+        let manifest = root.join("models-manifest.json");
+        std::fs::write(&model, b"not the published graph").unwrap();
+        std::fs::write(
+            &manifest,
+            r#"{"files":[{"dest":"models/parakeet_vi.onnx","url":"https://huggingface.co/OpenVoiceOS/model/resolve/240d82cc243f7cf47d100b293c7dff96e65a04c2/model.onnx","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]}"#,
+        )
+        .unwrap();
+
+        let error = parakeet_provenance(&model, &manifest).unwrap_err();
+
+        assert!(error.contains("SHA-256"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

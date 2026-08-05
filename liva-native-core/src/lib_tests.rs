@@ -489,7 +489,7 @@ mod system_status_tests {
     /// `AppState` tối thiểu: không TTS, không VAD/denoise/AEC/embedder, STT trỏ
     /// vào thư mục không tồn tại. Đây đúng là hình trạng của một máy vừa clone
     /// về chưa tải model — và bảng sức khoẻ phải nói ĐÚNG điều đó.
-    fn state_toi_thieu() -> Arc<AppState> {
+    fn state_voi_stt(stt_manager: stt::SttManager) -> Arc<AppState> {
         unsafe {
             std::env::set_var("LIVA_ENCRYPTION_KEY", "00000000000000000000000000000000");
             std::env::remove_var("TELEGRAM_BOT_TOKEN");
@@ -502,7 +502,7 @@ mod system_status_tests {
         Arc::new(AppState {
             db: db::DatabasePool::new_in_memory().expect("in-memory db"),
             crypto: crypto::EncryptionEngine::new("00000000000000000000000000000000"),
-            stt: tokio::sync::Mutex::new(stt::SttManager::new("khong_ton_tai_dau_ca")),
+            stt: tokio::sync::Mutex::new(stt_manager),
             tts: tokio::sync::Mutex::new(None),
             tts_player: tts::audio::TtsAudioPlayer::new(None),
             llm: tokio::sync::Mutex::new(
@@ -519,6 +519,58 @@ mod system_status_tests {
             )),
             embedder: tokio::sync::Mutex::new(None),
         })
+    }
+
+    fn state_toi_thieu() -> Arc<AppState> {
+        state_voi_stt(stt::SttManager::new("khong_ton_tai_dau_ca"))
+    }
+
+    #[tokio::test]
+    async fn stt_chua_thu_nap_parakeet_bao_chua_xac_dinh() {
+        let mut manager = stt::SttManager::new(".");
+        manager.record_parakeet_pending_for_test();
+
+        let status = system_status(state_voi_stt(manager)).await.expect("status");
+        let whisper = &status["healthChecks"]["whisper"];
+
+        assert_eq!(whisper["status"], "online");
+        assert_eq!(whisper["detail"], "chưa xác định");
+    }
+
+    #[tokio::test]
+    async fn stt_that_bai_parakeet_bao_nemotron_va_ghi_ro_fallback() {
+        let mut manager = stt::SttManager::new(".");
+        manager.record_parakeet_fallback_for_test("không có parakeet_vi.onnx");
+
+        let status = system_status(state_voi_stt(manager)).await.expect("status");
+        let whisper = &status["healthChecks"]["whisper"];
+
+        assert_eq!(whisper["status"], "online");
+        assert!(
+            whisper["detail"].as_str().is_some_and(
+                |detail| detail.contains("Nemotron") && detail.contains("đã lùi engine")
+            ),
+            "phải báo engine thực tế và fallback, được: {:?}",
+            whisper["detail"]
+        );
+    }
+
+    #[tokio::test]
+    async fn stt_da_nap_parakeet_bao_dung_parakeet_vi() {
+        let mut manager = stt::SttManager::new(".");
+        manager.record_parakeet_loaded_for_test();
+
+        let status = system_status(state_voi_stt(manager)).await.expect("status");
+        let whisper = &status["healthChecks"]["whisper"];
+
+        assert_eq!(whisper["status"], "online");
+        assert!(
+            whisper["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("Parakeet-vi") && detail.contains("đã nạp")),
+            "phải báo engine đã nạp thực tế, được: {:?}",
+            whisper["detail"]
+        );
     }
 
     /// Mười hai giá trị bịa của bản cũ, từng cái một.

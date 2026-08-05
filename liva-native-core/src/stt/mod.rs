@@ -10,6 +10,33 @@ use parakeet::ParakeetVi;
 use std::path::{Path, PathBuf};
 use tokenizer::SttTokenizer;
 
+pub(crate) fn prefers_parakeet_vi(configured_engine: Option<&str>) -> bool {
+    match configured_engine.map(str::trim) {
+        None | Some("") => true,
+        Some(engine) => engine.eq_ignore_ascii_case("parakeet"),
+    }
+}
+
+trait ParakeetRecognizer: Send {
+    fn transcribe(&mut self, samples: &[f32]) -> Result<String, String>;
+}
+
+impl ParakeetRecognizer for ParakeetVi {
+    fn transcribe(&mut self, samples: &[f32]) -> Result<String, String> {
+        ParakeetVi::transcribe(self, samples)
+    }
+}
+
+#[cfg(test)]
+struct LoadedParakeetTestDouble;
+
+#[cfg(test)]
+impl ParakeetRecognizer for LoadedParakeetTestDouble {
+    fn transcribe(&mut self, _samples: &[f32]) -> Result<String, String> {
+        Ok(String::new())
+    }
+}
+
 pub struct SttManager {
     pub model_dir: PathBuf,
     engine: Option<SttEngine>,
@@ -17,12 +44,13 @@ pub struct SttManager {
     dsp: SttDsp,
     language: String,
 
-    // Optional high-accuracy Vietnamese offline engine (Parakeet-CTC), opt-in
-    // via `LIVA_STT_VI_ENGINE=parakeet`. Used only for whole-utterance
+    // Default high-accuracy Vietnamese offline engine (Parakeet-CTC), opt-out
+    // via `LIVA_STT_VI_ENGINE=nemotron`. Used only for whole-utterance
     // transcription when the active language is Vietnamese; the Nemotron
     // streaming path below is left entirely untouched.
-    parakeet: Option<ParakeetVi>,
+    parakeet: Option<Box<dyn ParakeetRecognizer>>,
     use_parakeet_vi: bool,
+    parakeet_fallback_reason: Option<String>,
     raw_audio_buffer: Vec<f32>,
 
     // Audio stream state
@@ -44,9 +72,8 @@ impl SttManager {
             5.960_464_5e-8, // log_eps
         );
 
-        let use_parakeet_vi = std::env::var("LIVA_STT_VI_ENGINE")
-            .map(|v| v.trim().eq_ignore_ascii_case("parakeet"))
-            .unwrap_or(false);
+        let configured_vi_engine = std::env::var("LIVA_STT_VI_ENGINE").ok();
+        let use_parakeet_vi = prefers_parakeet_vi(configured_vi_engine.as_deref());
 
         Self {
             model_dir: model_dir.as_ref().to_path_buf(),
@@ -57,6 +84,7 @@ impl SttManager {
                 .unwrap_or_else(|_| lang::DEFAULT_LANGUAGE.to_string()),
             parakeet: None,
             use_parakeet_vi,
+            parakeet_fallback_reason: None,
             raw_audio_buffer: Vec::new(),
             residual_samples: Vec::new(),
             prev_sample: 0.0,
@@ -119,7 +147,8 @@ impl SttManager {
         match ParakeetVi::load(&model_path, &vocab_path) {
             Ok(pk) => {
                 tracing::info!("Parakeet-CTC vi STT loaded from {:?}", model_path);
-                self.parakeet = Some(pk);
+                self.parakeet = Some(Box::new(pk));
+                self.parakeet_fallback_reason = None;
                 true
             }
             Err(e) => {
@@ -128,9 +157,40 @@ impl SttManager {
                     e
                 );
                 self.use_parakeet_vi = false;
+                self.parakeet_fallback_reason = Some(e);
                 false
             }
         }
+    }
+
+    /// Engine tiếng Việt thực sự đã sẵn sàng phục vụ ở thời điểm quan sát.
+    pub fn active_vietnamese_engine(&self) -> (&'static str, Option<&str>) {
+        if self.parakeet.is_some() {
+            ("Parakeet-vi", None)
+        } else if self.use_parakeet_vi && self.parakeet_fallback_reason.is_none() {
+            ("chưa xác định", None)
+        } else {
+            ("Nemotron", self.parakeet_fallback_reason.as_deref())
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_parakeet_pending_for_test(&mut self) {
+        self.use_parakeet_vi = true;
+        self.parakeet = None;
+        self.parakeet_fallback_reason = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_parakeet_fallback_for_test(&mut self, reason: &str) {
+        self.use_parakeet_vi = false;
+        self.parakeet_fallback_reason = Some(reason.to_string());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_parakeet_loaded_for_test(&mut self) {
+        self.parakeet = Some(Box::new(LoadedParakeetTestDouble));
+        self.parakeet_fallback_reason = None;
     }
 
     /// Switch the recognition language ("vi", "en", "vi-VN", …).

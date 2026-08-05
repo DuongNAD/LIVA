@@ -59,6 +59,12 @@ mod tests {
         assert_eq!(lang_id_for("en"), Some(0));
         assert_eq!(lang_id_for("en-US"), Some(0));
         assert_eq!(lang_id_for("EN-GB"), Some(0)); // falls back to bare "en"
+        assert!(super::super::prefers_parakeet_vi(None));
+        assert!(super::super::prefers_parakeet_vi(Some("")));
+        assert!(super::super::prefers_parakeet_vi(Some("   ")));
+        assert!(super::super::prefers_parakeet_vi(Some("parakeet")));
+        assert!(!super::super::prefers_parakeet_vi(Some("nemotron")));
+        assert!(!super::super::prefers_parakeet_vi(Some(" NEMOTRON ")));
     }
 
     #[test]

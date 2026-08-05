@@ -114,8 +114,8 @@
     "stt-vi-hq": {
       "name": "STT tiếng Việt chất lượng cao (Parakeet)",
       "required": false,
-      "broken": "LIVA_STT_VI_ENGINE=parakeet sẽ không chạy; Nemotron vẫn nghe được (WER kém hơn ~3×).",
-      "note": "KHÔNG tải tự động được — phải tự export từ NeMo trong WSL, xem models/README.md."
+      "broken": "Nếu profile full chưa tải đủ model, runtime sẽ ghi rõ lý do rồi lùi về Nemotron (WER cao hơn khoảng 1,25×).",
+      "note": "Parakeet là engine tiếng Việt mặc định; profile full tải graph và external weights từ một revision cố định, có kiểm SHA-256."
     },
     "chat-alt": {
       "name": "Chat — router thay thế (không tải mặc định)",
@@ -388,17 +388,25 @@
       "group": "stt-vi-hq",
       "profile": "full",
       "dest": "models/parakeet_vi.onnx",
-      "url": null,
-      "bytes": 41914813,
-      "manual": "Tự export từ huggingface.co/nvidia/parakeet-ctc-0.6b-Vietnamese qua NeMo (WSL)."
+      "url": "https://huggingface.co/OpenVoiceOS/nvidia-parakeet-ctc-0.6b-vietnamese-onnx/resolve/240d82cc243f7cf47d100b293c7dff96e65a04c2/model.onnx",
+      "bytes": 953822,
+      "sha256": "aa5658c3499fc991780e44ad5ccd9d4393d1266727a281cb3e4ca39be42334c4"
     },
     {
       "group": "stt-vi-hq",
       "profile": "full",
-      "dest": "models/parakeet_vi.onnx.data",
-      "url": null,
-      "bytes": 2435002372,
-      "manual": "Đi kèm parakeet_vi.onnx, phải cùng thư mục."
+      "dest": "models/model.onnx_data",
+      "url": "https://huggingface.co/OpenVoiceOS/nvidia-parakeet-ctc-0.6b-vietnamese-onnx/resolve/240d82cc243f7cf47d100b293c7dff96e65a04c2/model.onnx_data",
+      "bytes": 2475958276,
+      "sha256": "52628785ccb501b46fd08d9c386f7a218a7620b93560d17abcab7f95afb2d43d"
+    },
+    {
+      "group": "stt-vi-hq",
+      "profile": "full",
+      "dest": "models/parakeet_vi_vocab.json",
+      "url": "https://huggingface.co/OpenVoiceOS/nvidia-parakeet-ctc-0.6b-vietnamese-onnx/resolve/240d82cc243f7cf47d100b293c7dff96e65a04c2/vocab.txt",
+      "bytes": 11016,
+      "sha256": "444bd313fa42719dd976e66515ae33cea5a375f45da8a7d7158f7db704799a77"
     }
   ]
 }

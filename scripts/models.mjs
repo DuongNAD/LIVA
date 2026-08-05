@@ -3,7 +3,7 @@
 //
 // Vì sao cần script này: weight bị gitignore, nên `git clone` xong LIVA **không
 // chạy được**. `models/README.md` đã ghi đủ nguồn tải, nhưng đó là *hướng dẫn
-// thủ công* cho ~26 file / ~3,7 GB trải trên 6 nguồn khác nhau — không ai ngoài
+// thủ công* cho hàng chục file / ~11,6 GB trải trên nhiều nguồn — không ai ngoài
 // người viết nó cài nổi. Tệ hơn: thiếu model **không gây lỗi**. Lõi vẫn khởi
 // động, vẫn nhận lệnh, chỉ là RAG im lặng bỏ qua, TTS rơi xuống backend khác,
 // `vision:ask` báo lỗi lúc gọi chứ không phải lúc boot. Đó là kiểu hỏng tệ
@@ -105,6 +105,15 @@ function docManifest() {
 
 const { NHOM, MANIFEST } = docManifest()
 
+// Các tên file lịch sử không còn được manifest quản lý. Doctor chỉ cảnh báo;
+// không tự xoá vì người dùng có thể đang trỏ một cấu hình riêng vào file đó.
+const FILE_MO_COI = [
+  {
+    dich: path.join('models', 'parakeet_vi.onnx.data'),
+    thayBang: path.join('models', 'model.onnx_data'),
+  },
+]
+
 // ---------------------------------------------------------------------------
 // Tiện ích
 // ---------------------------------------------------------------------------
@@ -179,6 +188,14 @@ function doctor({ argLlmDir }) {
     console.log(`    Sửa nó, hoặc chạy fetch với --llm-dir <đường dẫn>.`)
   }
   console.log('')
+
+  for (const file of FILE_MO_COI) {
+    const p = path.join(ROOT, file.dich)
+    if (!fs.existsSync(p)) continue
+    console.log(`  ⚠ File model mồ côi: ${file.dich} (${co(fs.statSync(p).size)})`)
+    console.log(`    Manifest hiện dùng ${file.thayBang}; hãy kiểm tra cấu hình rồi xoá file cũ thủ công.`)
+    console.log('')
+  }
 
   const theoNhom = new Map()
   for (const m of MANIFEST) {
@@ -465,7 +482,7 @@ function docThamSo(argv) {
     return i > -1 ? argv[i + 1] : null
   }
   const lenh = argv.find((a) => a === 'doctor' || a === 'fetch') || 'doctor'
-  const profile = lay('--profile') === 'full' ? 'full' : 'minimal'
+  const profile = lay('--profile') === 'full' || argv.includes('full') ? 'full' : 'minimal'
   const only = (lay('--only') || '').split(',').map((s) => s.trim()).filter(Boolean)
   return {
     lenh,

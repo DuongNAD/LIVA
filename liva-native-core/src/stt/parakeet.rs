@@ -157,6 +157,42 @@ pub struct ParakeetVi {
     dsp: ParakeetDsp,
 }
 
+fn parse_vocab(raw: &str) -> Result<Vec<String>, String> {
+    if let Ok(vocab) = serde_json::from_str::<Vec<String>>(raw) {
+        return Ok(vocab);
+    }
+
+    let mut vocab = Vec::new();
+    for (line_index, line) in raw.lines().enumerate() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        let (token, id) = line
+            .rsplit_once(' ')
+            .ok_or_else(|| format!("indexed vocab line {} has no numeric id", line_index + 1))?;
+        let id: usize = id
+            .parse()
+            .map_err(|_| format!("indexed vocab line {} has invalid id", line_index + 1))?;
+        if id != vocab.len() {
+            return Err(format!(
+                "indexed vocab line {} has id {} (expected {})",
+                line_index + 1,
+                id,
+                vocab.len()
+            ));
+        }
+        vocab.push(token.to_string());
+    }
+    if vocab.last().is_some_and(|token| token == "<blk>") {
+        vocab.pop();
+    }
+    if vocab.is_empty() {
+        return Err("vocab is empty".to_string());
+    }
+    Ok(vocab)
+}
+
 impl ParakeetVi {
     /// Load the ONNX graph (ORT auto-loads the sibling `.onnx.data`) and the
     /// BPE vocab list (`index = token id`).
@@ -170,8 +206,7 @@ impl ParakeetVi {
 
         let vocab_raw = std::fs::read_to_string(vocab_path)
             .map_err(|e| format!("read parakeet vocab {:?}: {}", vocab_path, e))?;
-        let vocab: Vec<String> = serde_json::from_str(&vocab_raw)
-            .map_err(|e| format!("parse parakeet vocab json: {}", e))?;
+        let vocab = parse_vocab(&vocab_raw).map_err(|e| format!("parse parakeet vocab: {e}"))?;
         if vocab.len() != EXPECTED_VOCAB {
             tracing::warn!(
                 "Parakeet vocab has {} tokens (expected {}); decoding falls back to the model's logprob width",
@@ -344,6 +379,12 @@ mod tests {
         // [a, a, blank, b] → "a b" (repeat collapsed, blank splits nothing here)
         let lp = onehot(&[0, 0, 2, 1], 3);
         assert_eq!(ctc_decode(&vocab, &lp, 4, 3), "a b");
+    }
+
+    #[test]
+    fn indexed_vocab_drops_the_ctc_blank_row() {
+        let vocab = parse_vocab("<unk> 0\nng 1\n▁t 2\n<blk> 3\n").unwrap();
+        assert_eq!(vocab, v(&["<unk>", "ng", "▁t"]));
     }
 
     #[test]

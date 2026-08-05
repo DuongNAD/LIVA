@@ -231,3 +231,45 @@ test('bắt được manifest có file không tải được mà cũng không c�
   const { loi } = kiemTra(goc)
   assert.ok(cham(loi, 'manual'), loi.join('\n'))
 })
+
+test('profile full phan phoi du Parakeet-vi tu URL bat bien', () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(REPO, 'data/models-manifest.json'), 'utf8'),
+  )
+  const parakeet = manifest.files.filter((file) => file.group === 'stt-vi-hq')
+
+  assert.deepEqual(
+    parakeet.map((file) => file.dest),
+    [
+      'models/parakeet_vi.onnx',
+      'models/model.onnx_data',
+      'models/parakeet_vi_vocab.json',
+    ],
+  )
+  for (const file of parakeet) {
+    assert.equal(file.profile, 'full')
+    assert.match(file.url, /\/resolve\/[0-9a-f]{40}\//)
+    assert.match(file.sha256, /^[0-9a-f]{64}$/)
+    assert.ok(file.bytes > 0)
+  }
+  const vocab = parakeet.find((file) => file.dest === 'models/parakeet_vi_vocab.json')
+  assert.match(vocab.url, /\/240d82cc243f7cf47d100b293c7dff96e65a04c2\/vocab\.txt$/)
+  assert.equal(vocab.sha256, '444bd313fa42719dd976e66515ae33cea5a375f45da8a7d7158f7db704799a77')
+})
+
+test('bao cao WER ghi dung sha256 graph Parakeet trong manifest', () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(REPO, 'data/models-manifest.json'), 'utf8'),
+  )
+  const report = JSON.parse(
+    fs.readFileSync(path.join(REPO, 'docs/05-chat-luong/wer-fleurs-vi.json'), 'utf8'),
+  )
+  const graph = manifest.files.find((file) => file.dest === 'models/parakeet_vi.onnx')
+
+  assert.equal(report.parakeet_model_sha256, graph.sha256)
+})
+
+test('external weights ONNX dung ten _data khong the bi commit nham', () => {
+  const gitignore = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8')
+  assert.match(gitignore, /^\*\.onnx_data$/mu)
+})

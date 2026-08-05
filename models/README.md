@@ -6,25 +6,29 @@ Tất cả `*.onnx`, `*.gguf` trong repo đều bị gitignore; clone mới ph�
 
 ```bash
 npm run doctor                          # thiếu gì → tính năng nào đang TẮT
-npm run setup:models                    # tải profile minimal (~2,3 GB)
-npm run setup:models -- --profile full  # thêm vision, VieNeu, wake-word, tiếng Anh (~3,7 GB)
+npm run setup:models                    # tải profile minimal (~5,6 GB)
+npm run setup:models -- --profile full  # thêm Parakeet, vision, VieNeu, wake-word (~11,6 GB)
 ```
 
 `scripts/models.mjs` tải có **resume** (rớt mạng thì chạy lại, không mất từ đầu) và
 **retry 3 lần**. Thư mục LLM lấy từ `data/liva-config.json → ai.localModelsDir`; máy
 không có ổ đĩa đó thì `--llm-dir <đường dẫn>`.
 
-Hai nhóm file script **không** tải được vì không có nguồn công khai — `doctor` vẫn
-báo thiếu và chỉ chỗ chuẩn bị: `parakeet_vi.*` (tự export qua NeMo) và
-`wake_liva_*.onnx` (tự train). Bảng dưới là nguồn gốc đầy đủ của từng file.
+`npm run doctor` cũng báo `models/parakeet_vi.onnx.data` nếu còn sót từ bản cũ. Manifest
+hiện dùng `models/model.onnx_data`; sau khi xác nhận Parakeet nạp được, có thể xoá file
+đời cũ thủ công để thu hồi khoảng 2,43 GB.
+
+Nhóm `wake_liva_*.onnx` vẫn không có nguồn công khai vì là model tự train; `doctor`
+vẫn báo thiếu và chỉ chỗ chuẩn bị. Parakeet-vi được tải trong profile `full` từ
+revision cố định, có kiểm SHA-256. Bảng dưới là nguồn gốc đầy đủ của từng file.
 
 | File | Nguồn tải | Ghi chú |
 |------|-----------|---------|
 | `silero_vad_v6.onnx` | <https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx> | Silero VAD v6.2 (~2.3MB). Resolver ưu tiên file này; thiếu thì fallback `nemotron-asr/silero_vad.onnx` (v5, có sẵn trong nested repo). Override: `LIVA_VAD_MODEL_PATH`. |
 | `piper/vi_VN-vais1000-medium.onnx` | <https://huggingface.co/rhasspy/piper-voices/tree/main/vi/vi_VN/vais1000/medium> | Giọng TTS tiếng Việt (63MB). File `.onnx.json` đi kèm ĐÃ commit. |
 | `piper/en_US-lessac-medium.onnx` | <https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/medium> | Giọng TTS tiếng Anh (63MB). `.onnx.json` đã commit. |
-| `nemotron-asr/` | nested git repo (LFS) — clone riêng | STT chính hiện tại (RNN-T). KHÔNG đụng vào bằng git từ repo ngoài (luôn hiện "modified content" — kệ nó). |
-| `parakeet_vi.onnx` + `parakeet_vi.onnx.data` + `parakeet_vi_vocab.json` | export từ <https://huggingface.co/nvidia/parakeet-ctc-0.6b-Vietnamese> qua NeMo trong WSL (2026-07-05) | **STT tiếng Việt chất lượng cao** (FastConformer-**CTC** 0.6B, WER FLEURS vi 5.15 vs Nemotron 14.45 — tốt ~3×). ONNX 1.1MB (graph) + 2.48GB weights external (1 file `.onnx.data`, phải cùng thư mục). Tiền xử lý: **80 mel**, n_fft 512, hop 160 (10ms), win 400 (25ms), normalize `per_feature`, KHÔNG preemph, dither 1e-5 — KHÁC Nemotron (128 mel + preemph 0.97). CTC decode (greedy + blank), vocab 1024 BPE token trong vocab.json. **✅ ĐÃ tích hợp** (`stt/parakeet.rs`) — bật bằng `LIVA_STT_VI_ENGINE=parakeet` (đường transcribe-cả-câu sau VAD-end, không partial streaming). License NVIDIA Open Model. |
+| `nemotron-asr/` | nested git repo (LFS) — clone riêng | STT streaming, wake-word và fallback (RNN-T). KHÔNG đụng vào bằng git từ repo ngoài (luôn hiện "modified content" — kệ nó). |
+| `parakeet_vi.onnx` + `model.onnx_data` + `parakeet_vi_vocab.json` | bản ONNX FP32 của [OpenVoiceOS](https://huggingface.co/OpenVoiceOS/nvidia-parakeet-ctc-0.6b-vietnamese-onnx), chuyển từ [NVIDIA Parakeet CTC 0.6B Vietnamese](https://huggingface.co/nvidia/parakeet-ctc-0.6b-Vietnamese), khóa tại revision `240d82cc243f7cf47d100b293c7dff96e65a04c2` | **STT tiếng Việt mặc định** cho whole-utterance sau VAD-end; Nemotron vẫn xử lý wake-word/streaming và là fallback. LIVA tự đo 100 câu FLEURS-vi: **WER 12,00%** so với Nemotron **15,01%**, p50 **667 ms** so với **3.772 ms**. Graph 953.822 byte tham chiếu external weights `model.onnx_data` 2.475.958.276 byte; phải giữ cùng thư mục. CTC greedy, vocab BPE 1.024 token. License NVIDIA Open Model. |
 | `kokoro-v1.0.onnx` | (tùy chọn, chưa dùng mặc định) | TTS EN premium — vắng mặt thì TTS tự route sang Piper. |
 | `vieneu/` (nhiều file) | HF <https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo> (thư mục `onnx_update/` + root) · codec <https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX> · phonemizer `sea_g2p.bin` từ <https://github.com/pnnbao97/sea-g2p> (`python/sea_g2p/sea_g2p.bin`) · `voices_v3_turbo.json` từ <https://github.com/pnnbao97/VieNeu-TTS> (`src/vieneu/assets/`) | **TTS tiếng Việt "giọng đẹp" premium — tự hồi quy (LLM Qwen3 + codec MOSS 48kHz), clone-giọng preset**. Toàn bộ **Apache-2.0** — **TRÁNH** repo `VieNeu-TTS-0.3B-q4-gguf` (CC-BY-NC). Files bắt buộc: `vieneu_prefill.onnx`, `vieneu_decode_step.onnx`, `vieneu_acoustic_cached.onnx`, `vieneu_backbone_shared.data` (~396MB), `vieneu_v3_heads.npz` (~50MB), `config.json`, `tokenizer.json`, `voices_v3_turbo.json`, `sea_g2p.bin` (~50MB), `moss_audio_tokenizer_decode_full.onnx` (+ `_decode_shared.data` ~42MB), `codec_browser_onnx_meta.json`. **✅ ĐÃ tích hợp** (`tts/vieneu/`, port thuần Rust `ort` của engine tham chiếu `onnx_runtime_lite.py`) — **opt-in `LIVA_TTS_VIENEU=1`**, đứng trên Piper (Piper vẫn always-on/khi tải nặng). Env: `LIVA_VIENEU_MODEL_DIR` (mặc định `models/vieneu`), `LIVA_VIENEU_VOICE` (mặc định `default_voice` = "Phạm Tuyên"), `LIVA_VIENEU_SEED`, `LIVA_VIENEU_THREADS` (mặc định 4). **Lưu ý:** tự hồi quy nên **RTF ~1.75 trên CPU** (chậm hơn real-time — dùng như tier chất lượng, chưa cắt được barge-in giữa chunk); cần crate `tokenizers` ≥0.21 (tokenizer.json dùng merges dạng mảng + `ignore_merges`). |
 | `embedding/model.onnx` + `embedding/tokenizer.json` | <https://huggingface.co/intfloat/multilingual-e5-small> (export ONNX) | **Model embedding cho bộ nhớ dài hạn — 384 chiều**, tách khỏi model chat có chủ đích. Lý do: `vec_idx` khai cứng `int8[384]`, còn embedding của model chat phụ thuộc model đang nạp (Qwen3-VL-2B → 2048 chiều, sqlite-vec báo `Dimension mismatch`); quan trọng hơn, dùng model chat nghĩa là **đổi model chat là mất sạch bộ nhớ cũ**. Họ E5 cần tiền tố `query: ` / `passage: ` — `EmbeddingEngine::embed_query` / `embed_passage` đã tự thêm. Override thư mục: `LIVA_EMBEDDING_MODEL_DIR`. **Thiếu file → không lỗi chí mạng**, chỉ là không có RAG. ⚠️ Chưa kiểm chứng end-to-end với model thật (chưa tải về máy dev). |

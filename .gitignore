@@ -43,6 +43,7 @@ data/consent.json
 *.gguf
 *.onnx
 *.onnx.data
+*.onnx_data
 liva-dataset/
 
 # ==========================================

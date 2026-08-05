@@ -1,8 +1,8 @@
 ---
 title: "Đối chiếu tuyên bố và thực tế"
-updated: 2026-08-04
-commit: 147f55c
-stale-ok: 147f55c
+updated: 2026-08-05
+commit: 2dc8e2e
+stale-ok: 2dc8e2e
 
 status: living
 owns:
@@ -51,6 +51,10 @@ covers:
 ---
 
 Tài liệu này đặt từng tuyên bố trong `README.md` (và trong `data/liva-config.json`, `.env.example`) cạnh bằng chứng đọc được từ mã nguồn. Mục đích **không** phải hạ thấp dự án, mà để mọi phát biểu ra bên ngoài (hồ sơ dự thi, README, demo cho beta tester) đều có chỗ dựa kiểm chứng được, và để đội phát triển biết chính xác chỗ nào cần nối dây tiếp.
+
+> **🔴 NỢ ĐÃ BIẾT, ghi ra thay vì để người đọc tự vấp — toạ độ `lib.rs:<dòng>` và `agent/graph.rs:<dòng>` trong tài liệu này ĐÃ TRÔI tại `2dc8e2e` (05/08/2026).** Lát refactor đó đưa `lib.rs` **1 550 → 740** dòng và `agent/graph.rs` **1 947 → 806**, nên phần lớn số dòng dưới đây trỏ ra ngoài độ dài mới của file. Mã bị chuyển chứ không bị xoá — đích đến là `paths.rs`, `system_status.rs`, `graph/intent.rs`, `graph/memory_scope.rs`, `graph/pipeline.rs` và `commands/*`.
+>
+> **Vì sao `docs-citations` KHÔNG bắt được, và đây mới là phần đáng nhớ:** tên `lib.rs` tồn tại ở **4 file khác nhau** trong repo, nên bộ kiểm xếp cả 95 trích dẫn `lib.rs` vào rổ "không kiểm được" (207 trích dẫn, chốt 508) và cổng vẫn **exit 0**. Tức một cổng xanh ở đây có nghĩa là *"không có neo hỏng trong số neo kiểm được"*, **không** có nghĩa là "mọi toạ độ đều đúng". Cách sửa dứt điểm là chuyển sang **neo ký hiệu** (`lib.rs#handle_command`) — `node scripts/docs-citations.mjs --suggest` liệt kê 564 chỗ chuyển được. Chưa làm trong lát này vì nó là một đợt sửa cơ học riêng, không phải một phần của việc tách commit.
 
 > **⚠️ Đợt đính chính 26/07/2026 — bốn phán quyết bị đảo, tất cả theo hướng tài liệu ĐANG NÓI XẤU sản phẩm.** Một bản đối chiếu lỗi thời nguy hiểm theo cả hai chiều: thổi phồng thì thành quảng cáo sai, mà hạ thấp thì thành thiệt hại tự gây — đặc biệt khi người đọc là giám khảo. Bốn mục đã sửa, mỗi mục ghi rõ "Đính chính" tại chỗ:
 >
@@ -130,7 +134,7 @@ already running on port 8002" từng bị chỉ ra là sai sự thật cũng đ�
 | **"Text generation và memory embedding chạy trên llama.cpp contexts TÁCH RỜI (decoupled), lưu ký ức và stream token ĐỒNG THỜI"** | README:23, :27 | **[THIẾU] — SAI SỰ THẬT** | `engine.rs:54-64` `LlamaRouterManager { engine: Option<LlamaEngine> }` — **một** engine; `LlamaEngine { context, mtmd, model }` (`engine.rs:34-42`) — **một** context. `lib.rs:1298-1308` `llm:embed` mượn **chính** `engine.context`. `llm/embed.rs:10` `context.clear_kv_cache()` — **xoá sạch KV cache của chat**. `AppState.llm` là **một** `tokio::sync::Mutex` (`lib.rs:33-46`) khoá chung chat/embed/vision/swap | Không những không "decoupled", việc embed còn **phá** KV cache chat và block toàn bộ LLM. Xem phân tích sâu ở §2.1 |
 | **In-Process Embeddings — "memory engine decoupled khỏi chat stream, tránh VRAM thrashing, giữ memory write khỏi hot path"** | README:27 | **[MỘT PHẦN]** — nửa đầu đúng, nửa sau sai | Embedding tính in-process qua `llama.cpp` thật (`llm/embed.rs`, `lib.rs:1298-1308`) — **không** có embedding service ngoài, đúng | Nhưng "decoupled khỏi chat stream" và "off the hot path" là sai: cùng context, cùng Mutex, cộng thêm `clear_kv_cache()` |
 | **Sequential Hot-Swap 4B Router ↔ 26B Expert, dùng `mmap`** | README:24 | **[MỘT PHẦN]** | Cơ chế swap có thật: `engine.rs:117-207`, `with_use_mmap(true)` (`engine.rs:140`), giải phóng engine + `sleep(500ms)` cho driver (`engine.rs:125-131`); lệnh `llm:swap_model` (`lib.rs:1265-1281`) | **Không có code tự động swap Router→Expert.** `DEFAULT_EXPERT_MODEL` (`lib.rs:61`) và `ai.expertModel` (`data/liva-config.json:21`) chỉ được **ghi ra** trong config mặc định (`lib.rs:379,444`); grep toàn repo: **không file `.rs` nào đọc `ai.expertModel`**. Chỉ có `configured_router_model_path()` (`lib.rs:119-138`). Ngoài ra "26B" ≠ thực tế: config là `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` |
-| **Router model = Gemma 4B** | README:155 | **[THIẾU] — lỗi thời** | `data/liva-config.json:19` = `Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf` | README chưa cập nhật sau khi chuyển sang Qwen3-VL. Router hiện tại là mô hình **đa phương thức 2B**, không phải Gemma 4B |
+| **Router model** | README §Technical Highlights | **[OK] từ 05/08/2026** — hàng này đã ĐẢO hai lần, giữ nguyên vệt thay vì viết lại | `data/liva-config.json` `ai.routerModel` = `gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf`, và `paths.rs#DEFAULT_ROUTER_MODEL` khớp đúng chuỗi đó | **Lịch sử của chính hàng này là bài học.** Bản 22/07 ghi "README nói Gemma 4B, thực tế Qwen3-VL-2B ⇒ README lỗi thời". Rồi `6723114` (02/08) đổi router sang **gemma-4-E4B**, khiến README *tình cờ* gần đúng trở lại trong khi hàng này thì sai — nó vẫn khẳng định router là Qwen. Vá ở `2dc8e2e`: README nay nói gemma-4-E4B ở cả 5 chỗ, các số đo trên Qwen được **giữ nguyên và dán nhãn có ngày** thay vì viết lại. ⇒ Một hàng "đã đối chiếu" **không tự đúng mãi**; nó đúng tại một sha và phải đo lại ở sha sau |
 | **LLM GGUF lấy từ `LIVA_LLM_MODEL_DIR` (mặc định `E:\AI_Models`)** | README:155 | **[THIẾU]** | grep `LIVA_LLM_MODEL_DIR` trong code chạy → chỉ `src/bin/router_stress.rs:68` (bin test). Runtime đọc `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel` (`lib.rs:129-137`) | Env này **không tồn tại** ở runtime chính; `.env.example:28` cũng sai theo |
 | **Nemotron ASR (ONNX) đa ngôn ngữ** | README:25 | **[OK]** | `stt/engine.rs:5-7,25-60` — 3 session ONNX encoder/decoder/joint (RNN-T thật, `decoder_hidden_state: vec![0.0; 2*1*640]`); model có trên đĩa (`models/nemotron-asr/encoder.onnx.data` 690 MB) | Claim đúng, giữ nguyên |
 | **`voice:set_language` chuyển vi/en runtime** | README:25, :116 | **[MỘT PHẦN]** | `lib.rs:1220-1233` → `stt/mod.rs:140-149` `set_language(&mut self, code: &str)`; `stt/lang.rs:20-23` `VERIFIED_LANG_IDS: [("vi-VN",33),("en-US",0)]` | Bảng lang_id được xác định **bằng thực nghiệm** (comment `stt/lang.rs:1-17`), chỉ **2/39** id được verify, và **không caller nào phía UI**. "Multilingual" trên thực tế = **song ngữ cố định** |

@@ -1,8 +1,8 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
-updated: 2026-08-04
-commit: 185f33a
-stale-ok: 596e8b6
+updated: 2026-08-05
+commit: 2dc8e2e
+stale-ok: 2dc8e2e
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -263,8 +263,10 @@ Lưu ý cú pháp `EnvFilter` để không mất công: directive tường minh 
 
 | Model | Kết quả | Chi phí mỗi lượt (debug build) |
 |---|---|---|
-| `gemma-4-E4B-it-qat-UD-Q4_K_XL` (4,2 GB) | **13/13** | chưa đo |
-| `Qwen3-VL-2B-Instruct-Q4_K_M` (1,1 GB) — **model router thực tế** | **13/13** | trung vị **2501 ms**, dải 1227–3709 ms |
+| `gemma-4-E4B-it-qat-UD-Q4_K_XL` (4,2 GB) — **model router thực tế từ 02/08/2026** (`6723114`) | **13/13** | chưa đo |
+| `Qwen3-VL-2B-Instruct-Q4_K_M` (1,1 GB) — router **tại thời điểm đo**, nay là `chat-alt` | **13/13** | trung vị **2501 ms**, dải 1227–3709 ms |
+
+⚠️ **Hai nhãn trên đã hoán đổi ngày 02/08/2026 và bảng này giữ nguyên số cũ có chủ đích.** Con số 2501 ms đo trên Qwen; **không** được đọc nó thành độ trễ tool-calling của router hiện tại, vì dòng gemma ở hàng trên vẫn ghi *chưa đo*. Đây đúng là chỗ dễ lấy số của model này gán cho model kia — cùng lớp nhầm lẫn với bẫy "tok/s không phải độ trễ" ở [§1 backlog](05-nang-cap-toan-dien.md#-đổi-router-02082026--một-phần-bảng-trên-đã-hết-hiệu-lực).
 
 Model 2B đạt đúng bằng model 4B là điều đáng chú ý: sau ba bản sửa ở §"bốn phát hiện", nhiệm vụ
 này không còn cần model to. Prompt ~1111 ký tự (≈277 token) — vẫn thừa sức nằm trong `n_ctx` 4096 cùng persona, RAG và lịch

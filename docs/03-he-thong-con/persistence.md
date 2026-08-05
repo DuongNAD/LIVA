@@ -74,13 +74,13 @@ flowchart TD
 ```
 
 `liva-native-core/src/boot.rs#build_app_state` tạo thư mục cha, mở pool, sau đó mới giải quyết
-khóa mã hóa. `liva-native-core/src/lib.rs#data_dir` là neo chung của config và database:
+khóa mã hóa. `liva-native-core/src/paths.rs#data_dir` là neo chung của config và database:
 
 1. source tree: thư mục chứa `data/liva-config.json`;
 2. bản cài: `LIVA_HOME`, data root mới của bundle hoặc root legacy khi thật sự có dữ liệu cũ;
 3. fallback cuối: `./data`.
 
-`liva-native-core/src/lib.rs#stray_database_paths` dò các DB từng bị tạo theo working directory
+`liva-native-core/src/paths.rs#stray_database_paths` dò các DB từng bị tạo theo working directory
 và chỉ cảnh báo. Không tự merge là lựa chọn an toàn vì hai DB có thể cùng chứa lịch sử hợp lệ.
 
 ### 2.1 Những nơi chưa theo neo chung
@@ -94,7 +94,7 @@ và chỉ cảnh báo. Không tự merge là lựa chọn an toàn vì hai DB c�
 | Stronghold | Tauri app-local-data | snapshot riêng | thuộc threat model |
 | Model tải về | `resource_write_root()/models` | manifest + SHA-256 | không thuộc DB |
 
-Config đi qua `liva-native-core/src/lib.rs#update_config_file_at`: khóa process-wide, ghi file tạm
+Config đi qua `liva-native-core/src/paths.rs#update_config_file_at`: khóa process-wide, ghi file tạm
 `create_new`, `sync_all`, rồi thay atomically. Consent tại
 `liva-native-core/src/consent.rs#save_to` chưa có cùng bảo đảm này.
 

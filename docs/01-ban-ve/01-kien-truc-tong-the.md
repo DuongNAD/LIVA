@@ -314,7 +314,7 @@ vì server MCP là read-only.
 | `EncryptionEngine` | AES-256-GCM | Chỉ **1 cột** được mã hoá: `facts.value` |
 | Governor game-aware | Vòng lặp 5s, hạ `n_gpu_layers` khi phát hiện tải nặng, gọi `reload_llm_gpu_layers` | Win32; early-return nếu `n_gpu_layers` vốn đã bằng 0 |
 | `VAD` / GTCRN denoise / SmartTurn shadow / AEC | Cụm xử lý tín hiệu tiếng nói | Dựng qua `VoiceRuntimeComponents::from_env` ở **cả hai vỏ**; `None` khi thiếu model hoặc bị tắt bằng `LIVA_*_ENABLED=0` |
-| `NativeMcpServer` | Server MCP nội bộ | Đã nối vào dispatcher: `mcp:list_tools` (`liva-native-core/src/lib.rs:1467-1468`) và `mcp:call_tool` (`liva-native-core/src/lib.rs:1470-1494`); **chưa client UI nào gọi** — xem điểm 4 của §3 |
+| `NativeMcpServer` | Server MCP nội bộ | Đã nối vào dispatcher: `mcp:list_tools` (`liva-native-core/src/lib.rs#handle_command`) và `mcp:call_tool` (`liva-native-core/src/lib.rs#handle_command`); **chưa client UI nào gọi** — xem điểm 4 của §3 |
 | `STDIO` | IPC dòng JSON qua stdin/stdout (`liva-native-core/src/main.rs:173-244`) | Chỉ binary standalone |
 
 Chuỗi xử lý cốt lõi trong sơ đồ: `VAD → STT → LLM → TTS` — đây là đường thoại; và
@@ -391,8 +391,8 @@ hai lệnh dispatcher `mcp:list_tools` / `mcp:call_tool` gọi tới, nhưng ch�
 
 4. **`NativeMcpServer` đã nối vào dispatcher, nhưng chưa có client nào gọi.** Nó nằm trong
    `AppState` (`lib.rs:44`), khởi tạo ở cả `main.rs:171` và `src-tauri/src/lib.rs:349`.
-   Từ 22/07/2026 `handle_command` có hai nhánh `mcp:*`: `"mcp:list_tools"` (`liva-native-core/src/lib.rs:1467-1468`,
-   gọi thẳng `state.mcp_server.list_tools()`) và `"mcp:call_tool"` (`liva-native-core/src/lib.rs:1470-1494`).
+   Từ 22/07/2026 `handle_command` có hai nhánh `mcp:*`: `"mcp:list_tools"` (`liva-native-core/src/lib.rs#handle_command`,
+   gọi thẳng `state.mcp_server.list_tools()`) và `"mcp:call_tool"` (`liva-native-core/src/lib.rs#handle_command`).
    `list_tools()` (`mcp/server.rs:39`) vì thế có caller thật, cộng thêm test tích hợp
    `liva-native-core/tests/integration_tests.rs:539` ("2.7 — `mcp:list_tools` /
    `mcp:call_tool` phải đi qua `handle_command`").
@@ -437,7 +437,7 @@ này để tránh trùng — xem §4.2.
 | Stronghold vault | Tauri plugin Stronghold, Argon2id; file trong `AppData/Local/com.liva.cognitive-os/` | **[MỘT PHẦN]** — mật khẩu hardcode |
 | Lưu trữ | SQLite WAL, pool writer(1)+readers(4), `data/agents/liva_core/structured_memory.sqlite` | **[MỘT PHẦN]** — chỉ 4 bảng thường + 2 bảng ảo có writer |
 | Mã hoá | AES-256-GCM, khoá từ `LIVA_ENCRYPTION_KEY` | **[MỘT PHẦN]** — chỉ 1 cột `facts.value` |
-| `NativeMcpServer` | MCP nội bộ, đích là Obsidian vault; cấp phát ở cả hai điểm vào | **[MỘT PHẦN]** — đã nối dispatcher (`liva-native-core/src/lib.rs:1467-1468`, `liva-native-core/src/lib.rs:1470-1494`), chưa client UI nào gọi |
+| `NativeMcpServer` | MCP nội bộ, đích là Obsidian vault; cấp phát ở cả hai điểm vào | **[MỘT PHẦN]** — đã nối dispatcher (`liva-native-core/src/lib.rs#handle_command`, `liva-native-core/src/lib.rs#handle_command`), chưa client UI nào gọi |
 | Telegram bot | HTTPS long-poll `api.telegram.org`; shell-out `ffmpeg.exe` cho voice; **cả hai vỏ** từ 26/07/2026 | **[MỘT PHẦN]** — cần `TELEGRAM_BOT_TOKEN`, không phải vì profile |
 | `liva-voice` | Python + FastAPI `0.0.0.0:8765`, edge-tts / GPT-SoVITS, khởi động thủ công | **[MỘT PHẦN]** — không auth/CORS/rate-limit |
 | `mobile_client` | Capacitor 8 + Vue 3 (Android), `adb reverse` | **[MỘT PHẦN]** — mic giả |
@@ -476,7 +476,7 @@ Còn lại đều tuỳ chọn hoặc chạy tay: `liva-native-core.exe` standal
    — `facts` (`db.rs:477`), `vectors_meta` (`db.rs:608`), `tasks` (`lib.rs:700`),
    `agent_checkpoints` (`agent/memory.rs:24`) — cộng **2 bảng ảo** `vec_idx` (`db.rs:655`)
    và `vectors_fts` (`db.rs:661`). Đường ghi vector là đường **có thật trong production**,
-   gọi được qua nhánh `"memory:upsert_vector"` của `handle_command` (`lib.rs:1168`). Phần
+   gọi được qua nhánh `"memory:upsert_vector"` của `liva-native-core/src/commands/memory.rs#handle`. Phần
    còn lại của schema bộ nhớ dài hạn vẫn là **schema rỗng**.
    > ~~"chỉ 3/15 bảng thực sự có câu `INSERT` (`facts`, `tasks`, `agent_checkpoints`)"~~ —
    > bản đếm cũ bỏ sót nhánh vector; sửa 22/07/2026.

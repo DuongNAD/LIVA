@@ -1,7 +1,7 @@
 ---
 title: "Kiểm kê và disposition tài liệu LIVA"
 updated: 2026-07-31
-commit: 147f55c
+commit: 2dc8e2e
 status: index
 owns:
   - inventory-disposition-tai-lieu
@@ -73,7 +73,7 @@ covers:
 | `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` | **MERGE** | C-quality | 25 | `docs/06-ke-hoach/roadmap.md`<br>`docs/05-chat-luong/risk-register.md` | Việc mở nhập vào roadmap; risk bền nhập vào risk register. |
 | `docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md` | **FREEZE** | B | 20 | — | Roadmap cũ đã bị master roadmap thay thế; giữ làm lịch sử F/P. |
 | `docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md` | **FREEZE** | B | 5 | — | Đề xuất point-in-time, không phải kiến trúc hay roadmap hiện hành. |
-| `docs/03-danh-gia/05-nang-cap-toan-dien.md` | **SPLIT** | C-roadmap | 6 | `docs/06-ke-hoach/roadmap.md`<br>`docs/99-luu-tru/bao-cao-lich-su/nang-cap-toan-dien-2026-07.md` | Việc còn mở nhập master roadmap; bằng chứng U1–U20 đóng băng. |
+| `docs/03-danh-gia/05-nang-cap-toan-dien.md` | **SPLIT** | C-roadmap | 7 | `docs/06-ke-hoach/roadmap.md`<br>`docs/99-luu-tru/bao-cao-lich-su/nang-cap-toan-dien-2026-07.md` | Việc còn mở nhập master roadmap; bằng chứng U1–U20 đóng băng. |
 | `docs/03-danh-gia/06-nhan-tin-ra-ngoai.md` | **SPLIT** | C-integrations | 5 | `docs/03-he-thong-con/messaging.md`<br>`docs/06-ke-hoach/epics/messaging-reliability.md` | Tách as-built messaging khỏi backlog outbox/Telegram. |
 | `docs/03-danh-gia/07-wake-word-viec-con-lai.md` | **FREEZE** | C-voice-complete | 3 | `docs/03-he-thong-con/wake-word.md`<br>`docs/05-chat-luong/wake-benchmark.md` | Đã tách architecture và benchmark wake; giữ số đo 27/07/2026 như snapshot lịch sử. |
 | `docs/03-he-thong-con/agent-tools.md` | **KEEP** | C-agent-tools-complete | 11 | — | Canonical as-built cho StateGraph, reflex lane, tool selector, MCP executor và skill runtime. |
@@ -153,7 +153,7 @@ inbound link trước, sau đó giữ redirect ít nhất một chu kỳ release
 - `docs/01-ban-ve/04-he-llm-va-prompt.md`: 14 file trỏ vào.
 - `docs/01-ban-ve/09-tich-hop-ngoai.md`: 11 file trỏ vào.
 - `docs/01-ban-ve/00-tong-quan-he-thong.md`: 9 file trỏ vào.
-- `docs/03-danh-gia/05-nang-cap-toan-dien.md`: 6 file trỏ vào.
+- `docs/03-danh-gia/05-nang-cap-toan-dien.md`: 7 file trỏ vào.
 - `docs/03-danh-gia/06-nhan-tin-ra-ngoai.md`: 5 file trỏ vào.
 - `docs/04-quy-trinh/KNOWLEDGE_BASE.md`: 3 file trỏ vào.
 - `docs/04-quy-trinh/prompts/readme-generation-prompt.md`: 2 file trỏ vào.

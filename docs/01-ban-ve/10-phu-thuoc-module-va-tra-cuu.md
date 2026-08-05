@@ -261,7 +261,7 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `…\src\db.rs` | SQLite (1 185 dòng) | `CustomSqliteManager` :15 · PRAGMA :30-48 · **`load_sqlite_vec`** :63 · `DatabasePool` :131 · `new` :137 · `new_in_memory` :159 · **`init_schemas`** :188-354 · `MetadataFilter` :377 · `set_fact` :467 · `get_fact` :501 · `upsert_vector` :536 · `search_similar_vectors` :626 · `search_fts_vectors` :720 · **`search_hybrid_vectors`** :839 |
 | `…\src\crypto.rs` | AES-256-GCM (133 dòng) | `Aes256Gcm16` :8 · **`new` không KDF** :15 · `encrypt` :23 · **`decrypt` fail-open** :50 |
 | `…\src\telegram.rs` | Bot (392 dòng) | `TelegramCommand` :8 · `new` :39 · `start` :54 · `is_authorized` :73 · `handle_command` :82 · `/latest` :145 · `/ls` :175 · `/cat` :218 · `handle_message` :274 · `process_voice_message` :317 · **`route_input_to_agent` đứt dây** :376 |
-| `…\src\mcp\server.rs` | MCP (183 dòng) | args struct :10-30 · `new` :33 · `list_tools` :39 (gọi từ `liva-native-core/src/lib.rs:1467-1468`) · **`resolve_path`** :67 · `call_tool` :79 (gọi từ `liva-native-core/src/lib.rs:1489-1492`) · `walk_dir` :121 · `control_smarthome` stub :176 |
+| `…\src\mcp\server.rs` | MCP (183 dòng) | args struct :10-30 · `new` :33 · `list_tools` :39 (gọi từ `liva-native-core/src/lib.rs#handle_command`) · **`resolve_path`** :67 · `call_tool` :79 (gọi từ `liva-native-core/src/lib.rs#handle_command`) · `walk_dir` :121 · `control_smarthome` stub :176 |
 | `…\src\mcp\client.rs` | MCP client stdio (1 143 dòng) | `McpStdioClient::connect` · `request` · `list_tools` · `call_tool` · `McpClientRegistry::get_or_connect` · `global_registry` · `load_config` |
 | `…\src\mcp\protocol.rs` | JSON-RPC (106 dòng) | `JsonRpcRequest` (id: String) :5 · `Tool` :72 · `CallToolRequest` :86 |
 | `…\src\integrations\smart_home.rs` | **STUB** (107 dòng) | enum :6,14 · `SmartHomeArgs` :21 · `get_metadata` :26 · `execute` :51 |
@@ -338,7 +338,7 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 
 | Tôi muốn… | Mở trước | Rồi tới |
 |---|---|---|
-| Thêm một lệnh API mới | `lib.rs:236` (`handle_command`), nhánh mặc định `lib.rs:1483` | `liva-native-core/src/websocket.rs:1422-1512` (`IpcRequest` qua WS), `liva-native-core/src/websocket.rs:829-1458` (legacy event) |
+| Thêm một lệnh API mới | `lib.rs:236` (`handle_command`), nhánh mặc định `liva-native-core/src/lib.rs#handle_command` | `liva-native-core/src/websocket.rs:1422-1512` (`IpcRequest` qua WS), `liva-native-core/src/websocket.rs:829-1458` (legacy event) |
 | Sửa hành vi khởi động / thứ tự nạp model | `main.rs:51` (`async_main`) | `liva-desktop\src-tauri\src\lib.rs:261` (`run()` — trình tự khác, `vad/denoiser/turn_shadow/aec = None`) |
 | Đổi khung nhị phân voice (op code, header) | `webrtc\frame.rs:3-7`, `:17`, `:29` | `liva-ui\src\utils\speakerFrame.ts:36`, `liva-ui\src\composables\useVoicePipeline.ts:345-350` |
 | Sửa độ trễ / ngắt lời / barge-in | `webrtc\pipeline.rs:164` (`handle_vad_start`), `:437` (`cancel_active_operations`) | `webrtc\vad.rs:133`, `liva-ui\src\composables\useSpeakerPlayback.ts:180` (`stop`), `:207` (`flush`) |

@@ -235,7 +235,7 @@ Ai quyết định gọi hàm này, theo ngưỡng GPU/CPU nào, và với chu k
 
 ### 3.5 Hot-swap thủ công qua IPC **[OK]**
 
-Lệnh `"llm:swap_model"` (`lib.rs:1349-1365`): nhận `model_path`, tuỳ chọn `n_ctx`, `n_gpu_layers`, `vocab_only`; lấy `state.llm.lock().await` rồi gọi thẳng `swap_model`. Không có kiểm tra file tồn tại ở tầng lệnh — lỗi trả về từ `load_from_file`.
+Lệnh `"llm:swap_model"` (`liva-native-core/src/lib.rs#handle_command`): nhận `model_path`, tuỳ chọn `n_ctx`, `n_gpu_layers`, `vocab_only`; lấy `state.llm.lock().await` rồi gọi thẳng `swap_model`. Không có kiểm tra file tồn tại ở tầng lệnh — lỗi trả về từ `load_from_file`.
 
 ---
 
@@ -386,7 +386,7 @@ Bổ trợ: `set_mmproj_path(&mut self, path: Option<PathBuf>)` (`engine.rs:134-
 
 | Điểm gọi | Ảnh vào | Streaming |
 |---|---|---|
-| `lib.rs:1478-1529` — lệnh IPC/WS `"vision:ask"` | base64 (`VisionImage::Encoded`) hoặc chụp màn hình `vision::capture::capture_for_vision()` → `VisionImage::Rgb` | **không** (`\|_\| true`); mặc định temp 0.7 / top_p 0.8. UI gọi ở `liva-ui/src/composables/useGateway.ts:524` (hàm `askVision`, phát lệnh ở `:532`) |
+| `liva-native-core/src/lib.rs#handle_command` — lệnh IPC/WS `"vision:ask"` | base64 (`VisionImage::Encoded`) hoặc chụp màn hình `vision::capture::capture_for_vision()` → `VisionImage::Rgb` | **không** (`\|_\| true`); mặc định temp 0.7 / top_p 0.8. UI gọi ở `liva-ui/src/composables/useGateway.ts:524` (hàm `askVision`, phát lệnh ở `:532`) |
 | `liva-native-core/src/websocket.rs:1088-1177` — nhánh keyword trong `user_voice_command` | chụp màn hình | **có**, qua event `ai_stream_chunk`; lỗi → fallback `"Xin lỗi, hiện mình chưa xem được màn hình."` |
 | `agent/graph.rs:456-521` — node `"vision"` | chụp màn hình | **có**, stream token vào `llm_chunk_tx` (→ TTS) |
 | `src/bin/qwen3vl_probe.rs` | binary probe | chạy đúng production path |
@@ -613,9 +613,9 @@ pub embedder: tokio::sync::Mutex<Option<llm::embedder::EmbeddingEngine>>,   // l
 
 ### 8.1 Thực tế: `embed.rs` gần như không dùng, còn RAG đã đi lối khác
 
-- Caller duy nhất trong Rust của `get_embedding`: `lib.rs:1392`, trong lệnh IPC `"llm:embed"` (`lib.rs:1366-1401`). Lệnh này nhận `input` dạng string hoặc array, trả `Vec<f32>` hoặc `Vec<Vec<f32>>`; có chặn `vocab_only` (`lib.rs:1383-1385`).
+- Caller duy nhất trong Rust của `get_embedding`: `liva-native-core/src/lib.rs#handle_command`, trong lệnh IPC `"llm:embed"` (`liva-native-core/src/lib.rs#handle_command`). Lệnh này nhận `input` dạng string hoặc array, trả `Vec<f32>` hoặc `Vec<Vec<f32>>`; có chặn `vocab_only` (`liva-native-core/src/lib.rs#handle_command`).
 - Grep `llm:embed` trong `liva-ui/src`, `packages`, `liva-desktop/src`: **0 hit**. Hit duy nhất ngoài Rust là `scripts/legacy/verify_llm_router.py:170` (script legacy). ⇒ `get_embedding` **vẫn không có consumer sản xuất nào**.
-- Hai lệnh IPC `memory:upsert_vector` (`lib.rs:1168-1253`) và `memory:search_hybrid` (`lib.rs:1108-1167`) vẫn **nhận vector từ payload client** rồi gọi thẳng `db::upsert_vector` / `db::search_hybrid_vectors`; không nhánh nào trong hai lệnh này gọi `get_embedding` để tự tính.
+- Hai lệnh IPC `memory:upsert_vector` và `memory:search_hybrid` (`liva-native-core/src/commands/memory.rs#handle`) vẫn **nhận vector từ payload client** rồi gọi thẳng `db::upsert_vector` / `db::search_hybrid_vectors`; không nhánh nào trong hai lệnh này gọi `get_embedding` để tự tính.
 - ~~Hệ RAG/memory **không tự sinh embedding**~~ — **đã hết đúng từ 22/07/2026.** Đường chat của agent graph nay tự sinh embedding **cả hai chiều**, nhưng bằng `EmbeddingEngine` của §8.0 chứ không bằng `get_embedding`:
   - `recall_context()` (`agent/graph.rs:193-242`) gọi `embed_query` (`:204`) rồi `db::search_hybrid_vectors` (`:221`), và chèn ký ức tìm được vào `chat_messages` như một turn `system` phụ (`agent/graph.rs:384-396`).
   - `persist_turn()` (`agent/graph.rs:249-286`) gọi `embed_passage` (`:259`) rồi `db::upsert_vector` (`:270`) để lưu lượt hội thoại; điểm gọi nằm ở `agent/graph.rs:434`, **trước** lần `trim_history()` thứ hai, để nội dung bị cắt khỏi cửa sổ ngữ cảnh không mất hẳn.
@@ -643,11 +643,11 @@ pub embedder: tokio::sync::Mutex<Option<llm::embedder::EmbeddingEngine>>,   // l
 | `lib.rs:293` (`reload_llm_gpu_layers`) | hot-swap theo tải GPU/game | `.lock().await` |
 | `lib.rs:575` | đọc trạng thái model | `.lock().await` |
 | `lib.rs:863` (`task_plan_chat`) | sinh kế hoạch tác vụ | `.blocking_lock()` |
-| `lib.rs:1359` (`llm:swap_model`) | hot-swap thủ công | `.lock().await` |
-| `lib.rs:1382` (`llm:embed`) | tính embedding | `.lock().await` |
-| `lib.rs:1438` (`chat:completion`) | chat IPC/WS | `.blocking_lock()` |
-| `lib.rs:1494` (`vision:ask`) | hỏi ảnh | `.blocking_lock()` |
-| `lib.rs:1531` | đọc trạng thái | `.lock().await` |
+| `liva-native-core/src/lib.rs#handle_command` (`llm:swap_model`) | hot-swap thủ công | `.lock().await` |
+| `liva-native-core/src/lib.rs#handle_command` (`llm:embed`) | tính embedding | `.lock().await` |
+| `liva-native-core/src/lib.rs#handle_command` (`chat:completion`) | chat IPC/WS | `.blocking_lock()` |
+| `liva-native-core/src/lib.rs#handle_command` (`vision:ask`) | hỏi ảnh | `.blocking_lock()` |
+| `liva-native-core/src/system_status.rs#system_status` | đọc trạng thái | `.lock().await` |
 | `liva-native-core/src/websocket.rs:1122-1151` (`user_voice_command` → vision) | thoại + màn hình | `.blocking_lock()` |
 | `liva-native-core/src/websocket.rs:1264-1375` (`user_voice_command` → chat) | thoại + chat | `.blocking_lock()` |
 | `agent/graph.rs:407` (node `chat_completion`) | agent chat | `.blocking_lock()` |
@@ -693,11 +693,11 @@ flowchart LR
 `LlamaEngine.context` là **một `LlamaContext<'static>` duy nhất**, được `swap_model` cấu hình `with_embeddings(true)` + `pooling=Mean` (`engine.rs:207-208`), và được dùng cho:
 
 1. **chat** — `generate_completion` (prefix-cache dựa trên `LlamaRouterManager.last_tokens`),
-2. **embed** — `get_embedding(&engine.model, &mut engine.context, …)` (`lib.rs:1392`) — **chỉ đường `llm:embed`**; embedding của RAG đi qua engine ONNX riêng (§8.0) và không đụng context này,
+2. **embed** — `get_embedding(&engine.model, &mut engine.context, …)` (`liva-native-core/src/lib.rs#handle_command`) — **chỉ đường `llm:embed`**; embedding của RAG đi qua engine ONNX riêng (§8.0) và không đụng context này,
 3. **vision** — `answer_with_image` (tự `clear_kv_cache()` đầu lượt, `engine.rs:444`),
 4. **swap** — `swap_model` huỷ và dựng lại context.
 
-**`clear_kv_cache()` của `embed` phá cache chat.** `embed.rs:10` gọi `context.clear_kv_cache()` để dọn context trước khi pooling. Nhưng lệnh `llm:embed` (`lib.rs:1382-1394`) **chỉ mượn `engine.model` và `engine.context`, KHÔNG chạm tới `llm_manager.last_tokens`**. Sau khi embed xong:
+**`clear_kv_cache()` của `embed` phá cache chat.** `embed.rs:10` gọi `context.clear_kv_cache()` để dọn context trước khi pooling. Nhưng lệnh `llm:embed` (`liva-native-core/src/lib.rs#handle_command`) **chỉ mượn `engine.model` và `engine.context`, KHÔNG chạm tới `llm_manager.last_tokens`**. Sau khi embed xong:
 
 - KV cache vật lý trong context đã **rỗng**,
 - nhưng `last_tokens` vẫn còn nguyên lịch sử lượt chat trước.
@@ -829,7 +829,7 @@ Chú ý: biến `message` — nội dung chat của chính user — **không** s
 
 | Vị trí | Điều kiện |
 |---|---|
-| `lib.rs:1416-1421` (`chat:completion`) | nếu client không gửi message role `system` thì chèn `PERSONA_LIVA` vào đầu |
+| `liva-native-core/src/lib.rs#handle_command` (`chat:completion`) | nếu client không gửi message role `system` thì chèn `PERSONA_LIVA` vào đầu |
 | `agent/graph.rs:369-374` (node `chat_completion`) | fallback cho checkpoint legacy không có system |
 | `liva-native-core/src/websocket.rs:1264-1271` (`user_voice_command`) | luôn dựng `[system=PERSONA_LIVA, user=text]` |
 | `webrtc/pipeline.rs:267-274` (dòng chèn: `:269`) | session mới seed `{"role":"system","content":PERSONA_LIVA}` |
@@ -837,7 +837,7 @@ Chú ý: biến `message` — nội dung chat của chính user — **không** s
 
 ### 10.7 Lỗ hổng đã xác định
 
-**`answer_with_image` không sanitize `question`** trước khi nhúng vào ChatML (`engine.rs:467-472`) — khác chuẩn của đường text/tool. Nếu `question` chứa `<|im_end|>` hoặc `<|im_start|>system`, kẻ tấn công có thể chèn thêm turn giả vào prompt vision. Đường phơi ra: lệnh `vision:ask` (`lib.rs:1478-1529`) nhận `question` trực tiếp từ payload client.
+**`answer_with_image` không sanitize `question`** trước khi nhúng vào ChatML (`engine.rs:467-472`) — khác chuẩn của đường text/tool. Nếu `question` chứa `<|im_end|>` hoặc `<|im_start|>system`, kẻ tấn công có thể chèn thêm turn giả vào prompt vision. Đường phơi ra: lệnh `vision:ask` (`liva-native-core/src/lib.rs#handle_command`) nhận `question` trực tiếp từ payload client.
 
 ---
 
@@ -875,9 +875,9 @@ Trình tự event phát ra: `ai_thinking_start` → `ai_stream_start` → n × `
 
 Consumer UI: `liva-ui/src/App.vue:215` và `liva-ui/src/WidgetApp.vue:827`.
 
-### 11.3 (B) Đường IPC/command chuẩn — `chat:completion` (`lib.rs:1402-1477`) **[MỘT PHẦN]**
+### 11.3 (B) Đường IPC/command chuẩn — `chat:completion` (`liva-native-core/src/lib.rs#handle_command`) **[MỘT PHẦN]**
 
-Bật khi `payload.stream == true` (mặc định `false`, `lib.rs:1429`). Chunk là `IpcResponse` mang cùng `req_id`:
+Bật khi `payload.stream == true` (mặc định `false`, `liva-native-core/src/lib.rs#handle_command`). Chunk là `IpcResponse` mang cùng `req_id`:
 
 ```rust
 IpcResponse { id: req_id_inner.clone(), status: "ok",
@@ -967,8 +967,8 @@ Bảng dưới là **mục lục nội bộ** của chính tài liệu này: m�
 | 3 | `ai.temperature` / `ai.topP` / `ai.maxTokens` Rust không đọc; giá trị thật là `TEMP_DEFAULT=0.7` / `TOP_P_DEFAULT=0.9`; `maxTokens` **không có tương ứng** trong `generate_completion` | `lib.rs:464-466`, `persona.rs:9,12` | **[THIẾU]** |
 | 4 | `LIVA_LLM_MODEL_DIR` chỉ `src/bin/router_stress.rs:65` dùng; core dùng `ai.localModelsDir` | `main.rs`, `lib.rs:203-222` | lệch tài liệu |
 | 5 | `LIVA_LLM_N_GPU_LAYERS` mặc định code = 0 trong khi `.env.example:67` = 99 → không có `.env` là chạy CPU thuần | `main.rs:135` | lệch tài liệu |
-| 6 | `embed.rs` dùng **chung context** với generation; `clear_kv_cache()` phá prefix-cache chat mà **không** xoá `last_tokens`. ~~mâu thuẫn README ("decoupled contexts")~~ — README đã sửa, nay tự ghi nhận việc dùng chung context (`README.md:26`) | `embed.rs:10`, `lib.rs:1382-1394`, `engine.rs:207-208` | **[MỘT PHẦN]** + bug tiềm ẩn |
-| 7 | `vec_idx` là `int8[MEMORY_VECTOR_DIM]` = 384 ≠ `n_embd` model chat → **`llm:embed` vẫn không nối được** vào `vec_idx`. ~~RAG dense chưa nối với `llm:embed`~~ / ~~`upsert_vector` không kiểm chiều~~ — RAG nay đi qua `llm/embedder.rs` (384 chiều, khớp), và `upsert_vector` kiểm chiều ở `db.rs:589` | `db.rs:358,551,589`, `lib.rs:1168-1253` | **[MỘT PHẦN]** |
+| 6 | `embed.rs` dùng **chung context** với generation; `clear_kv_cache()` phá prefix-cache chat mà **không** xoá `last_tokens`. ~~mâu thuẫn README ("decoupled contexts")~~ — README đã sửa, nay tự ghi nhận việc dùng chung context (`README.md:26`) | `embed.rs:10`, `liva-native-core/src/lib.rs#handle_command`, `engine.rs:207-208` | **[MỘT PHẦN]** + bug tiềm ẩn |
+| 7 | `vec_idx` là `int8[MEMORY_VECTOR_DIM]` = 384 ≠ `n_embd` model chat → **`llm:embed` vẫn không nối được** vào `vec_idx`. ~~RAG dense chưa nối với `llm:embed`~~ / ~~`upsert_vector` không kiểm chiều~~ — RAG nay đi qua `llm/embedder.rs` (384 chiều, khớp), và `upsert_vector` kiểm chiều ở `db.rs:589` | `db.rs:358,551,589`, `liva-native-core/src/lib.rs#handle_command` | **[MỘT PHẦN]** |
 | 8 | `answer_with_image` **không sanitize** `question` trước khi nhúng ChatML | `engine.rs:467-472` | rủi ro injection |
 | 9 | Feature `openblas` khai báo **rỗng** — bật không có tác dụng | `Cargo.toml:80` | **[THIẾU]** |
 | 10 | Vision **chết cứng trên debug build Windows** theo thiết kế — phải `cargo build --release` | `engine.rs:405-411` | **[MỘT PHẦN]** |

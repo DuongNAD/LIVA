@@ -37,7 +37,7 @@ covers:
 
 Chương này mô tả mọi điểm LIVA chạm ra thế giới bên ngoài quá trình chính: giao thức MCP (client + server nội bộ), bot Telegram, kỹ năng smart home, dịch vụ Python `liva-voice` (port 8765), client di động Capacitor, và MCP server TypeScript `obsidian_llm_wiki`.
 
-**Kết luận chủ đạo của chương (cập nhật 22/07/2026):** ~~ngoài `integrations::smart_home` (đã nối dây nhưng là stub) và lệnh Telegram `/stop`, **hầu như toàn bộ khu vực tích hợp ngoài của LIVA là code mồ côi**~~ — bản cũ đúng cho tới ngày 22/07/2026, khi hai điểm đứt dây lớn nhất được nối lại: MCP server nội bộ giờ có cổng vào thật (`mcp:list_tools` / `mcp:call_tool` trong `handle_command`, `liva-native-core/src/lib.rs:1467-1468, 1578`), và vòng hội thoại Telegram đã khép kín (`route_input_to_agent` gọi thẳng `chat:completion` rồi gửi trả lời về, `telegram.rs:387-460`). ~~Phần vẫn còn mồ côi: `mcp/client.rs` (`ProcessWrapper` 0 caller), …~~ — **`mcp/client.rs` cũng đã rời danh sách** ở rung G0 (25–26/07/2026): viết lại thành MCP client stdio đầy đủ, 7 call site, đã chạy với server `npx` thật (§9.1.1). Phần **vẫn còn mồ côi**: `liva-voice/` không tiến trình nào khởi động, `mobile_client/` PoC đóng băng — có struct, có test xanh, nhưng không có cổng vào hoặc không có consumer ở đầu ra.
+**Kết luận chủ đạo của chương (cập nhật 22/07/2026):** ~~ngoài `integrations::smart_home` (đã nối dây nhưng là stub) và lệnh Telegram `/stop`, **hầu như toàn bộ khu vực tích hợp ngoài của LIVA là code mồ côi**~~ — bản cũ đúng cho tới ngày 22/07/2026, khi hai điểm đứt dây lớn nhất được nối lại: MCP server nội bộ giờ có cổng vào thật (`mcp:list_tools` / `mcp:call_tool` trong `handle_command`, `liva-native-core/src/lib.rs#handle_command, 1578`), và vòng hội thoại Telegram đã khép kín (`route_input_to_agent` gọi thẳng `chat:completion` rồi gửi trả lời về, `telegram.rs:387-460`). ~~Phần vẫn còn mồ côi: `mcp/client.rs` (`ProcessWrapper` 0 caller), …~~ — **`mcp/client.rs` cũng đã rời danh sách** ở rung G0 (25–26/07/2026): viết lại thành MCP client stdio đầy đủ, 7 call site, đã chạy với server `npx` thật (§9.1.1). Phần **vẫn còn mồ côi**: `liva-voice/` không tiến trình nào khởi động, `mobile_client/` PoC đóng băng — có struct, có test xanh, nhưng không có cổng vào hoặc không có consumer ở đầu ra.
 
 Nhãn trạng thái dùng xuyên suốt: **[OK]** đang chạy thật · **[MỘT PHẦN]** có code nhưng tắt/opt-in/chưa nối dây · **[THIẾU]** chưa có/stub.
 
@@ -48,7 +48,7 @@ Nhãn trạng thái dùng xuyên suốt: **[OK]** đang chạy thật · **[MỘ
 | Thành phần | File / vị trí | Giao thức | Trạng thái |
 |---|---|---|---|
 | MCP **client** (spawn server ngoài qua stdio) | `liva-native-core/src/mcp/client.rs` (1 143 dòng) | stdio + JSON-RPC đầy đủ: handshake, tương quan id, `tools/list`+`tools/call`, drain stderr, timeout, đọc `mcp_config.json` | **[OK]** (26/07/2026, rung G0) — 7 call site; đã chạy với server `npx` thật |
-| MCP **server** nội bộ `NativeMcpServer` | `liva-native-core/src/mcp/server.rs` (183 dòng) | không có transport JSON-RPC riêng; đi vào qua lớp lệnh IPC | **[MỘT PHẦN]** (22/07/2026) — `new()` lúc khởi động, giữ trong `AppState`, và **đã có cổng vào thật**: `handle_command` có `"mcp:list_tools"` (`liva-native-core/src/lib.rs:1467-1468`) + `"mcp:call_tool"` (`liva-native-core/src/lib.rs:1470-1494`). ~~chỉ được gọi trong `tests/integration_tests.rs`~~. Chưa client UI nào gọi |
+| MCP **server** nội bộ `NativeMcpServer` | `liva-native-core/src/mcp/server.rs` (183 dòng) | không có transport JSON-RPC riêng; đi vào qua lớp lệnh IPC | **[MỘT PHẦN]** (22/07/2026) — `new()` lúc khởi động, giữ trong `AppState`, và **đã có cổng vào thật**: `handle_command` có `"mcp:list_tools"` (`liva-native-core/src/lib.rs#handle_command`) + `"mcp:call_tool"` (`liva-native-core/src/lib.rs#handle_command`). ~~chỉ được gọi trong `tests/integration_tests.rs`~~. Chưa client UI nào gọi |
 | MCP **protocol** (JSON-RPC struct) | `liva-native-core/src/mcp/protocol.rs` (106 dòng) | JSON-RPC 2.0 (lệch spec) | **[THIẾU]** một nửa — `JsonRpc*` 0 caller |
 | MCP server **thật chạy** | `teamwork_projects/obsidian_llm_wiki/src/{index,server,vault}.ts` | MCP stdio, `@modelcontextprotocol/sdk` | **[OK] nhưng NGOÀI LIVA** — Node/TS, phục vụ IDE agent, không phải LIVA gọi |
 | Telegram bot | `liva-native-core/src/telegram.rs` | Bot API qua `teloxide` (long polling) | **[MỘT PHẦN]** — opt-in theo env, chỉ spawn trong binary stdio, **không spawn trong Tauri** |
@@ -177,8 +177,8 @@ impl NativeMcpServer {
 
 - `AppState.mcp_server: Arc<mcp::server::NativeMcpServer>` — `lib.rs:44`.
 - Khởi tạo: `main.rs:169-171` và `liva-desktop/src-tauri/src/lib.rs:347-349`, cùng default `LIVA_VAULT_PATH = "E:\Project\LIVA\teamwork_projects\obsidian_llm_wiki\vault"` (**hardcode absolute path máy tác giả**).
-- **Vẫn không có transport riêng:** không có JSON-RPC loop, không listener stdio/HTTP cho server này. Nhưng **từ 22/07/2026 nó đã được nối vào lớp lệnh**: ~~`handle_command` (`lib.rs:236`) không có nhánh nào tên `mcp:*` … Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **0 hit**~~ — nay `handle_command` (`lib.rs:320`) có hai nhánh `"mcp:list_tools"` (`liva-native-core/src/lib.rs:1467-1468`) và `"mcp:call_tool"` (`liva-native-core/src/lib.rs:1470-1494`), đặt ngay trước nhánh cuối `_ => Err(format!("Unknown command: {}", command))` (`liva-native-core/src/lib.rs:1544`). Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **2 hit**, cả hai trong `lib.rs`. Khối comment ngay trên hai arm (`liva-native-core/src/lib.rs:1460-1466`) ghi rõ ranh giới an toàn: mọi thao tác file vẫn đi qua `resolve_path`.
-- Caller của `call_tool`: `liva-native-core/src/lib.rs:1489-1492` (arm `mcp:call_tool`, dựng `mcp::protocol::CallToolRequest`) và `liva-native-core/tests/integration_tests.rs` (dòng 41, 62, 78, 88, 171, 181, 192, 203, cùng nhóm mới 579-625). `list_tools()` được gọi ở `liva-native-core/src/lib.rs:1467-1468` và trong test `integration_tests.rs:559, 565` — ~~**không có caller nào, kể cả test**~~ không còn đúng.
+- **Vẫn không có transport riêng:** không có JSON-RPC loop, không listener stdio/HTTP cho server này. Nhưng **từ 22/07/2026 nó đã được nối vào lớp lệnh**: ~~`handle_command` (`lib.rs:236`) không có nhánh nào tên `mcp:*` … Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **0 hit**~~ — nay `handle_command` (`lib.rs:320`) có hai nhánh `"mcp:list_tools"` (`liva-native-core/src/lib.rs#handle_command`) và `"mcp:call_tool"` (`liva-native-core/src/lib.rs#handle_command`), đặt ngay trước nhánh cuối `_ => Err(format!("Unknown command: {}", command))` (`liva-native-core/src/lib.rs#handle_command`). Grep `"mcp:` trên `src/`, `src-tauri/src/`, `liva-ui/src/` = **2 hit**, cả hai trong `lib.rs`. Khối comment ngay trên hai arm (`liva-native-core/src/lib.rs#handle_command`) ghi rõ ranh giới an toàn: mọi thao tác file vẫn đi qua `resolve_path`.
+- Caller của `call_tool`: `liva-native-core/src/lib.rs#handle_command` (arm `mcp:call_tool`, dựng `mcp::protocol::CallToolRequest`) và `liva-native-core/tests/integration_tests.rs` (dòng 41, 62, 78, 88, 171, 181, 192, 203, cùng nhóm mới 579-625). `list_tools()` được gọi ở `liva-native-core/src/lib.rs#handle_command` và trong test `integration_tests.rs:559, 565` — ~~**không có caller nào, kể cả test**~~ không còn đúng.
 
 ⇒ **LIVA đã expose 4 tool này ra lớp lệnh IPC/WebSocket**, kèm test `2.7 — mcp:list_tools / mcp:call_tool phải đi qua handle_command` (`integration_tests.rs:539`). Phần còn thiếu: **chưa client UI nào gọi hai lệnh đó**, và vẫn không có transport JSON-RPC để một MCP host bên ngoài nối vào.
 
@@ -207,7 +207,7 @@ impl JsonRpcResponse { pub fn success(id: String, result: Value) -> Self        
 
 **Sai lệch spec (đọc trực tiếp):** `JsonRpcRequest { id: String }` (`protocol.rs:5`) ép `id` **bắt buộc và chỉ nhận string** — JSON-RPC 2.0/MCP cho phép `id` là **number** hoặc `null`. Client MCP thật gửi `"id": 1` sẽ **fail deserialize**. Đồng thời không có struct nào cho `initialize` / `ServerCapabilities` / `resources/*` / `prompts/*`.
 
-Chỉ `Tool` / `ToolList` / `CallToolRequest` / `CallToolResult` / `ToolContent` được `server.rs` + `lib.rs` (arm `mcp:call_tool`, `liva-native-core/src/lib.rs:1489-1494`) + test dùng; toàn bộ nhóm `JsonRpc*` là **0 caller**.
+Chỉ `Tool` / `ToolList` / `CallToolRequest` / `CallToolResult` / `ToolContent` được `server.rs` + `lib.rs` (arm `mcp:call_tool`, `liva-native-core/src/lib.rs#handle_command`) + test dùng; toàn bộ nhóm `JsonRpc*` là **0 caller**.
 
 ### 9.1.4 MCP server thật sự hoạt động — `teamwork_projects/obsidian_llm_wiki` **[OK] nhưng ngoài LIVA**
 
@@ -417,7 +417,7 @@ if let Some(token) = telegram_token {
 
 ### 9.2.7 Biến môi trường Telegram
 
-Điểm cần nhớ riêng cho chương này: `TELEGRAM_BOT_TOKEN` được đọc ở **3 nơi độc lập** (`liva-native-core/src/boot.rs:407-425`, `telegram.rs:323`, `lib.rs:1549`) thay vì một nguồn duy nhất; `TELEGRAM_ALLOWED_IDS` là CSV và **rỗng ⇒ chặn hết** (fail-closed). Nhóm `TELEGRAM_CHAT_ID` / `TELEGRAM_ADMIN_ID` / `REMOTE_CONTROL_ENABLED` / `ZALO_*` được khai báo nhưng **không có dòng Rust nào đọc** — chi tiết độ lệch `.env.example` ↔ code nằm ở tài liệu cấu hình.
+Điểm cần nhớ riêng cho chương này: `TELEGRAM_BOT_TOKEN` được đọc ở **3 nơi độc lập** (`liva-native-core/src/boot.rs:486`, `telegram.rs:395`, `liva-native-core/src/system_status.rs#system_status`) thay vì một nguồn duy nhất; `TELEGRAM_ALLOWED_IDS` là CSV và **rỗng ⇒ chặn hết** (fail-closed). Nhóm `TELEGRAM_CHAT_ID` / `TELEGRAM_ADMIN_ID` / `REMOTE_CONTROL_ENABLED` / `ZALO_*` được khai báo nhưng **không có dòng Rust nào đọc** — chi tiết độ lệch `.env.example` ↔ code nằm ở tài liệu cấu hình.
 
 > 📌 Nguồn đầy đủ (bảng biến môi trường, lệch `.env.example` vs code): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 
@@ -747,7 +747,7 @@ Cả 4 file **không được tracked trong bất kỳ npm script hay `.github/w
 
 Bản kiểm kê này đã được rút gọn sau đợt 22/07/2026. ~~Chương này phát hiện **12 hạng mục mồ côi/đứt dây**~~ — ba mục đã rời danh sách:
 
-- `mcp/server.rs` + `mcp/protocol.rs` **không còn mồ côi**: `handle_command` gọi cả `list_tools()` (`liva-native-core/src/lib.rs:1467-1468`) lẫn `call_tool()` (`liva-native-core/src/lib.rs:1489-1492`, dùng `mcp::protocol::CallToolRequest`) — §9.1.2.
+- `mcp/server.rs` + `mcp/protocol.rs` **không còn mồ côi**: `handle_command` gọi cả `list_tools()` (`liva-native-core/src/lib.rs#handle_command`) lẫn `call_tool()` (`liva-native-core/src/lib.rs#handle_command`, dùng `mcp::protocol::CallToolRequest`) — §9.1.2.
 - `telegram:message` **vẫn không có consumer** (§9.2.4) nhưng **không còn là đứt dây nghiêm trọng nhất**: nó chỉ là kênh sự kiện phụ, còn vòng hội thoại đã khép kín qua `chat:completion`.
 - ~~`data/models.config.json` là config chết (§9.4.9)~~ — file **đã bị xoá 22/07/2026** (`92e79a3`); thư mục `data/` không còn nó.
 

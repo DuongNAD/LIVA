@@ -175,7 +175,7 @@ nền kiểm projection theo batch, checkpoint và xử lý DLQ.
 | File `.rs` trong `liva-native-core` | **82** (76 trong `src/` + 6 trong `tests/`) sau khi `prng.rs` và `webrtc/signaling.rs` bị xoá ở `510c9e2` (22/07/2026); GitNexus index (đo trước đợt xoá) chỉ đếm 70 | `find src tests -name '*.rs'`, meta:gitnexus |
 | LOC Rust core (không kể `src/bin/`) | **18.687 dòng** (đo 22/07/2026). Kể cả 17 file `src/bin/` thì tổng mọi `.rs` trong `src/` là **21.238 dòng** | `wc -l` trên mọi `.rs` |
 | Binary phụ trợ | **17** file `src/bin/`; 14 khai báo `[[bin]]` với `test = false`, 3 auto-discover | `Cargo.toml:80-148` |
-| Lệnh IPC (`handle_command`) | **42 nhánh** + `_ => Err("Unknown command")` | `lib.rs:236-1484` |
+| Lệnh IPC (`handle_command`) | **42 nhánh** + `_ => Err("Unknown command")` | `liva-native-core/src/lib.rs#handle_command` |
 | Bảng SQLite | 13 bảng thường + 2 bảng ảo = **15** | `db.rs:188-354` |
 | Bảng **có** writer trong Rust | **3** (`facts`, `tasks`, `agent_checkpoints`) | grep `INSERT INTO` |
 | Cột được mã hoá | **1** (`facts.value`, AES-256-GCM) | `db.rs:454`, `crypto.rs` |

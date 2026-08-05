@@ -80,7 +80,7 @@ flowchart TD
     CHAT --> END["persist + __END__"]
 ```
 
-`liva-native-core/src/agent/graph.rs#build_pipeline_graph` đăng ký sáu node:
+`liva-native-core/src/agent/graph/pipeline.rs#build_pipeline_graph` đăng ký sáu node:
 
 | Node | Trách nhiệm | Side effect |
 |---|---|---|
@@ -96,7 +96,7 @@ node, nên tiếp tục gọi “4 node” là sai as-built.
 
 ## 4. Reflex lane
 
-`liva-native-core/src/agent/graph.rs#route_intent` định tuyến tất định:
+`liva-native-core/src/agent/graph/intent.rs#route_intent` định tuyến tất định:
 
 1. nhắn tin;
 2. vision;

@@ -118,8 +118,8 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 | `LIVA_DB_PATH` | `data_dir()/agents/liva_core/structured_memory.sqlite` | Không | `boot.rs#build_app_state` | Đường dẫn SQLite neo vào data root, không phụ thuộc cwd; parent dir được tạo trước khi mở |
 | `LIVA_ENCRYPTION_KEY` | khóa thiết bị DPAPI tự sinh trên Windows | Không | `lib.rs#resolve_and_rekey`, `boot.rs#build_app_state` | Nếu đặt thì dùng khóa explicit; nếu bỏ trống, sinh khóa thiết bị và hiển thị escrow một lần. Khóa 32 số `0` chỉ là legacy/test và không được chọn làm khóa live |
 | `LIVA_DB_IN_MEMORY` | `false` = dùng file trên đĩa | Không | `boot.rs#build_app_state`, qua `env_flag` | Bật khi `1/true/yes/on`; tắt khi `0/false/no/off`; không set hoặc giá trị lạ → **false** (an toàn) |
-| `LIVA_STT_MODEL_DIR` | `models/nemotron-asr` | Không | `main.rs:95`, `lib.rs:302` | Thư mục Nemotron ASR; đi qua `resolve_resource_path` |
-| `LIVA_TTS_MODEL_PATH` | `models/kokoro-v1.0.onnx` | Không | `main.rs:101`, `lib.rs:308` | Model Kokoro; nạp **lazy** (`tts/engine.rs:24-32`) — thiếu file **không** làm hỏng `TtsManager` |
+| `LIVA_STT_MODEL_DIR` | `models/nemotron-asr` | Không | `liva-native-core/src/boot.rs:263` | Thư mục Nemotron ASR; đi qua `resolve_resource_path` |
+| `LIVA_TTS_MODEL_PATH` | `models/kokoro-v1.0.onnx` | Không | `liva-native-core/src/boot.rs:264` | Model Kokoro; nạp **lazy** (`tts/engine.rs:24-32`) — thiếu file **không** làm hỏng `TtsManager` |
 | `LIVA_TTS_VOICE_PATH` | `node_modules/kokoro-js/voices/af_heart.bin` | Không | `boot.rs#build_app_state`, `tts/mod.rs#TtsManager::from_bin` | Voice fallback Kokoro; thiếu file chỉ ghi cảnh báo và dùng vector rỗng, không làm mất Piper/VieNeu |
 | `LIVA_MEMORY_RETENTION_DAYS` | `0` = tắt | Không | `memory_retention.rs#RetentionPolicy::from_env` | Số ngày không hoạt động trước khi hội thoại local đủ điều kiện xóa; 1–36.500 bật worker, 0/vắng là không tự xóa |
 | `LIVA_MEMORY_RETENTION_INTERVAL_SECS` | `3600` | Không | `memory_retention.rs#RetentionPolicy::from_env` | Nhịp sweeper; tối thiểu 60 giây; chỉ được đọc khi retention đã bật |
@@ -147,7 +147,7 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 | `LIVA_SERVER_PORT` | `8002` | Không | `websocket.rs#bind_from_env` | Cổng WebSocket `/ws` |
 | `LIVA_SERVER_HOST` | `127.0.0.1` | Không | `websocket.rs#bind_from_env` | Địa chỉ bind; loopback không yêu cầu token |
 | `LIVA_WS_AUTH_TOKEN` | không set | **Bắt buộc khi host non-loopback** | `websocket.rs#bind` | Bearer token 32–4096 visible ASCII byte; thiếu/yếu làm bind fail |
-| `TELEGRAM_BOT_TOKEN` | không set = **tắt bot** | Không | `liva-native-core/src/boot.rs:407-425`, `lib.rs:1465`, `telegram.rs:323` | Bật `TelegramBotManager` |
+| `TELEGRAM_BOT_TOKEN` | không set = **tắt bot** | Không | `liva-native-core/src/boot.rs:407-425`, `liva-native-core/src/system_status.rs#system_status`, `telegram.rs:323` | Bật `TelegramBotManager` |
 | `TELEGRAM_ALLOWED_IDS` | `""` (fail-closed) | Không | `liva-native-core/src/boot.rs:411-425` | CSV whitelist ID người dùng |
 
 > ⚠️ **Bẫy CSP:** `tauri.conf.json` chỉ cho `connect-src` tới `localhost:5173`, `ws://localhost:5173`, `ws://localhost:8002`, `ws://127.0.0.1:8002` — **port 8002 hardcode trong CSP**, nên đổi `LIVA_SERVER_PORT` sẽ vỡ kết nối WS từ UI (dù ở chế độ Tauri core chạy in-process, không mở WS).
@@ -174,7 +174,7 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 | `LIVA_VIENEU_VOICE` | `default_voice` trong `voices_v3_turbo.json` | Không | `tts/mod.rs:178` | ✅ đã bổ sung vào  (21/07/2026)`.env.example` |
 | `LIVA_VIENEU_THREADS` | `4` | Không | `tts/vieneu/mod.rs:126` | ✅ đã bổ sung vào  (21/07/2026)`.env.example` |
 | `LIVA_VIENEU_SEED` | `StdRng::from_entropy()` | Không | `tts/vieneu/mod.rs:211` | Seed sampling (tái lập kết quả) — ✅ đã bổ sung vào  (21/07/2026)`.env.example` |
-| `LIVA_STT_VI_ENGINE` | `nemotron` (**chỉ `parakeet`** mới đổi) | Không | `stt/mod.rs:49` | Chọn engine STT tiếng Việt |
+| `LIVA_STT_VI_ENGINE` | `parakeet`; đặt `nemotron` để opt-out | Không | `stt/mod.rs:13`, `stt/mod.rs:75` | Parakeet xử lý whole-utterance tiếng Việt sau VAD-end và được profile `full` tải về; thiếu/hỏng model thì tự lùi về Nemotron. Nemotron vẫn luôn dùng cho wake-word và streaming |
 | `LIVA_STT_LANGUAGE` | `"vi"` (`stt/lang.rs:26`) | Không | `stt/mod.rs:58` | Ngôn ngữ nhận dạng mặc định |
 | `LIVA_PARAKEET_MODEL_PATH` | `models/parakeet_vi.onnx` | Không | `stt/mod.rs:115` | ⚠️ dùng `PathBuf::from` trực tiếp, **KHÔNG** qua `resolve_resource_path` ⇒ phụ thuộc cwd |
 | `LIVA_PARAKEET_VOCAB_PATH` | `<model>.with_file_name("parakeet_vi_vocab.json")` | Không | `stt/mod.rs:118` | Vocab BPE 1024 token |
@@ -294,12 +294,12 @@ grep trên `liva-native-core/src` + `liva-desktop/src-tauri/src` → **0 kết q
 
 | Thành phần | Vị trí | Ghi chú |
 |---|---|---|
-| Hằng đường dẫn | `liva-native-core/src/lib.rs#CONFIG_REL_PATH` = `"data/liva-config.json"` | |
-| Dò đường dẫn | `config_file_path()` `lib.rs:66-74` | Thử tiền tố `""`, `".."`, `"../.."` vì cwd khác nhau theo điểm vào (repo root / liva-native-core / liva-desktop/src-tauri) |
-| Đọc | `liva-native-core/src/lib.rs#read_config_file` | Lỗi đọc hoặc JSON hỏng ⇒ **im lặng trả `{}`** (không cảnh báo) |
-| Ghi (merge sâu) | lệnh `update_config` `lib.rs:404-427` + `liva-native-core/src/lib.rs#merge_json` | UI gửi patch từng phần (ví dụ chỉ `ai`); object lồng nhau merge theo khoá, còn lại ghi đè |
-| Đọc phần `ai` cho UI | lệnh `get_ai_config` `lib.rs:428-451` | Trả `ai` nguyên khối; file vắng ⇒ trả default cứng |
-| Đọc toàn bộ cho UI | lệnh `get_config` `lib.rs:~350-403` | File vắng ⇒ trả default cứng (`lib.rs:360-401`) |
+| Hằng đường dẫn | `liva-native-core/src/paths.rs#CONFIG_REL_PATH` = `"data/liva-config.json"` | |
+| Dò đường dẫn | `liva-native-core/src/paths.rs#config_file_path` | Thử tiền tố `""`, `".."`, `"../.."` vì cwd khác nhau theo điểm vào (repo root / liva-native-core / liva-desktop/src-tauri) |
+| Đọc | `liva-native-core/src/paths.rs#read_config_file` | Lỗi đọc hoặc JSON hỏng ⇒ **im lặng trả `{}`** (không cảnh báo) |
+| Ghi (merge sâu) | lệnh `liva-native-core/src/commands/config.rs#update_config` + `liva-native-core/src/paths.rs#merge_json` | UI gửi patch từng phần (ví dụ chỉ `ai`); object lồng nhau merge theo khoá, còn lại ghi đè |
+| Đọc phần `ai` cho UI | `liva-native-core/src/commands/config.rs#get_ai_config` | Trả `ai` nguyên khối; file vắng ⇒ trả default cứng |
+| Đọc toàn bộ cho UI | `liva-native-core/src/commands/config.rs#get_config` | File vắng ⇒ trả default cứng |
 
 Hằng số fallback (`lib.rs:59-61`):
 

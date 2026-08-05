@@ -1,10 +1,13 @@
 {
   "dataset": "google/fleurs vi_vn test",
-  "manifest": "data/benchmarks/fleurs-vi/fleurs-vi-test.jsonl",
+  "manifest": "data\\benchmarks\\fleurs-vi\\fleurs-vi-test.jsonl",
   "production_api": "liva_native_core::stt::SttManager::feed_audio(audio, true)",
+  "parakeet_model_sha256": "aa5658c3499fc991780e44ad5ccd9d4393d1266727a281cb3e4ca39be42334c4",
+  "parakeet_model_revision": "240d82cc243f7cf47d100b293c7dff96e65a04c2",
   "results": [
     {
       "engine": "nemotron",
+      "active_engine": "Nemotron",
       "samples": 100,
       "substitutions": 326,
       "deletions": 58,
@@ -12,11 +15,14 @@
       "reference_words": 3024,
       "wer_percent": 15.013227513227513,
       "audio_seconds": 1279.7999999999997,
-      "elapsed_seconds": 530.0097448,
-      "real_time_factor": 0.41413482169088933
+      "elapsed_seconds": 397.21242,
+      "real_time_factor": 0.310370698546648,
+      "end_of_turn_latency_p50_ms": 3772.2748,
+      "end_of_turn_latency_p95_ms": 6111.418
     },
     {
       "engine": "parakeet",
+      "active_engine": "Parakeet-vi",
       "samples": 100,
       "substitutions": 234,
       "deletions": 48,
@@ -24,8 +30,10 @@
       "reference_words": 3024,
       "wer_percent": 12.003968253968255,
       "audio_seconds": 1279.7999999999997,
-      "elapsed_seconds": 97.9244728,
-      "real_time_factor": 0.07651544991404909
+      "elapsed_seconds": 75.3409,
+      "real_time_factor": 0.05886927644944524,
+      "end_of_turn_latency_p50_ms": 666.879,
+      "end_of_turn_latency_p95_ms": 1169.7256
     }
   ]
 }

@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-08-04
-commit: 596e8b6
-stale-ok: 596e8b6
+updated: 2026-08-05
+commit: 2dc8e2e
+stale-ok: 2dc8e2e
 status: living
 owns:
   - duong-co-so-do-luong
@@ -135,6 +135,26 @@ Bảng trên giữ nguyên vì nó là **ảnh chụp có ngày** của `260c643
 1. **`docs-citations.mjs` chết vì hết heap, không phải vì tài liệu sai.** Nó duyệt cây bằng `readdirSync` với `IGNORE_DIRS` cố định (`node_modules`, `target`, `models`…) **không có `venv`**. Từ khi `tools/wakeword/venv` tồn tại (240 gói site-packages), lệnh này nổ `JavaScript heap out of memory` ở mặc định 4 GB. Với `node --max-old-space-size=12288` thì **exit 0, 0 neo hỏng**. CI clone sạch nên không có `venv` ⇒ **CI không dính**; đây là lỗi chỉ xuất hiện trên máy dev.
 2. **`liva-native-core/Cargo.lock` là rác thời tiền-workspace.** Chạy `cargo audit` từ thư mục đó quét **319 crate** và báo **"1 vulnerability"** (crossbeam-epoch, RUSTSEC-2026-0204). Chạy từ gốc — như CI làm — quét **857 crate** và cho **0 vulnerability**. Cùng loại rác với `liva-native-core/target/`; luôn chạy `cargo audit` từ gốc workspace.
 
+#### Đo lại 05/08/2026 tại `2dc8e2e` — 14 cổng, chỉ những dòng đã đổi
+
+Đo trên cây làm việc **trước khi** hạ nó thành hai lát commit (`2dc8e2e` mã nguồn · lát tài liệu ngay sau). Cổng nào không có tên ở đây thì kết quả không đổi so với 04/08.
+
+| Cổng | Kết quả 05/08/2026 | So 04/08 |
+|---|---|---|
+| Test Rust | **657 pass · 0 fail · 3 ignored**, 35 binary test | ↑ từ 635 / 31 |
+| Lỗ hổng npm | **0 vulnerabilities** | ↑ từ 5 (3 high) — vá ở `30349c5`, đúng như dự đoán "phải vá bằng commit nâng phụ thuộc" |
+| Test + Coverage UI | **299 pass / 30 file** — 73,75 % stmt · 55,82 % branch · 63,74 % func · 75,77 % line | ≈ (−0,1 điểm cả bốn) |
+
+⚠️ **Dòng coverage giảm 0,1 điểm KHÔNG phải hồi quy, và cách xác định điều đó mới là phần đáng ghi.** `git diff 596e8b6..HEAD -- liva-ui/` trả về **rỗng** — nguồn UI không đổi một byte giữa hai lần đo. Cùng nguồn, khác số ⇒ nhiễu của chính phép đo (nhiều khả năng do `30349c5` nâng lockfile, đổi cây phụ thuộc mà istanbul đo qua). **Đừng đuổi theo 0,1 điểm coverage khi `git diff` của thư mục đó rỗng** — thời gian đó dành cho chỉ số khác có ích hơn.
+
+**Cổng mới có mặt trong lần đo này:** `npm run devkit:lint` + `node scripts/actionlint.mjs` — **pass**.
+
+**⚠️ Bẫy đo thứ ba, cùng họ với hai bẫy ở [§0.2 mục 3](#02-ba-cái-bẫy-đã-cắn-trong-phiên-2707--đọc-để-khỏi-mất-buổi) và bẫy `cargo test` ‖ `cargo clippy`.** Lần chạy `cargo test` đầu tiên đỏ với `CL.exe exited with code 1` giữa lúc biên dịch llama.cpp — trông y hệt build gãy ở HEAD. **Không phải:** lúc đó vitest + `vue-tsc` + `node --max-old-space-size=12288` + MSVC 20 luồng chạy song song, và MSVC chết vì cạn bộ nhớ. Chạy `cargo test` một mình: sạch, 657 pass. **Nhận dạng:** lỗi nằm trong C++ của *phụ thuộc* chứ không trong mã của bạn, và nó không tái hiện khi chạy đơn lẻ ⇒ nghi tài nguyên máy trước, đừng nghi HEAD. Quy tắc rút ra: **các cổng nặng chạy tuần tự, không song song** — đúng cùng kết luận với bẫy `cargo test` ‖ `cargo clippy`, chỉ khác nguyên nhân (bộ nhớ thay vì fingerprint).
+
+**Ba dòng vẫn chưa đo lại, nói rõ thay vì bỏ lửng:** E2E bộ nhớ (cần model embedding + DB trên đĩa), TTFT và độ trễ vision (cần build release + CUDA).
+
+---
+
 ### 🔄 ĐỔI ROUTER 02/08/2026 — một phần bảng trên đã hết hiệu lực
 
 Router đổi từ **Qwen3-VL-2B** sang **gemma-4-E4B-it-qat-UD-Q4_K_XL** (`6723114`). Mọi con số phụ thuộc model trong bảng trên **đo trên Qwen**, nên phải đọc kèm mốc này:
@@ -204,9 +224,13 @@ Worktree tái hiện **chính xác** thứ CI thấy — kể cả gitlink rỗn
 
 **[U10](#u10--tách-handle_command) đã đi xa hơn bảng cũ ghi.** `handle_command` nay **140 dòng** trong `lib.rs`, định tuyến **8 miền qua `::owns()`** (`config`, `integrations`, `llm`, `memory`, `messaging`, `setup`, `skill_store`, `task`) và chỉ còn **5 nhánh chuỗi inline**. Thư mục `commands/` là **12 module · 2 890 dòng**. `lib.rs` **1 550** · `db.rs` **1 641** · `main.rs` **266** dòng.
 
-**Hotspot còn lại** — 12 file > 1 000 dòng trong `liva-native-core/src` + `liva-ui/src` (phạm vi đếm này hẹp hơn phạm vi của [A31-04](02-no-ky-thuat-va-rui-ro.md), nên **hai con số không so thẳng được**). Đo lại 04/08/2026 tại `596e8b6`: `agent/graph.rs` **1 947** · `websocket.rs` **1 912** · `WidgetApp.vue` **1 811** · `MemoryViewer.vue` **1 667** · `db.rs` 1 641 · `lib.rs` 1 550 · `llm/tool_calling.rs` 1 537 · `tts/vieneu/mod.rs` 1 167.
+**Hotspot còn lại** — **10** file > 1 000 dòng trong `liva-native-core/src` + `liva-ui/src` (phạm vi đếm này hẹp hơn phạm vi của [A31-04](02-no-ky-thuat-va-rui-ro.md), nên **hai con số không so thẳng được**). Đo lại 05/08/2026 tại `2dc8e2e`: `WidgetApp.vue` **1 811** · `MemoryViewer.vue` **1 667** · `db.rs` 1 641 · `websocket.rs` 1 630 · `llm/tool_calling.rs` 1 537 · `tts/vieneu/mod.rs` 1 167 · `use3DModel.ts` 1 160 · `mcp/client.rs` 1 139 · `tts/normalizer.rs` 1 059 · `vision/diff.rs` 1 026.
 
-Ba dịch chuyển đáng ghi so với bảng 02/08, và **hai trong ba là đi lùi**: `agent/graph.rs` +76 và `websocket.rs` +188 do đường nhắn tin bằng giọng (`596e8b6`) — tính năng mới đắp thẳng vào đúng hai file đã nằm đầu bảng hotspot. Chỉ `MemoryViewer.vue` giảm (1 773 → 1 667). Việc tách MemoryViewer **không phải là thứ đã cứu coverage** — bốn component con chỉ gánh 164 dòng; phần có tác dụng là **8 test mới**, đưa `functions` từ 23,8 % lên 60 %.
+Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph.rs` **1 947** · `websocket.rs` **1 912**, với nhận xét rằng **hai trong ba dịch chuyển là đi lùi** — tính năng nhắn tin bằng giọng đắp thẳng vào đúng hai file đã đứng đầu bảng. **Cả hai nay đã đảo chiều:** `websocket.rs` → 1 630 (`147f55c`), `agent/graph.rs` → **806** và `lib.rs` 1 550 → **740** (`2dc8e2e`). Không file `.rs` nào còn trên 1 000 dòng ở hai vị trí đầu bảng nữa.
+
+**Điều đáng chú ý hơn con số: hotspot đã đổi phía.** Bốn vị trí đầu từng là Rust; nay hai vị trí đầu là Vue (`WidgetApp.vue`, `MemoryViewer.vue`) và chúng **không giảm một dòng nào** qua cả hai milestone. Đó là phía chưa có bước tách nào, và cũng đúng là phía [U11](#u11--lấp-lỗ-test-widgetappvue) nhắm tới. Việc tách MemoryViewer trước đó **không phải là thứ đã cứu coverage** — bốn component con chỉ gánh 164 dòng; phần có tác dụng là **8 test mới**, đưa `functions` từ 23,8 % lên 60 %. Bài học đó áp thẳng cho U11: **tách file không tự sinh coverage, test mới mới sinh.**
+
+**Quy mô mã nguồn đo lại 05/08/2026 tại `2dc8e2e`:** Rust `liva-native-core/src` **134 file · 48 770 dòng** (+11 file, +2 037 dòng so 02/08 — refactor tách file nên số file tăng nhiều hơn số dòng); `liva-ui/src` **54 file · 17 608 dòng**; test Rust `tests/` **20 file · 5 436 dòng**; **24 binary** trong `src/bin`; `commands/` **12 module · 2 890 dòng**. Vẫn **0 `TODO`/`FIXME`/`HACK`/`XXX`**.
 
 **Mật độ panic — số CŨ, đo 29/07 tại `c6ec120`, KHÔNG đo lại ở `260c643`:** `.unwrap()` xuất hiện **96 lần trong code production** (106 lúc vào phiên 29/07, −10 sau [U7](#u7--dọn-unwrap-trên-đường-thoại)) và ~436 lần trong khối `#[cfg(test)]`.
 

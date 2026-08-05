@@ -226,4 +226,4 @@ Nói trước để bạn không mất thời gian tìm:
 - `liva-desktop/src-tauri/tauri.conf.json` — thư mục cài, ngôn ngữ, WebView2 (mục 1, 2)
 - `data/models-manifest.json` — danh sách model và dung lượng (mục 3)
 - `liva-native-core/src/setup/mod.rs` · `liva-ui/public/setup.html` — cửa sổ chuẩn bị (mục 3)
-- `liva-native-core/src/lib.rs#data_dir`/`#user_home_dir` — bảng đường dẫn dữ liệu (mục 5)
+- `liva-native-core/src/paths.rs#data_dir` / `liva-native-core/src/paths.rs#user_home_dir` — bảng đường dẫn dữ liệu (mục 5)

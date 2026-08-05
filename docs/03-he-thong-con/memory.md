@@ -72,8 +72,8 @@ Không được dùng tài liệu Node.js lưu trữ tại `docs/99-luu-tru/` đ
 `SqliteCheckpointer` tại `liva-native-core/src/agent/memory.rs#SqliteCheckpointer::save_checkpoint` không phải long-term
 semantic memory. Nó serialize toàn bộ `AgentState` vào `agent_checkpoints.state_json`.
 
-Conversational RAG nằm trong `liva-native-core/src/agent/graph.rs#recall_context_scoped` và
-`liva-native-core/src/agent/graph.rs#persist_turn_scoped`.
+Conversational RAG nằm trong `liva-native-core/src/agent/graph/memory_scope.rs#recall_context_scoped` và
+`liva-native-core/src/agent/graph/memory_scope.rs#persist_turn_scoped`.
 
 Facts đi qua `liva-native-core/src/db.rs#set_fact` và `liva-native-core/src/db.rs#get_fact`.
 
@@ -153,7 +153,7 @@ flowchart LR
 `liva-native-core/src/db.rs#search_hybrid_vectors` lấy pool `top_k × 3`, hợp nhất dense và sparse
 bằng reciprocal-rank fusion rồi cắt top-k. `LIVA_RAG_TOP_K` mặc định 3, chỉ nhận 1–20.
 
-`liva-native-core/src/agent/graph.rs#memory_system_message` chèn kết quả như một system message.
+`liva-native-core/src/agent/graph/memory_scope.rs#memory_system_message` chèn kết quả như một system message.
 Memory được xem là dữ liệu tham khảo, không phải instruction có quyền cao hơn persona/policy.
 
 Recall không làm hỏng lượt chat: query rỗng, thiếu embedder, lỗi ONNX, lỗi DB hoặc không có hit đều trả
@@ -161,7 +161,7 @@ Recall không làm hỏng lượt chat: query rỗng, thiếu embedder, lỗi ON
 
 ### 2.5 Scope và lineage
 
-`liva-native-core/src/agent/graph.rs#ConversationMemoryScope::recall_filter` tách hai khái niệm:
+`liva-native-core/src/agent/graph/memory_scope.rs#ConversationMemoryScope::recall_filter` tách hai khái niệm:
 
 - `domain = memory_owner:<owner_id>` là ranh giới bảo mật;
 - `category = conversation:<conversation_id>` là lineage/audience.

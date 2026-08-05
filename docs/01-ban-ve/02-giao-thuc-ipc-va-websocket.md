@@ -168,7 +168,7 @@ pub struct AppState {
 | 8 | `denoiser` | `tokio::sync::Mutex<Option<GtcrnDenoiser>>` | có | `None` trong Tauri |
 | 9 | `turn_shadow` | `tokio::sync::Mutex<Option<SmartTurnClassifier>>` | có | `None` trong Tauri |
 | 10 | `aec` | `tokio::sync::Mutex<Option<SelfEchoCanceller>>` | có | `None` trong Tauri |
-| 11 | `mcp_server` | `Arc<NativeMcpServer>` | không | đã nối vào dispatcher: `mcp:list_tools` (`liva-native-core/src/lib.rs:1467-1468`) + `mcp:call_tool` (`liva-native-core/src/lib.rs:1470-1494`) |
+| 11 | `mcp_server` | `Arc<NativeMcpServer>` | không | đã nối vào dispatcher: `mcp:list_tools` (`liva-native-core/src/lib.rs#handle_command`) + `mcp:call_tool` (`liva-native-core/src/lib.rs#handle_command`) |
 | 12 | `vision` | `tokio::sync::Mutex<VisionManager>` | có | WGC qua `xcap` |
 | 13 | `embedder` | `tokio::sync::Mutex<Option<EmbeddingEngine>>` | có | model ONNX 384 chiều **tách khỏi** `llm` (`llm/embedder.rs`); `None` khi thiếu `models/embedding/` ⇒ RAG im lặng bỏ qua |
 
@@ -832,7 +832,7 @@ Nguồn thiết kế: [`docs/99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.m
 | Giữ stdin/stdout legacy, **dùng chung `Arc<AppState>`** | có | `liva-native-core/src/main.rs:173-244` dùng chính `state` đã dựng ở bước 17 | **KHỚP** |
 | Model phía server (router Gemma, TTS Kokoro) | "Gemma-4-E4B-it router model" + Kokoro | Router đã là **Qwen3-VL**; TTS định tuyến VieNeu → Piper → Kokoro | **LỆCH** — thiết kế lỗi thời (không ảnh hưởng hợp đồng dây, trừ `sample_rate` của `OP_SPEAKER_OUT`) |
 | Client "ultra-lightweight" không load model AI | có | `liva-ui` vẫn chạy **WakeWordWorker** phía client (`useVoicePipeline.ts:338-341`) | **LỆCH nhẹ** |
-| MCP server native | có | `NativeMcpServer` được khởi tạo **và đã nối vào dispatcher**: `mcp:list_tools` (`liva-native-core/src/lib.rs:1467-1468`) + `mcp:call_tool` (`liva-native-core/src/lib.rs:1470-1494`); ~~"không có nhánh `mcp:*` trong `handle_command`"~~ đúng cho tới trước 22/07/2026. Chưa client nào (UI hay mobile) gọi hai lệnh này. | **KHỚP** ở lớp lệnh, **[MỘT PHẦN]** ở phía client |
+| MCP server native | có | `NativeMcpServer` được khởi tạo **và đã nối vào dispatcher**: `mcp:list_tools` (`liva-native-core/src/lib.rs#handle_command`) + `mcp:call_tool` (`liva-native-core/src/lib.rs#handle_command`); ~~"không có nhánh `mcp:*` trong `handle_command`"~~ đúng cho tới trước 22/07/2026. Chưa client nào (UI hay mobile) gọi hai lệnh này. | **KHỚP** ở lớp lệnh, **[MỘT PHẦN]** ở phía client |
 
 > 📌 Nguồn đầy đủ về model: cấu hình LLM và persona ở [Hệ LLM và prompt](04-he-llm-va-prompt.md), bảng model + RAM/VRAM ở [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md), bảng backend TTS ở [Đường ống thoại](03-duong-ong-thoai.md). Đối chiếu **tuyên bố sản phẩm** (khác với đối chiếu thiết kế gốc ở bảng trên): [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md).
 

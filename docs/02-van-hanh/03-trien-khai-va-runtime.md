@@ -1,7 +1,7 @@
 ---
 title: "Triển khai và runtime"
-updated: 2026-08-05
-commit: 3688b5f
+updated: 2026-08-06
+commit: dce30da
 status: living
 owns:
   - bang-tien-trinh
@@ -197,7 +197,7 @@ flowchart LR
 | **`LIVA.exe`** — vỏ Tauri v2 + core nhúng in-process | `npx tauri dev --no-dev-server` (`start_all.ps1:66`) | **Bind `ws://127.0.0.1:8002/ws`** qua `boot::spawn_background_services`; UI↔core đi qua Tauri `invoke`, client ngoài đi qua WS | Rust ≥1.85 (edition 2024), CMake, LLVM/`LIBCLANG_PATH`, WebView2 Runtime, `data/liva-config.json`, `models/`, `E:\AI_Models` | **Có** — đây là tiến trình chính, panic nếu mở DB thất bại (`liva-desktop/src-tauri/src/lib.rs:281`, `:283`) hoặc dẫn xuất khoá Stronghold lỗi (`:408`). ~~"hoặc `LlamaRouterManager::new` lỗi"~~ — vẫn còn `.expect` ở `:345` nhưng không kích hoạt được: `LlamaRouterManager::new` luôn trả `Ok` (`liva-native-core/src/llm/engine.rs:117-128`) |
 | `msedgewebview2.exe` (WebView2) | tự sinh bởi `LIVA.exe`, 2 cửa sổ `widget` + `dashboard` | — | WebView2 Runtime | Có (tự động) |
 | `espeak-ng.exe` | shell-out từ `tts/espeak.rs` khi cần G2P | — | phải nằm trên PATH hoặc `LIVA_ESPEAK_PATH` | Có nếu dùng TTS Piper/Kokoro |
-| `ffmpeg.exe` | shell-out khi xử lý voice message Telegram | — | PATH | Không (chỉ liên quan bot Telegram ở bin standalone) |
+| `ffmpeg.exe` | shell-out khi xử lý voice message Telegram | — | PATH | Không — chỉ cần cho voice Telegram, nhưng bot chạy ở **cả hai vỏ** |
 | `liva-native-core.exe` (gateway standalone) | chạy tay: `cargo run -p liva-native-core` hoặc `target\debug\liva-native-core.exe` | **WS `ws://127.0.0.1:8002/ws`** (`LIVA_SERVER_HOST`/`LIVA_SERVER_PORT`) + IPC qua stdin/stdout | như trên + `models/silero_vad_v6.onnx`, `gtcrn_simple.onnx`, `smart_turn_v3.2_cpu.onnx` | **KHÔNG — và không cần.** Từ 26/07/2026 vỏ Tauri có đủ VAD/denoise/AEC/WakeGate/Telegram qua builder chung `boot.rs`. Chạy tay binary này chỉ cần khi muốn đường IPC **stdin/stdout** (vd `scripts/e2e-gateway-ci.mjs`). ⚠ Đừng chạy đồng thời hai vỏ — chúng tranh cùng cổng 8002 |
 | `TelegramBotManager` (trong tiến trình trên) | tự bật khi có `TELEGRAM_BOT_TOKEN` | ra ngoài HTTPS `api.telegram.org` | token + `TELEGRAM_ALLOWED_IDS` | Không |
 | `liva-voice` — `python liva_api.py` | `cd liva-voice; python liva_api.py` (thủ công) | **`0.0.0.0:8765`** HTTP + WS `/ws` + `/docs`, **không auth/CORS/rate-limit** | Python, fastapi/uvicorn, torch, edge-tts (cần Internet), yt-dlp, HF hub | **KHÔNG** — không file `.rs`/`.ts`/`.vue` nào gọi `8765`; `start_all.ps1` không nhắc tới cổng này |
@@ -477,14 +477,13 @@ python liva_api.py     # FastAPI 0.0.0.0:8765, có /docs
 
 Cảnh báo an ninh: bind `0.0.0.0` (lộ ra toàn LAN), **không auth, không CORS whitelist, không rate-limit**, và `edge-tts` gọi ra Internet — phá vỡ giả định offline. Chỉ bật khi thực sự cần voice-cloning, và cân nhắc đổi bind về `127.0.0.1`.
 
-### 4.6 Bảng "chạy lệnh nào thì được gì"
+### 4.6 Chạy lệnh nào thì được gì
 
-| Lệnh | Vite `:5173` | `LIVA.exe` + core nhúng | WS `:8002` | VAD/denoise/AEC/Wake | Telegram | `:8765` |
-|---|---|---|---|---|---|---|
-| `npm run dev` | **[OK]** | **[OK]** | **[THIẾU]** (bị kill) | **[THIẾU]** | **[THIẾU]** | **[THIẾU]** |
-| `.\target\release\liva-native-core.exe` | — | — | **[OK]** | **[OK]** | **[OK]** nếu có token | — |
-| Cả hai (mục 4.4) | **[OK]** | **[OK]** | **[OK]** | **[OK]** | **[OK]** nếu có token | **[THIẾU]** |
-| `python liva_api.py` | — | — | — | — | — | **[OK]** |
+Bảng năng lực theo profile chỉ được duy trì tại
+[Kiến trúc tổng thể §0.1](../01-ban-ve/01-kien-truc-tong-the.md#01-bảng-năng-lực-theo-profile--nguồn-sự-thật-duy-nhất).
+Tóm tắt vận hành: `npm run dev` đã có UI, core nhúng, WS `:8002`, đường thoại và Telegram (khi cấu
+hình); chạy standalone chỉ thêm stdin/stdout và bỏ UI. Không chạy hai vỏ cùng lúc vì chúng tranh
+`:8002`. `python liva_api.py` là dịch vụ voice-cloning riêng ở `:8765`, không được hai vỏ tự bật.
 
 ---
 

@@ -1,8 +1,8 @@
 ---
 title: "Đối chiếu tuyên bố và thực tế"
-updated: 2026-08-05
-commit: 2dc8e2e
-stale-ok: 95d641a
+updated: 2026-08-06
+commit: dce30da
+stale-ok: dce30da
 
 status: living
 owns:
@@ -172,7 +172,7 @@ already running on port 8002" từng bị chỉ ra là sai sự thật cũng đ�
 
 | **Nhắn tin ra ngoài: danh bạ → nháp → xác nhận → gửi** | *(README **KHÔNG** nhắc — năng lực mới 26–27/07/2026)* | **[MỘT PHẦN]** — có thật, nhưng cần người dùng tự dựng phiên Chrome | `messaging/mod.rs` (`send` chỉ nhận `Draft`), `messaging/contacts.rs`, `messaging/outbox.rs` (hộp chờ xác nhận, TTL 300 s, trần 32), `commands/messaging.rs`, `integrations/messenger.rs` (CDP), `scripts/messenger-chrome.ps1` | Bất biến "không gửi nếu chưa xác nhận" do **kiểu dữ liệu** giữ. Đường Messenger nay fail-closed: đưa đúng cửa sổ Chrome ra foreground, tự kiểm phím tới trang **trước khi gõ**, xoá chữ sót, có đường bấm nút dự phòng và chỉ báo thành công khi ô soạn đã rỗng. Đổi lại, thao tác gửi sẽ cướp foreground trong chốc lát. Facebook không có API cho tin nhắn cá nhân; Meta **cấm tự động hoá**, rủi ro khoá tài khoản là thật. LIVA không chạm mật khẩu — người dùng tự đăng nhập một profile Chrome riêng. Xem [tài liệu nhắn tin](06-nhan-tin-ra-ngoai.md) |
 | **Cổng đồng ý quan sát thụ động** | *(README **KHÔNG** nhắc — mới 27/07/2026)* | **[OK]** phần cổng · **[THIẾU]** phần thu thập | `consent.rs` (fail-closed: thiếu file / JSON hỏng / sai kiểu → CHƯA đồng ý), `commands/consent.rs` (`consent:get` · `grant` · `revoke`), `ObservationConsentPanel.vue` | Cố ý làm cổng **trước** collector, theo đúng ràng buộc thứ tự của U20. `is_capture_active()` LUÔN trả `false` vì chưa có một dòng thu thập nào — hợp đồng IPC tách bạch "đã cho phép" với "đang ghi". **Không** đụng `passive/hook.rs` (keylogger, vẫn nằm sau `--features experimental`) |
-| **Cờ `--preflight` báo trạng thái tài nguyên** | *(README **KHÔNG** nhắc — mới 26/07/2026)* | **[MỘT PHẦN]** — CLI xong, màn hình UI còn nợ | `preflight.rs`, `main.rs`, `scripts/start_all.ps1 -CheckOnly` | Biến thứ vốn chỉ là một dòng WARN lẫn giữa hàng trăm dòng log ONNX thành một bảng đọc được. Chi tiết và phần còn nợ: U3 ở [05-nang-cap-toan-dien.md](05-nang-cap-toan-dien.md) |
+| **Cờ `--preflight` báo trạng thái tài nguyên** | *(README **KHÔNG** nhắc — mới 26/07/2026)* | **[OK]** — CLI 26/07, **màn hình UI xong 06/08/2026** | `preflight.rs`, `main.rs`, `scripts/start_all.ps1 -CheckOnly`, `liva-ui/src/components/dashboard/SystemView.vue`, `liva-ui/src/composables/useGateway.ts` | Biến thứ vốn chỉ là một dòng WARN lẫn giữa hàng trăm dòng log ONNX thành một bảng đọc được — nay đọc được **cả trong UI**, không chỉ trên dòng lệnh. Mục U3 ở [05-nang-cap-toan-dien.md](05-nang-cap-toan-dien.md) đã đóng |
 
 Bảng trên là **phán quyết**, không phải đặc tả. Chi tiết kỹ thuật đầy đủ của từng hạng mục nằm ở tài liệu sở hữu tương ứng:
 

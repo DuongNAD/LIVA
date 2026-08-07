@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-06
-commit: 95d641a
-stale-ok: 95d641a
+commit: dce30da
+stale-ok: dce30da
 status: living
 owns:
   - duong-co-so-do-luong
@@ -299,15 +299,15 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | ~~**U1b**~~ ✅ **XONG 26/07/2026** | [Ghim `CUDAARCHS` + quyết định cách phát hành](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) | A | ~~Beta · U2~~ | đã đo — **binary −63%; còn 752 MB DLL cuBLAS, xem U1c** |
 | ~~**U1c**~~ ✅ **XONG 26/07/2026** | [Thử bỏ phụ thuộc cuBLAS](#u1c--thử-bỏ-phụ-thuộc-cublas-ba-hướng-đều-thất-bại) | A | — | **kết quả ÂM TÍNH**: cả 3 hướng thất bại, cuBLAS là phụ thuộc cứng ⇒ U2 phải tính ~830 MB |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
-| **U3** ◐ | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên--một-phần-cli-xong-26072026-ui-còn-nợ) | A | ~~Beta~~ | **CLI xong 26/07** (`--preflight` + `-CheckOnly`); còn màn hình UI — chặn bởi phiên đang sửa `lib.rs` |
+| ~~**U3**~~ ✅ **XONG 06/08/2026** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên--một-phần-cli-xong-26072026-ui-còn-nợ) | A | ~~Beta~~ | CLI 26/07; **màn hình UI xong 06/08** (`SystemView.vue` + `useGateway.ts`) |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
 | ~~**U5**~~ ✅ **XONG 26/07/2026** | [Biến drift tài liệu thành gate thật](#u5--biến-drift-tài-liệu-thành-gate-thật) | B | — | đã xong |
 | ~~**U6**~~ ✅ **XONG 26/07/2026** | [Sửa con trỏ chết trong AGENTS.md](#u6--sửa-con-trỏ-chết-trong-agentsmd) | B | — | đã xong |
 | ~~**U7**~~ ✅ **XONG 29/07/2026** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | ~~Beta~~ | **tiền đề SAI** — xem phân loại; đã vá nhiễm độc khoá + 6 test rác + 2 lỗi trong `voice_stress` |
-| **U8** ◐ | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | **`boot.rs` xong 26/07**; còn bảng "năng lực theo profile" ở `01-ban-ve/01` + `02-van-hanh/03` |
+| ~~**U8**~~ ✅ **XONG 06/08/2026** | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | `boot.rs` xong 26/07; **hai bảng "năng lực theo profile" đã cập nhật 06/08** |
 | ~~**U9**~~ ✅ **XONG 29/07/2026** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | ~~Hồ sơ~~ | đã đo — **p50 667 ms CPU · 18 ms CUDA** |
 | **U10** ◐ | [Tách `handle_command`](#u10--tách-handle_command) | D | — | **đang làm** — 6 miền tách xong, `lib.rs` 2 773 → 1 788 dòng |
-| **U11** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | 2–3 ngày |
+| ~~**U11**~~ ✅ **XONG 06/08/2026** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | line **73,89% → 80,70%**, chốt per-file **50 → 80** |
 | **U12** | [Tool calling (đang làm dở)](#u12--tool-calling-đang-làm-dở) | E | — | đang chạy |
 | **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
 | **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |
@@ -1190,7 +1190,7 @@ Và các số còn lại khớp tuyệt đối: **250 bone · 44 481 triangle ·
 
 **1. Duyệt lại toàn bộ đồ thị hai lần mỗi frame.** `applyFootPlant` trong `useAvatarAnimation.ts` gọi `scene.updateWorldMatrix(true, true)` **hai lần**: một trước khi đo vị trí bàn chân, một sau khi ghi `hips.position`. Trên đồ thị **333 node** đó là ~666 lần cập nhật ma trận mỗi frame chỉ để đặt bàn chân — chưa kể `vrm.update()` cũng đụng ma trận. Lần thứ hai có thể bỏ nếu để `vrm.update()` phía sau lo.
 
-**2. `removeUnnecessaryJoints` đã deprecated.** `use3DModel.ts:630` vẫn gọi nó; three-vrm trong dự án là **^3.5.2**, bản khuyến nghị `combineSkeletons` — gộp **23** skeleton rời thành một skeleton dùng chung thay vì prune từng cái. Cân nhắc thêm `combineMorphs` (model có **456** morph target).
+**2. `removeUnnecessaryJoints` đã deprecated.** `use3DModel.ts` **từng** gọi nó (đã đổi, xem khối ✅ bên dưới); three-vrm trong dự án là **^3.5.2**, bản khuyến nghị `combineSkeletons` — gộp **23** skeleton rời thành một skeleton dùng chung thay vì prune từng cái. Cân nhắc thêm `combineMorphs` (model có **456** morph target).
 
 **3. `findIndex` tuyến tính mỗi bone mỗi frame.** `sampleTrack` trong `mixamoRetarget.ts` quét `track.times.findIndex(...)` từ đầu cho **mỗi** bone, **mỗi** frame. Cache con trỏ keyframe theo hướng tiến là đủ; clip chạy tuyến tính nên lần sau gần như luôn ở ngay cạnh lần trước.
 

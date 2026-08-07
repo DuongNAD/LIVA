@@ -1,7 +1,7 @@
 ---
 title: "Kiến trúc tổng thể"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-06
+commit: dce30da
 status: living
 owns:
   - hai-profile-chay
@@ -52,20 +52,30 @@ gọi **cùng một hàm**:
 Doc-comment của `spawn_background_services` tự khai là **"nguồn sự thật duy nhất cho câu hỏi LIVA
 chạy những gì ở nền"** — thêm dịch vụ mới thì thêm ở một chỗ, không còn cửa để hai vỏ lệch nhau.
 
-### 0.1 Cả hai vỏ chạy những gì
+### 0.1 Bảng năng lực theo profile — nguồn sự thật duy nhất
 
 WebSocket server 8002 · tự nạp model router · phóng chiếu bộ nhớ (event→vector) · hạ lớp GPU khi có
 game · **giải phóng session TTS sau 5 phút rảnh** · **bot Telegram** (khi có `TELEGRAM_BOT_TOKEN`) ·
 governor ưu tiên CPU · cụm thoại VAD/denoise/turn-shadow/AEC theo `VoiceRuntimeComponents::from_env`.
 
-Khác biệt còn lại — và **chỉ** còn ngần này, đóng khung trong `boot::ServiceOptions`:
-
-| | vỏ A (gateway) | vỏ B (desktop) |
+| Năng lực / giao diện | Gateway standalone `liva-native-core.exe` | Desktop Tauri `npm run dev` |
 |---|---|---|
-| Vòng đọc lệnh từ **stdin** | **CÓ** | KHÔNG — dùng Tauri `invoke("native_ipc_call")` |
-| `ipc_tx` cho bot Telegram ghi ra stdout | **CÓ** | `None` — bot vẫn chạy đủ, chỉ mất kênh phụ |
-| Báo `gateway-ready` cho cửa sổ | không cần | **CÓ** — phát **sau khi bind thật**, kèm cổng thật |
-| Hiện lỗi boot / escrow khoá | stderr + `exit 1` | hộp thoại |
+| Dựng `AppState` | **CÓ** — `boot::build_app_state` | **CÓ** — cùng hàm |
+| WebSocket `127.0.0.1:8002/ws` | **CÓ** | **CÓ** — cùng `spawn_background_services` |
+| VAD + denoise | **CÓ**, mặc định bật | **CÓ**, cùng biến môi trường |
+| Turn-shadow + AEC | **CÓ** khi opt-in | **CÓ** khi opt-in |
+| WakeGate + barge-in | **CÓ** trên đường WebSocket | **CÓ** trên cùng đường WebSocket |
+| Telegram | **CÓ** khi có token; allow-list rỗng thì từ chối mọi người | **CÓ**, cùng điều kiện |
+| Phóng chiếu bộ nhớ · retention opt-in · tự nạp router · governor GPU · TTS idle-unload | **CÓ** | **CÓ** — cùng `spawn_background_services` |
+| UI widget + dashboard | KHÔNG | **CÓ** — hai WebView Tauri |
+| IPC lệnh chính | stdin/stdout JSON; client ngoài có thể dùng WebSocket | Tauri `invoke("native_ipc_call")`; voice/binary vẫn qua WebSocket |
+| Session ticket WebSocket cho WebView đặc quyền | KHÔNG | **CÓ** — `on_websocket_sessions_ready` |
+| `ipc_tx` cho bot ghi ra stdout | **CÓ** | KHÔNG — bot vẫn chạy, chỉ không có kênh stdout phụ |
+| Báo `gateway-ready` cho cửa sổ | Không cần | **CÓ** — phát sau khi bind thật, kèm cổng thật |
+| Hiện lỗi boot / escrow khoá | stderr + `exit 1` | Hộp thoại |
+
+Ba khác biệt callback/kênh nền cuối bảng được đóng khung trong `boot::ServiceOptions`; vòng đọc stdin
+và cách hiện lỗi nằm ở từng vỏ. Không có khác biệt nào làm desktop mất năng lực thoại.
 
 ### 0.2 Ba khẳng định cũ nay không còn đúng
 
@@ -99,22 +109,17 @@ giới hạn đo lường: chưa có bản ghi một phiên barge-in đầu-cu�
 
 ### 0.4 Nguyên văn bản trước (hồ sơ)
 
-<details><summary>Bảng "so sánh hai profile" cũ — giữ để đối chiếu, <b>đừng dùng làm nguồn</b></summary>
+<details><summary>Kết luận "hai profile không tương đương" cũ — giữ để đối chiếu, <b>đừng dùng làm nguồn</b></summary>
 
 > Nghịch lý cốt lõi: **profile chính thức (Tauri) là profile nghèo hơn.**
 >
-> | | `liva-native-core.exe` (chạy tay) | Tauri shell (`npm run dev`) |
-> |---|---|---|
-> | WS gateway 8002 | CÓ | KHÔNG — không gọi `start_websocket_server` |
-> | VAD / denoise / AEC / turn-shadow | CÓ | `None` hard-code |
-> | WakeGate | CÓ | KHÔNG |
-> | Telegram bot | CÓ | KHÔNG |
-> | IPC stdin/stdout | CÓ | KHÔNG (dùng Tauri `invoke`) |
+> Bản cũ khẳng định gateway standalone có WS 8002, VAD/denoise/AEC/turn-shadow, WakeGate và
+> Telegram còn Tauri thì không; chỉ IPC stdin/stdout được ghi đúng là riêng standalone.
 >
 > Kèm một khối `AppState { … vad: None, denoiser: None … }` trích từ vỏ Tauri, và kết luận
 > "toàn bộ đường song công chỉ sống khi chạy tay binary standalone".
 
-Ba dòng đầu bảng đã được đối chiếu lại ở §0.2. `WakeGate` sống trên đường WebSocket
+Các khẳng định năng lực đã được đối chiếu lại ở §0.2. `WakeGate` sống trên đường WebSocket
 (`websocket.rs` import `wake`) nên nó theo WS server — tức là **có ở cả hai vỏ**, không phải chỉ ở
 gateway.
 

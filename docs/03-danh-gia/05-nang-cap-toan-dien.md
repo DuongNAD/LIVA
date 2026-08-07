@@ -1,13 +1,15 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-08-05
-commit: 2dc8e2e
-stale-ok: 2dc8e2e
+updated: 2026-08-06
+commit: 95d641a
+stale-ok: 95d641a
 status: living
 owns:
   - duong-co-so-do-luong
   - backlog-nang-cap-U1-U15
   - goi-trinh-dien-U16-U20
+  - ra-soat-proj-airi-U24-U29
+  - locomotion-avatar-U30-U33
 covers:
   - .github/workflows/test.yml
   - AGENTS.md
@@ -18,12 +20,22 @@ covers:
   - liva-native-core/src/llm/tool_calling.rs
   - liva-native-core/src/main.rs
   - liva-native-core/src/mcp/client.rs
+  - liva-native-core/src/openai_api.rs
   - liva-native-core/src/preflight.rs
   - liva-native-core/src/sysinfo.rs
+  - liva-native-core/src/tts/avatar_control.rs
   - liva-native-core/src/tts/normalizer.rs
   - liva-native-core/src/tts/vieneu/g2p.rs
   - liva-native-core/src/vision/mod.rs
   - liva-ui/src/WidgetApp.vue
+  - liva-ui/src/components/VRMEngine.vue
+  - liva-ui/src/composables/footPlantIK.ts
+  - liva-ui/src/composables/mixamoRetarget.ts
+  - liva-ui/src/composables/use3DModel.ts
+  - liva-ui/src/composables/useAvatarAnimation.ts
+  - liva-ui/src/composables/useSpeakerPlayback.ts
+  - liva-ui/src/utils/avatarControlTags.ts
+  - liva-ui/src/utils/avatarMath.ts
   - liva-ui/vitest.config.ts
   - scripts/docs-check.mjs
   - scripts/e2e-gateway.mjs
@@ -61,6 +73,8 @@ covers:
 
 ### 0.1 Việc tiếp theo — chọn từ trên xuống
 
+> 🔴 **Chen ngang, chốt 06/08/2026: [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đứng trước mọi mục trong bảng dưới.** Đây là triệu chứng **người dùng trực tiếp báo** (avatar khựng theo từng bước chân), tức hạng khác với backlog — cùng hạng với hồi quy ở bước 1 của giao thức. Và **bước 0 của nó là một dòng**: tắt `FootPlantIK`, đi lại, nhìn. Làm cái đó trước khi nhận bất kỳ mục nào khác; kết quả quyết định U30 hay [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là chỗ đáng đào.
+
 Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong nhóm A trước, **không đụng nhóm D** (U10/U11) khi A/B/C còn dở.
 
 | Thứ tự | Việc | Vì sao ở vị trí này | Bắt đầu từ đâu |
@@ -77,6 +91,12 @@ Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong 
 **Ứng viên ngoại lệ, chưa duyệt:** [**U21**](#u21--sổ-đo-mỗi-lượt--turn_telemetry) (sổ đo mỗi lượt) thuộc nhóm E nên theo quy tắc chặn thì chưa tới lượt — nhưng nó là *hạ tầng đo* cho U14 chứ không phải năng lực mới, và mỗi ngày hoãn là một ngày mất dữ liệu. Điều kiện để chen ngang: nghiệm thu 3 (độ trễ thêm < 5 ms ở p50) phải đạt. Không đạt thì xếp lại hàng.
 
 **Việc vặt còn treo:** `.gitnexusrc` đang ở trạng thái `M` (thêm `walCheckpointThreshold`) — chưa commit.
+
+⚠️ **Bẫy đo khi cây làm việc đang bị sửa song song — trả giá 06/08/2026.** Trong phiên [U24](#u24--hai-lỗi-nối-dây-trên-đường-lip-sync-của-widget)/[U26](#u26--control-tag-đọc-được-giữa-câu-không-chỉ-ở-đầu-lượt), `npm run test:coverage -w liva-ui` đỏ ở `useAvatarAnimation.test.ts` (foot-plant IK, lệch 0,037 so với ngưỡng 0,00005). Chạy lại riêng file đó: **đỏ y hệt, cùng con số tới 17 chữ số thập phân**. Hai lần trùng khít như vậy đọc rất giống "đỏ ổn định, không flaky" — và kết luận đó **sai**.
+
+Sự thật: `footPlantIK.ts` và test của nó được sửa lúc **15:33 và 15:34**, tức *trong lúc* phiên đang chạy, bởi việc song song. Bốn lần chạy sau đó — hai lần riêng file, một lần toàn bộ, một lần có coverage — đều **394/394 xanh**.
+
+⇒ Hai phép đo trùng khít nhau **không** chứng minh tính ổn định nếu chúng cùng nằm trước một lần sửa. Khi các file liên quan đang ở trạng thái `??`/`M` và có người khác đang gõ, hãy **kiểm `mtime` trước khi kết luận** — `ls -l --time-style=+%H:%M:%S <file>` mất một giây và phân biệt được "lỗi thật" với "ảnh chụp cũ".
 
 ### 0.2 Ba cái bẫy đã cắn trong phiên 27/07 — đọc để khỏi mất buổi
 
@@ -148,6 +168,24 @@ Bảng trên giữ nguyên vì nó là **ảnh chụp có ngày** của `260c643
 ⚠️ **Dòng coverage giảm 0,1 điểm KHÔNG phải hồi quy, và cách xác định điều đó mới là phần đáng ghi.** `git diff 596e8b6..HEAD -- liva-ui/` trả về **rỗng** — nguồn UI không đổi một byte giữa hai lần đo. Cùng nguồn, khác số ⇒ nhiễu của chính phép đo (nhiều khả năng do `30349c5` nâng lockfile, đổi cây phụ thuộc mà istanbul đo qua). **Đừng đuổi theo 0,1 điểm coverage khi `git diff` của thư mục đó rỗng** — thời gian đó dành cho chỉ số khác có ích hơn.
 
 **Cổng mới có mặt trong lần đo này:** `npm run devkit:lint` + `node scripts/actionlint.mjs` — **pass**.
+
+#### 🔴 `docs-citations` chỉ nhìn thấy 40 % bộ trích dẫn — đo 05/08/2026
+
+Dòng "Trích dẫn tài liệu" ở bảng trên **phải đọc kèm phạm vi**, nếu không nó nói quá:
+
+| | Trích dẫn | |
+|---|---:|---|
+| Cổng thật sự kiểm | **1 085** | 59 tài liệu sống |
+| **Ngoài phạm vi kiểm** | **1 636** | 40 tài liệu đông lạnh (11 FREEZE + toàn bộ `docs/99-luu-tru/`) |
+| | | ⇒ cổng đọc **40 %**, mù **60 %** |
+
+`listDocs` trong `scripts/docs-citations.mjs` bỏ cả thư mục `99-luu-tru/` và mọi tài liệu `disposition: FREEZE`. **Đó là quyết định đúng** — snapshot có ngày mô tả mã nguồn của quá khứ, bắt nó khớp HEAD là bắt nó nói dối. Nhưng "không chặn" đã bị làm thành "không nhìn", và hai thứ đó khác nhau: ai đọc `✅ Không có neo hỏng` mà không biết phạm vi sẽ hiểu thành *"mọi trích dẫn đều đúng"*.
+
+Đã vá bằng cách **đo mà không chặn**: mỗi lần chạy, cổng in thẳng phạm vi ngoài tầm, kèm số trích dẫn trỏ quá độ dài file (**100** khi đo). Biến đếm riêng, không cộng vào `total`/`khongKiem`/`deXuat`, **không đụng exit code**. Danh sách chi tiết: `node scripts/docs-citations.mjs --dong-bang`.
+
+⚠️ **Con số 100 KHÔNG phải hạn ngạch phải hạ, và đây là chỗ dễ hiểu sai nhất.** Nó đo **khoảng cách giữa HEAD và các mốc lịch sử**, không đo chất lượng tài liệu — mã nguồn tiến lên thì toạ độ trong snapshot *phải* lệch đi, đó là hành vi đúng. Sửa nội dung tài liệu FREEZE để nó nhỏ lại là làm sai lệch sử liệu. Cùng loại với [22 warning `cargo audit`](#1-đường-cơ-sở-đã-đo--02082026-tại-260c643-thay-bảng-2907): một con số để **theo dõi**, không phải để **hạ**.
+
+📌 Vì sao con số này lộ ra muộn: đợt sửa 42 toạ độ `lib.rs` ngày 05/08 hạ chốt `--max-unchecked` 508 → 207, nhưng `khongKiem` **không giảm một đơn vị nào** (đúng 207 trước và sau). Truy ra thì 270 trong 422 trích dẫn `lib.rs` của bộ tài liệu nằm trong vùng mù — tức phần lớn công việc đó diễn ra ở chỗ cổng không đếm. **Một chốt không nhúc nhích sau khi bạn vừa sửa đúng thứ nó đo là tín hiệu phải truy, không phải chuyện thường.**
 
 **⚠️ Bẫy đo thứ ba, cùng họ với hai bẫy ở [§0.2 mục 3](#02-ba-cái-bẫy-đã-cắn-trong-phiên-2707--đọc-để-khỏi-mất-buổi) và bẫy `cargo test` ‖ `cargo clippy`.** Lần chạy `cargo test` đầu tiên đỏ với `CL.exe exited with code 1` giữa lúc biên dịch llama.cpp — trông y hệt build gãy ở HEAD. **Không phải:** lúc đó vitest + `vue-tsc` + `node --max-old-space-size=12288` + MSVC 20 luồng chạy song song, và MSVC chết vì cạn bộ nhớ. Chạy `cargo test` một mình: sạch, 657 pass. **Nhận dạng:** lỗi nằm trong C++ của *phụ thuộc* chứ không trong mã của bạn, và nó không tái hiện khi chạy đơn lẻ ⇒ nghi tài nguyên máy trước, đừng nghi HEAD. Quy tắc rút ra: **các cổng nặng chạy tuần tự, không song song** — đúng cùng kết luận với bẫy `cargo test` ‖ `cargo clippy`, chỉ khác nguyên nhân (bộ nhớ thay vì fingerprint).
 
@@ -274,13 +312,25 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
 | **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |
 | **U15** | [Nối `CodeAgent` vào LLM thật](#u15--nối-codeagent-vào-llm-thật) | E | — | 1 tuần |
-| **U21** | [Sổ đo mỗi lượt — `turn_telemetry`](#u21--sổ-đo-mỗi-lượt--turn_telemetry) | E | **U14** (và có ích cho U13) | 0,5–1 ngày |
 | ◐ **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) — dụng cụ đo xong 26/07; video chưa quay (vision 80 s chặn kịch bản đầy đủ) | F | Hồ sơ | còn quay |
 | ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng--xong-26072026) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | ~~**U18**~~ | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — ✅ **nghiệm thu 26/07** (người dùng chạy trên vỏ Tauri) | F | — | xong |
 | ~~**U19**~~ | [Ba tool OS thật](#u19--ba-tool-os-thật) — ✅ **nghiệm thu 10/10 ngày 26/07**; độ sáng cố tình bỏ | F | — | xong (2/3 tool) |
 | ◐ **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) — **bước 1 (cổng đồng ý) xong 26/07**; chưa có dòng thu thập nào | F | — | còn thu thập |
+| **U21** | [Sổ đo mỗi lượt — `turn_telemetry`](#u21--sổ-đo-mỗi-lượt--turn_telemetry) | E | **U14** (và có ích cho U13) | 0,5–1 ngày |
+| **U22** | [Hỏi trước khi trả — nhịp truy xuất](#u22--hỏi-trước-khi-trả--nhịp-truy-xuất) | E | — | 1–2 ngày · **cuối hàng**, không chen ngang |
+| **U23** | [Màn Kỹ năng đang báo 1 trong khi lõi có 7](#u23--màn-kỹ-năng-đang-báo-1-trong-khi-lõi-có-7) — màn hình nói dối, không phải thiếu năng lực | F | Hồ sơ · Beta | 0,5 ngày |
+| ~~**U24**~~ ✅ **XONG 06/08/2026** | [Hai lỗi nối dây trên đường lip-sync widget](#u24--hai-lỗi-nối-dây-trên-đường-lip-sync-của-widget) — nhân đôi tiếng + analyser bám chunk chưa phát | C | Beta · Hồ sơ | đã sửa, 5 test mới |
+| ~~**U25**~~ ✅ **XONG 06/08/2026** | [`useVRM.ts` là code mồ côi](#u25--usevrmts-là-code-mồ-côi-và-nó-đã-làm-người-rà-kết-luận-sai) — ≈420 dòng mô tả sai hệ thống | C | — | đã xoá; hàm thuần tách sang `utils/avatarMath.ts` |
+| ~~**U26**~~ ✅ **XONG 06/08/2026** | [Control tag đọc được giữa câu](#u26--control-tag-đọc-được-giữa-câu-không-chỉ-ở-đầu-lượt) — danh sách trắng hai phía TS/Rust | E | — | đã sửa, 12 + 14 test |
+| **U27** ◐ | [Hợp đồng giao thức + SDK công khai cho cổng 8002](#u27--hợp-đồng-giao-thức--sdk-công-khai-cho-cổng-8002) — **tiền đề mục này SAI một phần**: hợp đồng đã có 974 dòng, client 0-dep đã có | E | Hồ sơ | ví dụ chạy được **xong 06/08** (3/3 trên gateway thật); còn phép đo trên người + gói npm |
+| ~~**U28**~~ ✅ **XONG 06/08/2026** | [Endpoint tương thích OpenAI trên gateway](#u28--endpoint-tương-thích-openai-trên-gateway) — `/v1/models` · `/v1/chat/completions` (+SSE) · `/v1/audio/speech` | E | Hồ sơ | SDK OpenAI v7.4.0 **6/6**, 0 crate mới, mặc định TẮT |
+| **U29** | [Vòng lặp chủ động có ngân sách tick](#u29--vòng-lặp-chủ-động-có-ngân-sách-tick) — trụ "chủ động" | E | Ba trụ cột | nhiều tuần |
+| 🔴 **U30** | [Bù ngang ở pelvis — sóng răng cưa theo nhịp bước](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) — **triệu chứng người dùng báo**; bước 0 là một dòng | C | U33 | 0,5 ngày cho bậc 1 |
+| ~~**U31**~~ ✅ **XONG 06/08/2026** | [Ba khoản phí mỗi frame trên đường avatar](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) — **đo xong: (a) và (c) không đáng kể**, giá trị thật ở (b) và (d) | C | — | đã làm, +9 test |
+| **U32** | [Retarget đang vứt đi phần lớn chuyển động](#u32--retarget-đang-vứt-đi-phần-lớn-chuyển-động) — giữ 11/52 track, bỏ hips position | E | — | 2–4 ngày |
+| **U33** | [Locomotion đúng: nhịp cố định, blendspace, distance matching](#u33--locomotion-đúng-nhịp-cố-định-blendspace-distance-matching) | E | — | **nhiều tuần** · cần U30 xong trước |
 
 **Quy tắc chặn:** không phát hành cho beta khi A chưa xong; không nộp hồ sơ khi U4 chưa xong. **Không đụng nhóm D khi A/B/C còn dở** — tái cấu trúc trong lúc còn bug là cách nhanh nhất để mất cả hai. **Nhóm F cần U1 + U8 làm nguyên liệu** — làm F trước sẽ ra một video quay cảnh tính năng chưa chạy.
 
@@ -539,9 +589,32 @@ Kích thước củng cố kết luận: 45,5 MB nằm ở dải CPU mà [U1b](#
 
 `release/liva-mobile.apk` (27/06) là thứ khác, **không** thuộc phạm vi U2.
 
-#### Còn lại của U2 — chỉ người dùng làm được
+#### ✅ Quyết định U1b ĐÃ THI HÀNH — 05/08/2026, bộ cài CUDA đã dựng và đo
 
-Việc 2 và 3 (cài trên máy/VM chưa từng có LIVA, ghi lại chính xác thông điệp ở từng bước) **không thể suy luận từ code**, và nghiệm thu nói thẳng điều đó. Đây là phần chặn beta còn lại.
+Bảng ở trên ghi *"bản đang có là bản CPU, tức installer hiện có KHÔNG có vision dùng được"*. Nay đã dựng bản CUDA thật, giữ **mặc định 9 kiến trúc**:
+
+| | |
+|---|---|
+| `LIVA_1.0.0_x64-setup.exe` | **805,4 MB** (844 543 259 byte) |
+| SHA-256 | `98F4A72CB1E060124D2170EA7566E2C4412488AA669A9DF05C13FCA826E0FBAB` |
+| Thời gian cài (im lặng) | 54 giây |
+| Ba DLL NVIDIA **trong bundle** | có — `cublasLt64_12` 643,4 MB · `cublas64_12` 108,4 MB · `cudart64_12` 0,5 MB, đáp **cạnh .exe** |
+| `vision:ask` | **5/5 đạt**, p50 **937 ms** · min 844 · max 2031, 43 lớp trên CUDA0 |
+
+Đường đóng gói: `npm run installer:windows:cuda` → `scripts/stage-cuda-redist.mjs` chép DLL từ CUDA Toolkit vào `cuda-redist/`, khai trong `bundle.resources` là `"cuda-redist": "./"`. Chi tiết và cách tái lập: [`02-van-hanh/03` §6.1](../02-van-hanh/03-trien-khai-va-runtime.md).
+
+**🔴 Một lỗ hổng trong chính U1b, tìm ra trước khi build nên chưa kịp gây hại.** U1b chốt *"ghim `120a-real`: −63 % binary, không mất hiệu năng"* — đúng **trên máy dev**, và đó là cái bẫy. Danh sách mặc định phần lớn là `-virtual`, tức **PTX do driver JIT lúc nạp**, và chính PTX đó khiến một binary chạy được trên card nó chưa từng được biên dịch cho. Ghim `120a-real` vứt sạch PTX ⇒ máy RTX 30xx/40xx **không nạp nổi kernel CUDA**. Một phép đo về *kích thước* đã suýt được đọc thành một quyết định về *khả năng tương thích*. Giá của 9 kiến trúc: 937 ms so với 877 ms — **bằng không**, cả hai đều mẫu 3 lượt.
+
+#### ◐ Việc 2 và 3 — đã làm được phần mô phỏng, phần còn lại vẫn cần máy thật
+
+Cài bộ cài trên vào thư mục trắng, `PATH` rút còn `System32`, xoá mọi `LIVA_*`, rồi chạy `--preflight`. Checklist đầy đủ: [`02-van-hanh/03` §6.2](../02-van-hanh/03-trien-khai-va-runtime.md). Kết luận: máy mới cài **chạy được nhưng cụt gần hết**, và thứ chặn nhiều nhất là **model chưa tải**.
+
+**Phép đo này đẻ ra hai lỗi thật, cả hai đều trong chính bộ chẩn đoán:**
+
+1. **`--preflight` doạ sai 85 lần.** In `✗ ~80 s mỗi lượt` trên đúng máy đang chạy vision 937 ms. Nó **chép lại** quyết định `n_gpu_layers` của `boot.rs` thay vì **gọi** nó, và `533f3c6` đã thêm nhánh tự chọn theo VRAM ở dưới. Đã vá: `boot::gpu_layers_mac_dinh()` thành `pub`. Rồi lộ tầng thứ hai — `gpu_layers_theo_vram` trả 0 **ngay khi không đo được kích thước model**, nên trên máy mới cài lý do thật là *"chưa có model"*, không phải VRAM; thông điệp đã tách ba ca. **Đây là lần thứ ba cùng một dòng sai theo cùng một kiểu** (bản đầu quên `n_gpu_layers`; bản hai đọc env var; bản ba giải thích sai lý do) — mỗi lần vá đều đúng lúc đó rồi lệch khi mã dưới nó đi tiếp.
+2. **`✓ sqlite-vec` xanh vì lý do sai trên máy dev.** `vec0_candidate_paths` xếp **đầu** một đường dẫn dựng từ `env!("CARGO_MANIFEST_DIR")` — hằng số biên dịch cứng trỏ về cây mã nguồn — nên bản `vec0.dll` đã cài cạnh .exe không bao giờ được thử tới. Sản phẩm vẫn đúng trên máy sạch thật, nhưng dòng ✓ đó **không chứng minh được bản đóng gói dùng được**.
+
+**Vẫn cần máy/VM thật:** VC++ Redistributable và WebView2. Máy đo đã có sẵn cả hai; bộ cài *có nhúng* WebView2 offline, nhưng "có nhúng" không phải "đã chứng minh chạy trên máy chưa có". Đây là phần chặn beta còn lại, và nó **không suy luận từ code được**.
 
 ---
 
@@ -926,6 +999,235 @@ Máy đo: 20 lõi luận lý · RAM 47,8 GiB · RTX 5060 Ti 16 311 MiB · `n_ctx
 
 ---
 
+### U24 — Hai lỗi nối dây trên đường lip-sync của widget
+
+> **Nguồn gốc.** Rà `github.com/proj-airi` + `moeru-ai/airi` ngày 06/08/2026 (MIT, Vue + Electron, TTS chủ yếu qua API cloud). Ở riêng khâu lip-sync thì **LIVA không thua**: AIRI dẫn khẩu hình bằng biên độ, còn `use3DModel.ts:977-1057` đã là **5 dải tần → 5 viseme** (`aa/oh/ee/ih/ou`) — tinh hơn một bậc. Nhưng đọc kỹ để so sánh thì lộ ra hai lỗi nối dây. Không mục nào dưới đây là port từ AIRI.
+
+**Lỗi 1 — nguồn âm mắc song song: nhân đôi tiếng, và vô hiệu hoá một nửa audio-ducking.**
+
+`useSpeakerPlayback.ts:115` đã nối `source → outputNode`; với widget `useMasterGain: true` (`WidgetApp.vue:479`) thì `outputNode` là `masterGain`, và `masterGain → destination` (`useSpeakerPlayback.ts:95`). Sau đó `startAudioDrivenLipSync` nối thêm nhánh thứ hai `source → analyser → destination` (`use3DModel.ts:1008-1009`). Cùng một buffer về đích bằng **hai đường**, Web Audio cộng lại:
+
+- biên độ khoảng **2×** trên widget;
+- `setMasterVolume()` — chính là đường xử lý sự kiện `audio_ducking` ở `WidgetApp.vue:1335-1338` — chỉ hạ được **một** trong hai nhánh, nên hạ hết cỡ vẫn còn nhánh kia kêu nguyên. Comment ở `useSpeakerPlayback.ts:22` ghi master gain là *"required for audio ducking"*; nhánh analyser phá đúng cam kết đó.
+
+**Lỗi 2 — analyser bám vào chunk CHƯA phát, nên miệng đóng giữa lượt nói.**
+
+`onSourceStarted` được gọi bên trong `scheduleBuffer` ngay sau `source.start(nextStartTime)` (`useSpeakerPlayback.ts:128-131`), mà `nextStartTime` nằm ở **tương lai** với mọi chunk sau chunk đầu (`useSpeakerPlayback.ts:129`). `startAudioDrivenLipSync` lại mở đầu bằng `stopAudioDrivenLipSync()` (`use3DModel.ts:1001`) — ngắt analyser khỏi chunk **đang nghe thấy** và `smoothedBandRMS.fill(0)`.
+
+⇒ Từ lúc chunk N+1 được *xếp lịch* tới lúc nó *thật sự kêu*, analyser đọc một nguồn im lặng, `getByteFrequencyData` trả toàn 0, **miệng đóng trong khi LIVA vẫn đang nói**. TTS sinh nhanh hơn thời gian thực thì trạng thái đóng chiếm gần hết lượt.
+
+⚠️ **Test hiện có không bắt được lỗi nào trong hai.** `use3DModel.test.ts:121-146` chỉ gọi start/stop rồi thôi — không khẳng định gì về hình dạng đồ thị âm thanh. Cả hai lỗi đều xanh.
+
+**Cách sửa.** Một analyser **bền, nằm TRONG chuỗi**, thay cho một analyser mắc song song và dựng lại mỗi chunk: `source → analyser → masterGain → destination`, do `useSpeakerPlayback` sở hữu và tạo đúng một lần. `use3DModel.startAudioDrivenLipSync` nhận sẵn `AnalyserNode` thay vì tự tạo. Một đường duy nhất ⇒ hết nhân đôi và ducking hạ được toàn bộ; analyser không bị tháo ở biên chunk ⇒ khẩu hình bám đúng thứ đang kêu.
+
+**Nghiệm thu.** Ba khẳng định chạy được, trong `use3DModel.test.ts` và `useSpeakerPlayback.test.ts`:
+
+1. Sau khi xếp lịch một chunk, **không** node nào nối thẳng tới `ctx.destination` ngoài `masterGain`.
+2. Xếp lịch **hai** chunk liên tiếp ⇒ `createAnalyser` được gọi đúng **1** lần, và analyser **không** bị `disconnect()` xen giữa.
+3. `startAudioDrivenLipSync` không còn tự gọi `connect(ctx.destination)` — kiểm bằng chính chữ ký hàm: nó nhận `AnalyserNode`, không nhận `AudioContext`.
+
+---
+
+#### ✅ ĐÃ LÀM — 06/08/2026
+
+**Quyền sở hữu đổi chỗ, và đó là toàn bộ bản vá.** Analyser nay thuộc `useSpeakerPlayback` (bật bằng tuỳ chọn mới `enableAnalyser`), nằm ở **đầu** chuỗi ra và dựng đúng một lần cho mỗi `AudioContext`:
+
+```
+source → analyser → masterGain → destination
+```
+
+`use3DModel.startAudioDrivenLipSync` đổi chữ ký từ `(AudioContext, AudioBufferSourceNode)` sang `(AnalyserNode)` — nó chỉ còn **đọc**, không tạo và không nối gì. Đây không phải chuyện gu thiết kế: chữ ký cũ là thứ *cho phép* cả hai lỗi tồn tại, vì nó trao cho engine avatar đủ quyền để tự dựng một nhánh âm thanh thứ hai.
+
+⚠️ **Một chế độ hỏng MỚI do chính bản vá đẻ ra, đã chặn.** Analyser giờ nằm *trong* chuỗi, nên `stopAudioDrivenLipSync()` mà còn gọi `disconnect()` như cũ thì **cắt đứt tiếng hoàn toàn**, không chỉ tắt khẩu hình. Lệnh `disconnect()` đã bỏ, kèm comment tại chỗ giải thích vì sao không được thêm lại, và một test khẳng định `disconnect` **chưa từng** được gọi.
+
+Điểm bám cũng dời: từ `onSourceStarted` (chạy **mỗi chunk**, đúng nguyên nhân lỗi 2) sang `onPlaybackStarted` (chạy **một lần mỗi lượt nói**). `startAudioDrivenLipSync` thêm cổng bất biến — bám lại cùng một analyser là không-làm-gì, để việc tái khởi động giữa lượt không reset `smoothedBandRMS` và làm miệng giật.
+
+**Đo được:**
+
+```
+npx vitest run tests/composables/use3DModel.test.ts tests/composables/useSpeakerPlayback.test.ts \
+               tests/components/WidgetApp.test.ts tests/components/VRMEngine.test.ts
+   → 53 passed (48 cũ + 5 mới)
+
+npx vue-tsc --noEmit -p tsconfig.app.json   → sạch
+npx eslint . --max-warnings 0 --no-warn-ignored → sạch
+```
+
+**Một test cũ ĐÃ phải sửa** — `"should expose audio lip sync APIs"` khẳng định chữ ký hai tham số cũ. Sửa test ở đây là đúng, không phải né: nó khoá chính cái hợp đồng vừa được chứng minh là sai. Ba test còn lại của bốn file trên không đụng tới.
+
+**Không đo được trong phiên này:** biên độ thật và mức ducking thật cần tai người trên bản build có TTS chạy. Cái đã chứng minh là **hình dạng đồ thị âm thanh** — một đường duy nhất tới loa, mọi đường qua `masterGain`, một analyser cho cả lượt. Đó là điều kiện cần; phần "nghe có to gấp đôi nữa không" vẫn phải nghe.
+
+---
+
+### U25 — `useVRM.ts` là code mồ côi, và nó đã làm người rà kết luận sai
+
+`liva-ui/src/composables/useVRM.ts` (**≈420 dòng**) không có call-site sản xuất nào — chỉ `tests/composables/useVRM.test.ts` import nó. Bản dùng thật là `use3DModel.ts` (`VRMEngine.vue:16`).
+
+Vấn đề không phải mấy trăm dòng chết, mà là **nó mâu thuẫn với bản đang chạy**: hàm `updateLipSync` của nó dẫn khẩu hình bằng ba hàm `sin` với `speed = 8` cố định, **không đọc một mẫu âm thanh nào**, kèm comment tự khen *"simulates natural speech patterns (NOT random rectangles)"*. Trong đợt rà 06/08/2026, chính file này khiến người rà kết luận "lip-sync của LIVA là giả" và báo cáo sai — trước khi tìm ra `use3DModel.ts` mới là bản chạy. Đây đúng loại bẫy mà mục [code mồ côi](02-no-ky-thuat-va-rui-ro.md) tồn tại để chặn: dòng chết thì vô hại, **dòng chết mô tả sai hệ thống thì không**.
+
+**Nghiệm thu.** Xoá `useVRM.ts` cùng test của nó — hoặc, nếu muốn giữ các hàm thuần (`lerp`, `easeOutQuad`, `easeInQuad`, `randomBlinkInterval`, `weightedRandom`), tách chúng sang `utils/` rồi xoá phần còn lại. Sau đó cả ba phải đạt: `grep -rn "useVRM" liva-ui/src` trả **0** kết quả; `vue-tsc --noEmit -p tsconfig.app.json` sạch; `npm run test:coverage -w liva-ui` **không** tụt ngưỡng nào.
+
+---
+
+#### ✅ ĐÃ LÀM — 06/08/2026
+
+**Khảo sát trước khi xoá lộ ra một chuyện tệ hơn "code chết".** Năm hàm thuần kia tồn tại **hai bản**: bản `export` trong `useVRM.ts` và một bản riêng trong `use3DModel.ts` — **giống nhau từng byte, chỉ khác từ khoá `export`**. Bộ test lại nhập từ bản mồ côi. Nghĩa là suốt thời gian qua, **thứ được kiểm và thứ được chạy là hai bản khác nhau**; chúng khớp nhau thuần tuý do may, và không có gì chặn chúng trôi khỏi nhau.
+
+⇒ Chọn phương án tách thay vì xoá thẳng, vì xoá thẳng sẽ để lại bản đang chạy **không còn test nào**:
+
+| | Trước | Sau |
+|---|---|---|
+| Bản định nghĩa | 2 (một mồ côi, một đang chạy) | **1** — `liva-ui/src/utils/avatarMath.ts` |
+| Test kiểm bản nào | bản mồ côi | bản đang chạy |
+| Phải mock để test | THREE + GLTFLoader + `@pixiv/three-vrm` + `useFaceTracking` | **không mock gì** — toán thuần |
+
+Bộ test chuyển sang `tests/utils/avatarMath.test.ts`. Bỏ 5 test `clamp` của bản cũ: chúng kiểm một hàm **định nghĩa ngay trong file test**, không tồn tại trong `src/` — tức test đang kiểm chính nó.
+
+**Đo được:**
+
+```
+grep -rn "useVRM" liva-ui/src          → 0 kết quả
+npx vue-tsc --noEmit -p tsconfig.app.json → sạch
+npx eslint . --max-warnings 0             → sạch
+npm run test:coverage -w liva-ui          → 384 passed (384), không ngưỡng nào đỏ
+```
+
+Độ phủ `src/composables` **tăng** cả bốn chỉ số vì file mồ côi phủ kém đã biến mất:
+
+| | statements | branches | functions | lines |
+|---|---|---|---|---|
+| Trước | 73,11 | 56,82 | 81,00 | 74,98 |
+| Sau | **74,49** | **59,14** | **81,15** | **76,47** |
+
+Số test giảm 394 → 384 (−34 test của `useVRM.test.ts`, +24 test của `avatarMath.test.ts`). Giảm số test ở đây là **đúng hướng**: 34 test cũ gồm 5 test tự-kiểm-chính-nó và một nhóm "Composable Interface" chỉ khẳng định một composable không ai gọi thì không ném lỗi.
+
+⚠️ **Một sai lầm trong phiên, ghi lại vì nó rẻ và dễ lặp.** Test mới `weightedRandom` với mọi trọng số bằng 0 được viết theo kỳ vọng "trả về phần tử cuối" — đỏ. Hành vi thật: `total = 0` ⇒ `r = 0` ⇒ điều kiện `r <= 0` khớp **ngay vòng đầu** ⇒ trả về phần tử **đầu**. Dòng `return options[options.length - 1]` ở cuối hàm thực chất là phòng thủ gần như không tới được. Đã sửa kỳ vọng theo hành vi thật chứ không sửa hàm.
+
+**Không làm, có chủ đích:** `clamp` đang có **bốn** bản trùng lặp với chữ ký khác nhau — trong `useAvatarLocomotion.ts`, `useFaceTracking.ts`, `footPlantIK.ts` và `WidgetApp.vue:660`. Cùng loại nợ, nhưng khác phạm vi — gộp vào đây là mở rộng mục vượt quá điều kiện nghiệm thu đã chốt. *(Ba file đầu chưa vào cây nên `docs-citations` không phân giải được toạ độ dòng của chúng — đó là lý do chỗ này chỉ nêu tên file.)*
+
+---
+
+### U30 — Bù ngang ở pelvis: sóng răng cưa đồng bộ với nhịp bước
+
+> **Nguồn gốc.** Người dùng báo avatar "khựng khựng" khi đi. Một bản rà do ChatGPT thực hiện ngày 06/08/2026 chỉ vào `FootPlantIK`; **đã đối chiếu lại từng khẳng định với code và đo lại model** — xem "độ tin của bản rà" ở cuối mục. Chẩn đoán đứng vững, nhưng thứ tự thi hành mà bản rà đề xuất thì không.
+
+**Cơ chế, đã kiểm.** `FootPlantIK` không phải IK. `footPlantIK.ts` (`update`) chọn bàn chân thấp hơn rồi neo toạ độ **thế giới** của nó; `useAvatarAnimation.ts` (`applyFootPlant`) bù sai lệch bằng cách **dịch cả `hips`** — không xoay đùi–gối–bàn chân.
+
+Bù pelvis **theo trục đứng** là kỹ thuật chuẩn. Cái sai ở đây là bù theo **phương ngang**: `correction` có đủ `x`, `y`, `z` và cả ba đều được cộng vào `hips.position`. Tức là kéo lùi cả thân người để giữ bàn chân đứng yên — không phải foot-plant, mà là lôi nhân vật ngược lại.
+
+**Vì sao nó đúng bằng nhịp bước.** Bốn hằng số trong constructor (`0.025`, `0.12`, `0.14`, `18`) khép thành một chu trình răng cưa:
+
+| Pha | Điều gì xảy ra |
+|---|---|
+| Neo | Anchor đứng yên trong thế giới, nhân vật vẫn tiến ⇒ sai lệch tăng **tuyến tính theo tốc độ** |
+| Bão hoà | Chạm trần `maximumCorrection = 0.14` sau **khoảng một phần mười giây**, rồi ghim ở đó |
+| Đổi chân | Target nhảy về 0; `1 − exp(−18 × 0,0167) ≈ 0,26` mỗi frame ⇒ thân **lao tới trong ~4 frame** |
+| Lặp | Mỗi bước chân một lần |
+
+⇒ Đây là dao động răng cưa đồng bộ với nhịp bước — đúng nghĩa đen triệu chứng được báo.
+
+**Bước 0 — làm TRƯỚC mọi thứ khác, và nó là một dòng.**
+
+Bản rà đề xuất dựng bộ đo RAF p50/p95/p99 + Long Animation Frames *trước*, rồi mới A/B tắt `FootPlantIK`. **Ngược.** Tắt `FootPlantIK` là một dòng, nhìn 30 giây là biết. Dựng bộ đo là một ngày. Làm cái rẻ và quyết định trước; nếu tắt đi mà hết khựng thì bạn vừa tiết kiệm một ngày công để chứng minh thứ mắt đã thấy.
+
+⚠️ **Và nếu tắt đi mà VẪN khựng thì toàn bộ mục này sai** — thủ phạm nằm chỗ khác, và [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là nơi đáng nhìn tiếp. Đừng bỏ qua nhánh đó: chưa ai trong hai bản rà **nhìn thấy** hiện tượng, cả hai đều là đọc code. Người duy nhất đã thấy là chủ dự án.
+
+**Công tắc đã có — 06/08/2026.** `LIVA_FOOT_PLANT` đọc trong `useAvatarAnimation.ts` (`footPlantEnabled`), theo đúng lối `LIVA_ECO_MODE` sẵn có. **Mặc định BẬT**, so sánh với `false` chứ không ép boolean, nên quên khai báo không vô tình tắt nó.
+
+```js
+LIVA_FOOT_PLANT = false   // tắt ngay trong console, không build lại
+LIVA_FOOT_PLANT = true    // bật lại để so sánh
+```
+
+Khi tắt, `hips` được **trả về tư thế gốc** chứ không chỉ `return` sớm — thiếu bước đó thì độ lệch của lượt bù cuối cùng đóng băng vĩnh viễn, trông như một lỗi khác hẳn và đủ để làm hỏng chính phép A/B. Có test khoá cả hai vế (`LIVA_FOOT_PLANT = false tắt bù và trả hips về tư thế gốc`).
+
+⚠️ **Bẫy đo — trả giá 06/08/2026: không tự động hoá được phép A/B này.** Dựng dev server rồi bắt vị trí avatar trong 21 giây: toạ độ **không đổi một bit**. Nghi model chưa nạp — sai, `Liva.vrm` và cả **sáu** FBX đều tải 200. Nguyên nhân thật đo được bằng một phép thử:
+
+```
+requestAnimationFrame trong 1 giây: 0 lần   ·   document.hidden: true
+```
+
+Trình duyệt **treo hẳn `requestAnimationFrame` khi khung nhìn không được hiển thị**. Vòng lặp render không chạy, nên avatar đứng im, còn `update_interactive_zones` vẫn phát đều đặn vì nó nằm trên `setInterval` — tức là có tín hiệu sự sống *giả*, đủ để tin nhầm rằng mọi thứ đang chạy.
+
+⇒ Phép A/B này **bắt buộc phải có người mở cửa sổ ra nhìn**. Không có đường tắt bằng đo đạc tự động, và mọi con số thu được khi khung nhìn ẩn đều vô nghĩa.
+
+**Công thức chạy:**
+
+```bash
+npm run dev -w liva-ui
+```
+
+Mở `http://localhost:5173/widget.html`, đợi ~3 giây (wander bật mặc định, `WANDER_PAUSE_MIN = 2.5 s` rồi tự chọn đích). Không cần gateway — WebSocket lỗi là bình thường, avatar vẫn chạy.
+
+**Nghiệm thu.**
+
+1. **A/B có bằng chứng, không phải cảm nhận.** Quay hai đoạn `idle → walk → run → stop` cùng đường đi, một có một không `FootPlantIK`, đặt cạnh nhau.
+2. Sau khi sửa: **không có bước nhảy vị trí pelvis** ở thời điểm đổi chân trụ — kiểm bằng log `hips.position` theo frame, không bằng mắt.
+3. Chân trụ trượt **dưới 2 px/frame** ở tốc độ đi bộ.
+4. `npm run test:coverage -w liva-ui` không tụt ngưỡng nào (ba file locomotion đều đang có test).
+
+**Cách sửa, theo thứ tự tăng dần công sức** — dừng ở bậc nào đủ thì dừng:
+
+- **Bậc 1:** bỏ hẳn `x`/`z` khỏi correction, chỉ giữ `y`. Mất khử trượt ngang, nhưng hết răng cưa.
+- **Bậc 2:** two-bone IK thật cho đùi–gối–bàn chân; pelvis chỉ bù nhẹ theo trục đứng.
+- **Bậc 3:** contact curve trái/phải gắn vào từng clip, IK chỉ chạy khi contact active — thuộc [U33](#u33--locomotion-đúng-nhịp-cố-định-blendspace-distance-matching).
+
+**Độ tin của bản rà — kiểm rồi mới dùng.** Bản rà đưa ra số nghe như đã đo, nên đã đo lại độc lập. Lượt kiểm đầu tưởng nó bịa: đọc file `Liva.vrm` trên đĩa ra **309 node · 3 skin · 750 bone-link**, còn nó nói 333 node · 23 skeleton · 1 484 bone-link. **Sai ở phép kiểm, không phải ở bản rà** — nó đo *sau khi three.js nạp*, còn ở đây đo *file trên đĩa*:
+
+- glTF gộp nhiều primitive vào một mesh; three.js tách mỗi primitive thành một `SkinnedMesh` ⇒ **23** đúng ở runtime (8 + 12 + 3 primitive).
+- 309 node + 23 mesh object + 1 scene root = **333**. Khớp chính xác.
+- Trước prune: **5 750** bone-link (tính được từ file). Sau `removeUnnecessaryJoints`: 1 484. Hợp lý.
+
+Và các số còn lại khớp tuyệt đối: **250 bone · 44 481 triangle · 456 morph target · 11 bone được retarget**. ⇒ Bản rà **đã thật sự chạy đo**, và các khẳng định về code (hằng số, số lần `updateWorldMatrix`, lerp Euler, `findIndex` mỗi frame, ECO 5 FPS) đều đối chiếu đúng.
+
+*Một chỗ bản rà nói chưa chuẩn:* retarget **có** dùng slerp quaternion **bên trong** mỗi clip (`sampleTrack`); chỉ khâu trộn giữa hai tư thế mới là lerp Euler. Không đổi kết luận, nhưng đừng đi sửa nhầm chỗ.
+
+---
+
+### U31 — Ba khoản phí mỗi frame trên đường avatar
+
+**Đáng làm dù thủ phạm của [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) là gì** — cả ba đều độc lập với chẩn đoán, và cả ba đều rẻ.
+
+**1. Duyệt lại toàn bộ đồ thị hai lần mỗi frame.** `applyFootPlant` trong `useAvatarAnimation.ts` gọi `scene.updateWorldMatrix(true, true)` **hai lần**: một trước khi đo vị trí bàn chân, một sau khi ghi `hips.position`. Trên đồ thị **333 node** đó là ~666 lần cập nhật ma trận mỗi frame chỉ để đặt bàn chân — chưa kể `vrm.update()` cũng đụng ma trận. Lần thứ hai có thể bỏ nếu để `vrm.update()` phía sau lo.
+
+**2. `removeUnnecessaryJoints` đã deprecated.** `use3DModel.ts:630` vẫn gọi nó; three-vrm trong dự án là **^3.5.2**, bản khuyến nghị `combineSkeletons` — gộp **23** skeleton rời thành một skeleton dùng chung thay vì prune từng cái. Cân nhắc thêm `combineMorphs` (model có **456** morph target).
+
+**3. `findIndex` tuyến tính mỗi bone mỗi frame.** `sampleTrack` trong `mixamoRetarget.ts` quét `track.times.findIndex(...)` từ đầu cho **mỗi** bone, **mỗi** frame. Cache con trỏ keyframe theo hướng tiến là đủ; clip chạy tuyến tính nên lần sau gần như luôn ở ngay cạnh lần trước.
+
+**4. ECO Mode hạ avatar xuống 5 FPS.** `use3DModel.ts` đặt `throttleInterval = 200` khi `LIVA_ECO_MODE` bật. 5 FPS **chắc chắn** giật nếu nhân vật vẫn đang di chuyển — và ECO tồn tại để sống chung với workload nặng, tức đúng lúc người dùng vẫn đang nhìn. Sàn nên là **30 FPS**; muốn tiết kiệm thì hạ DPR, tắt antialias, giảm tần suất spring bone — đừng hạ frame rate.
+
+**Nghiệm thu.** Một bộ đo RAF ghi p50/p95/p99 + thời gian `vrm.update` + render, chạy 20 giây `idle → walk → run → stop`: **p95 dưới 20 ms, p99 dưới 33 ms**, và **không frame nào vượt 50 ms** do mã animation. Đo trước và sau từng khoản trong bốn khoản trên — gộp cả bốn rồi mới đo thì không biết khoản nào có tác dụng.
+
+---
+
+#### ✅ ĐÃ LÀM — 06/08/2026, và **hai trong bốn khoản hoá ra không đáng kể**
+
+Đo riêng từng khoản đúng như nghiệm thu yêu cầu. Kết quả ngược với kỳ vọng ở nửa danh sách:
+
+| Khoản | Đo được | Nghĩa thật |
+|---|---|---|
+| **(a)** bỏ một lần `updateWorldMatrix(true, true)` | **11 µs**/lần trên cây 333 node ⇒ tiết kiệm **0,66 ms/giây** | **0,07 %** ngân sách khung hình 60 FPS — không sửa được cái giật nào |
+| **(c)** nhị phân thay quét tuyến tính | 20 giây hoạt ảnh = 13 200 lần tra cứu: **0,28 ms → 0,17 ms** | ~5 ns/khung. **Không phải sửa lỗi hiệu năng**, chỉ là dọn dẹp |
+| **(b)** `combineSkeletons` | chưa đo được — cần GPU thật | Khoản duy nhất còn tiềm năng đáng kể: 23 skeleton → 1 |
+| **(d)** sàn ECO 5 → 30 FPS | 200 ms → 33 ms mỗi khung | Hiệu ứng lớn và thấy ngay — **nhưng chỉ khi ECO đang bật** |
+
+⚠️ **Bản rà đã thổi phồng (a) và (c), và tôi đã đồng ý với nó mà chưa đo.** Cả hai đúng về mặt kỹ thuật — đường đi thừa thì nên bỏ — nhưng **không cái nào giải thích được hiện tượng khựng nhìn thấy bằng mắt**. Ai đọc mục này về sau: đừng trông đợi U31 sửa được cái giật; nó là dọn dẹp, và giá trị thật nằm ở (b) với (d).
+
+⇒ Hệ quả cho [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước): nếu tắt `FootPlantIK` mà vẫn khựng, **đừng quay sang U31 để tìm nguyên nhân** như bảng ba-kết-cục gợi ý — U31 đã đo và không đủ lớn. Lúc đó phải dựng bộ đo RAF thật.
+
+**Đã thi hành:**
+
+- **(a)** Bỏ lần duyệt thứ hai trong `applyFootPlant`. Ba lý do độc lập, mỗi lý do đủ để bỏ: idle sway / blink / lookAt chạy ngay sau và ghi đè rotation nên ma trận vừa dựng đã cũ; spring bone của three-vrm tự lo ma trận của nó (`_ancestors[i].updateWorldMatrix(...)`); và `WebGLRenderer.render()` gọi `updateMatrixWorld()` trước khi vẽ. Test đếm riêng lần `(true, true)` — `getWorldPosition` cũng gọi `updateWorldMatrix` nhưng ở dạng `(true, false)` chỉ đi ngược lên cha, rẻ và không tránh được.
+- **(b)** `removeUnnecessaryJoints` → `combineSkeletons`. Chính thư viện in cảnh báo: *"deprecated. Use combineSkeletons instead… will be removed in the next major version."* Test khẳng định **cả hai chiều** — có gọi hàm mới, và đã thôi gọi hàm cũ.
+- **(c)** Tìm nhị phân, **không** dùng con trỏ cache như đề xuất ban đầu: lúc crossfade có hai lượt lấy mẫu trên cùng một clip ở hai mốc thời gian, xen kẽ nhau, nên một con trỏ dùng chung sẽ bị kéo qua kéo lại. Nhị phân không giữ trạng thái nên miễn nhiễm. Kiểm 1 000 mẫu ngẫu nhiên: **0 lệch** so với ngữ nghĩa cũ, cộng 5 test biên.
+- **(d)** `ECO_FRAME_INTERVAL_MS = 33`.
+
+**KHÔNG làm, có chủ đích: `combineMorphs`.** Là tối ưu tuỳ chọn (model có 456 morph target), nhưng nó tái cấu trúc đúng đường morph đang dẫn chớp mắt, khẩu hình và biểu cảm — thứ vừa sửa ở [U24](#u24--hai-lỗi-nối-dây-trên-đường-lip-sync-của-widget). Kiểm chứng cần nhìn tận mắt, mà phiên này không nhìn được (xem bẫy `requestAnimationFrame` ở U30). Có test khẳng định nó **chưa** được gọi, để lần bật sau là một quyết định có ý thức chứ không phải trôi vào.
+
+**Cổng:** `vitest` **398/398** (thêm 9 test) · typecheck sạch · ESLint sạch.
+
+---
+
 ## 6. Nhóm D — Cấu trúc
 
 > **Điều kiện vào nhóm này: A, B, C đã xong.** Tái cấu trúc khi còn bug chặn phát hành là cách nhanh nhất để mất cả hai.
@@ -1078,6 +1380,252 @@ Vòng lặp tự sửa lỗi đã hoàn chỉnh và có test; `trait CodeAgent` 
 **Chưa xong nếu chỉ có bảng.** Cùng lý lẽ với [U13](#u13--consolidation-ngữ-nghĩa-l2--l3) (*"Chưa chứng minh được điều đó thì L3 chỉ là schema"*): `turn_telemetry` không có `telemetry:summary` đọc ra được số thì nó là schema, không phải sổ đo — và nghiệm thu 1–3 đều không kiểm được.
 
 **Cái mục này KHÔNG làm, để khỏi bị nhầm là trùng lặp.** Nó **không** thay `skill_signals` + `skills/signals.rs` — sổ ghi đó đo **chất lượng skill** để cộng prior vào *thứ hạng truy hồi*, và nó đã tinh vi hơn (đếm `merge_key` phân biệt, trọng số theo loại, `refuted` không trừ điểm). `turn_telemetry` đo **chi phí và kết cục của một lượt LLM** để phục vụ *quyết định chọn model*. Hai miền khác nhau, đừng gộp.
+
+---
+
+### U22 — Hỏi trước khi trả — nhịp truy xuất
+
+> **Nguồn gốc.** Người dùng đưa ngày 05/08/2026: một "giao thức NEO" cho việc học với AI, gồm bốn nhịp — *cam kết* (viết phỏng đoán trước khi thấy đáp án) → *va chạm* (AI phá cái neo sai) → *nén* (một câu LÕI) → *truy xuất* (hỏi lại, không cho đáp án). Mục này lấy **duy nhất nhịp 4**, và cố ý **bỏ nhịp 2**. Lý do bỏ nằm ngay dưới — nó là phần đáng đọc nhất của mục này.
+
+**Vì sao chỉ lấy một nhịp trong bốn.** Sắp bốn nhịp theo *mức phụ thuộc năng lực model* thì thứ tự đảo ngược hẳn so với giá trị biểu kiến:
+
+| Nhịp | Đòi model làm gì | Hỏng thì ra gì |
+|---|---|---|
+| 2 — va chạm | Phát hiện **đúng** chỗ người dùng sai | Model 2–4B tự tin bảo bạn nhầm trong khi bạn đúng ⇒ **nó vừa thả neo hỏng lên bạn**, đúng cơ chế giao thức mô tả nhưng ngược chiều |
+| 4 — truy xuất | Đọc lại đúng câu đã lưu, **không suy luận** | Hỏi sai lúc — phiền, nhưng không cấy niềm tin sai |
+
+LIVA chạy router 2B offline trên máy người khác (beta là 5 người bạn, laptop, model 2–4B). Nhịp 2 là nhịp **duy nhất** trong bốn có chế độ hỏng làm người dùng *tệ đi so với không dùng gì*, và nó rơi đúng vào việc model nhỏ làm kém nhất. Nhịp 4 thì ngược lại: nó là nhịp con người hay bỏ nhất (không có phần thưởng tức thì) — tức đúng chỗ máy làm thay có lãi.
+
+**⚠️ Hạ tầng KHÔNG sẵn như nhìn lần đầu — đây là cái bẫy của mục này.** Bảng `facts` (`db.rs`, `init_schemas`) có sẵn ba cột `memory_strength`, `last_accessed_at`, `access_count` — đúng ba đại lượng một lịch ôn giãn cách cần, không thừa không thiếu. Nhưng đọc kỹ hai đầu thì chúng **không phải** lịch sử truy xuất:
+
+1. `get_fact` **đọc cả ba rồi không ghi lại gì** — không có `access_count = access_count + 1` trên đường đọc. Nhớ lại một fact hôm nay **không để lại dấu vết nào**.
+2. `set_fact` có `ON CONFLICT(key) DO UPDATE SET … memory_strength = excluded.memory_strength, last_accessed_at = excluded.last_accessed_at, access_count = excluded.access_count` — tức **ghi đè cả ba từ payload người gọi**. Mà người gọi là lệnh `memory:set_fact` (payload JSON, xem `main_tests.rs`), không phải một bộ lập lịch.
+
+Hệ quả: đặt trạng thái lịch ôn vào ba cột đó thì **lần `set_fact` bình thường kế tiếp trên cùng `key` sẽ xoá sạch nó**, im lặng, không lỗi. Đây đúng lớp hỏng mà [U18](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) đã cắn (ba database song song — "không lỗi, không log"). Chốt trước khi gõ dòng nào: **hoặc** sửa nhánh `ON CONFLICT` để ba cột này được giữ lại thay vì lấy từ `excluded` (đổi ngữ nghĩa một hàm dùng chung ⇒ bắt buộc `impact({target: "set_fact", direction: "upstream"})`), **hoặc** giữ lịch ôn ở bảng riêng và để `facts` yên. Đừng chọn bằng cảm tính — đo số điểm gọi `set_fact` rồi chọn.
+
+**Ba quyết định thiết kế.**
+
+**1. Không thêm lượt inference nào.** Nhịp 4 là một nhánh **trước** khi gọi LLM: khớp được `key` trong `facts` thì hỏi lại, không khớp thì đi đường cũ. Chi phí 0 token. Đây là điều kiện để mục này không mâu thuẫn với chủ trương sống chung với tải nặng — một mục "học tập" mà ăn thêm một lượt LLM mỗi sự kiện thì phải bị từ chối.
+
+**2. Mặc định TẮT, một biến môi trường, giống `LIVA_MEMORY_RETENTION_DAYS`.** `memory_retention.rs` đã lập tiền lệ đúng: không cấu hình thì runtime **không tự làm gì**. Một trợ lý giọng nói tự ý hỏi bài là thứ người dùng không xin.
+
+**3. Bám vào khoảnh khắc người dùng tự hỏi lại chủ đề đó — KHÔNG hẹn giờ nhắc.** Đây là khác biệt giữa "ôn đúng lúc" và "bị làm phiền". Tác giả giao thức thừa nhận nhịp 4 khô khan với *người tự chạy*; khi **máy** thi hành nó thì khô khan biến thành phiền, nặng hơn một bậc. Không có bộ hẹn giờ nào trong mục này.
+
+**Việc.**
+1. Chốt chỗ chứa trạng thái theo cảnh báo ⚠️ ở trên (sửa `ON CONFLICT`, hay bảng riêng).
+2. Ghi lại trên **đường đọc**: `get_fact` (hoặc lớp gọi nó) cập nhật `last_accessed_at` + `access_count`. Lỗi ghi **không được** làm hỏng lượt trả lời — nuốt vào `tracing::warn!`, đừng `?`. Cùng luật với nghiệm thu 4 của [U21](#u21--sổ-đo-mỗi-lượt--turn_telemetry).
+3. Nhánh hỏi-trước-khi-trả, sau cổng biến môi trường: khớp fact đã có ⇒ hỏi lại một lượt. Nhớ đúng → tăng `memory_strength`, giãn khoảng cách. Không nhớ → trả lời đầy đủ, rút ngắn khoảng cách.
+4. Câu hỏi phải đi qua `sanitize_untrusted` (`llm/prompt/persona.rs`) như mọi nội dung do người dùng sinh ra — nội dung fact là dữ liệu, không phải chỉ thị.
+
+**File.** `liva-native-core/src/db.rs` (`set_fact`/`get_fact`), `liva-native-core/src/commands/memory.rs`, `liva-native-core/src/lib.rs` (nhánh trước khi gọi LLM).
+
+**Nghiệm thu — cả ba đều là lệnh chạy được, không cần người xác nhận.**
+
+1. **Truy xuất để lại dấu vết.** Gateway với `LIVA_DB_PATH` trên đĩa (**không** `LIVA_DB_IN_MEMORY=1` — cùng lý do `e2e-memory.mjs` từ chối chạy khi thiếu biến này). Hỏi LIVA một fact đã lưu **hai lần**, rồi `SELECT access_count, last_accessed_at FROM facts WHERE key = …`: `access_count` phải **tăng đúng 2**, `last_accessed_at` phải khác 0.
+2. **Trạng thái sống sót một `set_fact` thường.** Sau bước 1, gọi `memory:set_fact` ghi đè **cùng `key`** đó bằng payload không có ba trường lịch ôn, rồi đọc lại: `access_count` **không** về 0. Đây là nghiệm thu ứng với cảnh báo ⚠️ — thiếu nó thì mục coi như chưa làm, vì chế độ hỏng là im lặng.
+3. **Tắt là thật sự tắt.** Không đặt biến môi trường ⇒ chạy lại `e2e-gateway.mjs` **8/8** và `e2e-memory.mjs` **6/6**, và **không** lượt nào bị chèn câu hỏi ngược. Kèm `cargo test` và `cargo clippy --all-targets --message-format=short` 0 warning.
+
+**Cái mục này KHÔNG làm.**
+- **Không đụng đường thoại/persona.** `llm/prompt/persona.rs` chốt: câu trả lời được TTS đọc lên, *không markdown, không bullet, 1–3 câu*. Sáu mục có tiêu đề in hoa của giao thức gốc là định dạng **cho mắt**; đọc lên bằng TTS là hỏng. Nếu muốn đủ sáu mục thì đó là **chế độ riêng trên kênh văn bản**, và là một mục khác.
+- **Không làm nhịp 2 (va chạm).** Xem bảng ở đầu mục. Đây là quyết định có chủ đích, không phải sót.
+- **Không dùng `l3_edges` cho "móc nối".** Nghe hợp, nhưng [U13](#u13--consolidation-ngữ-nghĩa-l2--l3) ghi rõ tầng L3 **chưa có writer nào** — xây lên trên nó là xây trên schema rỗng.
+
+**Vị trí trong hàng đợi: cuối nhóm E, không chen ngang.** Khác [U21](#u21--sổ-đo-mỗi-lượt--turn_telemetry), mục này **không** phải hạ tầng cho một mục đã lên lịch — nó là năng lực mới, nên quy tắc chặn ở §2 áp dụng đầy đủ: A/B/C xong đã. Ghi vào đây để khỏi mất ý tưởng, không phải để làm ngay.
+
+---
+
+### U26 — Control tag đọc được giữa câu, không chỉ ở đầu lượt
+
+> **Nguồn gốc.** Cùng đợt rà proj-airi 06/08/2026 với [U24](#u24--hai-lỗi-nối-dây-trên-đường-lip-sync-của-widget). AIRI đang mở issue #1607 cho đúng bài toán này (dẫn biểu cảm/cử chỉ VRM giàu hơn). Lấy **bài toán**, không lấy code — ngăn xếp của họ là Electron + TresJS.
+
+Trước bản vá này Liva chỉ đổi được cảm xúc **một lần, ở đầu câu trả lời**. Bộ đọc tag dừng ngay khi có chữ hiển thị đầu tiên — `avatarControlTags.ts` (*"Once visible text starts, bracketed text is passed through unchanged"*) và bản song sinh phía Rust `liva-native-core/src/tts/avatar_control.rs` (cờ `reading_control_prefix`). Nghĩa là một câu trả lời dài, đổi giọng điệu giữa chừng, vẫn giữ nguyên một biểu cảm từ đầu tới cuối.
+
+**Cái bẫy phải né khi sửa.** Thiết kế "chỉ đọc ở đầu" **không phải sơ suất** — nó tránh nuốt nhầm ngoặc vuông hợp lệ giữa câu, và có test khoá lại: `dau_ngoac_sau_khi_van_ban_bat_dau_duoc_giu_nguyen` (`avatar_control.rs`) khẳng định `"Kết quả [2 + 2] là 4."` phải đi qua nguyên vẹn. Gỡ tiền tố mà không thay bằng gì khác sẽ làm đỏ test đó — đúng như thiết kế.
+
+**Cách sửa giữ được cả hai.** Đọc tag ở **mọi vị trí**, nhưng chỉ nuốt khi nội dung trong ngoặc **khớp chính xác một tag trong danh sách trắng** (`AVATAR_EMOTIONS` ∪ `AVATAR_ACTIONS`). `[2 + 2]` không nằm trong danh sách ⇒ đi qua nguyên vẹn ⇒ test cũ vẫn xanh. Danh sách trắng phải **giống hệt nhau ở hai phía** TS và Rust, nếu không TTS sẽ đọc lên một tag mà UI đã nuốt.
+
+**Nghiệm thu.** Bốn test, hai bên:
+1. `"Chào bạn. [happy] Vui quá!"` ⇒ TTS nhận `"Chào bạn.  Vui quá!"`, UI nhận đúng **1** control `happy`.
+2. Test cũ `"Kết quả [2 + 2] là 4."` **vẫn xanh, không sửa test**.
+3. Tag bị cắt đôi giữa hai chunk stream (`"…[wa" + "ve] xin chào"`) vẫn ghép đúng ở **giữa** câu, không chỉ ở đầu.
+4. Chuỗi tag phía Rust và phía TS cho ra **cùng một** văn bản còn lại trên cùng đầu vào — khoá bằng một bảng ca kiểm chung.
+
+---
+
+#### ✅ ĐÃ LÀM — 06/08/2026
+
+**Cách sửa cuối cùng khác đề xuất ở trên một điểm, và điểm đó quan trọng.** Đề xuất ban đầu là "đọc tag ở mọi vị trí theo danh sách trắng". Làm đúng thế thì **test cũ số 2 đỏ**: `nhieu_tag_va_tag_la_o_dau_cau_deu_bi_loai` khẳng định `[dance]` — một tag **lạ** — vẫn bị nuốt khi nó đứng ở đầu. Danh sách trắng thuần sẽ thả `[dance]` cho TTS đọc lên.
+
+⇒ Bản đã thi hành giữ **hai chế độ khác nhau có chủ đích**, và đó là thứ nên đọc kỹ nếu sau này ai định "dọn cho nhất quán":
+
+| | Tiền tố (trước khi có chữ) | Thân (sau khi có chữ) |
+|---|---|---|
+| Ngoặc **quen** | nuốt, phát control | nuốt, phát control ← **mới** |
+| Ngoặc **lạ** | nuốt, im lặng | **giữ nguyên làm văn bản** |
+| Khoảng trắng sau tag | bị trim | giữ nguyên |
+
+Lý do bất đối xứng: ở đầu câu trả lời không có ngoặc vuông hợp lệ nào cần bảo vệ, nên nuốt hết là an toàn; giữa câu thì có, nên chỉ nuốt cái mình biết chắc.
+
+**Một chi tiết nữa không có trong đề xuất: chặn nghẽn luồng.** Giữ văn bản lại chờ dấu `]` là cần cho ca tag bị cắt đôi, nhưng nếu giữ vô điều kiện thì `"Kết quả [2 + 2"` sẽ treo TTS tới khi chunk sau tới — hoặc mãi mãi, nếu ngoặc không bao giờ đóng. Bản vá chỉ giữ lại khi phần đã thấy **còn có thể lớn lên thành một tag thật** (`is_viable_tag_prefix` / `isViableTagPrefix`): `[ha` giữ, `[2 + 2` nhả ngay. Hệ quả phụ đẹp: cuối luồng, phần treo **chắc chắn** là tag dở chứ không bao giờ là văn bản, nên `finish()`/`flush()` bỏ nó đi là đóng an toàn chứ không phải mất chữ.
+
+**Đo được:**
+
+```
+cargo test -p liva-native-core --lib tts::avatar_control   → 12 passed; 0 failed
+npx vitest run tests/utils/avatarControlTags.test.ts       → 14 passed
+```
+
+Bốn test Rust cũ và bốn test TS cũ **không sửa một dòng nào**. Bảng ca kiểm chung 8 ca (`bang_ca_kiem_chung_voi_ban_typescript` ↔ `"khớp từng ca với bản lọc phía Rust"`) là thứ chặn hai bản trôi khỏi nhau — sửa một bên mà quên bên kia thì một trong hai đỏ.
+
+**Phía tiêu thụ không phải sửa gì:** `WidgetApp.vue` đã lặp `for (const control of parsed.controls)` trên **mọi** chunk, nên control phát ra giữa câu chạy thẳng tới `setExpression` / `executeAvatarAction`. Nút thắt xưa nay chỉ nằm ở bộ đọc.
+
+---
+
+### U27 — Hợp đồng giao thức + SDK công khai cho cổng 8002
+
+AIRI phát hành `@proj-airi/server-sdk` và một `plugin-protocol` lên npm, nên người ngoài viết được module cho họ. LIVA có **14 cổng** WebSocket đã đo ([§1](#1-đường-cơ-sở-đã-đo--02082026-tại-260c643-thay-bảng-2907)) nhưng không có hợp đồng công bố ⇒ đứng ở vị trí một *ứng dụng*, không phải một *nền tảng*. Nguyên liệu đã có gần đủ: [`02-giao-thuc-ipc-va-websocket.md`](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) là đặc tả, và `scripts/e2e-gateway.mjs` trên thực tế **đã là một client mẫu chạy được**.
+
+**Nghiệm thu.** Một người chưa từng đọc repo, chỉ đọc trang giao thức, viết được một client nói chuyện với gateway trong dưới 30 phút — đo bằng cách đưa cho một người thật, không tự chấm.
+
+---
+
+#### ◐ ĐANG LÀM — 06/08/2026: khoảng trống hẹp hơn mô tả ở trên
+
+**Khảo sát lật ngược một phần tiền đề.** Mục này viết như thể LIVA thiếu hợp đồng giao thức. Không phải — [`02-giao-thuc-ipc-va-websocket.md`](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) đã là hợp đồng đầy đủ **974 dòng**, tự khai ngay đầu file là "*bất kỳ ai viết client cho LIVA đều phải theo đúng tài liệu này*", có bảng opcode, catalog lệnh, đối chiếu thiết-kế-gốc-vs-as-built và §11 checklist 13 mục. Và `scripts/lib/ws-client.mjs` đã là một client WebSocket **0 dependency** dựng trên `node:net`, đúng chuẩn RFC 6455 (mask phía client, gộp mảnh TCP, tự trả pong).
+
+⇒ Thiếu không phải đặc tả, cũng không phải code. Thiếu **đường đi từ con số không tới một socket đang chạy**: không có ví dụ nào chép về là chạy được, và ba chế độ hỏng đầu tiên đều có triệu chứng gây hiểu nhầm.
+
+**Đã làm:** [`examples/gateway-quickstart.mjs`](../../examples/gateway-quickstart.mjs) — Node thuần, 0 dependency, không import gì từ repo (kể cả `ws-client.mjs`, vì một ví dụ mở đầu phải kéo theo file khác thì không còn là "chép một file rồi chạy"). Kèm [§12 của tài liệu giao thức](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md#12-bắt-đầu-nhanh--client-chạy-được-trong-một-file).
+
+**Đo được — chạy trên gateway thật, không phải mock:**
+
+```
+# gateway debug, LIVA_SERVER_PORT=8099 LIVA_DB_IN_MEMORY=1
+node examples/gateway-quickstart.mjs   → 3/3 đạt, thoát 0
+PORT=8099 node scripts/e2e-gateway.mjs → 8/8 đạt
+```
+
+**Ba chế độ hỏng đã đo và ghi vào §12** — cả ba đều là thứ làm người mới mất buổi đầu:
+
+| Triệu chứng | Thực chất | Bằng chứng |
+|---|---|---|
+| Kết nối mở rồi đóng ngay, y hệt "server chưa chạy" | `Origin` không thuộc allow-list ⇒ **`HTTP/1.1 403 Forbidden`** thay vì 101 | đo 06/08 bằng handshake mang `Origin: http://evil.example.com` |
+| Gõ sai tên lệnh nhưng nhận lỗi *phân quyền* | cổng phân quyền chạy **trước** khi phân giải tên ⇒ tên bịa cũng ra `principal WebSocketRemote is not authorized for command '…'` | output thật của cả quickstart lẫn `e2e-gateway.mjs` |
+| `mcp:*` và `vision:ask` bị từ chối | **đúng thiết kế** — socket này mang principal `WebSocketRemote`, không toàn quyền. Toàn quyền nằm ở đường IPC stdin | `e2e-gateway.mjs` khẳng định đúng việc chặn |
+
+**Còn lại — và tôi KHÔNG tự nghiệm thu được.** Điều kiện nghiệm thu của mục này cố ý viết là "*đưa cho một người thật, không tự chấm*". Tôi chứng minh được ví dụ **chạy đúng**; tôi không chứng minh được nó **đủ để người lạ tự viết client trong 30 phút** — đó là phép đo trên người, phải do chủ dự án thực hiện. Chưa làm nữa: gói SDK phát hành được (npm) và bản tiếng Anh; cả hai đều là quyết định phát-ra-ngoài, không phải việc của một phiên làm việc.
+
+---
+
+### U28 — Endpoint tương thích OpenAI trên gateway
+
+Ý lấy từ `unspeech` của AIRI (proxy ASR/TTS dùng chung một dạng API). Mở `/v1/chat/completions`, `/v1/audio/speech`, `/v1/audio/transcriptions` ngay trên lõi Rust thì mọi công cụ sẵn có gọi được LIVA mà không cần biết gì về giao thức riêng — và quan trọng hơn cho hồ sơ: **VieNeu-TTS tiếng Việt trở thành dịch vụ mà máy khác trong nhà dùng được**, offline.
+
+**Nghiệm thu.** `curl` đúng payload OpenAI vào `/v1/audio/speech` trả về WAV phát được; và một client OpenAI SDK bất kỳ (chưa sửa dòng nào) chat được với LIVA qua `base_url` trỏ vào cổng 8002.
+
+**Cảnh báo phạm vi.** Chỉ làm phần *hình dạng API*. Không kéo theo xác thực, hạn mức, hay đa phiên — đó là dự án khác.
+
+---
+
+#### ✅ ĐÃ LÀM — 06/08/2026
+
+**File:** `liva-native-core/src/openai_api.rs`, nối vào `boot.rs` mục 5b. Bật bằng `LIVA_OPENAI_PORT`; **không đặt biến thì không mở socket nào**.
+
+**Ba quyết định đáng ghi lại, vì mỗi cái đều là một ngã rẽ.**
+
+**1. Dùng `hyper`, không `axum` — và điều đó tốn 0 crate mới.** Lõi không có framework HTTP nào: cổng 8002 là `TcpListener` thô đưa thẳng kết nối cho `tokio-tungstenite`. Nhưng `hyper 0.14` **đã nằm sẵn trong cây** qua `reqwest`, nên bật thêm feature `server`/`http1`/`tcp`/`stream` không kéo về gì — `httparse`, `http`, `http-body`, `tower-service`, `want`, `h2` đều đã có trong `Cargo.lock`. Kiểm bằng cách diff danh sách crate trước/sau: **rỗng**. `axum` thì là một cây mới hoàn toàn, cho một crate chỉ cần định tuyến ba đường dẫn.
+
+**2. Cổng RIÊNG, không phải 8002 — lệch với điều kiện nghiệm thu viết ở trên, có chủ đích.** Mục này viết "`base_url` trỏ vào cổng 8002". Làm đúng thế đòi hỏi soi trước vài byte của mỗi kết nối TCP rồi *phát lại* chúng cho `tokio-tungstenite` — một chỗ dễ sai nằm ngay trên đường thoại đang chạy tốt, đổi lấy đúng một thứ: trùng số cổng. Ý định thật của điều kiện là "SDK OpenAI gọi được LIVA", và điều đó đã đạt.
+
+**3. Mặc định TẮT.** Bề mặt này không có xác thực, và **kém an toàn hơn cổng 8002** ở một điểm cụ thể: nó không có cả hàng rào `Origin`, vì client HTTP không gửi header đó. Bật-mặc-định là mở thêm một cửa không khoá mà người dùng không yêu cầu.
+
+**Một lỗi chỉ lộ ra khi chạy thật.** Lượt đo đầu tiên trả về:
+
+```json
+{"message":{"content":"[happy][wave] Xin chào bạn nhé.","role":"assistant"}}
+```
+
+Tag điều khiển avatar **rò thẳng ra API**. Đường thoại và giao diện đều lọc chúng; endpoint mới thì chưa — và một công cụ bên ngoài không có cách nào biết `[happy]` là chỉ thị chứ không phải chữ LIVA muốn nói. Đã vá bằng chính `AvatarSpeechFilter` của [U26](#u26--control-tag-đọc-được-giữa-câu-không-chỉ-ở-đầu-lượt), ở **cả hai** đường. Ở đường stream, bộ lọc phải sống qua cả vòng lặp chứ không dựng lại mỗi token — một tag có thể bị cắt đôi giữa hai token, và bộ lọc mới mỗi mẩu sẽ không bao giờ ghép được hai nửa. Có test hồi quy.
+
+**Nghiệm thu — SDK OpenAI chính chủ v7.4.0, không sửa dòng nào, chỉ đổi `baseURL`:**
+
+```
+✅ client.models.list() — liva-local
+✅ client.chat.completions.create() — "Thủ đô của Việt Nam là Hà Nội."
+✅ không rò tag điều khiển avatar
+✅ có usage token — 577 token
+✅ stream: true (SSE) — "Một, hai, ba nhé."
+✅ client.audio.speech.create() — 169004 byte, RIFF
+
+6/6 đạt
+```
+
+`curl` trực tiếp cũng đạt: `/v1/audio/speech` trả **HTTP 200 · `audio/wav` · 176 684 byte**, header hợp lệ (mono, 48 kHz, 16-bit, 1,84 giây), và cỡ ghi trong header khớp cỡ file thật. Luồng SSE có đủ 13 mẩu, kết bằng `finish_reason:"stop"` rồi `data: [DONE]`.
+
+**Tái lập được mà không cần cài gì:** `examples/openai-api-check.mjs` — `node:http` thuần, 0 dependency, **11/11 đạt**. Repo không phải gánh gói `openai` chỉ để chạy một bộ kiểm; bản đo bằng SDK chính chủ ở trên đã chạy riêng một lần và ghi lại ở đây.
+
+```bash
+# lõi: LIVA_SERVER_PORT=8099 LIVA_OPENAI_PORT=8003 LIVA_DB_IN_MEMORY=1 LIVA_TTS_VIENEU=1
+node examples/openai-api-check.mjs   → 11/11 đạt
+```
+
+⚠️ **Bẫy đo, trả giá ngay trong phiên: cổng mở TRƯỚC khi model nạp xong.** Lần chạy đầu của bộ kiểm được **5/11** với `"No model loaded"`, rồi lần sau **quá hạn 60 giây**. Cả hai đều không phải lỗi của bề mặt API:
+
+- Socket HTTP mở ở khoảng giây thứ 20 của boot; router LLM nạp bất đồng bộ sau đó.
+- Và request đầu tiên **không trả lỗi rồi thôi — nó CHẶN** sau khoá của engine tới khi nạp xong. Đo được: **95 giây** với Qwen3-VL-2B trên máy dev. Nên "chờ tới khi cổng mở" là điều kiện sai; hạn 60 giây mỗi lượt cũng sai.
+
+Bộ kiểm nay tự chờ model (hạn 240 s mỗi lượt, ngân sách chung 420 s) và **coi quá hạn là "vẫn đang nạp"** chứ không phải trượt. Ai viết bộ kiểm khác cho bề mặt này nên đọc lại đoạn `doiModel()` trước, kẻo mất buổi đi tìm lỗi ở đúng chỗ không có lỗi.
+
+**Cổng đã chạy lại sau khi đụng `Cargo.toml`:** `cargo test` **553 passed** (548 + 5 test mới) · clippy **0** · `cargo fmt` sạch · `cargo audit` **22 cảnh báo allowed, 0 lỗ hổng** — đúng con số đường cơ sở, không phát sinh gì từ `hyper`.
+
+**Chưa làm, nêu rõ:**
+- **`/v1/audio/transcriptions`** — cần phân tích `multipart/form-data` thủ công, đủ lớn để thành mục riêng.
+- **Trường `model` không có tác dụng.** LIVA luôn dùng model router đang nạp; giá trị gửi lên được phản chiếu nguyên văn vào hồi âm cho khớp kỳ vọng SDK. Muốn đổi model thì vẫn là `llm:swap_model` ở cổng 8002.
+- **Đây là LIVA, không phải proxy LLM trung tính.** Persona được chèn khi request không có message `system`, có truy hồi RAG, có ghi lượt vào bộ nhớ (scope riêng `openai_api`, không trộn vào hội thoại cục bộ). Ai muốn model trần thì tự gửi message `system`.
+
+---
+
+### U29 — Vòng lặp chủ động có ngân sách tick
+
+Trụ "chủ động" vẫn là mảnh thiếu lớn nhất trong ba trụ. AIRI có ba repo chơi game (`game-playing-ai-balatro`, `-dome-keeper`, `-playground-2d`) và tất cả đều dùng **cùng một khuôn**: `perception → state → decision → action`, chạy theo tick có ngân sách. LIVA đã có sẵn ba trong bốn khâu — passive vision, governor, và Qwen3-VL làm bộ quyết định. Thiếu đúng cái **vòng lặp** khép chúng lại, cộng một đường xuất hành động.
+
+**Nghiệm thu.** LIVA tự mở lời **đúng một lần** trong một tình huống định trước (ví dụ: phát hiện một lỗi build trên màn hình) mà không ai gõ gì; và governor cắt được vòng lặp đó khi tải GPU vượt ngưỡng — chứng minh bằng log, không bằng mô tả.
+
+**Ước lượng: cao, nhiều tuần.** Ghi ra đây để có chỗ neo, không phải để nhận trong một phiên.
+
+---
+
+### U32 — Retarget đang vứt đi phần lớn chuyển động
+
+`CONTROLLED_BONES` trong `useAvatarAnimation.ts` giữ đúng **11** xương — hai chân, hai tay, hips. Bị bỏ: toàn bộ **spine, shoulder, hand, finger**, và **toàn bộ hips position**.
+
+**Đo được (06/08/2026):** mỗi FBX Mixamo trong `liva-ui/public/animations/mixamo/` chứa **68 tên xương `mixamorig:` duy nhất** — đếm bằng `strings` trên `walk.fbx`, `run.fbx`, `idle.fbx`, cả ba đều ra 68. Trong đó có vài mục không phải xương động (`HeadTop_End`, và một `Hipsf` trông như rác), nên số track hoạt hình thật thấp hơn 68 nhưng vẫn **hơn 11 rất nhiều**. *(Bản rà gốc ghi "52 track quaternion + 1 track vị trí hips"; con số đó **chưa tự kiểm** — muốn chính xác phải nạp FBX qua three.js và đếm `clip.tracks`. Kết luận không đổi dù con số đúng là 52 hay khác.)*
+
+Hệ quả: dáng đi không có chuyển động thân trên, tay không đánh theo vai, và vì hips position bị bỏ nên không có thành phần nhấp nhô/đưa ngang tự nhiên của bước chân — thứ mà [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đang cố bù lại bằng một cơ chế sai.
+
+Thêm một khoản riêng: khâu **trộn giữa hai tư thế** dùng lerp trên góc Euler (`blendPose`). Lerp Euler có thể sinh pop khi một góc đi qua biên ±π. *(Đây là cơ chế có thật nhưng **chưa kiểm chứng là có xảy ra với sáu clip hiện có** — chu kỳ đi bộ hiếm khi vung chi qua ±π. Đo trước khi sửa.)* Bên trong mỗi clip thì đã slerp quaternion đúng cách rồi.
+
+**Hai hướng, chọn một:**
+
+- **Giữ pipeline tự viết** nhưng mở rộng danh sách bone và giữ pose ở dạng quaternion, trộn bằng slerp.
+- **Chuyển clip đã retarget thành `THREE.AnimationClip`** rồi dùng `AnimationMixer` — được `crossFadeTo`, `syncWith`, time warping sẵn có, và bỏ được cả `blendPose` lẫn `sampleTrack` tự viết.
+
+**Nghiệm thu.** Số track giữ lại tăng từ 11 lên đủ chuỗi spine + shoulder + hand; một đoạn quay đặt cạnh bản cũ cho thấy thân trên có chuyển động; và `npm run test:coverage -w liva-ui` không tụt ngưỡng nào.
+
+---
+
+### U33 — Locomotion đúng: nhịp cố định, blendspace, distance matching
+
+**Điều kiện vào: [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đã xong và đã xác nhận hết khựng.** Đây là **viết lại hệ locomotion**, nhiều tuần — không phải bước tiếp theo tất yếu của việc sửa giật. Ghi ở đây để có chỗ neo, không phải để nhận ngay.
+
+- **Nhịp mô phỏng cố định 60 Hz** với accumulator + nội suy lúc render, thay cho variable delta chặn ở `0.1 s`. Giữ chuyển động ổn định khi frame time dao động.
+- **Tốc độ đã làm mượt** bằng bộ điều khiển critically-damped / giới hạn jerk, thay cho `motionWeight` thô.
+- **Blendspace `idle ↔ walk ↔ run`** theo tốc độ, dùng chung một gait phase.
+- **Phase theo quãng đường, không theo thời gian**: `phase += distance / strideLength`. Đây là thứ khử trượt chân tận gốc, thay vì bù sau bằng IK. Hằng số `STRIDE_HZ` hiện tại (`walk 1.05`, `run 1.9`) là nhịp theo *thời gian* — đúng loại cần thay.
+- **Hiệu chỉnh authored stride speed** của từng clip và giới hạn playback rate.
+- **Contact curve trái/phải** gắn vào từng clip; khi contact active thì giải two-bone IK cho đùi–gối–bàn chân, pelvis chỉ bù nhẹ theo trục đứng.
+
+**Nghiệm thu.** Route 20 giây `idle → walk → run → stop`, chạy cả khi đang chat lẫn khi rảnh: p95 frame interval **< 20 ms**, p99 **< 33 ms**; chân trụ trượt **< 2 px/frame**; **không có bước nhảy pelvis** khi đổi chân; và **vị trí kết thúc tương đương** ở ba lịch frame 30/60/120 Hz cũng như khi chèn một frame spike — đây là phép kiểm chứng minh nhịp cố định thật sự hoạt động.
 
 ---
 
@@ -1365,6 +1913,60 @@ Cổng khác: `cargo test` 510 pass · clippy 0 · vitest 265 pass · vue-tsc 0 
 
 ---
 
+### U23 — Màn Kỹ năng đang báo 1 trong khi lõi có 7
+
+**Phát hiện 05/08/2026** khi người dùng mở Dashboard → *Quản lý Kỹ năng* và thấy đúng **một** thẻ: `smart_home_control`, dưới nhãn "HỆ THỐNG CỐT LÕI".
+
+**Vì sao đây không phải "thiếu tính năng".** Màn hình không đếm gì cả — nó đọc một hằng số:
+
+```rust
+// liva-native-core/src/commands/config.rs
+"get_skills_list" => Ok(json!([integrations::smart_home::get_metadata()])),
+```
+
+Mảng một phần tử, viết cứng trong mã. `SkillsView.vue` gửi `get_skills_list` rồi render đúng cái nó nhận. Con số 1 vì thế **không đo gì**, và mọi nút trên màn đó — *Kiểm tra tất cả* · *Bật tất cả* · *Tắt tất cả* — chỉ thao tác trên một mục.
+
+**Lõi thật sự có 7 tool**, tất cả đã nghiệm thu và chạy được (`mcp/server.rs`):
+
+| Tool | Trạng thái |
+|---|---|
+| `read_markdown` · `write_markdown` · `search_vault` | vault Obsidian, có e2e |
+| `control_smarthome` | **duy nhất lên được màn hình** |
+| `control_volume` · `control_media` | chạm máy thật qua `SendInput` — [U19](#u19--ba-tool-os-thật) nghiệm thu **10/10** |
+| `get_weather` | |
+
+Và một hệ **thứ hai** nữa: kho skill có schema riêng, bảng SQLite, phiên bản hoá, tín hiệu chất lượng — 7 lệnh `skills:sync` / `skills:list` / `skills:search` / `skills:signal` / `skills:signals` / `skills:history` / `skills:pin_ids` (`commands/skill_store.rs`). Grep toàn bộ `liva-ui/src` cho `skills:` → **0 kết quả**: chưa màn hình nào gọi tới. Kho cũng đang rỗng — `skills_root()` trỏ `skills/` (đổi bằng `LIVA_SKILLS_DIR`), thư mục đó không tồn tại.
+
+⇒ Ba lớp chồng nhau, không phải một bug: (1) `get_skills_list` là **di sản thời Node.js** — tên `get_`/`toggle_` không có `namespace:`, có từ hồi chỉ tồn tại mỗi smart_home; (2) 7 tool MCP không có đường ra UI nào; (3) kho skill thật chưa nối dây và chưa có nội dung.
+
+**Vì sao xếp vào nhóm F chứ không phải nhóm E.** Nó **không thêm năng lực nào** — năng lực đã có, đã đo, đã nghiệm thu. Nó chỉ bật đèn cho thứ đang tắt, đúng định nghĩa của nhóm này. Đây cũng là ca "vàng đang tắt điện" rõ nhất còn lại sau [U17a](#u17a--bộ-chọn-giọng--xong-26072026) (10 giọng đã tải về mà vô hình).
+
+⚠️ **Nhưng nó nặng hơn một mục nhóm F thông thường, vì màn hình đang NÓI DỐI.** Dự án có một nguyên tắc đã ghim — *"instruments that admit ignorance"*: `sysinfo.rs` trả `null` và UI hiện `--` thay vì bịa một con số dễ chịu. Một màn hình hardcode `1` vi phạm thẳng nguyên tắc đó, và nó nằm trên đường đi của beta tester lẫn giám khảo. Cùng họ với `cpuUsage: 12` mà `sysinfo.rs` sinh ra để dẹp.
+
+📌 **Kéo theo một chỗ nữa, đừng sửa một nửa.** `system_status.rs` lấy độ dài từ **chính mảng này** (có comment nói rõ, cố ý để hai lệnh không lệch nhau), nên màn *Hệ thống* cũng đang báo 1. Hai chỗ nhất quán với nhau và cùng sai — sửa `get_skills_list` mà quên chỗ kia thì tạo ra lệch số giữa hai màn.
+
+**Việc.**
+1. `get_skills_list` trả **danh mục thật**: gộp tool MCP (`NativeMcpServer::list_tools()`) với `SkillStore::list()`. **Giữ nguyên hình dạng JSON** để `SkillsView.vue` không phải đổi — đây là điều khiến mục này rẻ.
+2. Trạng thái bật/tắt phải **thật**: `toggle_skill` hiện đổi cái gì? Nếu không có nơi lưu, thà hiện tất cả là "đang bật" và **bỏ hẳn công tắc** còn hơn một công tắc bấm xong không đổi gì.
+3. Kiểm lại `system_status.rs` cùng lượt (xem ghi chú trên).
+4. Không đụng `integrations:list` trong cùng lát — nó là miền khác và đang có nợ riêng.
+
+**File.** `liva-native-core/src/commands/config.rs`, `liva-native-core/src/system_status.rs`, `liva-native-core/src/mcp/server.rs` (chỉ đọc), `liva-native-core/src/commands/skill_store.rs` (chỉ đọc).
+
+**⚠️ Bắt buộc trước khi sửa:** `impact({target: "get_skills_list", direction: "upstream"})` — nó nằm trong allow-list phân quyền (`authorization.rs:58`) và có mặt ở cả hai đường vào (`websocket.rs:1042` và Tauri IPC), nên bán kính ảnh hưởng chạm cả hai profile chạy.
+
+**Nghiệm thu — ba điều kiện, cả ba đếm được.**
+
+| | |
+|---|---|
+| 1 | Qua socket thật: `get_skills_list` trả **≥ 7** phần tử, và tập tên **khớp đúng** `mcp:list_tools`. Lệch một tên là sai — hai lệnh phải kể cùng một câu chuyện |
+| 2 | Màn *Kỹ năng* và màn *Hệ thống* hiện **cùng một con số**. Đây là điều kiện bắt lỗi sửa-một-nửa |
+| 3 | Test vitest cho `SkillsView.vue` khoá lại: danh sách 7 phần tử render đủ 7 thẻ. **Viết vitest, đừng cố xem bằng Browser pane** — xem bẫy đã cắn hai lần ở [U18](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) và [U20](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) |
+
+**Chưa xong nếu chỉ đổi con số.** Cùng lý lẽ với [U13](#u13--consolidation-ngữ-nghĩa-l2--l3) và [U21](#u21--sổ-đo-mỗi-lượt--turn_telemetry): một màn hình liệt kê 7 tool mà công tắc không điều khiển được gì thì vẫn là màn hình nói dối, chỉ dối ở quy mô lớn hơn.
+
+---
+
 ## 9. Cái KHÔNG nên làm
 
 Mục này tồn tại để phiên sau không đốt thời gian vào việc trông có vẻ hữu ích.
@@ -1375,6 +1977,20 @@ Mục này tồn tại để phiên sau không đốt thời gian vào việc tr
 - **Đừng bỏ `DEFAULT_ENCRYPTION_KEY`** (`crypto.rs:16`) mà chưa có đường di trú dữ liệu. Nó cảnh báo lớn nhưng không chặn boot — đó là **quyết định có chủ đích**, đã ghim, không phải sơ suất.
 - **Đừng tin số ở §1 nếu ngày đã cũ.** Chạy lại lệnh. Đây là điều kiện tiên quyết, không phải lời khuyên.
 - **Đừng gộp nhiều mục U vào một lần sửa.** Mỗi mục có nghiệm thu riêng; gộp lại thì không biết cái nào hỏng khi cổng đỏ.
+- **Đừng dựng bộ đo trước khi thử tắt cái đang bị nghi.** Nếu nghi can có công tắc một dòng, bật/tắt nó rồi nhìn là phép thử rẻ nhất và quyết định nhất. Bộ đo dùng để **định lượng** một nguyên nhân đã xác định, hoặc để tìm nguyên nhân khi *không* có nghi can — không phải để chứng minh thứ mắt đã thấy. Đây là chỗ bản rà locomotion 06/08/2026 xếp sai thứ tự (xem [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước)).
+- **Đừng làm Motion Matching hay PFNN cho locomotion.** Motion matching chỉ phát huy khi có cơ sở dữ liệu lớn gồm start/stop/turn/pivot và nhiều quỹ đạo. Dự án hiện có **đúng sáu clip** (`idle`, `walk`, `run`, `jump`, `wave`, `thinking` — đếm trong `liva-ui/public/animations/mixamo/` ngày 06/08/2026); chi phí vượt xa lợi ích, và [U33](#u33--locomotion-đúng-nhịp-cố-định-blendspace-distance-matching) giải quyết được cùng vấn đề với công sức nhỏ hơn một bậc.
+- **Đừng tiết kiệm tài nguyên bằng cách hạ frame rate của avatar đang nhìn thấy.** Hạ DPR, tắt antialias, giảm tần suất spring bone — những thứ đó người dùng khó nhận ra. 5 FPS thì nhận ra ngay, và ECO Mode tồn tại để chạy đúng lúc người dùng vẫn đang nhìn (xem [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) khoản 4).
+
+### Bốn thứ KHÔNG lấy từ proj-airi — chốt 06/08/2026
+
+Rà xong `github.com/proj-airi` + `moeru-ai/airi` (MIT, lấy code được về mặt pháp lý). Bốn thứ dưới đây **có vẻ đáng lấy nhưng không**, ghi ra để phiên sau khỏi rà lại:
+
+- **DuckDB-WASM / pglite làm bộ nhớ trong trình duyệt.** AIRI cần vì lõi của họ chạy trong trình duyệt. LIVA có SQLite trong lõi Rust — hợp với luận điểm offline hơn, và đổi sang là đi lùi.
+- **Electron.** LIVA đã có Tauri v2. Không bàn lại.
+- **Multi-provider TTS cloud** (ElevenLabs / Azure / Alibaba). Ngược thẳng luận điểm "chạy offline trên máy người dùng".
+- **Mở rộng nhánh Live2D cho ngang bằng VRM.** Vừa chốt VRM xong (`Liva.vrm` + bộ retarget Mixamo); nuôi hai nhánh render lúc này là tự tạo nợ, không phải thêm năng lực.
+
+Và một thứ **không phải "không nên làm"** nhưng cần người quyết định, không phải agent: xin đưa LIVA vào danh sách [`awesome-ai-vtubers`](https://github.com/proj-airi/awesome-ai-vtubers) (475 sao). Chi phí gần bằng 0, và với hồ sơ dự thi thì một mục do bên thứ ba liệt kê là **bằng chứng**, khác hẳn tự tuyên bố. Đây là hành động phát ra ngoài repo ⇒ chủ dự án tự làm.
 
 ---
 

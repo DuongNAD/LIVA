@@ -2,7 +2,7 @@
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-08-05
 commit: 2dc8e2e
-stale-ok: 2dc8e2e
+stale-ok: 95d641a
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -124,7 +124,7 @@ flowchart LR
     D --> E1["vision:capture<br/>lib.rs:249-273<br/>ảnh màn hình base64"]
     D --> E2["get_config<br/>lib.rs:351-358<br/>ai.cloudApiKey"]
     D --> E3["telegram:send_text<br/>gửi tin mạo danh"]
-    D --> E4["llm:swap_model<br/>lib.rs:1265-1281<br/>nạp .gguf tuỳ ý"]
+    D --> E4["llm:swap_model<br/>liva-native-core/src/commands/llm.rs#swap_model<br/>nạp .gguf tuỳ ý"]
     E4 --> F["Parser GGUF C++ (llama.cpp)<br/>bề mặt memory-corruption"]
 ```
 

@@ -1,6 +1,6 @@
 ---
 title: "Thị giác, quan sát thụ động và governor"
-updated: 2026-07-30
+updated: 2026-08-05
 commit: 3688b5f
 status: frozen
 owns: []
@@ -50,7 +50,7 @@ Ba khối này là hiện thân kỹ thuật của ba trụ định hướng "LI
 | `governor::Governor` (ưu tiên tiến trình) | `src/governor.rs` | **[OK]** — thread poll 5 s ở `main.rs:143-149` và `liva-desktop/src-tauri/src/lib.rs:452-457` |
 | `governor::external_cpu_percent` (tải CPU thật) | `governor.rs:97` | **[OK]** — nhánh phát hiện thứ hai, song song với fullscreen (mục 5.2b) |
 | Game-aware GPU downshift | `lib.rs:208` + `main.rs:268-293` | **[MỘT PHẦN]** — early-return nếu `LIVA_LLM_N_GPU_LAYERS == 0` hoặc `== LIVA_GAME_N_GPU_LAYERS` |
-| `vision:ask` (Qwen3-VL) | `lib.rs:1394-1445` | **[MỘT PHẦN]** — chạy thật nhưng **chặn cứng ở debug build** (`llm/engine.rs:371-377`) và cần `ai.mmprojModel` trong config |
+| `vision:ask` (Qwen3-VL) | `liva-native-core/src/commands/vision.rs#ask` | **[MỘT PHẦN]** — chạy thật nhưng **chặn cứng ở debug build** (`llm/engine.rs:371-377`) và cần `ai.mmprojModel` trong config |
 
 Bảng trên chỉ xét ba khối thuộc phạm vi tài liệu này; danh sách code mồ côi toàn dự án (có xếp hạng) nằm ở tài liệu nợ kỹ thuật.
 
@@ -122,7 +122,7 @@ pub trait ScreenCapturer: Send + Sync { ... }                     // capture.rs:
 |---|---|---|
 | 1 | IPC `vision:capture` | `lib.rs:249` |
 | 2 | IPC `vision:get_changed_regions` | `lib.rs:289` |
-| 3 | `capture_for_vision()` — từ `vision:ask` (`lib.rs:1424`), node agent `vision` (`agent/graph.rs:240`), và `bin/qwen3vl_probe.rs:91` | — |
+| 3 | `capture_for_vision()` — từ `vision:ask` (`liva-native-core/src/commands/vision.rs#ask`), node agent `vision` (`agent/graph.rs:240`), và `bin/qwen3vl_probe.rs:91` | — |
 
 Cả ba đều bọc trong `tokio::task::spawn_blocking`.
 
@@ -264,7 +264,7 @@ flowchart TD
 
 ## 3. Nối với Qwen3-VL — ảnh → tiền xử lý → encoder → prompt **[MỘT PHẦN]**
 
-### 3.1 Chuỗi thật (`lib.rs:1394-1445` → `llm/engine.rs:353-489`)
+### 3.1 Chuỗi thật (`liva-native-core/src/commands/vision.rs#ask` → `llm/engine.rs:353-489`)
 
 ```rust
 pub enum VisionImage<'a> {
@@ -306,7 +306,7 @@ sequenceDiagram
 
 **Từng bước:**
 
-1. **Nguồn ảnh** — `payload["image"]` base64 (png/jpg) → `VisionImage::Encoded`; nếu vắng → `capture_for_vision()` → `VisionImage::Rgb` (`lib.rs:1411-1432`).
+1. **Nguồn ảnh** — `payload["image"]` base64 (png/jpg) → `VisionImage::Encoded`; nếu vắng → `capture_for_vision()` → `VisionImage::Rgb` (`liva-native-core/src/commands/vision.rs#ask`).
 2. **Chặn debug build** — `if cfg!(all(windows, debug_assertions))` trả lỗi ngay (`llm/engine.rs:371-377`). Nguyên nhân: loader clip/mmproj của llama.cpp link debug CRT, Rust link release CRT ⇒ assert fd-table và abort tiến trình. **Vision chỉ hoạt động với `cargo build --release`.**
 3. **mmproj** — lấy từ config `ai.mmprojModel` + `ai.localModelsDir` (`lib.rs:143-163`), gán qua `set_mmproj_path()` khi nạp router model (`lib.rs:184`). Thiếu ⇒ lỗi `"No mmproj (vision projector) configured"` (`llm/engine.rs:382`).
 4. **Dựng `MtmdContext` lười** (`llm/engine.rs:389-409`):
@@ -346,8 +346,8 @@ Khuôn payload/response của `vision:ask`, `vision:capture`, `vision:get_change
 
 Giá trị mặc định:
 
-- Câu hỏi khi payload rỗng: `"Trên màn hình đang hiển thị gì? Mô tả ngắn gọn bằng tiếng Việt."` (`lib.rs:1400`).
-- `temperature = 0.7`, `top_p = 0.8` (`lib.rs:1402-1403`); nhánh giọng nói dùng `persona::TEMP_DEFAULT` / `TOP_P_DEFAULT` (`agent/graph.rs:255-256`).
+- Câu hỏi khi payload rỗng: `"Trên màn hình đang hiển thị gì? Mô tả ngắn gọn bằng tiếng Việt."` (`liva-native-core/src/commands/vision.rs#ask`).
+- `temperature = 0.7`, `top_p = 0.8` (`liva-native-core/src/commands/vision.rs#ask`); nhánh giọng nói dùng `persona::TEMP_DEFAULT` / `TOP_P_DEFAULT` (`agent/graph.rs:255-256`).
 
 ### 3.3 Công cụ kiểm chứng: `bin/qwen3vl_probe.rs`
 

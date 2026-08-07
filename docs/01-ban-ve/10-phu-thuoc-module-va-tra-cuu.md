@@ -1,7 +1,7 @@
 ---
 title: "Phụ thuộc module và tra cứu file"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-06
+commit: 95d641a
 status: living
 owns:
   - bang-module-va-loc
@@ -18,7 +18,7 @@ covers:
   - liva-native-core/src/webrtc/*
   - liva-ui/src/App.vue
   - liva-ui/src/main.ts
-  - liva-ui/src/composables/useVRM.ts
+  - liva-ui/src/utils/avatarMath.ts
   - liva-ui/src/workers/audio-worker.ts
 ---
 # Phụ thuộc module và bảng tra cứu nhanh
@@ -321,7 +321,7 @@ Khối gạch đứt trong sơ đồ §1 vì vậy còn **ba** thành phần: `p
 
 Tỉ lệ tụt từ 7,0% xuống 4,4% vì **hai** lý do độc lập, đừng đọc thành một: `client.rs` rời danh sách, **và** crate lớn lên từ 18 687 lên 30 530 dòng.
 
-Ngoài ra còn code chết rải rác ở tầng khác (`mcp/protocol.rs` phần `JsonRpc*`, `tts/g2p.rs` + `tts/tokenizer.rs`, `liva-ui/src/composables/useVRM.ts`, `liva-ui/src/workers/audio-worker.ts`).
+Ngoài ra còn code chết rải rác ở tầng khác (`mcp/protocol.rs` phần `JsonRpc*`, `tts/g2p.rs` + `tts/tokenizer.rs`, `liva-ui/src/workers/audio-worker.ts`). *(`liva-ui/src/composables/useVRM.ts` đã **rời danh sách bằng cách bị xoá** ngày 06/08/2026 — xem [U25](../03-danh-gia/05-nang-cap-toan-dien.md#u25--usevrmts-là-code-mồ-côi-và-nó-đã-làm-người-rà-kết-luận-sai). Năm hàm thuần của nó chuyển sang `liva-ui/src/utils/avatarMath.ts`, nơi `use3DModel.ts` nhập vào — trước đó hai file có bản sao giống nhau từng byte và bộ test kiểm nhầm bản mồ côi.)*
 
 Với tài liệu này, ý nghĩa của danh sách trên là **hai tầng**:
 
@@ -394,5 +394,5 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 - `liva-native-core/src/agent/dispatcher.rs`, `src/passive/hook.rs` — khối mồ côi trong sơ đồ §1 và danh sách §4
 - `liva-native-core/src/mcp/client.rs` — **không còn** trong khối mồ côi từ rung G0; xem §4 và bảng §2
 - `liva-native-core/src/mcp/protocol.rs` — §3.4 và phần code chết rải rác ở §4
-- `liva-ui/src/composables/useVRM.ts`, `liva-ui/src/workers/audio-worker.ts`, `liva-ui/src/App.vue`, `liva-ui/src/main.ts` — danh sách code mồ côi phía frontend ở §4
+- `liva-ui/src/workers/audio-worker.ts`, `liva-ui/src/App.vue`, `liva-ui/src/main.ts` — danh sách code mồ côi phía frontend ở §4
 - `Cargo.toml` (root + `liva-native-core`) — §3.6 (profile, `[features]`, 14 `[[bin]]`)

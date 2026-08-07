@@ -1,12 +1,13 @@
 ---
 title: "Giao thức IPC và WebSocket"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-06
+commit: 95d641a
 status: living
 owns:
   - catalog-lenh-handle-command
   - khung-nhi-phan-9-byte
   - bang-opcode
+  - bat-dau-nhanh-client
 covers:
   - Cargo.toml
   - data/liva-config.json
@@ -43,6 +44,7 @@ covers:
 9. [Lệnh UI gửi mà core không có handler](#9-lệnh-ui-gửi-mà-core-không-có-handler)
 10. [Đối chiếu THIẾT KẾ GỐC vs AS-BUILT](#10-đối-chiếu-thiết-kế-gốc-vs-as-built)
 11. [Checklist cho người viết client](#11-checklist-cho-người-viết-client)
+12. [Bắt đầu nhanh — client chạy được trong một file](#12-bắt-đầu-nhanh--client-chạy-được-trong-một-file)
 
 ---
 
@@ -928,6 +930,56 @@ sequenceDiagram
     là cô lập đúng dữ liệu chứ không phải cam kết tăng throughput tuyến tính.
 12. **Không phát song song lệnh LLM.** `state.llm` là một Mutex duy nhất.
 13. **Chỉ có hàng rào `Origin`, không có token/TLS.** Client trình duyệt phải chạy từ một origin trong allow-list (hoặc thêm vào `LIVA_WS_ALLOWED_ORIGINS`); client native không gửi `Origin` nên đi lọt. Đừng bind ra `0.0.0.0` khi chưa có TLS + token.
+
+---
+
+## 12. Bắt đầu nhanh — client chạy được trong một file
+
+> Mười ba mục ở §11 là thứ cần khi bạn **đã** kết nối được. Mục này lo đúng đoạn trước đó: từ con số không tới một socket đang nói chuyện.
+
+**File:** [`examples/gateway-quickstart.mjs`](../../examples/gateway-quickstart.mjs) — Node thuần, **0 dependency**, tự dựng WebSocket trên `node:net`. Cố ý không import gì từ repo (kể cả `scripts/lib/ws-client.mjs`): một ví dụ mở đầu mà phải kéo theo file khác thì không còn là "chép một file rồi chạy".
+
+```bash
+node examples/gateway-quickstart.mjs
+```
+
+**Đã chạy thật ngày 06/08/2026** trên build debug, gateway `LIVA_SERVER_PORT=8099` + `LIVA_DB_IN_MEMORY=1`:
+
+```
+LIVA gateway: ws://127.0.0.1:8099/ws
+
+✅ Bắt tay WebSocket — Origin: http://localhost:5173
+✅ Lệnh hợp lệ trả *_response — llm:health_check_response
+✅ Lệnh sai tên trả *_error (không im lặng) — principal WebSocketRemote is not
+   authorized for command 'lenh_khong_ton_tai'
+
+3/3 đạt
+```
+
+### Ba thứ làm hỏng lần thử đầu tiên
+
+**1. Thiếu `Origin` hợp lệ ⇒ `HTTP/1.1 403 Forbidden`, không phải 101.** Đo lại 06/08/2026 bằng một handshake mang `Origin: http://evil.example.com`. Đây là chế độ hỏng khó chịu nhất vì triệu chứng phía client — kết nối mở rồi đóng ngay — **giống hệt "server chưa chạy"**. Allow-list mặc định ở §4.3; mở rộng bằng `LIVA_WS_ALLOWED_ORIGINS`.
+
+**2. Lệnh gõ sai trả về lỗi PHÂN QUYỀN, không phải "unknown command".** Cổng phân quyền chạy **trước** khi phân giải tên lệnh, nên một cái tên bịa cũng nhận:
+
+```
+principal WebSocketRemote is not authorized for command '<tên bạn vừa gõ>'
+```
+
+Đọc câu đó là **"sai tên HOẶC bị chặn"**. Người mới rất dễ đọc thành "tôi thiếu quyền" rồi đi tìm cách cấp quyền cho một lệnh không tồn tại.
+
+**3. Socket này KHÔNG phải toàn quyền.** Kết nối mang principal `WebSocketRemote`; `mcp:*` và `vision:ask` bị chặn **theo thiết kế** — `e2e-gateway.mjs` khẳng định đúng việc chặn đó. Cần toàn quyền thì dùng đường IPC stdin (§4.4), không phải WebSocket.
+
+### Đi tiếp
+
+| Muốn gì | Đọc mục nào |
+|---|---|
+| Danh sách lệnh đầy đủ | [§7 catalog lệnh theo miền](#7-handle_command--catalog-lệnh-theo-miền) |
+| Gửi/nhận audio | [§5 khung `VoiceFrame`](#5-lớp-nhị-phân--khung-voiceframe) — **bẫy #1: offset 9 không chia hết cho 4** |
+| Nhận token LLM theo luồng | [§8 khung streaming](#8-khung-streaming--hai-định-dạng-khác-nhau) — dùng Lớp B |
+| Chỗ code lệch thiết kế | [§10 đối chiếu](#10-đối-chiếu-thiết-kế-gốc-vs-as-built) |
+
+Client tham chiếu đầy đủ hơn (có `guiVaDoi` để đợi sự kiện kết thúc của một luồng): `scripts/lib/ws-client.mjs`, dùng bởi `scripts/e2e-gateway.mjs` và `scripts/e2e-memory.mjs`.
 
 ---
 

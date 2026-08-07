@@ -1,6 +1,6 @@
 ---
 title: "Hệ LLM và prompt"
-updated: 2026-07-30
+updated: 2026-08-05
 commit: 3688b5f
 status: living
 owns:
@@ -660,9 +660,9 @@ flowchart LR
     subgraph Callers["Mọi đường vào tầng LLM"]
         V["Thoại: user_voice_command<br/>liva-native-core/src/websocket.rs:1122-1151,978"]
         W["WebRTC graph<br/>graph.rs:407,477"]
-        I["IPC chat:completion<br/>lib.rs:1438"]
-        E["IPC llm:embed<br/>lib.rs:1382"]
-        X["IPC vision:ask<br/>lib.rs:1494"]
+        I["IPC chat:completion<br/>liva-native-core/src/commands/llm.rs#handle"]
+        E["IPC llm:embed<br/>liva-native-core/src/commands/llm.rs#embed"]
+        X["IPC vision:ask<br/>liva-native-core/src/commands/vision.rs#ask"]
         T["task_plan_chat<br/>lib.rs:863"]
         S["swap_model / reload GPU layers<br/>lib.rs:265,293,1359"]
     end
@@ -941,7 +941,7 @@ flowchart TD
     G -->|"A · websocket.rs#handle_ws_connection"| A1["text_tx.blocking_send<br/>event ai_stream_chunk"]
     A1 --> A2["WS text → App.vue:215<br/>WidgetApp.vue:827"]
 
-    G -->|"B · lib.rs:1402-1477"| B1["IpcResponse{token, done:false}<br/>cùng req_id"]
+    G -->|"B · liva-native-core/src/commands/llm.rs#handle"| B1["IpcResponse{token, done:false}<br/>cùng req_id"]
     B1 --> B2["stdout JSON-lines (main.rs:413)<br/>hoặc WS text (websocket.rs#handle_ws_connection)"]
 
     G -->|"C · agent graph voice"| C0{"epoch còn khớp<br/>và queue có chỗ ≤ 2 s?"}

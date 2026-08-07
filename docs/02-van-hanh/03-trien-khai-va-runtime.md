@@ -1,6 +1,6 @@
 ---
 title: "Triển khai và runtime"
-updated: 2026-07-31
+updated: 2026-08-05
 commit: 3688b5f
 status: living
 owns:
@@ -562,6 +562,89 @@ kích thước khớp. Thiếu hash ⇒ **fail closed**, không tải.
 Gateway standalone **vẫn không** được đóng gói vào luồng khởi động — nhưng từ
 26/07/2026 điều đó không còn nghĩa là thiếu tính năng: vỏ Tauri bind `:8002` và
 chạy đủ danh sách dịch vụ nền qua `boot::spawn_background_services` (mục 4.3).
+
+### 6.1 Bản CUDA — bộ cài đã dựng và đo, 05/08/2026
+
+Quyết định ở [U1b](../03-danh-gia/05-nang-cap-toan-dien.md#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) — **một** bản CUDA phục vụ mọi máy — nay đã được thi hành. Lệnh:
+
+```powershell
+npm run installer:windows:cuda
+```
+
+Nó thêm một bước trước luồng cũ: `scripts/stage-cuda-redist.mjs` chép ba DLL runtime của NVIDIA từ CUDA Toolkit vào `liva-desktop/src-tauri/cuda-redist/`, thư mục mà `tauri.conf.json` khai trong `bundle.resources` là `"cuda-redist": "./"`.
+
+| Đo được | |
+|---|---|
+| `LIVA_1.0.0_x64-setup.exe` | **805,4 MB** (844 543 259 byte) |
+| SHA-256 | `98F4A72CB1E060124D2170EA7566E2C4412488AA669A9DF05C13FCA826E0FBAB` |
+| `liva-desktop.exe` sau khi cài | 229 MB |
+| Ba DLL kèm theo | `cublasLt64_12.dll` 643,4 MB · `cublas64_12.dll` 108,4 MB · `cudart64_12.dll` 0,5 MB |
+| Thời gian cài (im lặng) | **54 giây** |
+| `vision:ask` sau khi cài | p50 **937 ms** · min 844 · max 2031 (mẫu 3 lượt, RTX 5060 Ti) |
+
+**⚠️ KHÔNG ghim `CUDAARCHS` khi dựng bản phát hành.** Bản mặc định của `llama-cpp-sys-2` là `50-virtual;61-virtual;70-virtual;75-virtual;80-virtual;86-real;89-real;90-virtual;120a-real` — **phần lớn là `-virtual`, tức PTX do driver JIT lúc nạp**, và chính PTX đó khiến một binary chạy được trên card nó chưa từng được biên dịch cho. Ghim `120a-real` cắt binary 202 MB → 74,5 MB và build 20 phút → 6 phút **mà không mất tốc độ trên máy dev**, nên con số rất dễ bị đọc thành một quyết định phát hành. Nó không phải: máy RTX 30xx (sm_86) hay 40xx (sm_89) sẽ **không nạp nổi kernel CUDA**. Cảnh báo đã ghim tại chỗ trong `liva-desktop/src-tauri/Cargo.toml`.
+
+Giá của 9 kiến trúc đã đo và **bằng không về hiệu năng**: 937 ms so với 877 ms của bản ghim, cả hai đều mẫu 3 lượt ⇒ chênh lệch nằm trong nhiễu.
+
+**Bản CPU không đổi.** `npm run installer:windows` vẫn chạy được như cũ và không cần CUDA Toolkit: `build.rs` tạo sẵn `cuda-redist/` rỗng, và bundler của Tauri **bỏ qua thư mục rỗng**. Đây là lý do phải dùng *thư mục* chứ không phải mẫu glob — `tauri-utils` biến một glob không khớp gì thành `GlobPathNotFound`, lỗi cứng, đủ để làm đỏ cả `release.yml`.
+
+### 6.2 Checklist "máy sạch" — do chạy thật sinh ra
+
+Đo 05/08/2026 bằng cách cài bộ cài trên vào một thư mục trắng, rồi chạy `--preflight` với `PATH` rút còn `C:\Windows\System32` và mọi biến `LIVA_*` bị xoá.
+
+| Hạng mục | Trên máy mới cài | Hậu quả nếu để nguyên |
+|---|---|---|
+| Profile build | ✓ release | — |
+| GPU (NVML) | ✓ nếu có NVIDIA | không có thì vision rơi về CPU, ~80 s/lượt |
+| **Model chat (router GGUF)** | ✗ **không có** | **không có não** — `chat:completion` và vision đều lỗi |
+| Bộ chiếu thị giác (mmproj) | ✗ chưa cấu hình | không có vision |
+| `liva-config.json` | ✗ không thấy | hai dòng model nói về **mặc định trong code**, không phải thứ app nạp |
+| `espeak-ng` | ✗ không thấy | TTS sai ngữ điệu hoặc lỗi hẳn |
+| `ffmpeg` | ✗ không thấy | chỉ mất voice Telegram; chat chữ vẫn chạy |
+| `sqlite-vec (vec0)` | ✓ — nhưng xem cảnh báo dưới | thiếu là **chặn boot** |
+| Khoá mã hoá | ? không đặt qua env | rơi về khoá thiết bị DPAPI |
+
+`--preflight` **luôn `exit 0`** — nó báo cáo, không phải cổng kiểm. Kết luận: một máy mới cài **chạy được nhưng cụt gần hết**, và thứ chặn nhiều nhất là **model chưa tải**. Lệnh tải: `npm run doctor` liệt kê 11 năng lực kèm lệnh.
+
+**⚠️ Hai giới hạn của phép đo này, nói rõ thay vì để người đọc tưởng là đủ.**
+
+1. **`✓ sqlite-vec` ở trên xanh vì lý do SAI, và chỉ trên máy dev.** `vec0_candidate_paths` (`db.rs`) xếp **đầu** danh sách một đường dẫn `node_modules/…/vec0.dll` dựng từ `env!("CARGO_MANIFEST_DIR")` — **hằng số biên dịch cứng vào binary**, trỏ về cây mã nguồn. Máy dev có thư mục đó nên ứng viên 1 khớp và bản `vec0.dll` **đã cài cạnh .exe** (ứng viên 3) không bao giờ được thử tới. Sản phẩm vẫn đúng trên máy sạch thật — ở đó ứng viên 1 không tồn tại nên nó rơi xuống ứng viên 3 — nhưng **dòng ✓ này trên máy dev không chứng minh được bản đóng gói dùng được**.
+2. **Bản thân phép chạy `--preflight` không nói gì về phụ thuộc cấp hệ điều hành** — nó kiểm model, PATH, GPU, config, chứ không kiểm thứ mà **DLL loader** cần *trước khi* một dòng mã LIVA nào chạy. Phần đó phải đọc bảng import của PE; xem §6.3.
+
+### 6.3 Phụ thuộc cấp hệ điều hành — đọc từ bảng import, 05/08/2026
+
+`dumpbin /dependents` trên `liva-desktop.exe` (bản CUDA phát hành) cho **43 DLL**. Phân loại chúng trả lời được câu hỏi mà `--preflight` không với tới: *một máy Windows sạch còn thiếu gì để LIVA khởi động nổi?*
+
+| Nhóm | Ví dụ | Có sẵn trên Windows 11 gốc? |
+|---|---|---|
+| Win32 lõi | `kernel32` · `user32` · `advapi32` · `ole32` · `combase` · `shell32` | ✅ |
+| Universal CRT (API set) | `api-ms-win-crt-*` (10 file) | ✅ — tên API-set, loader phân giải về `ucrtbase.dll` |
+| Đồ hoạ | `d3d11` · `d3d12` · `dxgi` · `dwmapi` · `directml` | ✅ — `DirectML.dll` có từ Win10 1903 |
+| NVIDIA driver | `nvcuda.dll` | ✅ nếu có driver NVIDIA; không có thì rơi về CPU |
+| **CUDA Toolkit** | `cudart64_12` · `cublas64_12` (+ `cublasLt64_12` nạp động) | ✅ **đã kèm trong bộ cài** — xem §6.1 |
+| **🔴 VC++ Redistributable** | **`MSVCP140.dll`** · **`MSVCP140_1.dll`** · `VCRUNTIME140.dll` | ❌ **KHÔNG** — và **KHÔNG kèm trong bộ cài** |
+
+**🔴 Đây là lỗ hổng phát hành, và chế độ hỏng của nó y hệt thiếu cuBLAS: tiến trình chết trong DLL loader, exit 127, không một dòng thông báo.** Người dùng bấm icon và không có gì xảy ra.
+
+Ba file `MSVCP140*` là **thư viện chuẩn C++ của MSVC**, đến từ *Microsoft Visual C++ 2015–2022 Redistributable (x64)*. LIVA cần chúng vì llama.cpp là C++ biên dịch bằng MSVC và link động vào CRT (`/MD`) — cùng cơ chế đã được truy ở [U1](../03-danh-gia/05-nang-cap-toan-dien.md#u1--build-release-và-kiểm-visionask-thật).
+
+⚠️ **Đừng đọc "System32 có sẵn ba file đó" thành "máy nào cũng có".** Trên máy đo chúng NẰM trong `C:\Windows\System32` — nhưng đó là vì máy này đã cài `Microsoft Visual C++ v14 Redistributable (x64) 14.50.35719`. Chính bộ cài redist đặt chúng vào đó. Windows gốc không có. Đây đúng loại "xanh vì lý do sai" như dòng `vec0` ở §6.2: **kiểm sự tồn tại của file trên máy dev không chứng minh được gì về máy người dùng** — phải hỏi *file này đến từ đâu*.
+
+**✅ WebView2 thì ngược lại — đã kèm, kiểm được.** `webviewInstallMode: offlineInstaller` khiến Tauri tải `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` (**199,9 MB**, nằm trong cache `%LOCALAPPDATA%\tauri\x64\`) và nhúng vào NSIS. Phép cộng kích thước khớp: 229 MB exe + 752,3 MB DLL CUDA + 199,9 MB WebView2 + 0,3 MB `vec0` ≈ **1 182 MB thô → 805,4 MB** sau LZMA (68 %). Máy chưa có WebView2 sẽ được cài im lặng.
+
+**Việc phải làm trước khi giao cho beta** — chọn một:
+
+| Đường | Giá |
+|---|---|
+| Nhúng VC++ redist vào NSIS (hook `installer.nsi`) | +~25 MB, người dùng không phải làm gì |
+| Ghi thành điều kiện tiên quyết trong [hướng dẫn cài](05-cai-dat-cho-nguoi-dung.md) | miễn phí, nhưng ai bỏ qua sẽ gặp exit 127 câm |
+| Thêm phép kiểm vào `--preflight` | không cứu được, vì lỗi xảy ra **trước** khi `main()` chạy |
+
+Đường thứ ba **không dùng được** và lý do đáng nhớ: một phép kiểm nằm *bên trong* chương trình không bao giờ chẩn đoán được thứ ngăn chương trình khởi động.
+
+**Vẫn cần máy/VM thật:** xác nhận rằng một Windows chưa từng cài gì thực sự khởi động được sau khi có redist. Bảng trên thu hẹp câu hỏi từ *"không biết thiếu gì"* xuống *"thiếu đúng một thứ, đã biết tên"* — nhưng nó vẫn là suy luận từ bảng import, không phải một lần chạy thật.
+
+**Một lỗi đã tìm ra và vá ngay trong lượt đo này.** `--preflight` báo `✗ … ~80 s mỗi lượt` trên đúng cái máy đang chạy vision **937 ms** — sai 85 lần, theo hướng doạ người dùng về một lỗi không tồn tại. Nguyên nhân: nó **chép lại** quyết định `n_gpu_layers` của `boot.rs` thay vì **gọi** quyết định đó, và `533f3c6` đã thêm nhánh tự chọn theo VRAM ở dưới. Nay `boot::gpu_layers_mac_dinh()` là `pub` và preflight gọi thẳng. Cùng lượt đó lộ thêm một tầng nữa: `gpu_layers_theo_vram` trả 0 **ngay khi không đo được kích thước model**, nên trên máy mới cài lý do thật là *"chưa có model"* chứ không phải VRAM — thông điệp đã tách ba ca để không đẩy beta tester đi săn một vấn đề GPU họ không có.
 
 ---
 

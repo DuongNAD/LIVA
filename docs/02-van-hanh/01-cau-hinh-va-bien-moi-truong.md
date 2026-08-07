@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-06
+commit: 95d641a
 status: living
 owns:
   - bang-bien-moi-truong
@@ -147,10 +147,13 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 | `LIVA_SERVER_PORT` | `8002` | Không | `websocket.rs#bind_from_env` | Cổng WebSocket `/ws` |
 | `LIVA_SERVER_HOST` | `127.0.0.1` | Không | `websocket.rs#bind_from_env` | Địa chỉ bind; loopback không yêu cầu token |
 | `LIVA_WS_AUTH_TOKEN` | không set | **Bắt buộc khi host non-loopback** | `websocket.rs#bind` | Bearer token 32–4096 visible ASCII byte; thiếu/yếu làm bind fail |
+| `LIVA_OPENAI_PORT` | không set = **không mở socket nào** | Không | `openai_api.rs` (`configured_addr`), `boot.rs` mục 5b | Bề mặt HTTP tương thích OpenAI (`/v1/models`, `/v1/chat/completions`, `/v1/audio/speech`). Bind theo `LIVA_SERVER_HOST`. **Không có xác thực** — xem cảnh báo dưới bảng |
 | `TELEGRAM_BOT_TOKEN` | không set = **tắt bot** | Không | `liva-native-core/src/boot.rs:407-425`, `liva-native-core/src/system_status.rs#system_status`, `telegram.rs:323` | Bật `TelegramBotManager` |
 | `TELEGRAM_ALLOWED_IDS` | `""` (fail-closed) | Không | `liva-native-core/src/boot.rs:411-425` | CSV whitelist ID người dùng |
 
 > ⚠️ **Bẫy CSP:** `tauri.conf.json` chỉ cho `connect-src` tới `localhost:5173`, `ws://localhost:5173`, `ws://localhost:8002`, `ws://127.0.0.1:8002` — **port 8002 hardcode trong CSP**, nên đổi `LIVA_SERVER_PORT` sẽ vỡ kết nối WS từ UI (dù ở chế độ Tauri core chạy in-process, không mở WS).
+
+> ⚠️ **`LIVA_OPENAI_PORT` mở một bề mặt mạng KHÔNG xác thực.** Cùng mức bảo vệ với cổng 8002 — nghĩa là gần như không có — nhưng thiếu cả hàng rào `Origin`, vì client HTTP không gửi header đó. Nó tắt mặc định chính vì thế: bật là một hành động có chủ ý, không phải trạng thái người dùng vô tình rơi vào. Giữ ở `127.0.0.1`; muốn máy khác trong nhà gọi được thì đặt reverse proxy có TLS + token ở trước, đừng đổi `LIVA_SERVER_HOST` thành `0.0.0.0`.
 
 ### 2.3 Nhóm C — đọc trong module (áp dụng cho cả 2 entry point, **nếu module đó được khởi tạo**)
 

@@ -1,6 +1,6 @@
 ---
 title: "Hệ agent, bộ nhớ và tiến hoá"
-updated: 2026-07-26
+updated: 2026-08-05
 commit: 6b5b87b
 status: frozen
 owns: []
@@ -56,7 +56,7 @@ Quy ước nhãn dùng xuyên suốt:
 | `agent::memory::SqliteCheckpointer` | `src/agent/memory.rs` | **[OK]** — chạy thật; lỗi ngữ nghĩa cũ (~~thread_id đổi mỗi lượt~~) **đã sửa 22/07/2026**: khoá nay là `conversation_id` ổn định suốt kết nối (mục 5.3) |
 | `agent::dispatcher` (swarm) | `src/agent/dispatcher.rs` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/`; từ 22/07/2026 nằm sau `#[cfg(feature = "experimental")]` (`src/agent/mod.rs:4-5`). Bằng chứng chạy duy nhất là `test_case_6_swarm_duplex_collaboration_no_deadlock` (`tests/integration_tests.rs:333`, `use …dispatcher` ở `:336`) — chính test này cũng bị gate ở `:331` nên **không chạy ở `cargo test` mặc định** |
 | `evolution::{SelfCorrectionLoop, Sandbox}` | `src/evolution/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: 0 tham chiếu trong `src/` ngoài `pub mod evolution;` (`src/lib.rs:15`), và dòng ngay trên nó là `#[cfg(feature = "experimental")]` (`src/lib.rs:14`); chỉ tests dùng, mà hai file test cũng bị gate cả file |
-| `mcp::server::NativeMcpServer` | `src/mcp/server.rs` | **[MỘT PHẦN]** — khởi tạo và nhét vào `AppState` (`src/main.rs:171,267`); từ 22/07/2026 `handle_command` đã có arm `"mcp:list_tools"` (`src/lib.rs:1575`) và `"mcp:call_tool"` (`src/lib.rs:1578`). ~~không có arm nào gọi `state.mcp_server`~~ không còn đúng. Vẫn đúng: **chưa client UI nào gọi hai lệnh này** |
+| `mcp::server::NativeMcpServer` | `src/mcp/server.rs` | **[MỘT PHẦN]** — khởi tạo và nhét vào `AppState` (`src/main.rs:171,267`); từ 22/07/2026 `handle_command` đã có arm `"mcp:list_tools"` (`liva-native-core/src/lib.rs#handle_command`) và `"mcp:call_tool"` (`liva-native-core/src/lib.rs#handle_command`). ~~không có arm nào gọi `state.mcp_server`~~ không còn đúng. Vẫn đúng: **chưa client UI nào gọi hai lệnh này** |
 | `mcp::client::{McpStdioClient, McpClientRegistry}` | `src/mcp/client.rs` | **[OK]** (26/07/2026, rung G0) — 7 call site; `llm/tool_calling.rs` dùng nó cho vòng tool-calling G1 |
 | `integrations::smart_home` | `src/integrations/smart_home.rs` | **[MỘT PHẦN]** — 3 điểm gọi thật (node `tool_exec`, `integration:smart_home_control`, `integrations:list`/`get_skills_list`) nhưng thân hàm là **stub chỉ log** |
 | `passive::{hook,buffer}` | `src/passive/*` | **[THIẾU] — MỒ CÔI + NGOÀI BUILD MẶC ĐỊNH**: grep `passive` trong `main.rs`/`lib.rs`/`webrtc/*` chỉ ra đúng 1 dòng `pub mod passive;` (`src/lib.rs:13`), và dòng ngay trên là `#[cfg(feature = "experimental")]` (`src/lib.rs:12`) từ 22/07/2026 |
@@ -509,7 +509,7 @@ Ghi qua `pool.writer`, đọc qua `pool.readers`, cả hai đều bọc `tokio::
 - ~~**Không** phân tầng ngắn hạn / dài hạn.~~ **Lỗi thời từ 22/07/2026.** Đúng là bản thân `memory.rs` không phân tầng, nhưng hai tầng nay nằm ở nơi khác: ngắn hạn do `AgentState::trim_history()` (`state.rs:38`) giới hạn 20 tin, dài hạn do RAG trong `agent/graph.rs` giữ (mục 5.4).
 - ~~**Không** truy hồi bằng embedding. Không có lời gọi `search_hybrid_vectors` / `llm:embed` nào từ `agent/`.~~ **Sai từ 22/07/2026.** `agent/graph.rs:221` gọi thẳng `crate::db::search_hybrid_vectors(&conn, &query, &vector, top_k, &filter, 1.0, 1.0)`, với vector do `EmbeddingEngine::embed_query` sinh (`graph.rs:204`) qua `state.embedder` (`graph.rs:202`). Embedding **tách hẳn khỏi model chat**: field `AppState.embedder` (`lib.rs:51`) trỏ tới một engine ONNX riêng 384 chiều ở `src/llm/embedder.rs` (353 dòng, `EMBEDDING_DIM` ở `embedder.rs:43`) — nên khẳng định cũ kiểu "chat và embedding dùng chung một `LlamaContext`" cũng không còn đúng.
 - **Projection consumer đã có; semantic consolidator chưa có.** `persist_conversation_event_vector()` ghi event pending cùng vector/FTS trong một transaction. `memory_consolidation.rs` chạy ở cả standalone và Tauri, dùng `BEGIN IMMEDIATE`, batch 25 mỗi 30 giây, xác minh `eventId == vec_id`, type, domain/category và `source_event_ids=[eventId]`; hợp lệ thì đánh dấu `consolidated`, lỗi thì retry tối đa 3 lần rồi ghi `dlq_consolidation`. Checkpoint và chuyển trạng thái event nằm cùng transaction. Worker này **không gọi LLM, không tạo fact/relationship và không ghi L3**.
-- **Không** mã hoá. Trái ngược với `facts` (dùng `db::set_fact(&conn, &state.crypto, &fact)` — `lib.rs:1075`), `state_json` được lưu **plaintext** dù chứa nguyên văn hội thoại.
+- **Không** mã hoá. Trái ngược với `facts` (dùng `db::set_fact(&conn, &state.crypto, &fact)` — `liva-native-core/src/commands/memory.rs#handle`), `state_json` được lưu **plaintext** dù chứa nguyên văn hội thoại.
 
 ### 5.3 KHOÁ CHECKPOINT — lỗi `session_id` làm `thread_id` ĐÃ SỬA 22/07/2026
 
@@ -754,7 +754,7 @@ flowchart TD
 
 ### 8.2 Danh sách skill lộ ra UI [OK]
 
-`get_skills_list` (`lib.rs:612-616`) và `integrations:list` (`lib.rs:1562-1566`) đều trả `[ smart_home::get_metadata() ]` — mảng **1 phần tử**. UI tiêu thụ ở `liva-ui/src/components/dashboard/SkillsView.vue:107,141` và `liva-ui/src/composables/useGateway.ts:162,283,318`.
+`get_skills_list` (`lib.rs:612-616`) và `integrations:list` (`liva-native-core/src/commands/integrations.rs#handle`) đều trả `[ smart_home::get_metadata() ]` — mảng **1 phần tử**. UI tiêu thụ ở `liva-ui/src/components/dashboard/SkillsView.vue:107,141` và `liva-ui/src/composables/useGateway.ts:162,283,318`.
 
 ### 8.3 `data/skill_whitelist.json` — đã bị xoá 22/07/2026 [KHÔNG CÒN]
 
@@ -780,8 +780,8 @@ Hai arm mới trong `handle_command`:
 
 | Lệnh | Dòng | Việc |
 |---|---|---|
-| `"mcp:list_tools"` | `lib.rs:1575` | Trả `state.mcp_server.list_tools()` đã serialize |
-| `"mcp:call_tool"` | `lib.rs:1578-1597` | Đọc `name` + `arguments` (thiếu `arguments` coi như `{}`) rồi gọi `state.mcp_server.call_tool(CallToolRequest{..})` (`lib.rs:1591-1594`) |
+| `"mcp:list_tools"` | `liva-native-core/src/lib.rs#handle_command` | Trả `state.mcp_server.list_tools()` đã serialize |
+| `"mcp:call_tool"` | `liva-native-core/src/lib.rs#handle_command` | Đọc `name` + `arguments` (thiếu `arguments` coi như `{}`) rồi gọi `state.mcp_server.call_tool(CallToolRequest{..})` (`liva-native-core/src/lib.rs#handle_command`) |
 
 Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét vào `AppState` ở `main.rs` (`:171`, `:267`), và 4 chỗ dựng `AppState` giả cho test/bin (`main.rs#test_state`, `agent/graph.rs:631`, `src/bin/verify_duplex.rs:99`, `src/bin/verify_integrations.rs:41`).
 
@@ -801,8 +801,8 @@ Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét và
 
 **Đường JSON (text) — KHÔNG đi qua agent graph:**
 
-- `chat:completion` (`lib.rs:1402-1477`) gọi thẳng `llm_manager.generate_completion` sau `compile_prompt`, có chèn persona server-side.
-- `vision:ask` (`lib.rs:1478-1529`) gọi thẳng `answer_with_image`.
+- `chat:completion` (`liva-native-core/src/commands/llm.rs#handle`) gọi thẳng `llm_manager.generate_completion` sau `compile_prompt`, có chèn persona server-side.
+- `vision:ask` (`liva-native-core/src/commands/vision.rs#ask`) gọi thẳng `answer_with_image`.
 - `task_plan_chat` gọi thẳng LLM với `SYS_TASK_PLANNER`.
 
 Không router, không `tool_exec`, không checkpoint.

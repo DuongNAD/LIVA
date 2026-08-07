@@ -1,6 +1,6 @@
 ---
 title: "Tầng dữ liệu và bảo mật"
-updated: 2026-07-30
+updated: 2026-08-05
 commit: 3688b5f
 status: frozen
 owns: []
@@ -381,9 +381,9 @@ Không nên gộp các tiêu chí trên thành một con số “bảng trống 
 Bốn IPC ghi/đọc memory tồn tại nhưng **không có caller nào trong `liva-ui/src`** (đã grep `set_fact|upsert_vector|search_hybrid|get_memory_data` — chỉ `get_memory_data` được UI gọi, tại `MemoryViewer.vue:32`, `useGateway.ts:178/287/322`):
 
 - `"memory:set_fact"` (`lib.rs:1064`) → `db::set_fact`
-- `"memory:get_fact"` (`lib.rs:1084`)
+- `"memory:get_fact"` (`liva-native-core/src/commands/memory.rs#handle`)
 - `"memory:search_hybrid"` (`lib.rs`) — `query_vector` tuỳ chọn; server tự embed khi thiếu. Vì command chưa có identity đáng tin cậy, nó bắt buộc `filter.type` rõ ràng và từ chối `conversation_turn`; domain do client gửi không được xem là owner scope.
-- `"memory:upsert_vector"` (`lib.rs:1168`)
+- `"memory:upsert_vector"` (`liva-native-core/src/commands/memory.rs#handle`)
 
 ⇒ ~~**RAG / bộ nhớ dài hạn hiện là hạ tầng có sẵn nhưng không được vòng hội thoại gọi.**~~ **Khẳng định này hết đúng từ 22/07/2026.** RAG nay được gọi thẳng trong vòng chat, không qua IPC:
 
@@ -520,7 +520,7 @@ Luồng ghi 5 bước (`db.rs:606-663`): `INSERT OR IGNORE` vào `vectors_meta` 
 
 **Sinh embedding cho bộ nhớ — đã tách khỏi LLM (22/07/2026):** nguồn vector nạp vào `vec_idx` **không còn là llama.cpp**. `llm/embedder.rs` cung cấp `EmbeddingEngine::{load, embed_query, embed_passage}` (`embedder.rs:79/123/131`) chạy một **model ONNX riêng**, `EMBEDDING_DIM = 384` (`embedder.rs:43`), thư mục mặc định `models/embedding` đổi được bằng `LIVA_EMBEDDING_MODEL_DIR` (`embedder.rs:52-67`). Engine này nằm ở `AppState.embedder` (`lib.rs:51`) và là thứ mà `persist_turn`/`recall_context` dùng.
 
-~~Sinh embedding: `get_embedding` … dùng chính llama.cpp engine.~~ Vẫn còn hàm đó — `pub fn get_embedding(model: &LlamaModel, context: &mut LlamaContext, text: &str) -> Result<Vec<f32>, String>` (`llm/embed.rs:5`), mean-pooling qua `embeddings_seq_ith(0)` với fallback `embeddings_ith(last)` rồi **L2-normalize** (`embed.rs:39-46`) — nhưng nay **chỉ phục vụ IPC `"llm:embed"`** (`lib.rs:1366`, gọi ở `lib.rs:1392`). Chính thông báo lỗi ở `db.rs:566-570` cảnh báo **không** được dùng nó cho bộ nhớ.
+~~Sinh embedding: `get_embedding` … dùng chính llama.cpp engine.~~ Vẫn còn hàm đó — `pub fn get_embedding(model: &LlamaModel, context: &mut LlamaContext, text: &str) -> Result<Vec<f32>, String>` (`llm/embed.rs:5`), mean-pooling qua `embeddings_seq_ith(0)` với fallback `embeddings_ith(last)` rồi **L2-normalize** (`embed.rs:39-46`) — nhưng nay **chỉ phục vụ IPC `"llm:embed"`** (`liva-native-core/src/commands/llm.rs#embed`, gọi ở `liva-native-core/src/commands/llm.rs#embed`). Chính thông báo lỗi ở `db.rs:566-570` cảnh báo **không** được dùng nó cho bộ nhớ.
 
 Ba hàm truy vấn:
 

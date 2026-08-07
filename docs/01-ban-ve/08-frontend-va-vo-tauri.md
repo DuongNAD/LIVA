@@ -1,6 +1,6 @@
 ---
 title: "Frontend và vỏ Tauri"
-updated: 2026-07-31
+updated: 2026-08-05
 commit: 3688b5f
 status: frozen
 owns: []
@@ -535,7 +535,7 @@ catalog sống nằm ở [Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-web
 Lệnh ngoài catalog vẫn fail-closed với `Unknown command`; không dùng snapshot 44 arm
 ngày 22/07 làm contract.
 
-> Hai arm `mcp:list_tools` (`liva-native-core/src/lib.rs:1467-1468`) và `mcp:call_tool` (`liva-native-core/src/lib.rs:1470-1494`) được nối vào dispatcher ngày 22/07/2026 — chưa client UI nào gọi, nhưng **không còn** là code mồ côi.
+> Hai arm `mcp:list_tools` (`liva-native-core/src/lib.rs#handle_command`) và `mcp:call_tool` (`liva-native-core/src/lib.rs#handle_command`) được nối vào dispatcher ngày 22/07/2026 — chưa client UI nào gọi, nhưng **không còn** là code mồ côi.
 
 > **Lịch sử (đã khắc phục 22/07/2026):** ~~Lỗi bị nuốt bằng `if let Ok(res)` ⇒ UI không nhận phản hồi và cũng không báo lỗi.~~ Nhánh WS nay match cả `Ok`/`Err` và gửi trả `"{event}_error"` kèm `{command, error}` (`websocket.rs#handle_ws_connection`); comment tại chỗ (`websocket.rs#handle_ws_connection`) ghi rõ ví dụ `vision:ask` ở build debug từng bắt người dùng chờ 120 s để nhận một thông báo sai.
 
@@ -551,7 +551,7 @@ ngày 22/07 làm contract.
 | **MemoryViewer.vue** (`memory`) | Xem turns/facts/events/vectors, tìm kiếm, xoá fact, chạy validation projection | `get_memory_data`, `consolidate_memory {batchSize?}`, `delete_memory_fact {key}` | **[OK ở contract hiện tại]** — cả ba có handler. Backend trả cả `id` và `vecId`; nút được ghi đúng nghĩa “Kiểm tra projection”, không quảng cáo semantic consolidation |
 | **SkillsView.vue** (`skills`) | Liệt kê/lọc skill, bật-tắt, self-test từng skill và toàn bộ | `get_skills_list` (`:107`,`:141`), `test_skill {name}` (`:121`), `test_all_skills` (`:135`), `toggle_skill {name,enabled}` (`:140`), `toggle_all_skills {enabled}` (`:145`,`:146`) | **[THIẾU]** gần như mock — `get_skills_list` có handler nhưng trả **đúng 1 phần tử** `integrations::smart_home::get_metadata()` (`lib.rs:612-616`); 4 op còn lại không có handler → toggle/test không làm gì, spinner treo tới khi rời tab |
 | **SystemView.vue** (`system`) | Health/uptime/RSS và trạng thái service | `get_system_status` (poll 3 s) | **[OK theo payload có thể đo]** — khối bốn nút quản trị giả đã bị gỡ; không còn gửi `force_gc`/GitNexus/reload/reset từ màn hình này |
-| **VisionView.vue** (`vision`) | Ô nhập câu hỏi → LIVA chụp & mô tả màn hình | `vision:ask {question?}` qua `gateway.askVision()` (`useGateway.ts:524-533`) | **[MỘT PHẦN]** — đường nối chỉn chu nhất; core `lib.rs:1478-1529` gọi `vision::capture::capture_for_vision()` + `llm_manager.answer_with_image(...)`; timeout UI 120 s; phản hồi qua WS `vision:ask_response` (`:444`) hoặc IPC case `'vision:ask'` (`:204`). **Yêu cầu core build RELEASE** (ghi rõ ở `VisionView.vue:7`, `useGateway.ts:517-523`) |
+| **VisionView.vue** (`vision`) | Ô nhập câu hỏi → LIVA chụp & mô tả màn hình | `vision:ask {question?}` qua `gateway.askVision()` (`useGateway.ts:524-533`) | **[MỘT PHẦN]** — đường nối chỉn chu nhất; core `liva-native-core/src/commands/vision.rs#ask` gọi `vision::capture::capture_for_vision()` + `llm_manager.answer_with_image(...)`; timeout UI 120 s; phản hồi qua WS `vision:ask_response` (`:444`) hoặc IPC case `'vision:ask'` (`:204`). **Yêu cầu core build RELEASE** (ghi rõ ở `VisionView.vue:7`, `useGateway.ts:517-523`) |
 | **UserProfile.vue** (`profile`) | Sửa hồ sơ: tên, năm sinh, quốc tịch, ngôn ngữ, sở thích, tone | `get_user_profile` (`:25`), `update_user_profile` qua `gateway.saveUserProfile()` (`:39`,`:53`) | **[MỘT PHẦN]** — `get_user_profile` thật (đọc `data/user_profile.json`, có fallback hardcode danh tính, `lib.rs:617-638`). `update_user_profile` **không có handler** → không lưu xuống đĩa; UI vẫn cập nhật optimistic (`useGateway.ts:506`) và báo "đã lưu" sau `setTimeout(600)` |
 | **SettingsView.vue** (`settings`) | Cấu hình system và modal xóa subject local | `get_config`, `update_config`, `memory:delete_subject {dryRun:false}` | **[OK ở contract xóa]** — destructive request chỉ gửi sau modal; core local-only, transaction/audit, trả `success` khi cả logic delete và WAL truncate hoàn tất |
 | **OnboardingForm.vue** (overlay) | Form bắt buộc khi `userProfile` rỗng (`DashboardApp.vue:82-85,145-147`) | `update_user_profile` (`:47`,`:69`) | **[THIẾU]** — cùng lý do với UserProfile. Có auto-detect locale trình duyệt `normalizeLocale()` (`:25-29`) |

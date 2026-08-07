@@ -1,6 +1,6 @@
 ---
 title: "Đường ống thoại"
-updated: 2026-07-27
+updated: 2026-08-05
 commit: 17f1774
 status: frozen
 owns: []
@@ -882,7 +882,7 @@ pub fn lang_id_for(code: &str) -> Option<i64> // lang.rs:34
   doc `lang.rs:1-17`). Model **không ship bảng id**.
 - Chuyển ngôn ngữ **thủ công**: `SttManager::set_language(&mut self, code: &str)` (`mod.rs:140`) →
   reset stream. Nguồn: env `LIVA_STT_LANGUAGE` lúc khởi tạo (`mod.rs:58-59`) hoặc command
-  `"voice:set_language"` (`lib.rs:1304`, đồng thời set cả TTS).
+  `"voice:set_language"` (`liva-native-core/src/commands/voice.rs#set_language`, đồng thời set cả TTS).
 - **⚠️ Không tìm thấy caller nào phía UI** cho `voice:set_language` (grep `liva-ui/src` +
   `liva-desktop/src-tauri/src` = 0 hit) ⇒ trên thực tế ngôn ngữ **cố định bằng env**, mặc định
   `vi` / lang_id 33.
@@ -901,7 +901,7 @@ pub fn lang_id_for(code: &str) -> Option<i64> // lang.rs:34
   với **cả câu, `is_last = true`**. ⇒ trên thực tế **Nemotron cũng đang chạy dạng batch** (nội bộ vẫn
   trượt cửa sổ 665 ms nhưng không partial nào được emit ra ngoài). Telegram cũng vậy
   (`telegram.rs:367`).
-- **Đường B — command `voice:stt_*` [THIẾU nối dây]**: `lib.rs:1254-1303` có `voice:stt_start` /
+- **Đường B — command `voice:stt_*` [THIẾU nối dây]**: `liva-native-core/src/commands/voice.rs#handle` có `voice:stt_start` /
   `voice:stt_chunk` (base64 f32le, `isLast`) / `voice:stt_stop` / `voice:stt_flush`. **Grep 0 caller**
   trong `liva-ui/src` và `liva-desktop/src-tauri/src` ⇒ nhánh streaming-partial hiện **không được ai
   dùng** (chỉ tới được qua bridge generic `native_ipc_call`).

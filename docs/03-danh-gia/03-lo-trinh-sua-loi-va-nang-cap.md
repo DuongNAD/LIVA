@@ -1,6 +1,6 @@
 ---
 title: "Lộ trình sửa lỗi và nâng cấp"
-updated: 2026-07-29
+updated: 2026-08-05
 commit: 272d791
 stale-ok: 0fd816c
 status: frozen
@@ -504,7 +504,7 @@ Nghĩa là: nếu prompt dài hơn `n_ctx`, hỏng ngay ở `decode`, chưa kị
         }
 ```
 
-Lớp 2 biến một crash khó chẩn đoán thành một thông báo lỗi đọc được, kể cả khi caller khác (`lib.rs:772`, `lib.rs:1347`, `main.rs:907`) quên cắt.
+Lớp 2 biến một crash khó chẩn đoán thành một thông báo lỗi đọc được, kể cả khi caller khác (`lib.rs:772`, `liva-native-core/src/commands/llm.rs#task_plan_chat`, `main.rs:907`) quên cắt.
 
 **Kiểm chứng.** `.\target\debug\router_stress.exe` đã có kịch bản `n_ctx = 16` (`bin/router_stress.rs:168-260`) — thêm một case prompt dài hơn `n_ctx` và khẳng định nhận được `Err` chứ không phải panic. Sau đó chạy hội thoại 50 lượt thật.
 
@@ -740,7 +740,7 @@ Lưu ý mô hình hiện tại: `accept_hdr_async` vẫn hoàn tất handshake r
 
 **Lớp 2: token phiên thật thay cho echo.** Sinh một token ngẫu nhiên lúc boot, ghi vào file chỉ người dùng đọc được (cạnh `LIVA_DB_PATH`), cho `liva-ui`/Tauri đọc và gửi trong payload `OP_AUTH_HANDSHAKE`. Sửa `main.rs:580-588` thành: so sánh **hằng thời gian** với token; sai thì đóng kết nối; đúng thì đặt cờ `authed = true`. Mọi arm khác (`OP_MIC_IN`, và toàn bộ nhánh `Message::Text` → `handle_command`) phải kiểm `authed` trước khi làm gì.
 
-**Ghép với 0.4.** Ngay cả sau khi có token, `llm:swap_model` (`lib.rs:1265-1281`) vẫn nhận đường dẫn tuỳ ý. Thêm kiểm: đường dẫn phải nằm dưới thư mục model đã cấu hình, phải có đuôi `.gguf`, và không chứa `..`. Có thể tái dùng nguyên mẫu `resolve_path` của `mcp/server.rs:67-77`:
+**Ghép với 0.4.** Ngay cả sau khi có token, `llm:swap_model` (`liva-native-core/src/commands/llm.rs#swap_model`) vẫn nhận đường dẫn tuỳ ý. Thêm kiểm: đường dẫn phải nằm dưới thư mục model đã cấu hình, phải có đuôi `.gguf`, và không chứa `..`. Có thể tái dùng nguyên mẫu `resolve_path` của `mcp/server.rs:67-77`:
 
 ```rust
         if p.is_absolute() || p.has_root() || p.components().any(|c| c == std::path::Component::ParentDir) {

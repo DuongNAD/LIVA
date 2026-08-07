@@ -1,6 +1,6 @@
 ---
 title: "Master roadmap LIVA → JARVIS"
-updated: 2026-07-31
+updated: 2026-08-07
 commit: 3688b5f
 status: living
 owns:
@@ -221,7 +221,38 @@ Chỉ bắt đầu khi có:
 | 7–8 | Retrieval threshold, tool corpus, cancellation/idempotency | tool runtime mặc định có điều kiện |
 | 9–12 | Semantic consolidator, provenance, memory UI | cognitive memory v1 |
 
-## 12. Roadmap cũ và trạng thái
+## 12. Ứng viên nâng cấp từ điểm tin R&D 2026-08-07
+
+Các mục dưới đây là **ứng viên có gate**, chưa phải cam kết triển khai. Kiến trúc chuẩn vẫn là
+Unified Native Engine bằng Rust; không đưa Python/PydanticAI trở lại đường backend và không thêm
+shared-memory framework trước khi benchmark chứng minh JSON/copy là nút thắt.
+
+| ID | Ưu tiên | Ứng viên | Phạm vi đúng | Dependency | Acceptance trước khi nhận vào milestone |
+|---|---:|---|---|---|---|
+| RD-01 | P1 | Structured tool decision native Rust | Thêm constrained output nếu backend hỗ trợ; nếu không, giữ parser/JSON Schema hiện tại và cho phép tối đa một lượt repair khi parse/schema lỗi | action policy, corpus tool selection | output sai không bao giờ thực thi; tối đa 1 retry; ≥95% chọn đúng trên corpus versioned; đo p50/p95 TTFT; không có Python runtime mới |
+| RD-02 | P1 | Session-aware LLM scheduling | Đo lock hiện tại, prefix-cache, context/sequence isolation và batching cho 2–4 phiên đồng thời; không chia sẻ raw KV pointer giữa agent | benchmark TTFT/throughput, VRAM governor | có baseline một phiên và nhiều phiên; không lẫn context; không OOM; chỉ nhận phương án cải thiện p95/throughput có ý nghĩa trên máy mục tiêu |
+| RD-03 | P2 | Binary data plane cho payload lớn | Giữ typed JSON cho control plane; chỉ thử packed binary/borrowed buffer cho ảnh, audio hoặc tensor lớn qua Tauri/WebSocket | S0.3 command identity, benchmark payload | benchmark chứng minh serialization/copy là hotspot; schema có version, kích thước trần, backpressure và fuzz/negative tests; không đổi đường text nhỏ sang Arrow |
+| RD-04 | P2 | Cầu nối LIVA ↔ Anima Engine | Typed/authenticated control messages; binary snapshot/telemetry riêng; shared-memory ring chỉ là bước sau nếu binary transport chưa đạt SLO | contract hai repo, cancellation, auth | không chia sẻ pointer; reconnect/failure fail-closed; producer không chặn simulation; benchmark end-to-end có p95 và wire bytes |
+| RD-05 | P3 | Hunyuan3D như job tạo asset | Tool/job tùy chọn, chạy tách khỏi chat; unload model LIVA trước khi chiếm GPU; output qua kiểm tra mesh/license/provenance | VRAM governor, artifact trust | thử bản nhỏ trên GPU mục tiêu; không OOM; job hủy được; asset GLB đọc lại được; license model/input/output được ghi nhận |
+
+### Không đưa vào roadmap thực thi
+
+- **ZCAO**: chưa tìm thấy paper/repository/DOI tương ứng với tiêu đề trong bản tin. Apache Arrow là
+  công nghệ thật nhưng không tự cung cấp orchestration hay chia sẻ KV-cache VRAM an toàn. Chỉ đánh
+  giá Arrow cho telemetry dạng bảng sau khi có benchmark.
+- **PydanticAI framework**: có giá trị tham khảo về typed output, validation và observability, nhưng
+  tích hợp trực tiếp sẽ tái tạo Python boundary đã được loại bỏ. Chỉ port pattern sang Rust.
+- **IBM Quantum real-time decoding và Classiq Quantum Engineering Agents**: theo dõi nghiên cứu,
+  không có workload sản phẩm hoặc bằng chứng lợi thế cho LIVA hiện tại.
+
+Nguồn upstream đã kiểm ngày 2026-08-07:
+[Apache Arrow](https://github.com/apache/arrow),
+[PydanticAI](https://github.com/pydantic/pydantic-ai),
+[Hunyuan3D-2](https://github.com/Tencent-Hunyuan/Hunyuan3D-2),
+[IBM Relay-BP trên FPGA](https://www.ibm.com/quantum/blog/qdc-2025) và
+[Classiq Quantum Engineering Agents](https://www.classiq.io/blog).
+
+## 13. Roadmap cũ và trạng thái
 
 | Tài liệu | Trạng thái chuyển tiếp |
 |---|---|

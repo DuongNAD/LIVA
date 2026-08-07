@@ -170,7 +170,46 @@ async fn test_verify_handle_commands() {
         handle_command(state.clone(), "get_skills_list", json!({}), None, None)
             .await
             .unwrap();
-    assert!(res_get_skills_list.is_array());
+    let skills_arr = res_get_skills_list
+        .as_array()
+        .expect("skills_list must be an array");
+
+    // a) get_skills_list trả >= 7 phần tử
+    assert!(
+        skills_arr.len() >= 7,
+        "get_skills_list must return at least 7 skills, got {}",
+        skills_arr.len()
+    );
+
+    // b) độ dài get_skills_list == skillsLoaded trong system_status (test chống lệch hai màn)
+    let skills_loaded = res_get_system_status["healthChecks"]["gateway"]["skillsLoaded"]
+        .as_u64()
+        .expect("skillsLoaded must be u64") as usize;
+    assert_eq!(
+        skills_arr.len(),
+        skills_loaded,
+        "skillsLoaded in system_status ({skills_loaded}) must match get_skills_list count ({})",
+        skills_arr.len()
+    );
+
+    // c) mỗi phần tử có đủ 5 khoá của hình dạng cũ
+    for skill in skills_arr {
+        let obj = skill.as_object().expect("skill item must be an object");
+        assert!(obj.contains_key("name"), "skill missing key 'name'");
+        assert!(obj.contains_key("category"), "skill missing key 'category'");
+        assert!(
+            obj.contains_key("short_desc"),
+            "skill missing key 'short_desc'"
+        );
+        assert!(
+            obj.contains_key("description"),
+            "skill missing key 'description'"
+        );
+        assert!(
+            obj.contains_key("parameters"),
+            "skill missing key 'parameters'"
+        );
+    }
 
     let res_get_user_profile =
         handle_command(state.clone(), "get_user_profile", json!({}), None, None)

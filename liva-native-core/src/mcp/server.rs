@@ -1,6 +1,7 @@
 use crate::mcp::protocol::{CallToolRequest, CallToolResult, Tool, ToolContent, ToolList};
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 pub struct NativeMcpServer {
@@ -166,6 +167,32 @@ impl NativeMcpServer {
                 },
             ],
         }
+    }
+
+    /// Danh sách kỹ năng định dạng chuẩn JSON cho UI (`get_skills_list` và `system_status`).
+    ///
+    /// Mỗi phần tử chứa đủ 5 khoá: `name`, `category`, `short_desc`, `description`, `parameters`.
+    pub fn list_skills(&self) -> Vec<Value> {
+        self.list_tools()
+            .tools
+            .into_iter()
+            .map(|tool| {
+                let category = match tool.name.as_str() {
+                    "read_markdown" | "write_markdown" | "search_vault" => "docs",
+                    "control_smarthome" => "core",
+                    "control_volume" | "control_media" => "system",
+                    "get_weather" => "web",
+                    _ => "extension",
+                };
+                serde_json::json!({
+                    "name": tool.name,
+                    "category": category,
+                    "short_desc": tool.description,
+                    "description": tool.description,
+                    "parameters": tool.input_schema,
+                })
+            })
+            .collect()
     }
 
     /// Ví dụ cách nói cho từng tool — **chỉ dùng để embed**, không vào prompt.

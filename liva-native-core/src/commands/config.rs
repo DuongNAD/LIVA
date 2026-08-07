@@ -19,7 +19,7 @@
 //! cần khi làm.
 
 use crate::{
-    AppState, DEFAULT_EXPERT_MODEL, DEFAULT_ROUTER_MODEL, config_file_path, integrations,
+    AppState, DEFAULT_EXPERT_MODEL, DEFAULT_ROUTER_MODEL, config_file_path,
     load_configured_router_model, resolve_resource_path, system_status, update_config_file_at,
 };
 use serde_json::{Value, json};
@@ -139,7 +139,7 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .map_err(|error| format!("Preflight worker failed: {error}"))?;
             Ok(json!({ "items": items }))
         }
-        "get_skills_list" => Ok(json!([integrations::smart_home::get_metadata()])),
+        "get_skills_list" => Ok(json!(state.mcp_server.list_skills())),
         "get_user_profile" => get_user_profile(),
         "get_avatar_models" => Ok(json!({
             "models2d": liet_ke_thu_muc(&resolve_resource_path("models/live2d")),

@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
-    AppState, configured_router_model_path, governor, integrations, sysinfo, telegram, websocket,
-};
+use crate::{AppState, configured_router_model_path, governor, sysinfo, telegram, websocket};
 
 /// Bảng sức khoẻ hệ thống cho Dashboard — **chỉ số đo thật**.
 ///
@@ -218,8 +216,7 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
     let ws_clients = websocket::ws_client_count();
     // Lấy độ dài từ CHÍNH mảng mà `get_skills_list` trả về, để hai lệnh không
     // bao giờ nói hai con số khác nhau.
-    let skills = json!([integrations::smart_home::get_metadata()]);
-    let skills_loaded = skills.as_array().map_or(0, |a| a.len());
+    let skills_loaded = state.mcp_server.list_skills().len();
     let mcp_tools = state.mcp_server.list_tools().tools.len();
 
     let tg_token = std::env::var("TELEGRAM_BOT_TOKEN")

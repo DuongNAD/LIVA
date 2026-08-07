@@ -31,93 +31,26 @@ import { safeFetch } from './utils/fetch';
 import { readRichTextChannel, renderSafeRichText } from './utils/richText';
 import ToolPanel from './components/ToolPanel.vue';
 import {
-  AvatarControlTagStream,
   stripAvatarControlTags,
-  type AvatarAction,
 } from './utils/avatarControlTags';
-import { getAvatarAnimation } from './utils/avatarAnimationRegistry';
 import {
-  OP_FLUSH,
-  OP_SPEAKER_OUT,
   SpeakerEpochGate,
-  VOICE_FRAME_HEADER_SIZE,
-  parseSpeakerPayload,
 } from './utils/speakerFrame';
-import { unpack } from 'msgpackr';
+import { useWidgetAvatarControl, type AvatarEngineApi } from './composables/useWidgetAvatarControl';
+import { useWidgetTransport } from './composables/useWidgetTransport';
+import type {
+  GatewayMessage,
+  GatewayPayload,
+  MessageDraft,
+  WidgetAvatarConfig,
+  WidgetModelConfig,
+} from './types/gateway';
 
 const platform = inject<IPlatformAdapter>('platform');
 
-/** Hình dạng model avatar mà widget truyền xuống engine */
-interface WidgetModelConfig {
-  filename: string;
-  type?: string;
-  format?: string;
-}
-
-interface WidgetAvatarConfig {
-  engineMode?: string;
-  activeModel?: WidgetModelConfig;
-  vrmModel?: string;
-  live2dModel?: string;
-}
-
-/**
- * Payload lỏng từ Gateway — mỗi event chỉ dùng một phần các trường dưới đây.
- * `text`/`audio` khai là bắt buộc vì code truy cập trực tiếp trong đúng nhánh
- * event của chúng (chỉ là kiểu, không đổi hành vi lúc chạy).
- */
-type GatewayPayload = {
-  ui?: { avatarMode?: string; activeModel?: WidgetModelConfig };
-  avatarMode?: string;
-  activeModel?: WidgetModelConfig;
-  avatar?: WidgetAvatarConfig;
-  text: string;
-  textChunk?: string;
-  isThought?: boolean;
-  audio: string;
-  volume?: number;
-  enabled?: boolean;
-  level?: string;
-  fps?: number;
-  /** `message:pending_response` — bản nháp đang chờ xác nhận, mới nhất trước. */
-  drafts?: MessageDraft[];
-  /** `message:confirm_response` — câu mô tả việc đã gửi. */
-  detail?: string;
-  /** `<lệnh>_error` — lý do thất bại, do lõi soạn. */
-  error?: string;
-  tool?: string;
-  label?: string;
-  ok?: boolean;
-  data?: unknown;
-  reason?: string;
-};
-
-/** Một gói tin WebSocket từ Gateway (một số event đặt field ngay ở gốc) */
-type GatewayMessage = GatewayPayload & {
-  event?: string;
-  payload: GatewayPayload;
-};
-
-/** Các API mà engine avatar (VRM/Live2D) expose qua defineExpose */
-interface AvatarEngineApi {
-  triggerMotion?: () => void;
-  startAudioLipSync?: (analyser: AnalyserNode) => void;
-  stopAudioLipSync?: () => void;
-  setExpression?: (emotion: string) => void;
-  captureFrameForAI?: () => string | null;
-  isCameraOn?: { value: boolean };
-  setScreenPosition?: (nx: number, ny: number) => void;
-  setScale?: (scale: number) => void;
-  getScreenBounds?: () => { x: number; y: number; width: number; height: number } | null;
-  moveTo?: (x: number, y: number, options?: { run?: boolean }) => void;
-  jump?: () => void;
-  stopMoving?: () => void;
-  setWander?: (enabled: boolean) => void;
-  playGesture?: (name: 'wave' | 'nod' | 'shake') => void;
-  setThinking?: (active: boolean) => void;
-  inspectScreenPoint?: (x: number, y: number) => void;
-  clearInspection?: () => void;
-}
+// Hình dạng gói tin Gateway nay ở `types/gateway.ts` — `useWidgetTransport.ts`
+// cần đúng những kiểu này cho `onJsonMessage`, mà kiểu khai bên trong một SFC
+// thì không import được từ ngoài.
 
 /** Các biến toàn cục LIVA gắn lên window để engine/renderer đọc */
 type LivaWindow = typeof window & {
@@ -226,12 +159,7 @@ interface Message {
   thinking?: string;
 }
 
-const generateMsgId = () => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-};
+
 
 const messages = shallowRef<Message[]>([
   {
@@ -269,7 +197,7 @@ interface ToolPanelView {
 const toolPanel = ref<ToolPanelView | null>(null);
 const TOOL_PRESENTATION_TIMEOUT_MS = 30_000;
 let toolPresentationTimer: ReturnType<typeof setTimeout> | null = null;
-let toolPresentationActive = false;
+const toolPresentationActive = ref(false);
 
 // ═══════════════════════════════════════════════════════
 //  Chat UI Dragging Logic
@@ -331,29 +259,7 @@ const onDragStart = (e: MouseEvent) => {
 //  câu trả lời đúng: thà nói "hết hạn rồi" còn hơn im lặng làm thẻ biến mất
 //  giữa lúc người dùng đang đọc.
 // ═══════════════════════════════════════════════════════
-interface MessageDraft {
-  draft_id: string;
-  platform: string;
-  display_name: string;
-  handle: string;
-  text: string;
-}
-const pendingDraft = ref<MessageDraft | null>(null);
-const draftBusy = ref(false);
 
-const refreshPendingDraft = () => sendMsg('message:pending');
-
-const confirmDraft = () => {
-  if (!pendingDraft.value || draftBusy.value) return;
-  draftBusy.value = true;
-  sendMsg('message:confirm', { draftId: pendingDraft.value.draft_id });
-};
-
-const cancelDraft = () => {
-  if (!pendingDraft.value || draftBusy.value) return;
-  draftBusy.value = true;
-  sendMsg('message:cancel', { draftId: pendingDraft.value.draft_id });
-};
 
 /** Thêm một dòng của LIVA vào khung chat. Dùng cho kết quả gửi. */
 const pushAssistantLine = (text: string) => {
@@ -452,9 +358,9 @@ voice.onWakeWordDetected(handleWakeWordDetection);
 
 const forceTriggerWakeWord = async () => {
   if (voice.state.value === 'OFF') {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       try {
-        await voice.startPipeline(ws);
+        await voice.startPipeline(ws.value);
       } catch (e) {
         logger.warn('[Widget]', 'Failed to start voice pipeline on force trigger:', e);
         return;
@@ -471,20 +377,6 @@ const forceTriggerWakeWord = async () => {
 // Camera frame capture interval (send to AI every 10s)
 let frameCaptureInterval: ReturnType<typeof setInterval> | null = null;
 
-// ═══════════════════════════════════════════════════════
-//  WebSocket
-// ═══════════════════════════════════════════════════════
-let ws: WebSocket | null = null;
-let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let wsReconnectAttempt = 0;
-let allowWsReconnect = true;
-let wsConnectPending = false;
-
-const sendMsg = (event: string, payload: Record<string, unknown> = {}) => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ event, payload }));
-  }
-};
 
 // ═══════════════════════════════════════════════════════
 //  Audio Queue — gapless OP_SPEAKER_OUT PCM; encoded JSON audio uses a separate
@@ -526,7 +418,369 @@ const speaker = useSpeakerPlayback({
 //  Engine ref for triggering motions
 // ═══════════════════════════════════════════════════════
 const engineRef = ref<AvatarEngineApi | null>(null);
-const avatarControlStream = new AvatarControlTagStream();
+
+const {
+  avatarControlStream,
+  restoreWanderWhenIdle,
+  executeAvatarAction,
+  executeRegisteredAvatarAnimation,
+} = useWidgetAvatarControl({
+  isThinking,
+  toolPresentationActive,
+  engineRef,
+});
+
+let speakerEpochGate = new SpeakerEpochGate();
+
+const handleGatewayMessage = async (data: GatewayMessage) => {
+    if (data.event === 'config_data' || data.event === 'config_updated') {
+      const conf = data.payload || data;
+      applyWidgetConfig(conf, data.event);
+    } else if (data.event === 'user_profile' || data.event === 'profile_updated_success') {
+      // Sync user profile (language, tone, etc.) to shared Gateway state
+      // so useI18n reactive computed picks up the language change instantly
+      if (data.payload) {
+        gateway.userProfile.value = data.payload;
+      }
+    } else if (data.event === 'eco_mode_changed') {
+      const enabled = !!data.payload?.enabled;
+      (window as LivaWindow).LIVA_ECO_MODE = enabled;
+      logger.info(
+        '[Widget]',
+        `Eco Mode status changed: ${enabled}. Throttling avatar renderer.`
+      );
+    } else if (data.event === 'avatar_demote') {
+      // [Phase 3] Graduated VRAM Protection — reduce avatar rendering to free GPU resources
+      const level = data.payload?.level as string;
+      const fps = data.payload?.fps as number;
+      if (level === 'eco') {
+        (window as LivaWindow).LIVA_ECO_MODE = true;
+        (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'eco';
+        logger.info('[Widget]', `VRAM Protection: Avatar demoted to ECO (${fps}fps)`);
+      } else if (level === 'freeze') {
+        (window as LivaWindow).LIVA_ECO_MODE = true;
+        (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'freeze';
+        logger.info('[Widget]', 'VRAM Protection: Avatar FROZEN (0fps)');
+      } else if (level === 'preempted') {
+        (window as LivaWindow).LIVA_ECO_MODE = true;
+        (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'preempted';
+        logger.warn('[Widget]', 'VRAM Protection: Avatar PREEMPTED (hard stop)');
+      }
+    } else if (data.event === 'avatar_restore') {
+      // [Phase 3] Restore avatar rendering after VRAM pressure relieved
+      (window as LivaWindow).LIVA_ECO_MODE = false;
+      (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'normal';
+      logger.info('[Widget]', 'VRAM Protection: Avatar restored to normal rendering');
+    } else if (data.event === 'debug_log') {
+      logger.info('[Widget]', 'Gateway debug', data.payload ?? data);
+    } else if (data.event === 'stt_fallback_activated') {
+      voice.activateWebSpeechFallback();
+    } else if (data.event === 'stt_fallback_deactivated') {
+      voice.deactivateWebSpeechFallback();
+    } else if (data.event === 'tool_start') {
+      startToolPresentation(data.payload);
+    } else if (data.event === 'tool_result') {
+      finishToolPresentation(data.payload);
+    } else if (data.event === 'ai_thinking_start') {
+      isThinking.value = true;
+      speaker.stop();
+      scrollToBottom();
+      voice.setProcessing();
+    } else if (data.event === 'ai_thinking_end') {
+      isThinking.value = false;
+    } else if (data.event === 'ai_stream_reset') {
+      avatarControlStream.reset();
+      if (
+        messages.value.length > 0 &&
+        messages.value[messages.value.length - 1].role === 'assistant'
+      ) {
+        messages.value.pop();
+        triggerRef(messages);
+      }
+    } else if (data.event === 'ai_stream_start') {
+      avatarControlStream.reset();
+      speaker.unblock();
+      isThinking.value = false;
+
+      // 1. Find and filter out any existing assistant message containing thinking/skills content
+      let thinkingText = '';
+      const lastUserIdx = messages.value.map((msg) => msg.role).lastIndexOf('user');
+      const filteredMsgs = messages.value.filter((msg, idx) => {
+        // Only filter out assistant messages that were added after the last user message in the current turn
+        if (lastUserIdx !== -1 && idx <= lastUserIdx) return true;
+
+        const isThinkingMsg =
+          msg.role === 'assistant' &&
+          (msg.text.includes('sys-thinking-flag') ||
+            msg.text.includes('sys-skill-flag') ||
+            msg.text.includes('LIVA đang') ||
+            msg.text.includes('Identify Tool') ||
+            msg.text.includes('Determine Parameters') ||
+            msg.text.includes('Execute Tool Call') ||
+            msg.thinking);
+        if (isThinkingMsg) {
+          if (msg.thinking) {
+            thinkingText = msg.thinking;
+          } else {
+            const matches = [
+              ...msg.text.matchAll(
+                /<i [^>]*class="sys-(?:thinking|skill)-flag"[^>]*>([\s\S]*?)(?:<\/i>|$)/g
+              ),
+            ];
+            if (matches.length > 0) {
+              thinkingText = matches.map((m) => m[1]).join('\n\n');
+            } else {
+              thinkingText = msg.text;
+            }
+          }
+          return false; // Remove this intermediate thinking bubble from history
+        }
+        return true;
+      });
+
+      // 2. Extract clean thinking text to store in the structured field
+      let cleanThinking = '';
+      if (thinkingText) {
+        cleanThinking = thinkingText
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<[^>]+>/g, '') // strip HTML tags
+          .trim();
+      }
+
+      messages.value = [
+        ...filteredMsgs,
+        { id: generateMsgId(), role: 'assistant', text: '', thinking: cleanThinking || '' },
+      ];
+      triggerRef(messages);
+      scrollToBottom();
+    } else if (data.event === 'ai_stream_chunk') {
+      if (messages.value.length > 0) {
+        const lastMsg = messages.value[messages.value.length - 1];
+        let chunk = data.payload.textChunk as string;
+        const isThoughtChunk = !!data.payload.isThought;
+
+        if (isThoughtChunk) {
+          // Strip raw XML thought tags if any leak
+          chunk = chunk
+            .replace(/<\/?thought>/gi, '')
+            .replace(/<\|channel>thought/gi, '')
+            .replace(/<\/channel_thought>/gi, '')
+            .replace(/<\/?scratchpad>/gi, '');
+
+          if (lastMsg.thinking === undefined) {
+            lastMsg.thinking = '';
+          }
+          lastMsg.thinking += chunk;
+        } else {
+          chunk = chunk.replace(/\[\[SYS_THINKING\]\]/g, t('sys_thinking'));
+          chunk = chunk.replace(/\[\[SYS_USING_SKILL\]\]/g, t('sys_using_skill'));
+
+          const parsed = avatarControlStream.push(chunk);
+          chunk = parsed.text;
+          for (const control of parsed.controls) {
+            if (control.type === 'emotion') {
+              engineRef.value?.setExpression?.(control.value);
+            } else if (control.type === 'action') {
+              executeAvatarAction(control.value);
+            } else {
+              executeRegisteredAvatarAnimation(control.value);
+            }
+          }
+          chunk = chunk.replace(/\n/g, '<br/>');
+          lastMsg.text += chunk;
+        }
+        triggerRef(messages);
+        scrollToBottom();
+        voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
+      }
+    } else if (data.event === 'ai_spoken_response') {
+      speaker.unblock();
+      isThinking.value = false;
+      // Only transition back to PASSIVE immediately if no audio is currently playing/queued.
+      // Otherwise, let the source.onended handler switch it to PASSIVE once playback finishes
+      // to prevent the microphone from feeding LIVA's own voice back to the wake worker.
+      if (!speaker.hasActiveSources() && !speaker.isPlaying()) {
+        voice.setPassive();
+      }
+
+      const cleanFinalReply = stripAvatarControlTags(data.payload.text);
+      avatarControlStream.reset();
+      const finalReply = cleanFinalReply.replace(/\n/g, '<br/>');
+
+      // Clean up any remaining thinking bubbles if any got past the stream_start phase
+      let thinkingText = '';
+      const lastUserIdx = messages.value.map((msg) => msg.role).lastIndexOf('user');
+      const filteredMsgs = messages.value.filter((msg, idx) => {
+        // Only filter out assistant messages that were added after the last user message in the current turn
+        if (lastUserIdx !== -1 && idx <= lastUserIdx) return true;
+
+        const isThinkingMsg =
+          msg.role === 'assistant' &&
+          (msg.text.includes('sys-thinking-flag') ||
+            msg.text.includes('sys-skill-flag') ||
+            msg.text.includes('LIVA đang') ||
+            msg.text.includes('Identify Tool') ||
+            msg.text.includes('Determine Parameters') ||
+            msg.text.includes('Execute Tool Call') ||
+            msg.thinking);
+        if (isThinkingMsg && !msg.thinking) {
+          const matches = [
+            ...msg.text.matchAll(
+              /<i [^>]*class="sys-(?:thinking|skill)-flag"[^>]*>([\s\S]*?)(?:<\/i>|$)/g
+            ),
+          ];
+          if (matches.length > 0) {
+            thinkingText = matches.map((m) => m[1]).join('\n\n');
+          } else {
+            thinkingText = msg.text;
+          }
+          return false;
+        }
+        return true;
+      });
+
+      const lastMsg = filteredMsgs[filteredMsgs.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant') {
+        lastMsg.text = finalReply;
+        if (thinkingText) {
+          lastMsg.thinking = thinkingText
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .trim();
+        }
+        messages.value = [...filteredMsgs];
+      } else {
+        let cleanThinking = '';
+        if (thinkingText) {
+          cleanThinking = thinkingText
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .trim();
+        }
+        messages.value = [
+          ...filteredMsgs,
+          {
+            id: generateMsgId(),
+            role: 'assistant',
+            text: finalReply,
+            thinking: cleanThinking || undefined,
+          },
+        ];
+      }
+      triggerRef(messages);
+      scrollToBottom();
+      // Lượt vừa xong có thể đã soạn một bản nháp — hỏi lõi xem có không.
+      refreshPendingDraft();
+    } else if (data.event === 'message:pending_response') {
+      // Lấy bản nháp mới nhất; lõi đã sắp mới-trước.
+      const drafts = (data.payload?.drafts ?? []) as MessageDraft[];
+      pendingDraft.value = drafts.length > 0 ? drafts[0] : null;
+      draftBusy.value = false;
+    } else if (data.event === 'message:confirm_response') {
+      pendingDraft.value = null;
+      draftBusy.value = false;
+      pushAssistantLine(data.payload?.detail || t('wg_draft_sent'));
+    } else if (data.event === 'message:confirm_error') {
+      // Không xoá thẻ: lỗi mạng thì bấm lại là gửi được. Chỉ khi lõi nói
+      // bản nháp không còn nữa thì thẻ mới vô nghĩa, và lúc đó
+      // `message:pending` ở lượt sau sẽ tự dọn.
+      draftBusy.value = false;
+      pushAssistantLine(`⚠️ ${data.payload?.error || t('wg_draft_failed')}`);
+    } else if (data.event === 'message:cancel_response') {
+      pendingDraft.value = null;
+      draftBusy.value = false;
+    } else if (
+      data.event === 'message:cancel_error' ||
+      data.event === 'message:pending_error'
+    ) {
+      draftBusy.value = false;
+    } else if (data.event === 'audio_ducking') {
+      // [v26] Stage 1 Barge-in: backend reduces TTS volume when user starts speaking
+      const vol = typeof data.payload?.volume === 'number' ? data.payload.volume : 1.0;
+      speaker.setMasterVolume(vol);
+    } else if (data.event === 'ai_audio_chunk') {
+      if (speaker.isBlocked()) return;
+      try {
+        const binaryStr = atob(data.payload.audio);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++)
+          bytes[i] = binaryStr.codePointAt(i) as number;
+
+        await speaker.enqueueEncodedAudio(bytes.buffer);
+      } catch (audioErr: unknown) {
+        logger.warn(
+          '[Widget]',
+          'Audio decode/playback error:',
+          audioErr instanceof Error ? audioErr.message : String(audioErr)
+        );
+      }
+    }
+};
+
+const {
+  ws,
+  pendingDraft,
+  draftBusy,
+  generateMsgId,
+  sendMsg,
+  refreshPendingDraft,
+  confirmDraft,
+  cancelDraft,
+  connectWebSocket,
+  closeTransport,
+} = useWidgetTransport({
+  platform,
+  engineStatus,
+  allowWsReconnect: true,
+  onConnected: (socket) => {
+    speakerEpochGate = new SpeakerEpochGate();
+    sendMsg('get_config');
+    sendMsg('get_avatar_models');
+    sendMsg('get_user_profile');
+    refreshPendingDraft();
+    void (async () => {
+      await voice.startPipeline(socket);
+      if (
+        ws.value === socket &&
+        socket.readyState === WebSocket.OPEN &&
+        !voice.isReady.value &&
+        !voice.pipelineError.value
+      ) {
+        await voice.startPipeline(socket);
+      }
+    })().catch((e) => {
+      logger.warn(
+        '[Widget]',
+        'Voice pipeline start failed:',
+        e instanceof Error ? e.message : String(e)
+      );
+    });
+  },
+  onDisconnected: () => {
+    const cleanup = voice.stopPipeline().catch((error) => {
+      logger.warn(
+        '[Widget]',
+        'Voice cleanup after gateway disconnect failed:',
+        error instanceof Error ? error.message : String(error)
+      );
+    });
+    void cleanup;
+  },
+  onSpeakerBinary: (payload, turnEpoch) => {
+    if (speakerEpochGate.accepts(turnEpoch)) {
+      speaker.enqueueSpeakerPayload(payload);
+    }
+  },
+  onFlushBinary: (turnEpoch) => {
+    speakerEpochGate.observeFlush(turnEpoch);
+    speaker.flush();
+  },
+  onJsonMessage: (data) => {
+    handleGatewayMessage(data);
+  },
+});
+
+
 
 // Vị trí nhân vật trên màn hình, chuẩn hoá [0,1]; y tính theo chân.
 // Mặc định đứng sát mép phải-dưới — chỗ cũ của avatar trước khi mở toàn màn hình.
@@ -654,19 +908,8 @@ const toggleCollapse = () => {
 };
 
 // ═══════════════════════════════════════════════════════
-//  Thinking → trigger avatar motion
+//  Thinking → trigger avatar motion (Extracted to useWidgetAvatarControl)
 // ═══════════════════════════════════════════════════════
-const wanderEnabled = ref(true);
-let avatarActionTimer: ReturnType<typeof setTimeout> | null = null;
-let avatarActionActive = false;
-let pendingAvatarAnimationId: number | null = null;
-const avatarAnimationCooldowns = new Map<number, number>();
-
-const restoreWanderWhenIdle = () => {
-  if (!isThinking.value && !avatarActionActive && !toolPresentationActive) {
-    engineRef.value?.setWander?.(wanderEnabled.value);
-  }
-};
 
 const clearToolPresentationTimer = () => {
   if (toolPresentationTimer) clearTimeout(toolPresentationTimer);
@@ -688,7 +931,7 @@ const toolPanelTarget = () => {
 };
 
 const endToolPresentation = (withErrorGesture: boolean) => {
-  toolPresentationActive = false;
+  toolPresentationActive.value = false;
   clearToolPresentationTimer();
   engineRef.value?.clearInspection?.();
   if (withErrorGesture) engineRef.value?.playGesture?.('shake');
@@ -698,7 +941,7 @@ const endToolPresentation = (withErrorGesture: boolean) => {
 const startToolPresentation = (payload: GatewayPayload) => {
   if (!payload.tool) return;
   const tool = payload.tool;
-  toolPresentationActive = true;
+  toolPresentationActive.value = true;
   clearToolPresentationTimer();
   toolPanel.value = {
     tool,
@@ -708,7 +951,7 @@ const startToolPresentation = (payload: GatewayPayload) => {
   engineRef.value?.setWander?.(false);
 
   nextTick(() => {
-    if (!toolPresentationActive || toolPanel.value?.tool !== tool) return;
+    if (!toolPresentationActive.value || toolPanel.value?.tool !== tool) return;
     const target = toolPanelTarget();
     engineRef.value?.moveTo?.(target.standX, 0.96, { run: false });
     engineRef.value?.inspectScreenPoint?.(target.focusX, target.focusY);
@@ -716,7 +959,7 @@ const startToolPresentation = (payload: GatewayPayload) => {
   });
 
   toolPresentationTimer = setTimeout(() => {
-    if (!toolPresentationActive || toolPanel.value?.tool !== tool) return;
+    if (!toolPresentationActive.value || toolPanel.value?.tool !== tool) return;
     toolPanel.value = {
       tool,
       state: 'error',
@@ -727,7 +970,7 @@ const startToolPresentation = (payload: GatewayPayload) => {
 };
 
 const finishToolPresentation = (payload: GatewayPayload) => {
-  if (!toolPresentationActive || !payload.tool || toolPanel.value?.tool !== payload.tool) return;
+  if (!toolPresentationActive.value || !payload.tool || toolPanel.value?.tool !== payload.tool) return;
   if (payload.ok) {
     toolPanel.value = { tool: payload.tool, state: 'done', payload: payload.data };
     endToolPresentation(false);
@@ -743,96 +986,10 @@ const finishToolPresentation = (payload: GatewayPayload) => {
 };
 
 const closeToolPanel = () => {
-  if (toolPresentationActive) endToolPresentation(false);
+  if (toolPresentationActive.value) endToolPresentation(false);
   toolPanel.value = null;
   nextTick(updateInteractiveZones);
 };
-
-const holdAvatarForAction = (durationMs: number) => {
-  avatarActionActive = true;
-  engineRef.value?.stopMoving?.();
-  engineRef.value?.setWander?.(false);
-  if (avatarActionTimer) clearTimeout(avatarActionTimer);
-  avatarActionTimer = setTimeout(() => {
-    avatarActionTimer = null;
-    avatarActionActive = false;
-    restoreWanderWhenIdle();
-  }, durationMs);
-};
-
-const executeAvatarAction = (action: AvatarAction, registryDurationMs?: number) => {
-  switch (action) {
-    case 'wave':
-      holdAvatarForAction(registryDurationMs ?? 1_600);
-      engineRef.value?.playGesture?.('wave');
-      break;
-    case 'nod':
-      holdAvatarForAction(registryDurationMs ?? 900);
-      engineRef.value?.playGesture?.('nod');
-      break;
-    case 'jump':
-      holdAvatarForAction(registryDurationMs ?? 1_000);
-      engineRef.value?.jump?.();
-      break;
-    case 'come_closer':
-      holdAvatarForAction(registryDurationMs ?? 4_000);
-      engineRef.value?.moveTo?.(0.55, 0.9, { run: false });
-      break;
-    case 'step_back':
-      holdAvatarForAction(registryDurationMs ?? 4_000);
-      engineRef.value?.moveTo?.(0.88, 1, { run: false });
-      break;
-  }
-};
-
-const executeRegisteredAvatarAnimation = (id: number) => {
-  const definition = getAvatarAnimation(id);
-  if (!definition?.modelSelectable) return;
-
-  if (isThinking.value || toolPresentationActive) {
-    pendingAvatarAnimationId = id;
-    return;
-  }
-
-  const now = Date.now();
-  if ((avatarAnimationCooldowns.get(id) ?? 0) > now) return;
-  avatarAnimationCooldowns.set(id, now + definition.cooldownMs);
-
-  if (definition.kind === 'emotion') {
-    engineRef.value?.setExpression?.(definition.key);
-  } else if (definition.kind === 'action') {
-    executeAvatarAction(definition.key as AvatarAction, definition.durationMs);
-  }
-};
-
-watch(isThinking, (val, previous) => {
-  engineRef.value?.setThinking?.(val);
-  if (val && engineRef.value?.triggerMotion) {
-    engineRef.value.triggerMotion();
-  }
-  // Đứng yên trong lúc nghĩ để người dùng còn đọc được câu trả lời đang tới;
-  // chỉ đi lang thang lại khi không có hành động theo ngữ cảnh đang chạy.
-  if (val) {
-    engineRef.value?.stopMoving?.();
-    engineRef.value?.setWander?.(false);
-  } else if (previous) {
-    if (pendingAvatarAnimationId !== null && !toolPresentationActive) {
-      const id = pendingAvatarAnimationId;
-      pendingAvatarAnimationId = null;
-      executeRegisteredAvatarAnimation(id);
-    }
-    restoreWanderWhenIdle();
-  }
-});
-
-// ═══════════════════════════════════════════════════════
-//  Đi lang thang khi rảnh
-// ═══════════════════════════════════════════════════════
-watch(engineRef, (engine) => {
-  if (!engine) return;
-  engine.setThinking?.(isThinking.value);
-  engine.setWander?.(wanderEnabled.value && !isThinking.value);
-});
 
 const handleRichTextClick = (event: MouseEvent) => {
   const channel = readRichTextChannel(event.target);
@@ -862,7 +1019,7 @@ watch(
 function startFrameCapture() {
   if (frameCaptureInterval) return;
   frameCaptureInterval = setInterval(() => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return;
     if (!engineRef.value?.captureFrameForAI) return;
 
     const frame = engineRef.value.captureFrameForAI();
@@ -910,10 +1067,10 @@ const handleKeydown = async (e: KeyboardEvent) => {
 // ═══════════════════════════════════════════════════════
 const toggleVoice = () => {
   if (voice.state.value === 'OFF') {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       logger.info('[Widget]', 'Manually starting voice pipeline...');
       voice
-        .startPipeline(ws)
+        .startPipeline(ws.value)
         .then(() => {
           if (voice.state.value === 'PASSIVE') {
             voice.toggleVoice();
@@ -934,8 +1091,8 @@ const toggleVoice = () => {
 const interruptLIVA = () => {
   speaker.stop();
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send('[INTERRUPT]');
+  if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+    ws.value.send('[INTERRUPT]');
   }
 };
 
@@ -943,7 +1100,7 @@ const interruptLIVA = () => {
 //  Send Message
 // ═══════════════════════════════════════════════════════
 const sendMessage = () => {
-  if (!inputText.value.trim() || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!inputText.value.trim() || !ws.value || ws.value.readyState !== WebSocket.OPEN) return;
 
   speaker.stop();
 
@@ -951,7 +1108,7 @@ const sendMessage = () => {
   messages.value = [...messages.value, { id: generateMsgId(), role: 'user', text }];
   triggerRef(messages);
 
-  ws.send(
+  ws.value.send(
     JSON.stringify({
       event: 'user_voice_command',
       payload: { text },
@@ -996,12 +1153,13 @@ onMounted(() => {
   // We trigger the initial update and start a 150ms periodic check to sync coords.
   nextTick(() => {
     updateInteractiveZones();
-  });
+    void connectWebSocket();
+});
   zonesInterval = setInterval(updateInteractiveZones, 150);
 
   // Expose global helper for clickable bubble buttons
   (window as LivaWindow).sendLIVAMessage = (text: string) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       speaker.stop();
       messages.value = [...messages.value, { id: generateMsgId(), role: 'user', text }];
       triggerRef(messages);
@@ -1012,518 +1170,19 @@ onMounted(() => {
 
   // 3. Connect WebSocket
   // Connect directly because the Tauri event might fire before this component mounts.
-  const connectWebSocket = async () => {
-    if (
-      !allowWsReconnect ||
-      wsConnectPending ||
-      (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN))
-    ) {
-      return;
-    }
 
-    const port = 8002;
-    let sessionQuery = '';
-    if (platform?.platformName === 'tauri') {
-      wsConnectPending = true;
-      try {
-        const ticket = (await platform.invokeBackend('issue_websocket_session')) as {
-          token?: unknown;
-        } | null;
-        const token = ticket?.token;
-        if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) {
-          throw new Error('Tauri không trả session ticket WebSocket hợp lệ');
-        }
-        sessionQuery = `?session=${encodeURIComponent(token)}`;
-      } catch (error) {
-        const delay = Math.min(500 * 2 ** wsReconnectAttempt, 5_000);
-        wsReconnectAttempt += 1;
-        engineStatus.value = 'websocket-session-error';
-        logger.warn(
-          '[Widget]',
-          `Không xin được WebSocket session; thử lại sau ${delay}ms:`,
-          error instanceof Error ? error.message : String(error)
-        );
-        if (allowWsReconnect) {
-          if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-          wsReconnectTimer = setTimeout(() => {
-            wsReconnectTimer = null;
-            void connectWebSocket();
-          }, delay);
-        }
-        return;
-      } finally {
-        wsConnectPending = false;
-      }
-    }
 
-    // Component có thể đã unmount hoặc một kết nối khác đã mở trong lúc chờ
-    // Tauri cấp ticket. Không tiêu thụ ticket vào một socket thừa.
-    if (
-      !allowWsReconnect ||
-      (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN))
-    ) {
-      return;
-    }
-
-    const wsUrl = `ws://127.0.0.1:${port}/ws${sessionQuery}`;
-    const socket = new WebSocket(wsUrl);
-    ws = socket;
-    socket.binaryType = 'arraybuffer';
-    const speakerEpochGate = new SpeakerEpochGate();
-    engineStatus.value = 'websocket-connecting';
-
-    socket.onopen = () => {
-      if (ws !== socket) return;
-      wsReconnectAttempt = 0;
-      logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
-      engineStatus.value = 'websocket-open';
-      sendMsg('get_config');
-      sendMsg('get_avatar_models');
-      sendMsg('get_user_profile');
-      // Bản nháp nằm ở lõi, không ở màn hình — nên nó sống sót qua reload
-      // widget. Hỏi ngay lúc nối lại, kẻo một tin đã soạn bị bỏ quên vì người
-      // dùng lỡ đóng widget giữa chừng.
-      refreshPendingDraft();
-      void (async () => {
-        await voice.startPipeline(socket);
-        // A previous startup may have been cancelled by a disconnect while
-        // getUserMedia was pending. Retry once for the current live socket.
-        // Chỉ retry ca *bị huỷ* (pipelineError rỗng): nếu lần đầu đã hỏng có lý do
-        // — mic bị chặn, máy không có mic — thì thử lại chỉ xin quyền thêm một lần
-        // nữa để nhận đúng câu trả lời cũ, kèm một banner quyền thứ hai.
-        if (
-          ws === socket &&
-          socket.readyState === WebSocket.OPEN &&
-          !voice.isReady.value &&
-          !voice.pipelineError.value
-        ) {
-          await voice.startPipeline(socket);
-        }
-      })().catch((e: unknown) => {
-        logger.warn(
-          '[Widget]',
-          'Voice pipeline start failed:',
-          e instanceof Error ? e.message : String(e)
-        );
-      });
-    };
-
-    socket.onmessage = async (event) => {
-      try {
-        let data: GatewayMessage | null = null;
-        if (event.data instanceof ArrayBuffer) {
-          const arrayBuffer = event.data;
-          if (arrayBuffer.byteLength > 0) {
-            const view = new DataView(arrayBuffer);
-            const type = view.getUint8(0);
-            if (type === OP_SPEAKER_OUT) {
-              // Check if this is a VoiceBinaryProtocol SPEAKER_OUT frame
-              if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
-                const payloadSize = view.getUint32(5, true); // Little-Endian
-                if (
-                  payloadSize === arrayBuffer.byteLength - VOICE_FRAME_HEADER_SIZE &&
-                  payloadSize > 0
-                ) {
-                  // SPEAKER_OUT payload: [turn_epoch u32][sample_rate u32][f32 PCM…]
-                  // Fail closed: untagged/malformed audio must not bypass the epoch gate.
-                  const payload = new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize);
-                  const chunk = parseSpeakerPayload(payload);
-                  if (!chunk || !speakerEpochGate.accepts(chunk.turnEpoch)) return;
-                  speaker.enqueueSpeakerPayload(payload);
-                  return;
-                }
-              }
-              // Otherwise it's a MsgPack event (legacy path)
-              try {
-                data = unpack(new Uint8Array(arrayBuffer, 1));
-              } catch (unpackErr) {
-                logger.error('[Widget]', 'Lỗi unpack MsgPack:', unpackErr);
-                return;
-              }
-            } else if (type === OP_FLUSH) {
-              // Barge-in: the core cancelled the active TTS session — stop all
-              // scheduled audio and reset the cursor. Chunks arriving after the
-              // The epoch watermark rejects any stale chunk queued behind this FLUSH.
-              if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
-                speakerEpochGate.observeFlush(view.getUint32(1, true));
-              }
-              speaker.flush();
-              return;
-            } else {
-              return; // skip audio/other types
-            }
-          } else {
-            return;
-          }
-        } else if (typeof event.data === 'string') {
-          if (event.data.trim() === '[INTERRUPT]') {
-            speaker.stop();
-            return;
-          }
-          try {
-            data = JSON.parse(event.data);
-          } catch (e) {
-            logger.error('[Widget]', 'Lỗi phân giải JSON:', e);
-            return;
-          }
-        } else {
-          return;
-        }
-
-        if (!data) return;
-
-        if (data.event === 'config_data' || data.event === 'config_updated') {
-          const conf = data.payload || data;
-          applyWidgetConfig(conf, data.event);
-        } else if (data.event === 'user_profile' || data.event === 'profile_updated_success') {
-          // Sync user profile (language, tone, etc.) to shared Gateway state
-          // so useI18n reactive computed picks up the language change instantly
-          if (data.payload) {
-            gateway.userProfile.value = data.payload;
-          }
-        } else if (data.event === 'eco_mode_changed') {
-          const enabled = !!data.payload?.enabled;
-          (window as LivaWindow).LIVA_ECO_MODE = enabled;
-          logger.info(
-            '[Widget]',
-            `Eco Mode status changed: ${enabled}. Throttling avatar renderer.`
-          );
-        } else if (data.event === 'avatar_demote') {
-          // [Phase 3] Graduated VRAM Protection — reduce avatar rendering to free GPU resources
-          const level = data.payload?.level as string;
-          const fps = data.payload?.fps as number;
-          if (level === 'eco') {
-            (window as LivaWindow).LIVA_ECO_MODE = true;
-            (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'eco';
-            logger.info('[Widget]', `VRAM Protection: Avatar demoted to ECO (${fps}fps)`);
-          } else if (level === 'freeze') {
-            (window as LivaWindow).LIVA_ECO_MODE = true;
-            (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'freeze';
-            logger.info('[Widget]', 'VRAM Protection: Avatar FROZEN (0fps)');
-          } else if (level === 'preempted') {
-            (window as LivaWindow).LIVA_ECO_MODE = true;
-            (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'preempted';
-            logger.warn('[Widget]', 'VRAM Protection: Avatar PREEMPTED (hard stop)');
-          }
-        } else if (data.event === 'avatar_restore') {
-          // [Phase 3] Restore avatar rendering after VRAM pressure relieved
-          (window as LivaWindow).LIVA_ECO_MODE = false;
-          (window as LivaWindow).LIVA_AVATAR_DEMOTE_LEVEL = 'normal';
-          logger.info('[Widget]', 'VRAM Protection: Avatar restored to normal rendering');
-        } else if (data.event === 'debug_log') {
-          logger.info('[Widget]', 'Gateway debug', data.payload ?? data);
-        } else if (data.event === 'stt_fallback_activated') {
-          voice.activateWebSpeechFallback();
-        } else if (data.event === 'stt_fallback_deactivated') {
-          voice.deactivateWebSpeechFallback();
-        } else if (data.event === 'tool_start') {
-          startToolPresentation(data.payload);
-        } else if (data.event === 'tool_result') {
-          finishToolPresentation(data.payload);
-        } else if (data.event === 'ai_thinking_start') {
-          isThinking.value = true;
-          speaker.stop();
-          scrollToBottom();
-          voice.setProcessing();
-        } else if (data.event === 'ai_thinking_end') {
-          isThinking.value = false;
-        } else if (data.event === 'ai_stream_reset') {
-          avatarControlStream.reset();
-          if (
-            messages.value.length > 0 &&
-            messages.value[messages.value.length - 1].role === 'assistant'
-          ) {
-            messages.value.pop();
-            triggerRef(messages);
-          }
-        } else if (data.event === 'ai_stream_start') {
-          avatarControlStream.reset();
-          speaker.unblock();
-          isThinking.value = false;
-
-          // 1. Find and filter out any existing assistant message containing thinking/skills content
-          let thinkingText = '';
-          const lastUserIdx = messages.value.map((msg) => msg.role).lastIndexOf('user');
-          const filteredMsgs = messages.value.filter((msg, idx) => {
-            // Only filter out assistant messages that were added after the last user message in the current turn
-            if (lastUserIdx !== -1 && idx <= lastUserIdx) return true;
-
-            const isThinkingMsg =
-              msg.role === 'assistant' &&
-              (msg.text.includes('sys-thinking-flag') ||
-                msg.text.includes('sys-skill-flag') ||
-                msg.text.includes('LIVA đang') ||
-                msg.text.includes('Identify Tool') ||
-                msg.text.includes('Determine Parameters') ||
-                msg.text.includes('Execute Tool Call') ||
-                msg.thinking);
-            if (isThinkingMsg) {
-              if (msg.thinking) {
-                thinkingText = msg.thinking;
-              } else {
-                const matches = [
-                  ...msg.text.matchAll(
-                    /<i [^>]*class="sys-(?:thinking|skill)-flag"[^>]*>([\s\S]*?)(?:<\/i>|$)/g
-                  ),
-                ];
-                if (matches.length > 0) {
-                  thinkingText = matches.map((m) => m[1]).join('\n\n');
-                } else {
-                  thinkingText = msg.text;
-                }
-              }
-              return false; // Remove this intermediate thinking bubble from history
-            }
-            return true;
-          });
-
-          // 2. Extract clean thinking text to store in the structured field
-          let cleanThinking = '';
-          if (thinkingText) {
-            cleanThinking = thinkingText
-              .replace(/<br\s*\/?>/gi, '\n')
-              .replace(/<[^>]+>/g, '') // strip HTML tags
-              .trim();
-          }
-
-          messages.value = [
-            ...filteredMsgs,
-            { id: generateMsgId(), role: 'assistant', text: '', thinking: cleanThinking || '' },
-          ];
-          triggerRef(messages);
-          scrollToBottom();
-        } else if (data.event === 'ai_stream_chunk') {
-          if (messages.value.length > 0) {
-            const lastMsg = messages.value[messages.value.length - 1];
-            let chunk = data.payload.textChunk as string;
-            const isThoughtChunk = !!data.payload.isThought;
-
-            if (isThoughtChunk) {
-              // Strip raw XML thought tags if any leak
-              chunk = chunk
-                .replace(/<\/?thought>/gi, '')
-                .replace(/<\|channel>thought/gi, '')
-                .replace(/<\/channel_thought>/gi, '')
-                .replace(/<\/?scratchpad>/gi, '');
-
-              if (lastMsg.thinking === undefined) {
-                lastMsg.thinking = '';
-              }
-              lastMsg.thinking += chunk;
-            } else {
-              chunk = chunk.replace(/\[\[SYS_THINKING\]\]/g, t('sys_thinking'));
-              chunk = chunk.replace(/\[\[SYS_USING_SKILL\]\]/g, t('sys_using_skill'));
-
-              const parsed = avatarControlStream.push(chunk);
-              chunk = parsed.text;
-              for (const control of parsed.controls) {
-                if (control.type === 'emotion') {
-                  engineRef.value?.setExpression?.(control.value);
-                } else if (control.type === 'action') {
-                  executeAvatarAction(control.value);
-                } else {
-                  executeRegisteredAvatarAnimation(control.value);
-                }
-              }
-              chunk = chunk.replace(/\n/g, '<br/>');
-              lastMsg.text += chunk;
-            }
-            triggerRef(messages);
-            scrollToBottom();
-            voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
-          }
-        } else if (data.event === 'ai_spoken_response') {
-          speaker.unblock();
-          isThinking.value = false;
-          // Only transition back to PASSIVE immediately if no audio is currently playing/queued.
-          // Otherwise, let the source.onended handler switch it to PASSIVE once playback finishes
-          // to prevent the microphone from feeding LIVA's own voice back to the wake worker.
-          if (!speaker.hasActiveSources() && !speaker.isPlaying()) {
-            voice.setPassive();
-          }
-
-          const cleanFinalReply = stripAvatarControlTags(data.payload.text);
-          avatarControlStream.reset();
-          const finalReply = cleanFinalReply.replace(/\n/g, '<br/>');
-
-          // Clean up any remaining thinking bubbles if any got past the stream_start phase
-          let thinkingText = '';
-          const lastUserIdx = messages.value.map((msg) => msg.role).lastIndexOf('user');
-          const filteredMsgs = messages.value.filter((msg, idx) => {
-            // Only filter out assistant messages that were added after the last user message in the current turn
-            if (lastUserIdx !== -1 && idx <= lastUserIdx) return true;
-
-            const isThinkingMsg =
-              msg.role === 'assistant' &&
-              (msg.text.includes('sys-thinking-flag') ||
-                msg.text.includes('sys-skill-flag') ||
-                msg.text.includes('LIVA đang') ||
-                msg.text.includes('Identify Tool') ||
-                msg.text.includes('Determine Parameters') ||
-                msg.text.includes('Execute Tool Call') ||
-                msg.thinking);
-            if (isThinkingMsg && !msg.thinking) {
-              const matches = [
-                ...msg.text.matchAll(
-                  /<i [^>]*class="sys-(?:thinking|skill)-flag"[^>]*>([\s\S]*?)(?:<\/i>|$)/g
-                ),
-              ];
-              if (matches.length > 0) {
-                thinkingText = matches.map((m) => m[1]).join('\n\n');
-              } else {
-                thinkingText = msg.text;
-              }
-              return false;
-            }
-            return true;
-          });
-
-          const lastMsg = filteredMsgs[filteredMsgs.length - 1];
-          if (lastMsg && lastMsg.role === 'assistant') {
-            lastMsg.text = finalReply;
-            if (thinkingText) {
-              lastMsg.thinking = thinkingText
-                .replace(/<br\s*\/?>/gi, '\n')
-                .replace(/<[^>]+>/g, '')
-                .trim();
-            }
-            messages.value = [...filteredMsgs];
-          } else {
-            let cleanThinking = '';
-            if (thinkingText) {
-              cleanThinking = thinkingText
-                .replace(/<br\s*\/?>/gi, '\n')
-                .replace(/<[^>]+>/g, '')
-                .trim();
-            }
-            messages.value = [
-              ...filteredMsgs,
-              {
-                id: generateMsgId(),
-                role: 'assistant',
-                text: finalReply,
-                thinking: cleanThinking || undefined,
-              },
-            ];
-          }
-          triggerRef(messages);
-          scrollToBottom();
-          // Lượt vừa xong có thể đã soạn một bản nháp — hỏi lõi xem có không.
-          refreshPendingDraft();
-        } else if (data.event === 'message:pending_response') {
-          // Lấy bản nháp mới nhất; lõi đã sắp mới-trước.
-          const drafts = (data.payload?.drafts ?? []) as MessageDraft[];
-          pendingDraft.value = drafts.length > 0 ? drafts[0] : null;
-          draftBusy.value = false;
-        } else if (data.event === 'message:confirm_response') {
-          pendingDraft.value = null;
-          draftBusy.value = false;
-          pushAssistantLine(data.payload?.detail || t('wg_draft_sent'));
-        } else if (data.event === 'message:confirm_error') {
-          // Không xoá thẻ: lỗi mạng thì bấm lại là gửi được. Chỉ khi lõi nói
-          // bản nháp không còn nữa thì thẻ mới vô nghĩa, và lúc đó
-          // `message:pending` ở lượt sau sẽ tự dọn.
-          draftBusy.value = false;
-          pushAssistantLine(`⚠️ ${data.payload?.error || t('wg_draft_failed')}`);
-        } else if (data.event === 'message:cancel_response') {
-          pendingDraft.value = null;
-          draftBusy.value = false;
-        } else if (
-          data.event === 'message:cancel_error' ||
-          data.event === 'message:pending_error'
-        ) {
-          draftBusy.value = false;
-        } else if (data.event === 'audio_ducking') {
-          // [v26] Stage 1 Barge-in: backend reduces TTS volume when user starts speaking
-          const vol = typeof data.payload?.volume === 'number' ? data.payload.volume : 1.0;
-          speaker.setMasterVolume(vol);
-        } else if (data.event === 'ai_audio_chunk') {
-          if (speaker.isBlocked()) return;
-          try {
-            const binaryStr = atob(data.payload.audio);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++)
-              bytes[i] = binaryStr.codePointAt(i) as number;
-
-            await speaker.enqueueEncodedAudio(bytes.buffer);
-          } catch (audioErr: unknown) {
-            logger.warn(
-              '[Widget]',
-              'Audio decode/playback error:',
-              audioErr instanceof Error ? audioErr.message : String(audioErr)
-            );
-          }
-        }
-      } catch (parseErr: unknown) {
-        logger.warn(
-          '[Widget]',
-          'WebSocket message parse error:',
-          parseErr instanceof Error ? parseErr.message : String(parseErr)
-        );
-      }
-    };
-
-    socket.onerror = () => {
-      logger.warn('[Widget]', `Gateway socket error on port ${port}`);
-    };
-
-    socket.onclose = () => {
-      if (ws !== socket) return;
-      ws = null;
-      engineStatus.value = 'websocket-disconnected';
-      const cleanup = voice.stopPipeline().catch((error: unknown) => {
-        logger.warn(
-          '[Widget]',
-          'Voice cleanup after gateway disconnect failed:',
-          error instanceof Error ? error.message : String(error)
-        );
-      });
-      void cleanup.then(() => {
-        if (!allowWsReconnect) return;
-
-        const delay = Math.min(500 * 2 ** wsReconnectAttempt, 5_000);
-        wsReconnectAttempt += 1;
-        if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-        wsReconnectTimer = setTimeout(() => {
-          wsReconnectTimer = null;
-          void connectWebSocket();
-        }, delay);
-        logger.warn('[Widget]', `Gateway disconnected; reconnecting in ${delay}ms`);
-      });
-    };
-  };
-
-  void connectWebSocket();
-
-  // 4. Listen for avatar/config hot-swap from Dashboard (Handled via WebSocket instead of IPC)
-
-  if (ws) {
-    engineStatus.value = 'websocket-connecting';
-  }
 });
 
 onUnmounted(() => {
   globalThis.removeEventListener('keydown', handleKeydown);
-  allowWsReconnect = false;
-  if (wsReconnectTimer) {
-    clearTimeout(wsReconnectTimer);
-    wsReconnectTimer = null;
-  }
-  if (ws) {
-    const socket = ws;
-    ws = null;
-    socket.close();
-  }
+  closeTransport();
   speaker.close();
   stopFrameCapture();
   voice.stopPipeline();
   if (zonesInterval) {
     clearInterval(zonesInterval);
     zonesInterval = null;
-  }
-  if (avatarActionTimer) {
-    clearTimeout(avatarActionTimer);
-    avatarActionTimer = null;
   }
   clearToolPresentationTimer();
   engineRef.value?.setThinking?.(false);
@@ -1549,11 +1208,6 @@ onDeactivated(() => {
   if (zonesInterval) {
     clearInterval(zonesInterval);
     zonesInterval = null;
-  }
-  if (avatarActionTimer) {
-    clearTimeout(avatarActionTimer);
-    avatarActionTimer = null;
-    avatarActionActive = false;
   }
 });
 </script>

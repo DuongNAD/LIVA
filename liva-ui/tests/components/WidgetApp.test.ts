@@ -1061,4 +1061,34 @@ describe('WidgetApp.vue', () => {
       wrapper.unmount();
     });
   });
+
+  describe('Lifecycle KeepAlive', () => {
+    it('kích hoạt onActivated và onDeactivated', async () => {
+      const App = {
+        components: { WidgetApp },
+        template: '<keep-alive><WidgetApp v-if="show" /></keep-alive>',
+        data() { return { show: true }; }
+      };
+      const wrapper = mount(App, {
+        global: {
+        provide: {
+          platform: {
+            platformName: 'web',
+            getWindowSize: () => Promise.resolve({ width: 800, height: 600 }),
+            toggleGhostMode: vi.fn(),
+            minimizeToTray: vi.fn(),
+            quitApp: vi.fn(),
+            hasVaultSecret: vi.fn(),
+            storeVaultSecret: vi.fn(),
+            deleteVaultSecret: vi.fn(),
+            invokeBackend: vi.fn(() => Promise.resolve()),
+          },
+        },
+        }
+      });
+      await nextTick();
+      await wrapper.setData({ show: false });
+      wrapper.unmount();
+    });
+  });
 });

@@ -9,13 +9,9 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 use tracing_subscriber::FmtSubscriber;
 
-/// Báo cáo môi trường chạy (`--preflight`). Cố ý là module của **binary**, không
-/// của lib: nó chỉ phục vụ dòng lệnh, và giữ ở đây thì `lib.rs` không phải mở
-/// thêm API công khai nào.
-mod preflight;
-
 /// Tải model từ dòng lệnh (`--setup-models`). Cùng lý do đặt ở binary như
-/// `preflight`; phần logic dùng chung với vỏ Tauri nằm ở `liva_native_core::setup`.
+/// trước đây của `preflight`; phần logic dùng chung với vỏ Tauri nằm ở
+/// `liva_native_core::setup`.
 mod setup_cli;
 
 #[derive(Debug, Deserialize)]
@@ -40,7 +36,7 @@ fn main() {
     // không nạp model. Đó là cả điểm của nó — phải trả lời được "máy này thiếu
     // gì" trên đúng cái máy chưa boot nổi. Nạp model ở đây là tự thua.
     if std::env::args().skip(1).any(|a| a == "--preflight") {
-        std::process::exit(preflight::chay());
+        std::process::exit(liva_native_core::preflight::chay());
     }
 
     // `--setup-models` cũng chạy TRƯỚC mọi khởi tạo, và vì cùng một lý do: nó

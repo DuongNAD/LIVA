@@ -28,14 +28,19 @@
 use std::path::{Path, PathBuf};
 
 /// Một dòng trong báo cáo.
-struct Muc {
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct Muc {
     /// Năng lực người dùng nhìn thấy, không phải tên module.
+    #[serde(rename = "name")]
     ten: &'static str,
     /// `true` = dùng được, `false` = mất năng lực, `None` = không kết luận được.
+    #[serde(rename = "available")]
     ok: Option<bool>,
     /// Trạng thái đo được, một dòng.
+    #[serde(rename = "status")]
     trang_thai: String,
     /// Hệ quả khi thiếu / ghi chú hành động. Rỗng thì bỏ dòng này.
+    #[serde(rename = "consequence")]
     he_qua: String,
 }
 
@@ -137,7 +142,7 @@ fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) ->
             // `gpu_layers_theo_vram` trả 0 ngay khi `can == 0`, tức khi không đo
             // được kích thước model — trên máy mới cài thì đó là lý do DUY NHẤT,
             // và VRAM hoàn toàn không liên quan.
-            if liva_native_core::configured_router_model_path().is_none_or(|p| !p.is_file()) {
+            if crate::configured_router_model_path().is_none_or(|p| !p.is_file()) {
                 "CHƯA CÓ MODEL nên chưa tính được — đây là hệ quả của dòng \
                  `Model chat` bên dưới, không phải vấn đề GPU. Phép tự chọn cần \
                  kích thước model + projector để biết nhét được bao nhiêu lớp; \
@@ -170,7 +175,7 @@ fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) ->
 }
 
 /// Dựng toàn bộ báo cáo. Thuần đọc — không mở DB, không nạp model.
-fn thu_thap() -> Vec<Muc> {
+pub fn thu_thap() -> Vec<Muc> {
     let mut muc = Vec::new();
 
     // ── Profile build & tăng tốc ─────────────────────────────────────────
@@ -189,7 +194,7 @@ fn thu_thap() -> Vec<Muc> {
     }
     muc.push(profile);
 
-    let vram = liva_native_core::governor::gpu_vram_bytes();
+    let vram = crate::governor::gpu_vram_bytes();
     let co_gpu = vram.is_some();
     muc.push(match vram {
         // `gpu_vram_bytes` trả `(tổng, đang dùng)` — thứ tự này dễ đảo, và đảo thì
@@ -219,7 +224,7 @@ fn thu_thap() -> Vec<Muc> {
     let n_gpu_layers = std::env::var("LIVA_LLM_N_GPU_LAYERS")
         .ok()
         .and_then(|v| v.trim().parse::<u32>().ok())
-        .unwrap_or_else(liva_native_core::boot::gpu_layers_mac_dinh);
+        .unwrap_or_else(crate::boot::gpu_layers_mac_dinh);
     muc.push(muc_vision(
         cfg!(debug_assertions),
         cfg!(feature = "cuda"),
@@ -249,8 +254,7 @@ fn thu_thap() -> Vec<Muc> {
 
     // ── vec0: thứ duy nhất CHẶN BOOT ────────────────────────────────────
     let exe_dir = std::env::current_exe().ok();
-    let ung_vien =
-        liva_native_core::db::vec0_candidate_paths(exe_dir.as_deref().and_then(|p| p.parent()));
+    let ung_vien = crate::db::vec0_candidate_paths(exe_dir.as_deref().and_then(|p| p.parent()));
     let vec0_thay = ung_vien.iter().find(|c| Path::new(c).is_file());
     muc.push(match vec0_thay {
         Some(p) => Muc::moi("sqlite-vec (vec0)", Some(true), gon(Path::new(p))),
@@ -272,7 +276,7 @@ fn thu_thap() -> Vec<Muc> {
             "Sẽ dùng khoá thiết bị (DPAPI) khi khởi động thật. Preflight không \
              mở keystore nên không kết luận thay được.",
         ),
-        Some(k) if k == liva_native_core::crypto::DEFAULT_ENCRYPTION_KEY => Muc::moi(
+        Some(k) if k == crate::crypto::DEFAULT_ENCRYPTION_KEY => Muc::moi(
             "Khoá mã hoá dữ liệu cá nhân",
             Some(false),
             "đang dùng KHOÁ MẶC ĐỊNH (công khai trong source)",
@@ -297,7 +301,7 @@ fn thu_thap() -> Vec<Muc> {
     //    không phải về model mà app đang thật sự nạp — hai thứ đó trùng nhau
     //    HÔM NAY (cùng là `gemma-4-E4B` từ 02/08/2026) nên cái bẫy vô hình; ngày
     //    chúng lệch nhau lại là ngày dòng ✓ này nói dối mà không ai thấy.
-    let cfg = liva_native_core::config_file_path();
+    let cfg = crate::config_file_path();
     let co_cfg = cfg.exists();
     muc.push(if co_cfg {
         Muc::moi("Cấu hình (liva-config.json)", Some(true), gon(&cfg))
@@ -315,7 +319,7 @@ fn thu_thap() -> Vec<Muc> {
     });
 
     // ── Model từ config (chi tiết để `doctor` lo) ───────────────────────
-    let router = liva_native_core::configured_router_model_path();
+    let router = crate::configured_router_model_path();
     muc.push(match router {
         Some(p) if p.is_file() => Muc::moi("Model chat (router GGUF)", Some(true), gon(&p)),
         Some(p) => Muc::moi("Model chat (router GGUF)", Some(false), gon(&p))
@@ -324,7 +328,7 @@ fn thu_thap() -> Vec<Muc> {
             .vi("Đặt `ai.localModelsDir` + `ai.routerModel` trong `data/liva-config.json`."),
     });
 
-    let mmproj = liva_native_core::configured_mmproj_path();
+    let mmproj = crate::configured_mmproj_path();
     muc.push(match mmproj {
         Some(p) if p.is_file() => Muc::moi("Bộ chiếu thị giác (mmproj)", Some(true), gon(&p)),
         Some(p) => Muc::moi("Bộ chiếu thị giác (mmproj)", Some(false), gon(&p))
@@ -470,6 +474,38 @@ mod tests {
         let m = thu_thap();
         assert!(m.len() >= 8, "quá ít hạng mục: {}", m.len());
         assert!(m.iter().all(|x| !x.ten.is_empty()));
+    }
+
+    #[test]
+    fn bao_cao_co_hinh_dang_json_on_dinh_cho_ui() {
+        let json = serde_json::to_value(thu_thap()).expect("preflight phải serialize được");
+        let first = json
+            .as_array()
+            .and_then(|items| items.first())
+            .expect("preflight phải có ít nhất một mục");
+        assert!(
+            first
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+        );
+        assert!(first.get("available").is_some());
+        assert!(
+            first
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+        );
+        assert!(
+            first
+                .get("consequence")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+        );
+        assert!(
+            first.get("ten").is_none(),
+            "không rò tên field nội bộ ra IPC"
+        );
     }
 
     #[test]

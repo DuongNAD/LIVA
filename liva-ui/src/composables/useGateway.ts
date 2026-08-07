@@ -65,6 +65,39 @@ const applyConsentPayload = (payload: unknown) => {
 };
 
 const systemStatus = ref<Partial<SystemStatus>>({});
+export interface PreflightItem {
+  name: string;
+  available: boolean | null;
+  status: string;
+  consequence: string;
+}
+export interface PreflightReport {
+  items: PreflightItem[];
+}
+const preflightReport = ref<PreflightReport | null>(null);
+const applyPreflightPayload = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+  const rawItems = (payload as { items?: unknown }).items;
+  if (!Array.isArray(rawItems)) return;
+  const items: PreflightItem[] = [];
+  for (const raw of rawItems) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const item = raw as Record<string, unknown>;
+    if (
+      typeof item.name !== 'string' ||
+      (typeof item.available !== 'boolean' && item.available !== null) ||
+      typeof item.status !== 'string' ||
+      typeof item.consequence !== 'string'
+    ) continue;
+    items.push({
+      name: item.name,
+      available: item.available,
+      status: item.status,
+      consequence: item.consequence,
+    });
+  }
+  preflightReport.value = { items };
+};
 const skillsList = ref<SkillInfo[]>([]);
 const tasksList = ref<TaskItem[]>([]);
 const avatarModels3D = ref<AvatarModelInfo[]>([]);
@@ -258,6 +291,9 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       break;
     case 'get_system_status':
       systemStatus.value = (res as Partial<SystemStatus>) || {};
+      break;
+    case 'get_preflight_status':
+      applyPreflightPayload(res);
       break;
     case 'get_skills_list':
       skillsList.value = ((res as { skills?: SkillInfo[] })?.skills || (res as SkillInfo[]) || []) as SkillInfo[];
@@ -561,6 +597,9 @@ const connect = () => {
         case 'system_status':
           systemStatus.value = data.payload;
           break;
+        case 'get_preflight_status_response':
+          applyPreflightPayload(data.payload);
+          break;
         case 'skills_list':
           skillsList.value = data.payload.skills || data.payload;
           break;
@@ -806,6 +845,7 @@ export function useGateway() {
     vieneuNotice,
     observationConsent,
     systemStatus,
+    preflightReport,
     skillsList,
     tasksList,
     avatarModels3D,

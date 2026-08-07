@@ -114,6 +114,22 @@ const systemStatusRef = ref({
   vramUsage: 30,
   latencyMs: 15,
 });
+const preflightReportRef = ref({
+  items: [
+    {
+      name: "Nhìn màn hình (vision:ask)",
+      available: false,
+      status: "build DEBUG",
+      consequence: "Cần cargo build --release.",
+    },
+    {
+      name: "Bot Telegram",
+      available: null,
+      status: "không đặt token — bot sẽ không chạy",
+      consequence: "",
+    },
+  ],
+});
 const isConnectedRef = ref(true);
 const memoryDataRef = ref({
   facts: [
@@ -154,6 +170,7 @@ const gatewayMock = {
   userProfile: userProfileRef,
   configData: configDataRef,
   systemStatus: systemStatusRef,
+  preflightReport: preflightReportRef,
   isConnected: isConnectedRef,
   memoryData: memoryDataRef,
   tasksList: tasksListRef,
@@ -507,6 +524,11 @@ describe("Dashboard Views", () => {
   it("should mount and exercise SystemView.vue", async () => {
     const wrapper = mount(SystemView);
     expect(wrapper.exists()).toBe(true);
+    expect(gatewayMock.sendMsg).toHaveBeenCalledWith("get_preflight_status");
+    expect(wrapper.get("[data-testid='preflight-report']").text()).toContain("Nhìn màn hình");
+    expect(wrapper.get("[data-testid='preflight-report']").text()).toContain("build DEBUG");
+    expect(wrapper.get("[data-testid='preflight-report']").text()).toContain("Cần cargo build --release");
+    expect(wrapper.get("[data-testid='preflight-report']").text()).toContain("Chưa cấu hình");
   });
 
   it("should mount and exercise TaskManager.vue", async () => {

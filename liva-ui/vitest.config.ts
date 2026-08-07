@@ -47,7 +47,7 @@ export default defineConfig({
         // per-file để reconnect/command transport/vision không âm thầm tụt lại
         // dưới mức đã nghiệm thu ngày 31/07/2026.
         'src/WidgetApp.vue': {
-          lines: 50,
+          lines: 80,
         },
         'src/composables/useGateway.ts': {
           lines: 50,

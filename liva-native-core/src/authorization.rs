@@ -55,6 +55,7 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "get_voice_status",
     "get_voice_profiles",
     "get_system_status",
+    "get_preflight_status",
     "get_skills_list",
     "get_user_profile",
     "get_avatar_models",
@@ -146,5 +147,24 @@ pub fn authorize_command(principal: CommandPrincipal, command: &str) -> Result<(
         Err(format!(
             "principal {principal:?} is not authorized for command '{command}'"
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preflight_chi_mo_cho_dashboard_cuc_bo() {
+        assert!(
+            authorize_command(CommandPrincipal::TauriDashboard, "get_preflight_status").is_ok()
+        );
+        assert!(
+            authorize_command(CommandPrincipal::WebSocketDashboard, "get_preflight_status").is_ok()
+        );
+        assert!(authorize_command(CommandPrincipal::TauriWidget, "get_preflight_status").is_err());
+        assert!(
+            authorize_command(CommandPrincipal::WebSocketRemote, "get_preflight_status").is_err()
+        );
     }
 }

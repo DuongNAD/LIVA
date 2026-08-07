@@ -375,6 +375,15 @@ describe('useGateway — Message Dispatch & Error Handlers', () => {
       { event: 'voice_profiles', payload: { profiles: [{ id: '1' }] } },
       { event: 'avatar_models_list', payload: { models3d: [{ name: 'm3d' }], models2d: [{ name: 'm2d' }] } },
       { event: 'system_status', payload: { cpuUsage: 10 } },
+      {
+        event: 'get_preflight_status_response',
+        payload: {
+          items: [
+            { name: 'Vision', available: false, status: 'debug', consequence: 'build release' },
+            { name: 'invalid item', available: 'yes', status: 'bad', consequence: '' },
+          ],
+        },
+      },
       { event: 'skills_list', payload: { skills: [{ name: 's1' }] } },
       { event: 'tasks_list', payload: { tasks: [{ title: 't1' }] } },
       { event: 'memory_data', payload: { facts: [{ key: 'k' }] } },
@@ -390,6 +399,9 @@ describe('useGateway — Message Dispatch & Error Handlers', () => {
     expect(gw.voiceProfiles.value).toEqual([{ id: '1' }]);
     expect(gw.avatarModels3D.value).toEqual([{ name: 'm3d' }]);
     expect(gw.systemStatus.value).toEqual({ cpuUsage: 10 });
+    expect(gw.preflightReport.value).toEqual({
+      items: [{ name: 'Vision', available: false, status: 'debug', consequence: 'build release' }],
+    });
     expect(gw.skillsList.value).toEqual([{ name: 's1' }]);
     expect(gw.tasksList.value).toEqual([{ title: 't1' }]);
     expect(gw.gpuSetupStatus.value).toBe('Complete');

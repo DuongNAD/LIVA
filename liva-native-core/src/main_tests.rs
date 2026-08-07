@@ -153,6 +153,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_preflight_status_tra_cung_bang_voi_cli() {
+        let val = handle_command(
+            test_state(),
+            "get_preflight_status",
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .await
+        .expect("preflight command phải chạy được qua dispatcher");
+
+        let items = val["items"]
+            .as_array()
+            .expect("preflight response phải có mảng items");
+        assert!(items.len() >= 8, "quá ít hạng mục: {}", items.len());
+        assert!(items.iter().all(|item| item.get("name").is_some()));
+        assert!(items.iter().all(|item| item.get("available").is_some()));
+        assert!(items.iter().all(|item| item.get("status").is_some()));
+        assert!(items.iter().all(|item| item.get("consequence").is_some()));
+    }
+
+    #[tokio::test]
     async fn test_unknown_command() {
         let state = test_state();
         let payload = serde_json::json!({});

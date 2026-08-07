@@ -112,6 +112,7 @@ const avatarEngineMock = {
   stopMoving: vi.fn(),
   setWander: vi.fn(),
   setThinking: vi.fn(),
+  triggerMotion: vi.fn(),
   getScreenBounds: vi.fn(() => null),
 };
 
@@ -802,6 +803,147 @@ describe('WidgetApp.vue', () => {
     expect(socket.send).toHaveBeenCalledWith('[INTERRUPT]');
 
     wrapper.unmount();
+  });
+
+  it('thực thi các điều khiển chat mở rộng qua DOM', async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(WidgetApp, {
+      global: {
+        provide: {
+          platform: { platformName: 'web', invokeBackend: vi.fn().mockResolvedValue(null) },
+        },
+        stubs: {
+          Live2DEngine: true,
+          VRMEngine: AvatarEngineStub,
+          VisionSensor: true,
+          ResourceMeter: true,
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = mockSockets[0];
+    socket.readyState = MockWebSocket.OPEN;
+    socket.onopen?.(new Event('open'));
+
+    const vm = wrapper.vm as any;
+    vm.isCollapsed = false;
+    await nextTick();
+
+    const input = wrapper.get('input[type="text"]');
+    await input.setValue('  kiểm tra DOM  ');
+    await input.trigger('keyup.enter');
+    expect(socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw))).toContainEqual({
+      event: 'user_voice_command',
+      payload: { text: 'kiểm tra DOM' },
+    });
+    expect((input.element as HTMLInputElement).value).toBe('');
+
+    await wrapper.get('button[title="Diagnostics"]').trigger('click');
+    expect(vm.showDiagnostics).toBe(true);
+    await wrapper.get('input[type="range"]').setValue('0.025');
+    expect(voiceMock.setWakeWordThreshold).toHaveBeenCalledWith(0.025);
+
+    voiceMock.state.value = 'PASSIVE';
+    await wrapper.get('button[title="wg_start_mic"]').trigger('click');
+    expect(voiceMock.toggleVoice).toHaveBeenCalled();
+
+    vm.isThinking = true;
+    await nextTick();
+    await wrapper.get('button[title="wg_interrupt"]').trigger('click');
+    expect(socket.send).toHaveBeenCalledWith('[INTERRUPT]');
+    expect(avatarEngineMock.triggerMotion).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('phát phản hồi wake word và force trigger qua pipeline đang mở', async () => {
+    const oscillator = {
+      connect: vi.fn(),
+      type: '',
+      frequency: { value: 0 },
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    const gain = {
+      connect: vi.fn(),
+      gain: {
+        setValueAtTime: vi.fn(),
+        linearRampToValueAtTime: vi.fn(),
+        exponentialRampToValueAtTime: vi.fn(),
+      },
+    };
+    class FakeAudioContext {
+      state = 'suspended';
+      currentTime = 1;
+      destination = {};
+      resume = vi.fn();
+      createOscillator = vi.fn(() => oscillator);
+      createGain = vi.fn(() => gain);
+    }
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+
+    const wrapper = mount(WidgetApp, {
+      global: {
+        provide: {
+          platform: { platformName: 'web', invokeBackend: vi.fn().mockResolvedValue(null) },
+        },
+        stubs: {
+          Live2DEngine: true,
+          VRMEngine: true,
+          VisionSensor: true,
+          ResourceMeter: true,
+        },
+      },
+    });
+    await vi.waitFor(() => expect(mockSockets).toHaveLength(1));
+    const socket = mockSockets[0];
+    socket.readyState = MockWebSocket.OPEN;
+
+    const wakeCallback = voiceMock.onWakeWordDetected.mock.calls.at(-1)?.[0] as () => void;
+    wakeCallback();
+    expect(voiceMock.muteWakeWordFor).toHaveBeenCalledWith(750);
+    expect(oscillator.start).toHaveBeenCalledTimes(2);
+
+    voiceMock.state.value = 'PASSIVE';
+    await (wrapper.vm as any).forceTriggerWakeWord();
+    expect(voiceMock.state.value).toBe('ACTIVE');
+    expect(socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw).event)).toContain(
+      'wake_word_triggered'
+    );
+    expect((wrapper.vm as any).messages.at(-1).text).toBe('wg_wake_word_ack');
+    wrapper.unmount();
+  });
+
+  it('xử lý phím sensory capture và dọn timer khi unmount', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mount(WidgetApp, {
+      global: {
+        provide: {
+          platform: { platformName: 'web', invokeBackend: vi.fn().mockResolvedValue(null) },
+        },
+        stubs: {
+          Live2DEngine: true,
+          VRMEngine: true,
+          VisionSensor: true,
+          ResourceMeter: true,
+        },
+      },
+    });
+
+    globalThis.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'S', ctrlKey: true, shiftKey: true })
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:3000/api/sensory-capture',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect((wrapper.vm as any).isSensing).toBe(true);
+
+    wrapper.unmount();
+    await vi.runAllTimersAsync();
+    expect((wrapper.vm as any).isSensing).toBe(true);
   });
 
   /**

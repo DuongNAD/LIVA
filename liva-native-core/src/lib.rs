@@ -21,6 +21,7 @@ pub mod openai_api;
 pub mod passive;
 mod paths;
 pub mod persistence_backup;
+pub mod preflight;
 pub mod setup;
 pub mod skills;
 pub mod stt;

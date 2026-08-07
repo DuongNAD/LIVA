@@ -51,6 +51,7 @@ const hardware = ref<HardwareProfile | null>(null);
 const hc = computed(() => (gateway.systemStatus.value as SystemStatusExt)?.healthChecks || null);
 const osStats = computed<OsStats>(() => (gateway.systemStatus.value as SystemStatusExt)?.osStats || {});
 const telemetry = computed<TelemetryEntry[]>(() => (gateway.systemStatus.value as SystemStatusExt)?.telemetry || []);
+const preflightReport = computed(() => gateway.preflightReport.value);
 
 // 'busy'    — lõi đang giữ lock (LLM sinh chữ, TTS đang phát). Đang CHẠY.
 // 'unknown' — không đo được (vd VRAM trên máy không NVIDIA). Khác hẳn 'offline':
@@ -160,7 +161,10 @@ const aiModel = computed<string>(() => String((gateway.systemStatus.value as Sys
 let timer: ReturnType<typeof setInterval> | null = null;
 const startPoll = () => { if (!timer) { gateway.sendMsg('get_system_status'); timer = setInterval(() => gateway.sendMsg('get_system_status'), 3000); } };
 const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
-onMounted(() => { hardware.value = profileHardware(); });
+onMounted(() => {
+  hardware.value = profileHardware();
+  gateway.sendMsg('get_preflight_status');
+});
 onActivated(startPoll);
 onDeactivated(stopPoll);
 onUnmounted(stopPoll);
@@ -221,6 +225,29 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'busy' ?
       </div>
     </div>
 
+    <!-- Cùng dữ liệu với `liva-native-core --preflight`; frontend không tự
+         suy diễn lại trạng thái tài nguyên. -->
+    <div class="section-subtitle" style="margin-top:var(--space-lg)">Kiểm tra tài nguyên trước khi chạy</div>
+    <div class="card preflight-card" data-testid="preflight-report">
+      <div v-if="!preflightReport" class="preflight-empty">Đang kiểm tra môi trường chạy…</div>
+      <div v-else-if="!preflightReport.items.length" class="preflight-empty">Không nhận được dữ liệu preflight.</div>
+      <div v-else class="preflight-list">
+        <div v-for="item in preflightReport.items" :key="item.name" class="preflight-row">
+          <span :class="['preflight-mark', item.available === true ? 'ok' : item.available === false ? 'missing' : 'unknown']">
+            {{ item.available === true ? '✓' : item.available === false ? '✗' : '?' }}
+          </span>
+          <div class="preflight-body">
+            <div class="preflight-name">{{ item.name }}</div>
+            <div class="preflight-status">{{ item.status }}</div>
+            <div v-if="item.consequence" class="preflight-consequence">{{ item.consequence }}</div>
+          </div>
+          <span :class="['badge', item.available === true ? 'badge-success' : item.available === false ? 'badge-danger' : 'badge-warning']">
+            {{ item.available === true ? 'Sẵn sàng' : item.available === false ? 'Mất năng lực' : 'Chưa cấu hình' }}
+          </span>
+        </div>
+      </div>
+    </div>
+
     <!-- Hardware -->
     <div class="section-subtitle" style="margin-top:var(--space-lg)">{{ t('sys_hardware') }}</div>
     <div class="card hw-card" v-if="hardware">
@@ -262,6 +289,20 @@ function badgeTxt(s: string) { return s === 'online' ? 'Online' : s === 'busy' ?
 
 <style scoped>
 .system-view { padding: var(--space-lg); overflow-y: auto; height: 100%; }
+
+.preflight-card { padding: var(--space-sm) var(--space-md); }
+.preflight-list { display: flex; flex-direction: column; }
+.preflight-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: var(--space-sm); align-items: start; padding: var(--space-sm) 0; border-bottom: 1px solid var(--border-subtle); }
+.preflight-row:last-child { border-bottom: 0; }
+.preflight-mark { font-size: 16px; font-weight: 800; line-height: 20px; }
+.preflight-mark.ok { color: var(--color-success); }
+.preflight-mark.missing { color: var(--color-danger); }
+.preflight-mark.unknown { color: var(--color-warning); }
+.preflight-body { min-width: 0; }
+.preflight-name { color: var(--text-primary); font-size: 13px; font-weight: 700; }
+.preflight-status { color: var(--text-secondary); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.preflight-consequence { color: var(--text-muted); font-size: 11px; line-height: 1.45; margin-top: 4px; }
+.preflight-empty { color: var(--text-muted); font-size: 12px; padding: var(--space-sm) 0; }
 
 /* Control Card & Actions */
 .control-card { padding: var(--space-md); margin-bottom: var(--space-md); }

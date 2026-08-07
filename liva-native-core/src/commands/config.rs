@@ -107,6 +107,7 @@ const OWNED: &[&str] = &[
     "get_voice_status",
     "get_voice_profiles",
     "get_system_status",
+    "get_preflight_status",
     "get_skills_list",
     "get_user_profile",
     "get_avatar_models",
@@ -132,6 +133,12 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         "get_voice_status" => get_voice_status(state).await,
         "get_voice_profiles" => Ok(json!(liet_ke_thu_muc(std::path::Path::new("data/voices")))),
         "get_system_status" => system_status(state).await,
+        "get_preflight_status" => {
+            let items = tokio::task::spawn_blocking(crate::preflight::thu_thap)
+                .await
+                .map_err(|error| format!("Preflight worker failed: {error}"))?;
+            Ok(json!({ "items": items }))
+        }
         "get_skills_list" => Ok(json!([integrations::smart_home::get_metadata()])),
         "get_user_profile" => get_user_profile(),
         "get_avatar_models" => Ok(json!({
@@ -318,7 +325,7 @@ mod tests {
         // thêm nhánh vào `handle` mà quên `OWNED` sẽ làm test này đỏ.
         assert_eq!(
             OWNED.len(),
-            12,
+            13,
             "đổi số nhánh thì cập nhật cả OWNED lẫn test"
         );
         for name in OWNED {
@@ -329,6 +336,7 @@ mod tests {
             "không được nhận lệnh của miền khác"
         );
         assert!(!owns("get_tasks"), "get_tasks thuộc miền task, chưa tách");
+        assert!(owns("get_preflight_status"));
     }
 
     /// Thư mục không tồn tại phải trả danh sách RỖNG, không panic — cả ba lệnh

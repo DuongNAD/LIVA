@@ -1,7 +1,7 @@
 ---
 title: "Agent và tool runtime — kiến trúc as-built"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - may-trang-thai-agent
@@ -86,7 +86,7 @@ flowchart TD
 |---|---|---|
 | `router` | gọi `route_intent`, hoặc thử `select_tool` khi intent là chat | không |
 | `mcp_tool_exec` | dựng `ResolvedCall`, gọi executor, chuyển observation thành message `tool` | có, theo policy |
-| `message_draft` | tạo bản nháp và yêu cầu xác nhận | chỉ ghi outbox RAM |
+| `message_draft` | tạo bản nháp và yêu cầu xác nhận | outbox SQLite mã hoá, TTL 300 giây, sống qua restart |
 | `tool_exec` | gọi placeholder smart-home theo keyword | adapter hiện chưa điều khiển thiết bị thật |
 | `vision` | chụp/đọc màn hình rồi tạo context | đọc |
 | `chat_completion` | RAG, prompt, stream LLM, persist turn | ghi memory/event |
@@ -138,7 +138,7 @@ LLM không đọc được.
 - tool native từ `NativeMcpServer::list_tools`;
 - tool của các server trong `LIVA_TOOL_CALLING_SERVERS`.
 
-Native catalog hiện có sáu tool:
+Native catalog hiện có bảy tool:
 
 | Tool | Loại | Mặc định |
 |---|---|---|
@@ -148,9 +148,11 @@ Native catalog hiện có sáu tool:
 | `control_smarthome` | hành động vật lý placeholder | Auto, nhưng adapter chưa thật |
 | `control_volume` | OS reversible | Auto |
 | `control_media` | OS reversible | Auto |
+| `get_weather` | đọc dữ liệu thời tiết qua Open-Meteo | Auto; cần Internet, định vị IP phải opt-in |
 
-Comment trong `NativeMcpServer::list_tools` vẫn ghi “bốn tool”; vector thực tế có sáu. Đây là
-comment stale, không phải catalog runtime chỉ có bốn.
+`get_weather` nhận location tường minh hoặc dùng profile/định vị coarse đã opt-in; timeout cứng và
+trả lỗi rõ khi offline. Nó là ngoại lệ mạng read-only, không phải bằng chứng LIVA đã chuyển sang
+cloud-first.
 
 `liva-native-core/src/llm/tool_calling.rs#execute_call` là cửa thi hành của đường agent:
 
@@ -191,9 +193,11 @@ phải action policy.
 Hai lệnh `mcp:call_tool` và `mcp_client:call_tool` không đi qua selector. Chúng gọi
 `liva-native-core/src/llm/tool_calling.rs#guard_direct_call` trước executor cụ thể.
 
-Điều này đóng đường gọi trực tiếp tới `write_markdown` hoặc tool server ngoài theo mặc định,
-nhưng không biến WebSocket thành một ranh giới xác thực. Handshake hiện kiểm
-`liva-native-core/src/lib.rs#origin_allowed`; chưa có identity/authorization theo client.
+Điều này đóng đường gọi trực tiếp tới `write_markdown` hoặc tool server ngoài theo mặc định.
+WebSocket/Tauri còn đi qua `authorization::authorize_command`: query tự khai principal không được
+tin, scope đặc quyền chỉ đến từ exact Tauri label hoặc session ticket loopback dùng một lần.
+`guard_direct_call` vẫn cần vì principal chỉ trả lời *ai được gọi command*, không quyết định tool
+nào được auto-execute.
 
 Test nối dây và guard:
 

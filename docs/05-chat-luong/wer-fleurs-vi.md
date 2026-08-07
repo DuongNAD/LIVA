@@ -2,6 +2,7 @@
 title: "WER tiếng Việt qua đường ống STT sản xuất"
 updated: 2026-08-04
 commit: 596e8b6
+stale-ok: bd11c84
 status: living
 owns:
   - wer-tieng-viet-do-thuc-te

@@ -1,7 +1,7 @@
 ---
 title: "Threat model — ranh giới tin cậy, mã hóa và kế hoạch hardening"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - so-do-ma-hoa
@@ -52,7 +52,7 @@ vụ LAN hoặc môi trường multi-user. Mô hình bảo vệ tốt nhất hi�
 - CSP chỉ cho script/style bundle từ `self`, cấm object/base/frame và không còn inline asset;
 - GGUF, mmproj và vec0 phải canonicalize trong trust root và khớp SHA-256 manifest nhúng;
 - Telegram fail-closed khi allowlist ID rỗng;
-- tool side effect có policy cục bộ, nhưng chưa có identity/audit thống nhất.
+- tool side effect có policy cục bộ và principal theo kênh, nhưng chưa có action ID/audit thống nhất.
 
 Các giới hạn quan trọng:
 
@@ -98,12 +98,13 @@ Các giới hạn quan trọng:
 ```mermaid
 flowchart LR
     WEB["Trang web bất kỳ"] -- "Origin" --> OA["Origin allowlist"]
-    NATIVE["Native process cùng user"] -- "không Origin" --> WS["WebSocket /ws"]
+    NATIVE["Native process cùng user"] -- "loopback · mặc định remote scope" --> WS["WebSocket /ws"]
     LAN["Thiết bị LAN"] -- "Bearer bắt buộc nếu non-loopback" --> AUTH["WS auth"]
     AUTH --> WS
     TAURI["WebView Tauri"] --> TC["Tauri commands"]
     OA --> WS
-    WS --> CMD["Generic command router"]
+    WS --> AUTHZ["Principal command allow-list"]
+    AUTHZ --> CMD["Generic command router"]
     TC --> CORE["Rust AppState"]
     CMD --> CORE
     CORE --> DB["SQLite + WAL"]
@@ -116,9 +117,10 @@ flowchart LR
     class NATIVE,CMD gap;
 ```
 
-Ranh giới màu đỏ chưa có principal/authorization độc lập. Origin allowlist bảo vệ browser
-cross-site; Bearer bảo vệ non-loopback; loopback vẫn không phải security boundary trước native
-malware/process khác cùng user.
+Principal/authorization baseline đã có: query không tự khai được scope, ticket đặc quyền chỉ do
+Tauri exact-label cấp và dùng một lần trên loopback. Origin bảo vệ browser cross-site; Bearer bảo
+vệ non-loopback. Loopback vẫn không phải security boundary trước malware/process khác cùng user,
+và shared secret chưa phải device identity.
 
 ## 4. Mã hóa và quản lý khóa
 
@@ -300,6 +302,13 @@ filesystem/network/process của user. Nó chỉ có target dir riêng, timeout 
 Không được mô tả cơ chế này là sandbox bảo mật. Chỉ được bật production sau khi có VM/container/
 Windows Sandbox, network deny, read-only source, resource quota, patch provenance và human review.
 
+### 6.7 HTTP tương thích OpenAI
+
+`openai_api.rs` chỉ mở khi có `LIVA_OPENAI_PORT`; endpoint không có xác thực nội tại. Default tắt
+và host nên giữ `127.0.0.1`. Nếu bind ra LAN, operator phải đặt reverse proxy TLS + token phía
+trước; Bearer/session ticket của WebSocket **không** tự bảo vệ HTTP này. Memory từ API được tách
+owner `openai_api`, nhưng tách scope dữ liệu không thay thế network authentication.
+
 ## 7. Risk register
 
 | ID | Mức | Rủi ro | Trạng thái |
@@ -309,6 +318,7 @@ Windows Sandbox, network deny, read-only source, resource quota, patch provenanc
 | S-P0-3 | cao | recovery key không còn đi stderr/log | đã đóng |
 | S-P0-4 | cao | bulk hội thoại/checkpoint plaintext trong DB/WAL | đã đóng mức beta bằng ADR-001 + byte-level tests |
 | S-P1-1 | vừa | model canonical + manifest hash đã chốt; config root vẫn sửa được và còn TOCTOU path loader | một phần |
+| S-P1-4 | cao nếu bind LAN | OpenAI-compatible HTTP không auth; default tắt/loopback | một phần — cần reverse proxy hoặc auth native trước khi hỗ trợ LAN |
 | S-P1-2 | cao | vec0 chỉ nạp từ trust root canonical và đúng manifest hash | đã đóng |
 | S-P1-3 | vừa/cao | capability Tauri đã tách và vault key có allowlist | đã đóng |
 | S-P1-4 | vừa | CSP self-only; toàn bộ public HTML có regression gate cấm inline | đã đóng |

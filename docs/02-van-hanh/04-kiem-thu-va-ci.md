@@ -1,7 +1,7 @@
 ---
 title: "Kiểm thử và CI"
-updated: 2026-08-01
-commit: e6391eb
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-test
@@ -105,7 +105,9 @@ per-file riêng. Khi một file dưới ngưỡng:
 4. chạy lại coverage toàn UI.
 
 Các hotspot đang được theo dõi trực tiếp: `WidgetApp.vue`, `useGateway.ts` và
-`VisionView.vue`.
+`VisionView.vue`. Từ `dce30da`, ratchet riêng của `WidgetApp.vue` là
+`lines: 80`; phép đo cùng commit đạt **80,05% lines**. Đây là bánh cóc: chỉ nâng
+sau khi coverage thật tăng, không hạ để chữa cổng.
 
 ## 4. Security/data-loss acceptance tests
 

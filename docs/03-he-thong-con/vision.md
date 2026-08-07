@@ -1,7 +1,7 @@
 ---
 title: "Vision runtime — chụp màn hình, diff vùng và hỏi đáp đa phương thức"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - vision-runtime-as-built
@@ -89,7 +89,10 @@ không-fullscreen cũng tự kích hoạt crop.
 2. `ai.mmprojModel` đã được cấu hình và artifact vượt qua trust verification khi autoload;
 3. trên Windows phải chạy release build vì debug CRT có thể abort trong loader mmproj.
 
-Đường CPU-only đã đo trong source khoảng 80 giây/lượt ở cấu hình Qwen3-VL-2B + mmproj-F16.
+Lỗi hard-code ChatML trong `answer_with_image` đã được gỡ ở `e69f47d`; prompt ảnh nay dùng chat
+template của chính model nên hoạt động với Gemma-4 hiện hành lẫn Qwen3-VL thay thế. Trên máy CUDA
+đủ VRAM, phép đo 05/08/2026 đạt khoảng **937 ms** với `n_gpu_layers=99`; CPU-only vẫn có thể ở
+mức hàng chục giây, vì vậy preflight phải báo theo quyết định GPU thật của runtime.
 Đó là bằng chứng kỹ thuật point-in-time, không phải SLO sản phẩm.
 
 ## 4. “Canh chừng màn hình” trong Dashboard

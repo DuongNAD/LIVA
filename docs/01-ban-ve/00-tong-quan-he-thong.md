@@ -1,7 +1,7 @@
 ---
 title: "Tổng quan hệ thống"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-chi-so-du-an
@@ -93,7 +93,7 @@ Ba trụ cột định hướng (theo memory dự án và roadmap `README.md:205
 Hai ràng buộc nền xuyên suốt:
 
 - **100% offline** — không phụ thuộc dịch vụ đám mây cho các năng lực lõi.
-- **Sống chung được với tải nặng** — game AAA, render, build; LIVA phải nhường tài nguyên chứ không độc chiếm máy. Từ 22/07/2026 governor đã đọc **tải CPU thật** ngoài dấu hiệu fullscreen (xem §3 và bảng chỉ số); **tải GPU vẫn chưa được đọc**, nên vế "không độc chiếm GPU" hiện mới đúng ở mức gián tiếp (nhận diện game qua fullscreen rồi hạ `n_gpu_layers`), chưa phải đo VRAM/GPU util.
+- **Sống chung được với tải nặng** — game AAA, render, build; LIVA phải nhường tài nguyên chứ không độc chiếm máy. Governor hiện đọc tải CPU ngoài tiến trình LIVA và GPU ngoài tiến trình qua NVML khi driver cho phép; fullscreen vẫn là tín hiệu riêng cho watcher đổi GPU layer và crop vision. Khi không tách được tải GPU của chính LIVA, nó bỏ tín hiệu thay vì tự throttle sai.
 
 ```mermaid
 mindmap
@@ -171,24 +171,13 @@ nền kiểm projection theo batch, checkpoint và xử lý DLQ.
 | Chỉ số | Giá trị | Nguồn |
 |---|---|---|
 | Workspace Cargo | 2 crate: `liva-native-core` + `liva-desktop/src-tauri` | `Cargo.toml` gốc, `resolver = "2"` |
-| Workspace npm | 5: `packages/liva-common`, `liva-ui`, `liva-desktop`, `teamwork_projects/obsidian_llm_wiki`, `mobile_client` | `package.json:8-14` |
-| File `.rs` trong `liva-native-core` | **82** (76 trong `src/` + 6 trong `tests/`) sau khi `prng.rs` và `webrtc/signaling.rs` bị xoá ở `510c9e2` (22/07/2026); GitNexus index (đo trước đợt xoá) chỉ đếm 70 | `find src tests -name '*.rs'`, meta:gitnexus |
-| LOC Rust core (không kể `src/bin/`) | **18.687 dòng** (đo 22/07/2026). Kể cả 17 file `src/bin/` thì tổng mọi `.rs` trong `src/` là **21.238 dòng** | `wc -l` trên mọi `.rs` |
-| Binary phụ trợ | **17** file `src/bin/`; 14 khai báo `[[bin]]` với `test = false`, 3 auto-discover | `Cargo.toml:80-148` |
-| Lệnh IPC (`handle_command`) | **42 nhánh** + `_ => Err("Unknown command")` | `liva-native-core/src/lib.rs#handle_command` |
-| Bảng SQLite | 13 bảng thường + 2 bảng ảo = **15** | `db.rs:188-354` |
-| Bảng **có** writer trong Rust | **3** (`facts`, `tasks`, `agent_checkpoints`) | grep `INSERT INTO` |
-| Cột được mã hoá | **1** (`facts.value`, AES-256-GCM) | `db.rs:454`, `crypto.rs` |
-| Test Rust (`cargo test` **mặc định**) | **206 pass + 1 ignored**: 197 unit inline (`#[cfg(test)]` trong 32 file `src/`, gồm `lib.rs` 191 + `main.rs` 6) + 9 hàm trong `tests/`. Test `#[ignore]` duy nhất là smoke test tải CPU thật (`governor.rs:476`) | đo bằng `cargo test -- --list`, 22/07/2026 |
-| Test Rust (`--features experimental`) | **226 pass + 1 ignored**: `lib.rs` 201 · `main.rs` 6 · `integration_tests` 8 · `sandbox_stress` 3 · `self_correction_stress` 4 · `swarm_stress_tests` 2 · `verify_commands` 1 · `panic_cleanup` 1 | `cargo test --features experimental -- --list` |
-| Test UI | 22 file vitest, ~242 `it()`/`test()` | `liva-ui/tests/**` |
-| CI gate | 12 bước (windows-latest, 96 dòng): `docs-check.mjs` → `npm ci` → cache Cargo → LLVM → **`tsc --noEmit`** → **`eslint . --max-warnings 0`** → vitest → `cargo test` → `cargo check --all-targets --features experimental`. Clippy vẫn `continue-on-error: true`; **vẫn không có `cargo fmt`** | `.github/workflows/test.yml` |
-| GitNexus index | 6.582 node / 13.220 cạnh / 300 process / 423 file; embeddings **0** | `.gitnexus/meta.json` |
-| Nhiễu trong index | 1.488 node (22,6%) từ 2 bundle JS minified; 276/300 process là rác | meta:gitnexus |
-| Code mồ côi trong core | **4 thành phần, 1.311 dòng ≈ 7,0%** lõi (`passive/` 647 · `evolution/` 428 · `agent/dispatcher.rs` 187 · `mcp/client.rs` 49). Trong đó **1.262 dòng đã rời build mặc định** từ 22/07/2026 nhờ `#[cfg(feature = "experimental")]`; chỉ `mcp/client.rs` còn được biên dịch | `wc -l`, `Cargo.toml:64-78` |
-| Cargo feature | `[features]` ở `Cargo.toml:64-78`. `openblas = []` (`:78`) là feature **rỗng và no-op thật** — không `#[cfg]` nào đọc nó. `experimental = []` (`:75`) cũng rỗng về dependency **nhưng KHÔNG no-op**: nó gate 3 module qua `#[cfg(feature = "experimental")]` (`lib.rs:12,14`, `agent/mod.rs:4`, `tests/{sandbox_stress,self_correction_stress,swarm_stress_tests}.rs:5`, `tests/integration_tests.rs:331`) | `Cargo.toml:64-78` |
+| Workspace npm | 5 workspace | [root package.json](../../package.json) |
+| Lệnh IPC | **77 lệnh có tên / 11 miền**; dispatcher đã tách khỏi `lib.rs` | [Catalog IPC hiện hành](02-giao-thuc-ipc-va-websocket.md#7-handle_command--catalog-lệnh-theo-miền) |
+| Tài liệu sống được checker đọc | **61** | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` tại `bd11c84` |
+| CI bắt buộc | docs + citation, npm audit, fmt, cargo audit, typecheck, ESLint, UI coverage, build web, vault, Rust test/e2e, Tauri, experimental và Clippy | `.github/workflows/test.yml` |
+| Mốc đo chất lượng | Không sao chép số test/coverage vào đây; mốc có ngày, SHA và lệnh tái lập nằm ở backlog đánh giá | [Đường cơ sở 14 cổng](../03-danh-gia/05-nang-cap-toan-dien.md#1-đường-cơ-sở-đã-đo--02082026-tại-260c643-thay-bảng-2907) |
 
-**Cách đọc bảng này:** hai dòng đáng chú ý nhất vẫn là *bảng có writer* (3/15) và *code mồ côi* (7,0%) — chúng chỉ về một hiện tượng: tốc độ viết code vượt xa tốc độ nối dây. Dòng *CI gate* thì đã đổi chiều: trong ngày 22/07/2026, CI được bổ sung `tsc`, ESLint, `docs-check`, cache Cargo và compile-check nhánh `experimental`, nên khoảng hở kiểm soát nay chỉ còn `cargo fmt` và Clippy (vẫn non-blocking). Cũng trong ngày đó, 1.262/1.311 dòng mồ côi đã bị đưa ra khỏi build mặc định thay vì bị xoá.
+**Cách đọc bảng này:** chỉ giữ các contract cấu trúc ổn định. Số test, coverage, LOC và kích thước index đổi theo từng commit nên nguồn sở hữu của chúng là đường cơ sở có ngày/SHA; chép lại ở tổng quan chính là cách tạo thêm một bản lỗi thời.
 
 ---
 
@@ -302,7 +291,7 @@ E:\Project\LIVA\
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
 - `Cargo.toml` + `package.json` (gốc repo) — bảng chỉ số dự án (§4: số crate, số npm workspace, số binary) và cây thư mục §5.2.
-- `liva-desktop/src-tauri/src/lib.rs` — §3.A (hai profile chạy) và dòng "Lệnh IPC 42 nhánh" trong bảng chỉ số.
+- `liva-desktop/src-tauri/src/lib.rs`, `liva-native-core/src/commands/*` — §3.A (hai profile chạy) và catalog IPC 77 lệnh trong bảng chỉ số.
 - `liva-native-core/src/db.rs` — §3.B và các dòng "Bảng SQLite" / "Bảng có writer" / "Cột được mã hoá".
 - `liva-native-core/src/webrtc/pipeline.rs` — §3.C (lỗi khoá checkpoint làm mất trí nhớ đa lượt).
 - `scripts/*` (nhất là `start_all.ps1`) — §3.A và mô tả thư mục `scripts/` trong bảng §5.1.

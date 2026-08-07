@@ -1,7 +1,7 @@
 ---
 title: "Action policy — ranh giới an toàn và acceptance gates"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - action-policy-as-built
@@ -41,8 +41,8 @@ Ba cơ chế này không dùng một action contract chung. Hiện chưa có `Ac
 |---|---|---|---|
 | LLM/native tool | `ExecPolicy::for_tool` | reversible/read-only Auto; ghi file ProposeOnly | không có confirmation continuation |
 | LLM/external MCP | `ExecPolicy::for_tool` | ProposeOnly | env có thể mở cả server bằng `server/*` |
-| IPC direct MCP | `guard_direct_call` | cùng allowlist | kênh chưa có identity/authorization |
-| Messaging | `stage` → UI confirm → `take` | bắt buộc xác nhận, dùng một lần | outbox RAM, không sống qua restart |
+| IPC direct MCP | principal command allow-list → `guard_direct_call` | chỉ principal được cấp command, rồi mới xét tool allowlist | thiếu audit action chung |
+| Messaging | draft SQLite mã hoá → UI confirm → consume-once | bắt buộc xác nhận, dùng một lần, sống qua restart | chưa có action envelope/audit chung |
 | Passive consent | `ObservationConsent::is_capture_allowed` | fail-closed | collector chưa tồn tại |
 | Smart home | keyword/tool | được gọi nhưng adapter placeholder | không có read-after-write hay physical consent |
 
@@ -69,10 +69,12 @@ Override này là cấu hình quyền, không phải bằng chứng người dù
 
 ### 3.3 Gửi tin dùng một lần
 
-`liva-native-core/src/messaging/outbox.rs#take` lấy draft ra khỏi hộp trước khi gửi. Lần xác
-nhận thứ hai không còn draft để thi hành. Draft hết hạn sau 300 giây và hộp có trần 32 mục.
+`liva-native-core/src/messaging/outbox.rs` lưu draft mã hoá trong SQLite; confirm tiêu thụ atomically
+trước khi gửi. Lần xác nhận thứ hai không còn draft để thi hành. Draft hết hạn sau 300 giây và
+sống qua restart trong thời hạn đó.
 
-Đây là idempotency trong một process, chưa phải idempotency bền vững qua restart.
+Đây là consume-once bền qua restart cho riêng messaging, chưa phải idempotency contract dùng
+chung cho mọi tool/action.
 
 ### 3.4 Consent fail-closed
 
@@ -104,10 +106,10 @@ Các nguồn không tin cậy:
 - memory/RAG;
 - nội dung skill;
 - mô tả/output MCP server ngoài;
-- WebSocket client được Origin allowlist chấp nhận.
+- WebSocket client đã qua Origin/Bearer/session-ticket handshake nhưng vẫn là input không tin cậy.
 
-Origin allowlist tại `liva-native-core/src/lib.rs#origin_allowed` không thay thế user identity
-hay authorization.
+Origin/Bearer không tự cấp scope. `authorization::authorize_command` quyết định command theo
+principal kênh; action policy vẫn phải quyết định side effect theo tool/risk.
 
 ## 5. Khoảng trống P0
 
@@ -118,7 +120,7 @@ hay authorization.
 | AP-03 | chưa có action ID/idempotency bền | retry có thể lặp side effect | restart/retry không gửi hoặc ghi hai lần |
 | AP-04 | chưa có audit chung | không trả lời được ai/lúc nào/vì sao | audit redacted, truy theo action ID |
 | AP-05 | chưa có read-after-write | báo thành công giả | observation xác minh hoặc trạng thái `unknown` |
-| AP-06 | chưa có channel identity | direct IPC guard dựa vào tool, không dựa vào caller | permission test theo Tauri/WS/Telegram |
+| ~~AP-06~~ | ~~chưa có channel identity~~ | baseline principal + permission matrix đã có; chưa phải device identity/mTLS | **đã đóng baseline**, giữ audit/action ID ở AP-04 |
 | AP-07 | `server/*` mở quyền rộng | config sai mở toàn bộ server ngoài | cảnh báo và explicit per-tool default |
 
 ## 6. Contract đích cho GĐ1

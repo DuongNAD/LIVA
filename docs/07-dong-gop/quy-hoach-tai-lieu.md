@@ -1,7 +1,7 @@
 ---
 title: "Quy hoạch và di trú tài liệu LIVA v2"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - quy-hoach-tai-lieu-v2
@@ -184,6 +184,7 @@ metadata sẽ trở thành trang trí.
 | Citation report, không vượt trần living-doc hiện hành | `npm run docs:cite` |
 | Vault schema và wiki links | `npm run validate --workspace teamwork_projects/obsidian_llm_wiki` |
 | Skill parity/governance | `npm run skills:audit` |
+| Rà stale bằng AI | Gemini worker một doc/lượt → JSON verdict → Pro/human review; contract ở `docs/_meta/huong-dan-bao-tri.md` §7.5 |
 
 Mục tiêu cuối:
 
@@ -205,3 +206,7 @@ Mục tiêu cuối:
 - tự động đổi citation theo số dòng.
 
 Đợt đầu tạo hạ tầng để các thay đổi trên có thể làm từng phần và kiểm chứng được.
+
+AI không được tự bump SHA. `commit:` chỉ đi cùng patch nội dung; `stale-ok:` chỉ đi cùng danh sách
+`coversReviewed` và bằng chứng đã đọc `git diff BASE..HEAD -- <covers>`. File security/architecture
+hoặc diff rộng phải qua reviewer Pro, không giao chung với nhóm Flash hàng loạt.

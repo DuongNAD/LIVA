@@ -2,6 +2,7 @@
 title: "Context broker — ranh giới quan sát chủ động và proactive runtime"
 updated: 2026-07-31
 commit: 3688b5f
+stale-ok: bd11c84
 status: living
 owns:
   - canh-bao-passive-keylogger

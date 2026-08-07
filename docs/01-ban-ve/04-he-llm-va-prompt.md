@@ -1,7 +1,7 @@
 ---
 title: "Hệ LLM và prompt"
-updated: 2026-08-05
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - cau-hinh-llm
@@ -29,7 +29,7 @@ covers:
 
 ---
 
-Tài liệu này mô tả toàn bộ tầng LLM của LIVA: cách nạp model, cách sinh token, cách biên dịch prompt cho từng họ model, đường đa phương thức (vision) của Qwen3-VL, sampler, embedding, persona và ba lớp chống prompt-injection, cùng ba đường streaming token ra WebSocket.
+Tài liệu này mô tả toàn bộ tầng LLM của LIVA: cách nạp model, cách sinh token, cách biên dịch prompt cho từng họ model, đường đa phương thức MTMD của router Gemma-4 hiện hành (vẫn tương thích Qwen3-VL), sampler, embedding, persona và ba lớp chống prompt-injection, cùng ba đường streaming token ra WebSocket.
 
 **Kết luận rút gọn cần nhớ trước khi đọc chi tiết:** toàn hệ LLM của LIVA là **một engine duy nhất, một `LlamaContext` duy nhất, được bảo vệ bởi một `tokio::sync::Mutex` duy nhất**, và context đó phục vụ đồng thời bốn chức năng khác nhau: sinh text chat, tính embedding, suy luận ảnh (vision) và hot-swap model. Đây là ràng buộc kiến trúc chi phối gần như mọi giới hạn được liệt kê bên dưới — xem §9.
 
@@ -195,15 +195,15 @@ sequenceDiagram
 | Tham số | Nguồn | Mặc định |
 |---|---|---|
 | `n_ctx` | env `LIVA_LLM_N_CTX` (`main.rs:130-133`) | **4096** |
-| `n_gpu_layers` | env `LIVA_LLM_N_GPU_LAYERS` (`main.rs:134-137`) | **0 (CPU thuần)** — trong khi `.env.example:67` ghi `99` |
+| `n_gpu_layers` | env `LIVA_LLM_N_GPU_LAYERS`; nếu vắng gọi `boot::gpu_layers_mac_dinh` | **99** khi VRAM trống đủ chứa model + projector + 2 GiB dự phòng; ngược lại 0 |
 | threads | env `LIVA_LLM_THREADS`, đọc **hai lần**: trong `swap_model` (`engine.rs:198-201`) và lại lần nữa trong `answer_with_image` (`engine.rs:427-430`) | **4** |
-| model path | `data/liva-config.json → ai.localModelsDir + ai.routerModel` | `E:\AI_Models` + hằng fallback `lib.rs:65-67` |
+| model path | `data/liva-config.json → ai.localModelsDir + ai.routerModel` | `E:\AI_Models` + hằng fallback trong `paths.rs` |
 
 Ba điểm lệch pha cần biết:
 
 - **`ai.temperature` (0.3), `ai.topP` (0.9), `ai.maxTokens` (2048) trong `liva-config.json` không hề được Rust đọc** — chỉ xuất hiện làm literal trong JSON fallback ở `lib.rs:464-466` (`get_config`) và `lib.rs:529-531` (`get_ai_config`). Nhiệt độ thực dùng là `persona::TEMP_DEFAULT = 0.7` / `TOP_P_DEFAULT = 0.9`, hoặc giá trị nằm trong payload từng request. Đây là lệch pha **nội bộ tầng LLM**, thuộc phạm vi tài liệu này.
 - **`LIVA_LLM_MODEL_DIR` KHÔNG được core đọc** (chỉ 1 hit ở binary test `src/bin/router_stress.rs:65`); core lấy thư mục model từ `ai.localModelsDir`.
-- **`LIVA_LLM_N_GPU_LAYERS` mặc định trong code = 0** (`main.rs:135`) trong khi `.env.example` ghi 99 → không có file `.env` là LLM chạy **CPU thuần**.
+- **Thiếu `LIVA_LLM_N_GPU_LAYERS` không còn đồng nghĩa CPU thuần.** Runtime đo VRAM trống bằng NVML và chọn 99 hoặc 0; không đọc được GPU, không đọc được kích thước artifact, hoặc không đủ 2 GiB dự phòng thì mới về 0. Biến môi trường vẫn là override tường minh.
 
 Hai gạch đầu dòng cuối là lệch pha giữa `.env.example` / `CLAUDE.md` và code; bảng biến môi trường đầy đủ và danh sách đối chiếu `.env.example` ↔ code nằm ở tài liệu vận hành.
 
@@ -235,7 +235,7 @@ Ai quyết định gọi hàm này, theo ngưỡng GPU/CPU nào, và với chu k
 
 ### 3.5 Hot-swap thủ công qua IPC **[OK]**
 
-Lệnh `"llm:swap_model"` (`liva-native-core/src/lib.rs#handle_command`): nhận `model_path`, tuỳ chọn `n_ctx`, `n_gpu_layers`, `vocab_only`; lấy `state.llm.lock().await` rồi gọi thẳng `swap_model`. Không có kiểm tra file tồn tại ở tầng lệnh — lỗi trả về từ `load_from_file`.
+Lệnh `"llm:swap_model"` (`liva-native-core/src/commands/llm.rs`): nhận `model_path`, tuỳ chọn `n_ctx`, `n_gpu_layers`, `vocab_only`; canonicalize đường dẫn dưới trust root model trước khi lấy lock và gọi `swap_model`. Đường ngoài thư mục model hoặc artifact không đạt trust gate bị từ chối trước khi nạp.
 
 ---
 
@@ -269,12 +269,12 @@ Từ 22/07/2026 `agent/graph.rs` được viết lại (289 → 693 dòng) và l
 ```json
 "provider": "local",
 "localModelsDir": "E:\\AI_Models",
-"routerModel": "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf",
-"mmprojModel": "Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf",
+"routerModel": "gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+"mmprojModel": "gemma-4-E4B-it-qat-GGUF/mmproj-F16.gguf",
 "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"
 ```
 
-⇒ Model đang chạy thật = `E:\AI_Models\Qwen3-VL-2B-Instruct-GGUF\Qwen3-VL-2B-Instruct-Q4_K_M.gguf` — **Qwen3-VL-2B là lõi text + vision cùng một model.** Hằng `DEFAULT_ROUTER_MODEL = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"` (`lib.rs:66`) chỉ là fallback khi file config thiếu key. ~~`data/models.config.json` (ghi `gemma-4-26B`) hoàn toàn không liên quan tới luồng thật.~~ — file đó **đã bị xoá khỏi repo 22/07/2026** (§1), nên nay không còn nguồn gây hiểu nhầm nào ngoài `data/liva-config.json`.
+⇒ Model đang chạy thật = `E:\AI_Models\gemma-4-E4B-it-qat-GGUF\gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf`; projector phải đến từ **cùng repo QAT** và đúng SHA-256 trong manifest. `DEFAULT_ROUTER_MODEL` ở `paths.rs` trùng cấu hình hiện hành. Qwen3-VL-2B vẫn nằm trong manifest như router/vision thay thế, không còn là mặc định. ~~`data/models.config.json` (ghi `gemma-4-26B`) hoàn toàn không liên quan tới luồng thật.~~ — file đó đã bị xoá khỏi repo 22/07/2026.
 
 Đoạn trên là **cấu hình LLM** (thuộc tài liệu này). Danh mục model đầy đủ (kích thước file, lượng tử hoá, RAM/VRAM cần thiết, model STT/TTS đi kèm) là bảng của tài liệu vận hành.
 
@@ -966,10 +966,10 @@ Bảng dưới là **mục lục nội bộ** của chính tài liệu này: m�
 | 2 | `expertModel` có UI, có type TS, có hằng Rust, **không có logic swap** | `lib.rs:67,463,528` | **[THIẾU]** |
 | 3 | `ai.temperature` / `ai.topP` / `ai.maxTokens` Rust không đọc; giá trị thật là `TEMP_DEFAULT=0.7` / `TOP_P_DEFAULT=0.9`; `maxTokens` **không có tương ứng** trong `generate_completion` | `lib.rs:464-466`, `persona.rs:9,12` | **[THIẾU]** |
 | 4 | `LIVA_LLM_MODEL_DIR` chỉ `src/bin/router_stress.rs:65` dùng; core dùng `ai.localModelsDir` | `main.rs`, `lib.rs:203-222` | lệch tài liệu |
-| 5 | `LIVA_LLM_N_GPU_LAYERS` mặc định code = 0 trong khi `.env.example:67` = 99 → không có `.env` là chạy CPU thuần | `main.rs:135` | lệch tài liệu |
+| 5 | ~~Thiếu `LIVA_LLM_N_GPU_LAYERS` từng mặc định 0~~ — từ `533f3c6`, runtime dùng `boot::gpu_layers_mac_dinh` để chọn 99/0 theo VRAM trống và kích thước artifact | `boot.rs#gpu_layers_mac_dinh` | **đã đóng** |
 | 6 | `embed.rs` dùng **chung context** với generation; `clear_kv_cache()` phá prefix-cache chat mà **không** xoá `last_tokens`. ~~mâu thuẫn README ("decoupled contexts")~~ — README đã sửa, nay tự ghi nhận việc dùng chung context (`README.md:26`) | `embed.rs:10`, `liva-native-core/src/lib.rs#handle_command`, `engine.rs:207-208` | **[MỘT PHẦN]** + bug tiềm ẩn |
 | 7 | `vec_idx` là `int8[MEMORY_VECTOR_DIM]` = 384 ≠ `n_embd` model chat → **`llm:embed` vẫn không nối được** vào `vec_idx`. ~~RAG dense chưa nối với `llm:embed`~~ / ~~`upsert_vector` không kiểm chiều~~ — RAG nay đi qua `llm/embedder.rs` (384 chiều, khớp), và `upsert_vector` kiểm chiều ở `db.rs:589` | `db.rs:358,551,589`, `liva-native-core/src/lib.rs#handle_command` | **[MỘT PHẦN]** |
-| 8 | `answer_with_image` **không sanitize** `question` trước khi nhúng ChatML | `engine.rs:467-472` | rủi ro injection |
+| 8 | ~~`answer_with_image` từng hard-code ChatML và nhúng question theo format sai với Gemma~~ — `e69f47d` chuyển sang chat template của chính model; câu hỏi vẫn đi qua ranh giới prompt đa phương thức riêng | `engine.rs#answer_with_image` | **đã đóng lỗi format** |
 | 9 | Feature `openblas` khai báo **rỗng** — bật không có tác dụng | `Cargo.toml:80` | **[THIẾU]** |
 | 10 | Vision **chết cứng trên debug build Windows** theo thiết kế — phải `cargo build --release` | `engine.rs:405-411` | **[MỘT PHẦN]** |
 | 11 | ~~Không có guard `prompt_tokens > n_ctx` trước prefill; node `chat_completion` duyệt toàn bộ `state.messages` không giới hạn~~ — **ĐÃ BỊT 22/07/2026** bằng hai lớp: `state.trim_history()` (`graph.rs:358,442`) và `check_prompt_fits()` (`engine.rs:82-93`, gọi ở `:264`) | `engine.rs:264`, `graph.rs:358` | **đã đóng** |

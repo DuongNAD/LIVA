@@ -1,7 +1,7 @@
 ---
 title: "Kiểm kê và disposition tài liệu LIVA"
 updated: 2026-07-31
-commit: 7e58e6e
+commit: bd11c84
 status: index
 owns:
   - inventory-disposition-tai-lieu
@@ -49,7 +49,7 @@ covers:
 | `docs/00-san-pham/tam-nhin-jarvis.md` | **KEEP** | A | 7 | — | Canonical owner cho tầm nhìn và nguyên tắc sản phẩm. |
 | `docs/01-ban-ve/00-tong-quan-he-thong.md` | **MERGE** | C-foundation | 9 | `docs/03-he-thong-con/runtime-native.md` | Tổng quan as-built cần nhập vào subsystem runtime, tránh cạnh tranh với product vision. |
 | `docs/01-ban-ve/01-kien-truc-tong-the.md` | **SPLIT** | C-foundation | 21 | `docs/01-kien-truc/as-built.md`<br>`docs/03-he-thong-con/runtime-native.md` | Đang trộn topology as-built, target design và runtime composition. |
-| `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md` | **SPLIT** | C-contracts | 20 | `docs/02-hop-dong/tauri-ipc.md`<br>`docs/02-hop-dong/websocket.md` | Hai contract có vòng đời và consumer khác nhau. |
+| `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md` | **SPLIT** | C-contracts | 21 | `docs/02-hop-dong/tauri-ipc.md`<br>`docs/02-hop-dong/websocket.md` | Hai contract có vòng đời và consumer khác nhau. |
 | `docs/01-ban-ve/03-duong-ong-thoai.md` | **FREEZE** | C-voice-complete | 13 | `docs/03-he-thong-con/voice.md`<br>`docs/05-chat-luong/voice-slo.md` | Đã tách canonical voice runtime và SLO; giữ khảo sát chi tiết như snapshot lịch sử. |
 | `docs/01-ban-ve/04-he-llm-va-prompt.md` | **SPLIT** | C-agent | 14 | `docs/03-he-thong-con/llm-routing.md`<br>`docs/02-hop-dong/prompt-context.md` | Model routing và prompt contract cần chủ sở hữu độc lập. |
 | `docs/01-ban-ve/05-agent-bo-nho-va-tien-hoa.md` | **FREEZE** | C-agent-tools-complete | 7 | `docs/03-he-thong-con/agent-tools.md`<br>`docs/03-he-thong-con/memory.md`<br>`docs/05-chat-luong/action-policy.md` | Đã tách agent/tool runtime, memory và action policy; evolution còn lại là snapshot experimental. |
@@ -73,7 +73,7 @@ covers:
 | `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` | **MERGE** | C-quality | 25 | `docs/06-ke-hoach/roadmap.md`<br>`docs/05-chat-luong/risk-register.md` | Việc mở nhập vào roadmap; risk bền nhập vào risk register. |
 | `docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md` | **FREEZE** | B | 20 | — | Roadmap cũ đã bị master roadmap thay thế; giữ làm lịch sử F/P. |
 | `docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md` | **FREEZE** | B | 5 | — | Đề xuất point-in-time, không phải kiến trúc hay roadmap hiện hành. |
-| `docs/03-danh-gia/05-nang-cap-toan-dien.md` | **SPLIT** | C-roadmap | 7 | `docs/06-ke-hoach/roadmap.md`<br>`docs/99-luu-tru/bao-cao-lich-su/nang-cap-toan-dien-2026-07.md` | Việc còn mở nhập master roadmap; bằng chứng U1–U20 đóng băng. |
+| `docs/03-danh-gia/05-nang-cap-toan-dien.md` | **SPLIT** | C-roadmap | 9 | `docs/06-ke-hoach/roadmap.md`<br>`docs/99-luu-tru/bao-cao-lich-su/nang-cap-toan-dien-2026-07.md` | Việc còn mở nhập master roadmap; bằng chứng U1–U20 đóng băng. |
 | `docs/03-danh-gia/06-nhan-tin-ra-ngoai.md` | **SPLIT** | C-integrations | 5 | `docs/03-he-thong-con/messaging.md`<br>`docs/06-ke-hoach/epics/messaging-reliability.md` | Tách as-built messaging khỏi backlog outbox/Telegram. |
 | `docs/03-danh-gia/07-wake-word-viec-con-lai.md` | **FREEZE** | C-voice-complete | 3 | `docs/03-he-thong-con/wake-word.md`<br>`docs/05-chat-luong/wake-benchmark.md` | Đã tách architecture và benchmark wake; giữ số đo 27/07/2026 như snapshot lịch sử. |
 | `docs/03-he-thong-con/agent-tools.md` | **KEEP** | C-agent-tools-complete | 11 | — | Canonical as-built cho StateGraph, reflex lane, tool selector, MCP executor và skill runtime. |
@@ -148,12 +148,12 @@ inbound link trước, sau đó giữ redirect ít nhất một chu kỳ release
 
 - `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md`: 25 file trỏ vào.
 - `docs/01-ban-ve/01-kien-truc-tong-the.md`: 21 file trỏ vào.
-- `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md`: 20 file trỏ vào.
+- `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md`: 21 file trỏ vào.
 - `docs/02-van-hanh/03-trien-khai-va-runtime.md`: 15 file trỏ vào.
 - `docs/01-ban-ve/04-he-llm-va-prompt.md`: 14 file trỏ vào.
 - `docs/01-ban-ve/09-tich-hop-ngoai.md`: 11 file trỏ vào.
 - `docs/01-ban-ve/00-tong-quan-he-thong.md`: 9 file trỏ vào.
-- `docs/03-danh-gia/05-nang-cap-toan-dien.md`: 7 file trỏ vào.
+- `docs/03-danh-gia/05-nang-cap-toan-dien.md`: 9 file trỏ vào.
 - `docs/03-danh-gia/06-nhan-tin-ra-ngoai.md`: 5 file trỏ vào.
 - `docs/04-quy-trinh/KNOWLEDGE_BASE.md`: 3 file trỏ vào.
 - `docs/04-quy-trinh/prompts/readme-generation-prompt.md`: 2 file trỏ vào.

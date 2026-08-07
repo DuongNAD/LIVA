@@ -1,7 +1,7 @@
 ---
 title: "Voice runtime — kiến trúc as-built"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - chuoi-xu-ly-thoai
@@ -98,8 +98,8 @@ Owner runtime được dựng tại `liva-native-core/src/stt/mod.rs#SttManager:
 
 | Engine | Đường dùng | Trạng thái |
 |---|---|---|
-| Nemotron ONNX | streaming mặc định | hoạt động; decoder bootstrap được kiểm tensor finite/shape |
-| Parakeet VI | whole-utterance khi `LIVA_STT_VI_ENGINE=parakeet` | opt-in; không dùng cho wake probe |
+| Nemotron ONNX | streaming và fallback tiếng Việt | hoạt động; decoder bootstrap được kiểm tensor finite/shape |
+| Parakeet VI | whole-utterance tiếng Việt mặc định; `LIVA_STT_VI_ENGINE=nemotron` để opt-out | lazy-load; lỗi model/vocab thì ghi lý do và lùi Nemotron; không dùng cho wake probe |
 
 Nemotron engine được dựng tại `liva-native-core/src/stt/engine.rs#SttEngine::new`; bootstrap decoder được
 xác nhận một lần rồi clone snapshot khi reset utterance. Parakeet không được lazy-load chỉ để
@@ -113,6 +113,16 @@ Owner runtime được dựng tại `liva-native-core/src/tts/mod.rs#TtsManager:
 1. VieNeu nếu được bật và phù hợp;
 2. Piper theo ngôn ngữ;
 3. Kokoro fallback cuối.
+
+Trước chunker/TTS, `tts/avatar_control.rs#AvatarSpeechFilter::push` loại control tag avatar khỏi câu đọc.
+Nó chấp nhận 11 tag cảm xúc/hành động và `[anim:<id>]`, kể cả tag bị cắt giữa hai token stream;
+ngoặc thường trong thân câu vẫn được giữ. Danh sách phải đồng bộ với
+`liva-ui/src/utils/avatarControlTags.ts` để UI và TTS không hiểu hai schema khác nhau.
+
+Đường thoại còn có state machine gửi tin nhiều lượt ở
+`messaging/voice_dialogue.rs#VoiceMessageDialogue::begin`: hỏi phần thân/nền tảng còn thiếu, tạo draft,
+đợi xác nhận hoặc huỷ. Side effect vẫn đi qua outbox SQLite consume-once; hội thoại không được
+gửi trực tiếp chỉ vì STT nghe thấy một câu giống lệnh.
 
 Fallback được thực thi tại `liva-native-core/src/tts/mod.rs#run_synthesis_fallback`; cancellation
 được kiểm trước mỗi backend nên turn đã hủy không được phát sinh side effect âm thanh mới.

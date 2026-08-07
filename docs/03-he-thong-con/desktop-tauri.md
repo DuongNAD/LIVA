@@ -1,7 +1,7 @@
 ---
 title: "Desktop Tauri — cửa sổ, capability và native IPC boundary"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-tauri-command
@@ -115,6 +115,11 @@ query tự khai `principal=` bị từ chối ngay handshake.
 
 Sau khi services chạy, host gọi preflight model. Nếu thiếu model bắt buộc, setup window hiển thị
 `setup:status`, `setup:paths`, `setup:fetch`; tải stream progress và có thể resume.
+
+Dashboard System còn gọi `get_preflight_status`, lệnh chỉ cấp cho principal Dashboard local. Core
+trả đúng vector `preflight::thu_thap()` mà CLI `--preflight` dùng, với schema
+`name/available/status/consequence`; UI không tự viết lại logic dò GPU/model/vec0. Việc chuyển
+`preflight` từ module riêng của binary sang module public của core là để giữ contract một nguồn.
 
 Setup là HTML/JS tĩnh và dùng `window.__TAURI__`, nên `withGlobalTauri=true` vẫn cần cho entry này.
 CSP hiện không có `unsafe-inline`, chỉ cho self/data/asset và loopback dev/gateway cần thiết.

@@ -1,7 +1,7 @@
 ---
 title: "Cài đặt và sử dụng LIVA (cho người dùng)"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - cai-dat-windows
@@ -34,7 +34,7 @@ cần cài Node, Python, Rust hay Git. Nếu bạn muốn build LIVA từ mã ng
 | Yêu cầu | Mức | Ghi chú |
 |---|---|---|
 | Windows | 10 hoặc 11, 64-bit | Chưa có bản macOS/Linux |
-| Ổ trống | **~4 GB tối thiểu; ~7 GB nếu tải full** | Ứng dụng ~250 MB; model minimal 2,28 GiB, full 5,95 GiB |
+| Ổ trống | **~7 GB tối thiểu; ~11 GB nếu tải full** | Ứng dụng ~250 MB; manifest hiện hành: minimal 13 file **5,18 GiB**, full 31 file **9,01 GiB** |
 | RAM | 8 GB tối thiểu, 16 GB thì dễ thở | Model chạy trên RAM, không phải trên mây |
 | Mạng | Chỉ cần **lúc tải model lần đầu** | Sau đó rút mạng LIVA vẫn chạy |
 | Card đồ hoạ | Không bắt buộc | Xem mục 6 về tính năng nhìn màn hình |
@@ -79,7 +79,7 @@ Cửa sổ này liệt kê từng khả năng và tình trạng của nó:
 | Bộ nhớ dài hạn | **LIVA không nhớ gì** giữa các lần trò chuyện |
 | Cắt lượt nói (VAD) | Không biết bạn nói xong lúc nào |
 
-Bấm **Tải model**. Bộ tối thiểu là **13 file, 2,28 GB** — với đường truyền
+Bấm **Tải model**. Bộ tối thiểu là **13 file, 5,18 GiB** — với đường truyền
 20 Mbps thì chừng 15–20 phút. Bộ đầy đủ là **29 file, 5,95 GiB**; 26 file có
 nguồn tự tải và 3 file tuỳ chọn cần chuẩn bị thủ công.
 
@@ -202,10 +202,11 @@ Nói trước để bạn không mất thời gian tìm:
 
 - **Không tự cập nhật.** Muốn bản mới thì tải và chạy đè.
 - **Không ký số** — Windows sẽ cảnh báo mỗi lần cài.
-- **Không kèm model** (2,28 GB bộ tối thiểu) — tải riêng ở lần chạy đầu.
+- **Không kèm model** (5,18 GiB bộ tối thiểu) — tải riêng ở lần chạy đầu.
 - **Không kèm CUDA.** Bản phát hành chạy CPU. Tính năng *nhìn màn hình*
   (`vision:ask`) vì thế mất khoảng 80 giây mỗi lượt thay vì ~1,2 giây. Muốn
-  nhanh thì phải tự build với `--features cuda` — xem
+  nhanh thì dùng gói CUDA riêng hoặc dựng bằng `npm run installer:windows:cuda`; script này stage
+  đúng CUDA redistributable rồi gọi Tauri với `--features cuda` — xem
   [Triển khai và runtime](03-trien-khai-va-runtime.md).
 - **Không có bản MSI**, không triển khai qua GPO.
 - **Không gửi gì ra Internet** sau khi tải model xong, trừ khi chính bạn bật

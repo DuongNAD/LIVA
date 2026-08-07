@@ -1,8 +1,8 @@
 ---
 title: "Sổ đăng ký nguồn sự thật"
-updated: 2026-08-01
-commit: 3688b5f
-status: living
+updated: 2026-08-07
+commit: bd11c84
+status: index
 owns:
   - so-do-nguon-su-that
 covers:
@@ -212,7 +212,7 @@ Các bảng/số liệu dưới đây **đang được viết ở ≥2 nơi như
 
 | # | Sự thật đang trôi | Đang xuất hiện ở | Nên thuộc về | Ghi chú |
 |---|---|---|---|---|
-| 1 | **Vòng đời khởi động 25 bước** của `async_main()` | `01-ban-ve/02` §3 (bản đầy đủ), README (nhắc tên), `01-ban-ve/01` (nhắc thứ tự khởi tạo) | `01-ban-ve/02` — khoá đề xuất `vong-doi-khoi-dong-25-buoc` | Bản đầy đủ đã ở đúng chỗ, chỉ thiếu khai báo `owns` nên không có gì bảo vệ khi số bước đổi |
+| 1 | **Vòng đời khởi động 26 bước** của composition root dùng chung | `01-ban-ve/02` §3 (bản đầy đủ), README (nhắc tên), `01-ban-ve/01` (nhắc thứ tự khởi tạo) | `01-ban-ve/02` — khoá đề xuất `vong-doi-khoi-dong` | Bản đầy đủ đã ở đúng chỗ; tránh nhúng số bước vào tên khoá vì mỗi bước mới sẽ buộc rename owner |
 | 2 | **Cấu trúc `AppState`** (các trường, ai giữ, ai khoá) | `01-ban-ve/02` (bản đầy đủ) + **16 tài liệu khác nhắc tên trường** | `01-ban-ve/02` — khoá đề xuất `cau-truc-appstate` | Đây là ký hiệu bị nhắc lại nhiều nhất toàn bộ tài liệu; thêm một trường mới hiện không có cách nào biết phải sửa ở đâu |
 | 3 | **Bảng cổng mạng** (8002 / 5173 / 8765 / cổng Tauri) | `02-van-hanh/03` §2.1 (bảng đầy đủ), `01-ban-ve/01` (liệt kê lại trong sơ đồ + bảng profile), `01-ban-ve/00`, `01-ban-ve/09`, `03-danh-gia/01`, `03-danh-gia/02` | `02-van-hanh/03` — khoá đề xuất `bang-cong-mang` | Rủi ro cao: đổi `LIVA_SERVER_PORT` mặc định sẽ phải sửa ≥5 file |
 | 4 | **Bảng 10 nhóm `.gitignore` + tình trạng `.aiexclude`** | `02-van-hanh/01` §6.1 (bảng đầy đủ), `01-ban-ve/07` §8 (tóm tắt phần Secrets), `02-van-hanh/02` (nhắc nhóm weights), `03-danh-gia/02` | `02-van-hanh/01` — khoá đề xuất `bang-gitignore-aiexclude` | ⚠️ Kèm một liên kết sai cần sửa: `01-ban-ve/07:768` ghi *"Cấu hình và biến môi trường §8"* nhưng bảng thật nằm ở **§6.1** |

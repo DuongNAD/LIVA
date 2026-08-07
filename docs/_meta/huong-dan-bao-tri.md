@@ -1,7 +1,7 @@
 ---
 title: "Hướng dẫn bảo trì bộ tài liệu"
-updated: 2026-07-26
-commit: 5d69c3c
+updated: 2026-08-07
+commit: bd11c84
 status: index
 owns:
   - luoc-do-front-matter
@@ -406,6 +406,108 @@ bao xa. Sửa ở bản vẽ tương ứng.
 
 Muốn thay đổi một tài liệu `frozen` thì chỉ có hai lựa chọn hợp lệ: (a) tạo một ảnh chụp mới với tên
 và ngày mới, hoặc (b) chuyển nó vào `99-luu-tru/` theo quy trình §4. Không có lựa chọn "sửa nhẹ".
+
+### 7.5 Rà stale theo lô bằng Gemini 3.6 Flash / 3.1 Pro
+
+AI chỉ là người **đọc diff và đề xuất patch**; `docs-check`, Git và người duyệt mới là trọng tài.
+Không giao một prompt “dọn toàn bộ docs” vì model rất dễ bump hàng loạt `commit:` mà không đối
+chiếu từng contract.
+
+#### Chia vai model
+
+| Tầng | Model ID | Nhận việc |
+|---|---|---|
+| Worker | `gemini-3.6-flash` | Một tài liệu/lượt; diff nhỏ hoặc trung bình; trích contract, tìm claim lỗi thời, đề xuất patch JSON |
+| Reviewer | `gemini-3.1-pro-preview` | `01-kien-truc/`, `05-chat-luong/`, file security/authorization, diff >20 file nguồn, xung đột giữa hai owner, hoặc duyệt lại 4–6 kết quả Flash |
+
+⚠️ **`docs/03-danh-gia/` KHÔNG được giao cho Flash worker chạy một mình.** Đó là thư mục duy nhất
+mà lỗi thời **chặn CI** (`--strict-stale=docs/03-danh-gia`), nên một verdict sai ở đây làm đỏ build
+chứ không chỉ để lại cảnh báo. Mọi tài liệu trong thư mục đó phải qua Reviewer, kể cả khi diff nhỏ.
+
+`3.1 Pro` hiện là endpoint preview nên ID đầy đủ có hậu tố `-preview`; luôn kiểm `/model` trước khi
+chạy. Model ID là tham số vận hành, không được chép vào front-matter hay dùng làm bằng chứng rằng
+diff đã được đọc.
+
+#### Một job chỉ có một tài liệu
+
+1. Ghi `HEAD = git rev-parse --short HEAD`, `base = commit` hoặc `stale-ok` hợp lệ gần nhất.
+2. Đọc toàn bộ tài liệu hiện tại và front-matter `covers`.
+3. Chạy `git diff --find-renames <base>..HEAD -- <covers...>`; không chỉ đọc `--stat` hoặc log.
+4. Đối chiếu mọi claim bị diff chạm với code hiện tại. Neo bằng `file#symbol`, không đoán số dòng.
+5. Trả đúng một verdict: `content-change`, `stale-ok`, hoặc `blocked`.
+6. Chỉ sau khi reviewer chấp nhận mới áp patch bằng công cụ edit UTF-8; không cho model commit/push.
+
+> 🔴 **TUYỆT ĐỐI không áp patch bằng PowerShell.** Đây là cái bẫy nguy hiểm nhất của cả mục này,
+> vì nó **im lặng** và vì ví dụ gọi Gemini CLI ngay bên dưới lại viết bằng PowerShell — rất dễ
+> làm người thi hành nghĩ cả quy trình chạy trong shell đó.
+>
+> `Get-Content -Raw` đọc UTF-8-không-BOM theo codepage 1252, còn `Set-Content -Encoding utf8`
+> ghi kèm BOM. Một vòng đọc-sửa-ghi làm **double-encode mọi ký tự tiếng Việt**. `docs-check`
+> bắt được BOM nhưng **KHÔNG bắt được mojibake**, nên hỏng sẽ đi lọt qua cổng và chỉ lộ ra khi
+> có người đọc.
+>
+> Dùng công cụ edit của agent, hoặc `[System.IO.File]::ReadAllText/WriteAllText` với
+> `UTF8Encoding($false)` tường minh. Dấu hiệu đã dính: `git diff --stat` báo số dòng đổi xấp xỉ
+> **toàn bộ** số dòng của file.
+>
+> Lệnh `gemini …` ở cuối mục này chỉ **sinh ra** JSON patch — chạy nó trong PowerShell thì không
+> sao. Cấm là cấm khâu **ghi patch xuống file**.
+
+Schema đầu ra bắt buộc:
+
+```json
+{
+  "doc": "docs/...md",
+  "base": "abcdef0",
+  "head": "1234567",
+  "coversReviewed": ["path/or/glob"],
+  "changedContracts": [
+    {"claim": "mô tả ngắn", "evidence": ["path#symbol"], "action": "update|none"}
+  ],
+  "verdict": "content-change|stale-ok|blocked",
+  "patch": "unified diff hoặc null",
+  "frontMatter": {
+    "updated": "YYYY-MM-DD hoặc giữ nguyên",
+    "commit": "HEAD chỉ khi content-change, ngược lại null",
+    "stale-ok": "HEAD chỉ khi stale-ok, ngược lại null"
+  },
+  "risks": [],
+  "confidence": "high|medium|low"
+}
+```
+
+Fail closed nếu `coversReviewed` thiếu một entry, evidence không tồn tại, verdict mâu thuẫn với
+front-matter, hoặc model chỉ nói “refactor không đổi hành vi” mà không chỉ ra symbol trước/sau.
+
+#### Prompt worker dùng lại được
+
+```text
+Bạn đang rà đúng MỘT living doc của LIVA. Đọc AGENTS.md và
+docs/_meta/huong-dan-bao-tri.md trước. Không sửa file, không commit, không push.
+
+DOC=<đường dẫn>
+BASE=<sha từ commit/stale-ok>
+HEAD=<git rev-parse --short HEAD>
+
+Đọc toàn bộ DOC. Lấy mọi entry covers rồi đọc đầy đủ:
+git diff --find-renames BASE..HEAD -- <covers...>
+Đối chiếu claim bị chạm với code hiện tại. Nếu nội dung phải đổi, trả patch và verdict
+content-change; nếu đã đọc hết diff và không claim nào đổi, trả stale-ok; nếu thiếu bằng chứng
+hoặc diff quá rộng, trả blocked. Không bao giờ bump commit chỉ để làm checker im.
+Chỉ xuất một object JSON đúng schema ở §7.5.
+```
+
+Với Gemini CLI mới, chọn model tường minh bằng `--model`/`-m` và dùng JSON cho automation:
+
+```powershell
+gemini --model gemini-3.6-flash --output-format json -p "<prompt worker>"
+gemini --model gemini-3.1-pro-preview --output-format json -p "<prompt reviewer>"
+```
+
+Máy chưa có CLI thì cài theo tài liệu chính thức của `@google/gemini-cli`; repo không ghim CLI
+vào dependency sản phẩm. Sau mỗi lô tối đa 6 file, chạy lại `docs-check --strict-stale` và
+`docs-citations`; sau commit tài liệu phải chạy lại một lần nữa vì tài liệu meta có thể `covers`
+lẫn nhau và tự tạo cảnh báo mới.
 
 ---
 

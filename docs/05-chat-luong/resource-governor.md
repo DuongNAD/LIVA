@@ -1,7 +1,7 @@
 ---
 title: "Resource governor — chính sách sống chung với game và workload nặng"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - nguong-governor
@@ -41,7 +41,7 @@ Vì vậy LIVA hiện nhường CPU cho cả workload không-fullscreen, nhưng 
 | `LIVA_BUSY_CPU_PERCENT` | 80 | 0 tắt nhánh CPU; rác hoặc >100 về mặc định |
 | `LIVA_BUSY_GPU_PERCENT` | 80 | 0 tắt nhánh GPU; rác hoặc >100 về mặc định |
 | `LIVA_GAME_N_GPU_LAYERS` | 0 | số GPU layer khi watcher fullscreen chuyển mode |
-| `LIVA_LLM_N_GPU_LAYERS` | 0 | số layer bình thường và tín hiệu LIVA có thể dùng GPU |
+| `LIVA_LLM_N_GPU_LAYERS` | vắng = tự chọn 99/0 | override số layer bình thường; tự chọn dựa VRAM trống + kích thước router/mmproj + 2 GiB dự phòng |
 
 `liva-native-core/src/governor.rs#external_cpu_percent` tính tải của tiến trình **khác** bằng
 `GetSystemTimes`, rồi trừ CPU-time của chính LIVA từ `GetProcessTimes`. Việc trừ này tránh vòng
@@ -72,15 +72,15 @@ thì trả `NORMAL`. `LIVA_GAME_PRIORITY=off` giữ nguyên priority dù detecto
 
 ## 4. Chuyển GPU layer
 
-Background service thứ tư trong `boot::spawn_background_services` so
-`LIVA_LLM_N_GPU_LAYERS` với `LIVA_GAME_N_GPU_LAYERS`:
+Background service thứ tư trong `boot::spawn_background_services` so số layer bình thường đã
+resolve (env hoặc `gpu_layers_mac_dinh`) với `LIVA_GAME_N_GPU_LAYERS`:
 
-- CPU-only hoặc hai giá trị bằng nhau: không spawn watcher có tác dụng;
+- số layer bình thường bằng 0 hoặc hai giá trị bằng nhau: không spawn watcher có tác dụng;
 - mỗi 5 giây kiểm fullscreen bằng `game_mode_active_now`;
 - chỉ reload khi trạng thái đổi;
 - nếu model chưa nạp, không chốt trạng thái và thử lại nhịp sau.
 
-`liva-native-core/src/lib.rs#reload_llm_gpu_layers` nạp lại model ở số layer mục tiêu. Reload có
+`liva-native-core::reload_llm_gpu_layers` nạp lại model ở số layer mục tiêu. Reload có
 chi phí giây và xóa KV cache; vì vậy không được gọi ở mọi poll hoặc theo dao động metric ngắn.
 
 Điểm cần nói thẳng: CPU/GPU threshold **không** kích hoạt GPU-layer watcher hiện tại. Muốn hợp

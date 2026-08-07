@@ -1,7 +1,7 @@
 ---
 title: "Frontend runtime — widget, dashboard và transport Vue"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-man-hinh-dashboard
@@ -103,9 +103,9 @@ WebView nhận click trong vùng tương tác. Poll 150 ms phía Vue chỉ cập
 | `api` | `ApiManagementView` | credential write-only |
 | `voice` | `VoiceManagementView` | profile/provider voice |
 | `tasks` | `TaskManager` | CRUD task và plan |
-| `memory` | `MemoryViewer` | facts/conversation/delete |
+| `memory` | `MemoryViewer` + `memory/{MemoryViewerHeader,MemoryViewerStats,MemoryViewerTabs}` | facts/conversation/delete; shell giữ data flow, phần trình bày đã tách |
 | `skills` | `SkillsView` | list/toggle/test skill |
-| `system` | `SystemView` | health và resource |
+| `system` | `SystemView` | health thật + báo cáo preflight dùng chung với CLI |
 | `vision` | `VisionView` | ask/watch màn hình |
 | `profile` | `UserProfile` | hồ sơ người dùng |
 | `settings` | `SettingsView` | consent, reset và UI settings |
@@ -124,6 +124,10 @@ mount và `destroy()` khi unmount; profile rỗng bật onboarding sau cửa s�
 
 `gatewayPrincipalForPath` chỉ quyết định bootstrap set của frontend. Nó **không cấp quyền**; host
 Tauri và core authorization vẫn kiểm exact window label/principal.
+
+`useGateway` giữ `preflightReport` sau phản hồi `get_preflight_status` ở cả Tauri và WebSocket,
+đồng thời lọc schema từng item trước khi cho `SystemView` render. Màn hình chỉ ánh xạ
+`available=true/false/null` thành sẵn sàng/mất năng lực/chưa kết luận; mọi chẩn đoán nằm ở Rust.
 
 Widget không dùng `useGateway` làm transport thoại chính; nó cần WebSocket nhị phân để chuyển
 audio và event streaming. Dashboard chủ yếu dùng native IPC.

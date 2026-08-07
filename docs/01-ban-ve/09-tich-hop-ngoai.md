@@ -1,7 +1,7 @@
 ---
 title: "Tích hợp ngoài"
-updated: 2026-07-30
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-tich-hop-ngoai
@@ -258,7 +258,7 @@ Cả hai là **công cụ cấu hình IDE agent bên ngoài**, không phải LIV
 | Điểm | Đánh giá |
 |---|---|
 | Path traversal (Rust) | Có chặn (`resolve_path`), nhưng **không canonicalize** ⇒ symlink trong vault có thể trỏ ra ngoài |
-| Xác thực | **Không có ở tầng MCP.** ~~cũng không có transport nên chưa phơi ra~~ — từ 22/07/2026 `mcp:call_tool` đi được qua WebSocket `:8002` (`websocket.rs#handle_ws_connection` dispatch mọi `req.command` vào `handle_command`), nên hàng rào duy nhất là allow-list `Origin` của socket (`origin_allowed()` trong `lib.rs`) + `resolve_path` ghim trong vault |
+| Xác thực | MCP không tự xác thực, nhưng đường command bên ngoài nay đi qua `authorization::authorize_command`: Tauri lấy principal từ exact window label; WebSocket đặc quyền cần session ticket loopback dùng một lần. `guard_direct_call` và `resolve_path` vẫn là hai lớp policy/path riêng, không thay thế principal. |
 | Ghi file | `write_markdown` tạo thư mục cha tuỳ ý **trong vault**; không giới hạn kích thước, không giới hạn extension |
 | Blocking I/O trong async | `search_vault` dùng `std::fs` trong `async fn` ⇒ chặn worker Tokio nếu vault lớn |
 | Deserialize | `id: String` bắt buộc ⇒ **không tương thích** client MCP thật |
@@ -421,7 +421,7 @@ if let Some(token) = telegram_token {
 
 > 📌 Nguồn đầy đủ (bảng biến môi trường, lệch `.env.example` vs code): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 
-UI: `ApiManagementView.vue:113-114, 165-168` chỉ ghi `.env`/vault; `SystemView.vue:39-43` render thẻ "Remote Control" từ health check — mà `lib.rs:596` **hardcode `"telegram": {"status": "online"}`** bất kể bot có chạy hay không.
+UI: `ApiManagementView.vue` ghi credential theo đường write-only/vault; `SystemView.vue` render trạng thái Remote Control từ `system_status.rs`. Trạng thái Telegram nay lấy từ `telegram::bot_running()`, trả `offline` khi bot chưa chạy và không còn hard-code xanh.
 
 ### 9.2.8 Bảo mật Telegram
 
@@ -432,13 +432,24 @@ UI: `ApiManagementView.vue:113-114, 165-168` chỉ ghi `.env`/vault; `SystemView
 | Token đọc lại từ env thay vì dùng token trong `Bot` | `telegram.rs:323` | Trung bình |
 | `Bot::new()` mới mỗi lần `telegram:send_text` (không reuse connection pool) | `liva-native-core/src/commands/integrations.rs:65-72` | Thấp |
 | Token rỗng vẫn spawn bot | `liva-native-core/src/boot.rs:407-425` | Thấp |
-| Health check giả báo `telegram: online` | `lib.rs:583-609` | Trung bình (gây hiểu nhầm) |
+| ~~Health check giả báo `telegram: online`~~ | `system_status.rs#system_status` nay đo `telegram::bot_running()` | **Đã đóng** |
 
 Điểm mâu thuẫn đáng chú ý: **MCP server cùng repo có `resolve_path` chống traversal, trong khi `/cat` của Telegram — cổng vào từ Internet — thì không có gì.**
 
 ---
 
 ## 9.3 Smart home — không có giao thức nào **[THIẾU]**
+
+### 9.3.1 Tool thời tiết và định vị coarse — tích hợp mạng có chủ đích **[OK]**
+
+`get_weather` là ngoại lệ Internet duy nhất trong catalog tool native. Nó dùng Open-Meteo không
+cần API key, timeout cứng 6 giây và trả lỗi nói rõ “cần Internet” thay vì làm cả lượt chat treo.
+Địa điểm được chọn theo thứ tự: tham số người dùng → `user_profile.json.location` → cache định vị
+IP coarse 24 giờ. Nhánh IP chỉ chạy khi `system.geolocationEnabled` hoặc
+`LIVA_GEOLOCATION_ENABLED` được bật; LIVA không lưu hay gửi địa chỉ IP vào LLM.
+
+Tool này là read-only/retrieval, không biến smart-home placeholder thành thiết bị thật. Nguồn:
+`integrations/weather.rs`, `integrations/geolocation.rs`, catalog trong `mcp/server.rs`.
 
 Không Home Assistant, không MQTT, không Zigbee, không HTTP. `liva-native-core/Cargo.toml` không có `rumqttc`/`paho`/bất cứ dep MQTT nào (grep `mqtt` = **0 hit**).
 
@@ -756,7 +767,7 @@ Bản kiểm kê này đã được rút gọn sau đợt 22/07/2026. ~~Chương
 
 Các hạng mục **còn nguyên giá trị**, đã mô tả chi tiết kèm `file:dòng` ở các mục trên: bot Telegram không spawn dưới Tauri (§9.2.5), hai stub smart home lệch schema (§9.3), `/ls` + `/cat` không sandbox (§9.2.8), `liva-voice` không ai start (§9.4.1), và `mobile_client` PoC đóng băng (§9.5.3).
 
-Một mục chỉ xuất hiện ở đây: **health check giả** — `lib.rs:583-609` hardcode `telegram: online`, `whisper: online`, `vramGuard: 0%`, `cpuUsage: 12`, `uptime: 3600`, và `SystemView.vue` hiển thị y như số liệu thật.
+Health check giả của snapshot cũ đã được thay bằng `system_status.rs`: CPU/RAM/uptime, trạng thái model/STT/TTS, WebSocket, Telegram và governor đều lấy số đo thật; không đo được thì trả `null`/`unknown`, lock bận thì trả `busy`.
 
 Các hạng mục này được xếp hạng mức độ nghiêm trọng và gộp chung với phần còn lại của repo ở tài liệu nợ kỹ thuật; không lặp lại bảng ở đây.
 
@@ -795,5 +806,5 @@ Các hạng mục này được xếp hạng mức độ nghiêm trọng và g�
 - `liva-desktop/src-tauri/src/lib.rs` — §9.2.5 (kết luận "không có Telegram dưới Tauri" phụ thuộc file này).
 - `liva-voice/*` và `liva-voice/src/*` — §9.4 toàn bộ (10 endpoint, 3 bug chặn, edge-tts, trùng lặp normalizer).
 - `liva-native-core/src/webrtc/frame.rs` — §9.5.2 (kết luận mobile client khớp 1:1 với lõi).
-- `liva-ui/src/components/dashboard/ApiManagementView.vue`, `SystemView.vue` — §9.2.7 (UI ghi biến Telegram, hiển thị health check giả).
+- `liva-ui/src/components/dashboard/ApiManagementView.vue`, `SystemView.vue` — §9.2.7 (credential write-only và health check Telegram đo thật).
 - `scripts/start_all.ps1` — §9.4.1 (bằng chứng port 8765 không được khởi động).

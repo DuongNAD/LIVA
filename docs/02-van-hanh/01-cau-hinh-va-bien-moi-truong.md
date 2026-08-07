@@ -1,7 +1,7 @@
 ---
 title: "Cấu hình và biến môi trường"
-updated: 2026-08-06
-commit: 95d641a
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-bien-moi-truong
@@ -125,7 +125,7 @@ Cột **Bắt buộc?** phản ánh **hành vi code thật**, không phản ánh
 | `LIVA_MEMORY_RETENTION_INTERVAL_SECS` | `3600` | Không | `memory_retention.rs#RetentionPolicy::from_env` | Nhịp sweeper; tối thiểu 60 giây; chỉ được đọc khi retention đã bật |
 | `LIVA_MEMORY_RETENTION_BATCH_SIZE` | `10` | Không | `memory_retention.rs#RetentionPolicy::from_env` | Số hội thoại tối đa mỗi batch, bị chặn trong 1–25 |
 | `LIVA_LLM_N_CTX` | `4096` | Không | `main.rs:127`, `lib.rs:334` | context llama.cpp; parse fail → 4096 |
-| `LIVA_LLM_N_GPU_LAYERS` | **`0`** (`.env.example:37` ghi `99` — lệch) | Không | `main.rs:131`, `lib.rs:338` | `u32`; parse fail → 0. **KHÔNG dùng `-1`** |
+| `LIVA_LLM_N_GPU_LAYERS` | vắng = tự chọn **99 hoặc 0** theo VRAM trống, kích thước model+projector và 2 GiB dự phòng | Không | `boot.rs#gpu_layers_mac_dinh` | `u32`; có giá trị hợp lệ thì override phép tự chọn. **KHÔNG dùng `-1`** |
 | `LIVA_GAME_N_GPU_LAYERS` | `0` | Không | `main.rs:271`, `lib.rs:419` | Layer GPU khi phát hiện game; task tự `return` nếu `normal==0 \|\| game==normal` |
 | `LIVA_VAULT_PATH` | `E:\Project\LIVA\teamwork_projects\obsidian_llm_wiki\vault` (**hardcode tuyệt đối**) | Không | `main.rs:166`, `lib.rs:345` | Vault Obsidian cho `NativeMcpServer` |
 
@@ -167,7 +167,6 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 | `LIVA_GAME_PRIORITY` | `true` (**chỉ `"off"`** mới tắt) | Không | `governor.rs:58` | Hạ priority tiến trình xuống BELOW_NORMAL khi vào game |
 | `LIVA_BUSY_CPU_PERCENT` | `80` (`0` = tắt nhánh CPU; >100 hoặc rác → 80) | Không | `governor.rs:94-100` | Ngưỡng tải CPU **của tiến trình khác** để bật chế độ tiết kiệm, song song với dò fullscreen |
 | `LIVA_BUSY_GPU_PERCENT` | `80` (`0` = tắt nhánh GPU; >100 hoặc rác → 80) | Không | `governor.rs:197-203` | Ngưỡng tải GPU **của tiến trình khác** (NVML, chỉ NVIDIA — máy khác nhánh tự tắt). Không tách được phần của LIVA mà `LIVA_LLM_N_GPU_LAYERS > 0` thì bỏ tín hiệu, tránh vòng phản hồi ngược |
-|  |  ( = tắt nhánh GPU; >100 hoặc rác → 80) | Không |  | Ngưỡng tải GPU **của tiến trình khác** (NVML, chỉ NVIDIA — máy khác nhánh tự tắt). Khi không tách được phần của LIVA mà  thì bỏ tín hiệu để tránh vòng phản hồi ngược |
 | `LIVA_LLM_THREADS` | `4` | Không | `llm/engine.rs:172`, `llm/engine.rs:393` | `n_threads` llama.cpp |
 | `LIVA_ESPEAK_PATH` | tự dò PATH → `C:\Program Files\eSpeak NG\espeak-ng.exe` → `(x86)` | Không | `tts/espeak.rs:12-35` | Nhị phân G2P; cache bằng `OnceLock` |
 | `LIVA_TTS_PIPER_DIR` | `models/piper` | Không | `tts/mod.rs:133` | Quét `vi*.onnx` / `en*.onnx` |
@@ -236,7 +235,7 @@ Bảng dưới liệt kê **biến và giá trị mặc định**. Ý nghĩa v�
 |---|---|---|---|---|
 | 1 | `LIVA_LLM_MODEL_DIR` | `E:\AI_Models` (`.env.example:28`) | **không có reader nào ở runtime** (chỉ `router_stress.rs:68`, `integration_tests.rs:213`) | Sửa biến này **không đổi gì**; đường dẫn model thật lấy từ `data/liva-config.json` |
 | 2 | `LIVA_WAKE_THRESHOLD` | `0.77` | default code là `0.68` | Vì không có dotenv, không export thì dùng 0,68; dòng example chỉ có tác dụng khi người vận hành export thật |
-| 3 | `LIVA_LLM_N_GPU_LAYERS` | `99` | default code là `0` | Vì không có dotenv, không export thì LLM vẫn CPU-only ngay cả trên build CUDA |
+| 3 | `LIVA_LLM_N_GPU_LAYERS` | `99` | vắng = `gpu_layers_mac_dinh()` tự chọn 99/0 | `.env.example` là ví dụ override; runtime không nạp file `.env`, nhưng thiếu biến không còn đồng nghĩa CPU-only |
 
 Các lệch cũ về `LIVA_DB_IN_MEMORY`, khóa mặc định công khai, VieNeu vắng trong example và
 `LIVA_TTS_VOICE_PATH` làm mất toàn bộ TTS đã được sửa trong code/example; không còn là rủi ro hiện hành.
@@ -283,7 +282,7 @@ grep trên `liva-native-core/src` + `liva-desktop/src-tauri/src` → **0 kết q
 | Tham số | Default trong code | Giá trị tài liệu ghi | Nguồn tài liệu |
 |---|---|---|---|
 | `LIVA_WAKE_THRESHOLD` | `0.68` (`wake.rs:92-95`) | `0.77` | `.env.example:97`, `models/README.md:18`, README |
-| `LIVA_LLM_N_GPU_LAYERS` | `0` (`main.rs:131`) | `99` | `.env.example:37` |
+| `LIVA_LLM_N_GPU_LAYERS` | tự chọn 99/0 (`boot.rs#gpu_layers_mac_dinh`) | `99` | `.env.example` |
 | `LIVA_VAD_END_FRAMES` | `22` (`webrtc/vad.rs:49`) | `22` trong `.env.example:79`, nhưng `Default` của struct là `45` | `webrtc/vad.rs` |
 | `parakeet_vi.onnx` (kích thước) | thực tế **41,9 MB** trên đĩa | "1.1MB graph" | `models/README.md:11` — **sai số liệu** |
 
@@ -308,7 +307,7 @@ Hằng số fallback (`lib.rs:59-61`):
 
 ```rust
 pub const DEFAULT_MODELS_DIR: &str = "E:\\AI_Models";
-pub const DEFAULT_ROUTER_MODEL: &str = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
+pub const DEFAULT_ROUTER_MODEL: &str = "gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
 pub const DEFAULT_EXPERT_MODEL: &str = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf";
 ```
 
@@ -342,8 +341,8 @@ Giá trị cột "Giá trị hiện tại" lấy từ file thật `E:\Project\LI
 |---|---|---|---|
 | `ai.provider` | `"local"` | `lib.rs:124`, `lib.rs:146` | **[OK]** — `!= "local"` ⇒ bỏ hẳn nạp model local |
 | `ai.localModelsDir` | `E:\AI_Models` | `configured_models_dir`, `artifact_trust::verify_model_artifact` | **[OK]** — root được canonicalize; config vẫn có thể đổi nên đây chưa phải operator-owned root bất biến |
-| `ai.routerModel` | `Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf` | `configured_router_model_path`, `load_configured_router_model` | **[OK]** — chỉ nạp nếu dest + SHA-256 khớp manifest nhúng |
-| `ai.mmprojModel` | `Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf` | `configured_mmproj_path`, `load_configured_router_model` | **[OK]** — dùng cùng canonical/hash gate trước đường `vision:ask` |
+| `ai.routerModel` | `gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` | `configured_router_model_path`, `load_configured_router_model` | **[OK]** — chỉ nạp nếu dest + SHA-256 khớp manifest nhúng |
+| `ai.mmprojModel` | `gemma-4-E4B-it-qat-GGUF/mmproj-F16.gguf` | `configured_mmproj_path`, `load_configured_router_model` | **[OK]** — projector phải cùng repo QAT và qua canonical/hash gate |
 | `ai.expertModel` | `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` | chỉ xuất hiện ở default `lib.rs:379`, `:444` | **[MỘT PHẦN]** — **chưa có code swap expert tự động** |
 | `ai.cloudBaseUrl` | `""` | không có reader (`lib.rs:374`, `:439` chỉ là default echo) | **[THIẾU]** |
 | `ai.cloudApiKey` | **không còn hợp lệ** | `update_config` từ chối; `get_config` redact legacy | **[ĐÃ XÓA]** — secret ở Stronghold `ai/cloud_api_key` |
@@ -475,7 +474,7 @@ Trước khi báo cáo "cấu hình X đã bật", hãy xác nhận theo thứ t
 1. **Có `.env` không?** Nếu có, nó **vẫn không được nạp** — phải export biến vào shell.
 2. **Điểm vào nào đang chạy?** `tauri dev` hay gateway standalone? Cả hai dùng chung `boot.rs`; chỉ các biến dựng Tokio runtime (`LIVA_TOKIO_*`) là standalone-only.
 3. **Đường dẫn model LLM** đọc từ `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel`, **không** từ `LIVA_LLM_MODEL_DIR`.
-4. **GPU:** không có `.env` ⇒ `LIVA_LLM_N_GPU_LAYERS=0` ⇒ CPU thuần dù build CUDA.
+4. **GPU:** không có biến env ⇒ runtime tự chọn 99/0 theo VRAM trống và artifact; không có NVML/driver, không đủ dự phòng hoặc build không có backend CUDA thì về CPU.
 5. **Vision:** cần build `--release` **và** `ai.mmprojModel` không rỗng.
 6. **TTS:** thiếu voice Kokoro chỉ làm fallback đó suy giảm; kiểm riêng model của backend muốn dùng.
 7. **Retention:** mặc định tắt. Chỉ export `LIVA_MEMORY_RETENTION_DAYS` số dương sau khi đã dry-run bằng `memory:sweep_retention`.

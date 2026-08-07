@@ -1,7 +1,7 @@
 ---
 title: "Mô hình AI và tài nguyên"
-updated: 2026-07-31
-commit: 3688b5f
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-model
@@ -64,7 +64,7 @@ Có **hai** cơ chế xác định model, và chúng không phải một:
 
 | Loại model | Nguồn đường dẫn thật | Ghi chú |
 |---|---|---|
-| **LLM GGUF** (router + mmproj + expert) | `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel` / `ai.mmprojModel` / `ai.expertModel`; bản cài chuẩn hoá đường dẫn dev tuyệt đối sang thư mục dữ liệu của người dùng | Fallback hiện hành: `DEFAULT_MODELS_DIR = "E:\\AI_Models"`, `DEFAULT_ROUTER_MODEL = "Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf"`, `DEFAULT_EXPERT_MODEL = "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"` |
+| **LLM GGUF** (router + mmproj + expert) | `data/liva-config.json` → `ai.localModelsDir` + `ai.routerModel` / `ai.mmprojModel` / `ai.expertModel`; bản cài chuẩn hoá đường dẫn dev tuyệt đối sang thư mục dữ liệu của người dùng | Fallback hiện hành: `DEFAULT_MODELS_DIR = "E:\\AI_Models"`, router `gemma-4-E4B-it-qat-GGUF/...Q4_K_XL.gguf`, expert `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` |
 | **ONNX / Piper / VieNeu / VAD / wake** | biến `LIVA_*` → nếu không có thì default hardcode trong code, phần lớn đi qua `resolve_resource_path` | Tên biến và giá trị mặc định: xem tài liệu cấu hình |
 
 > 📌 Nguồn đầy đủ (bảng ~60 biến `LIVA_*`, giá trị mặc định, các chỗ lệch `.env.example` vs code): [Cấu hình và biến môi trường](01-cau-hinh-va-bien-moi-truong.md)
@@ -126,11 +126,11 @@ Khớp `data/liva-config.json` → `ai.localModelsDir = "E:\\AI_Models"`.
 
 | File | Có? | Kích thước | Vai trò | Trạng thái |
 |---|---|---|---|---|
-| `Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf` | ✅ | 1,11 GB | **Router LLM đang chạy thật** (`liva-config.json` → `ai.routerModel`) | **[OK]** |
-| `Qwen3-VL-2B-Instruct-GGUF/mmproj-F16.gguf` | ✅ | 819 MB | Vision projector (`ai.mmprojModel` → `configured_mmproj_path()`, `liva-native-core/src/lib.rs:227-247`) | **[MỘT PHẦN]** — chỉ chạy ở build RELEASE |
+| `gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 4,22 GB | **Router LLM đang chạy thật** (`liva-config.json` → `ai.routerModel`) | **[OK]** |
+| `gemma-4-E4B-it-qat-GGUF/mmproj-F16.gguf` | ✅ | 990 MB | Vision projector hiện hành; phải cùng repo QAT và đúng hash | **[MỘT PHẦN]** — đường vision Windows cần build RELEASE |
+| `Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q4_K_M.gguf` + `mmproj-F16.gguf` | ✅ | 1,11 GB + 819 MB | Router/vision thay thế có ghim manifest | **[THIẾU]** — config hiện hành không trỏ tới |
 | `Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf` | ✅ | 445 MB | mmproj thay thế, nhẹ hơn | **[THIẾU]** — không config nào trỏ tới |
 | `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 6,72 GB | `ai.expertModel`, đồng thời là hằng số `DEFAULT_EXPERT_MODEL` (`liva-native-core/src/lib.rs:67`) | **[THIẾU]** — **chưa có code swap expert tự động** |
-| `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` | ✅ | 4,22 GB | model kho rời; không còn là `DEFAULT_ROUTER_MODEL` | **[THIẾU]** — không config hiện hành trỏ tới |
 | Còn lại: `DeepSeek-R1-Distill-Qwen-14B/32B`, `Gemma-2-9B`, `Llama-3-8B`, `Qwen2.5-*`, `Qwythos-9B`, `gemma-4-26B-A4B*`, `gemma-4-E2B/E4B` | ✅ | 3 – 19,8 GB mỗi file | kho model rời | **[THIẾU]** — không config nào trỏ tới |
 
 ### 3.1 Cấu hình chết / trỏ sai (đã kiểm chứng)
@@ -155,8 +155,8 @@ flowchart LR
   end
 
   subgraph FILES["File trên đĩa"]
-    GGUF["E:/AI_Models/Qwen3-VL-2B-Instruct-Q4_K_M.gguf · 1,11 GB"]
-    MMP["E:/AI_Models/mmproj-F16.gguf · 819 MB"]
+    GGUF["E:/AI_Models/gemma-4-E4B...Q4_K_XL.gguf · 4,22 GB"]
+    MMP["E:/AI_Models/gemma-4-E4B.../mmproj-F16.gguf · 990 MB"]
     NEMO["models/nemotron-asr/ · ~788 MB"]
     PIPER["models/piper/*.onnx · 2 x 63,2 MB"]
     KOKV["node_modules/kokoro-js/voices/af_heart.bin · KHONG TON TAI"]
@@ -171,7 +171,7 @@ flowchart LR
   end
 
   subgraph RT["Runtime engine"]
-    LLAMA["llama.cpp qua llama-cpp-2 (feature mtmd)<br/>n_ctx 4096 · n_threads 4 · n_gpu_layers 0"]
+    LLAMA["llama.cpp qua llama-cpp-2 (feature mtmd)<br/>n_ctx 4096 · n_threads 4 · n_gpu_layers tự chọn 99/0"]
     ORT["ONNX Runtime qua ort 2.0.0-rc.11<br/>CPU-only, CO Y"]
     ESPK["espeak-ng.exe · shell-out G2P"]
   end
@@ -204,7 +204,7 @@ flowchart LR
   WAKE -.->|"LIVA_WAKE_MODE khac Off"| ORT
 
   PIPER --> ESPK
-  LLAMA --> CPUD["CPU · VRAM = 0"]
+  LLAMA --> CPUD["CPU hoặc CUDA · VRAM theo phép tự chọn"]
   ORT --> CPUD
 ```
 
@@ -219,7 +219,7 @@ flowchart LR
 | Model | File thật trên đĩa | RAM ước tính | VRAM | Thiết bị |
 |---|---|---|---|---|
 | Nemotron ASR (3 ONNX + tokenizer) | ≈ **788 MB** | ~0,9–1,1 GB | 0 | **CPU** (ORT) |
-| Router LLM GGUF | Qwen3-VL-2B Q4_K_M **1,11 GB** (hoặc gemma 4–7 GB) | ~3–8 GB + KV-cache `n_ctx=4096` | **0** vì `LIVA_LLM_N_GPU_LAYERS`=0 | **CPU** (llama.cpp, 4 threads) |
+| Router LLM GGUF | Gemma-4 E4B QAT Q4_K_XL **4,22 GB** | ~5–8 GB + KV-cache `n_ctx=4096` | **0 hoặc offload 99 layer** theo VRAM trống/override | CPU hoặc CUDA (llama.cpp, 4 threads) |
 | VieNeu-TTS v3 Turbo (opt-in) | ≈ **569 MB** | ~0,7 GB | 0 | **CPU** |
 | Parakeet-vi CTC 0.6B (opt-in) | 41,9 MB + **2,27 GiB** | ~2,4–2,8 GB | 0 | **CPU** |
 | Piper TTS vi + en | 2 × 63,2 MB | ~0,08–0,15 GB | 0 | **CPU** |
@@ -229,17 +229,18 @@ flowchart LR
 | GTCRN denoise | 536 KB | ~5 MB | 0 | CPU — chỉ bin standalone |
 | Smart Turn v3.2 | 8,68 MB | ~20 MB | 0 | CPU — opt-in |
 | Wake-word (3 model) | ≈ **2,8 MB** | ~10 MB | 0 | CPU — mặc định `Off` |
-| **Tổng đường mặc định** (Tauri + Nemotron + router + Piper) | — | **≈ 4–9 GB RAM** | **≈ 0 VRAM** | **CPU thuần**, kể cả khi build có `cuda` |
+| **Tổng đường mặc định** (Tauri + Nemotron + router + Piper) | — | **≈ 6–10 GB RAM** nếu CPU | **0 hoặc khoảng trọng số router+projector**, còn chừa 2 GiB | CPU khi không đủ điều kiện; CUDA khi build hỗ trợ và phép tự chọn trả 99 |
 
-### 5.1 Vì sao VRAM = 0 dù có card rời
+### 5.1 Vì sao VRAM không còn là hằng số 0
 
-Ba lý do độc lập, phải gỡ **cả ba** mới thấy GPU được dùng:
+Runtime hiện quyết định theo ba điều kiện, không còn mặc định cứng CPU:
 
-1. **`LIVA_LLM_N_GPU_LAYERS` default = `0`** trong code (`liva-native-core/src/main.rs:134-137`, `liva-desktop/src-tauri/src/lib.rs:340-343`) — `.env.example:37` ghi `99`, nhưng vì **không có cơ chế nạp `.env`**, giá trị 99 đó không bao giờ tới được tiến trình.
-2. **Build mặc định không bật `cuda`** — `default = []` (`liva-native-core/Cargo.toml:65`). Không có backend GPU thì `n_gpu_layers` truyền vào llama.cpp cũng vô nghĩa.
-3. **ORT cố ý KHÔNG bật CUDA** — mọi ONNX (STT, TTS, VAD, wake, denoise, turn, embedding) chạy CPU-only. Đây là quyết định có chủ đích, xem comment `stt/parakeet.rs:180-185` giải thích nguy cơ dính bẫy khởi tạo backend nêu ở `models/README.md:24`.
+1. **Biến `LIVA_LLM_N_GPU_LAYERS` có mặt** thì giá trị hợp lệ override mọi phép tự chọn; file `.env` vẫn không được runtime tự nạp.
+2. **Biến vắng** thì `boot::gpu_layers_mac_dinh` đọc VRAM trống và kích thước router+projector: đủ thêm 2 GiB dự phòng → 99, còn lại → 0. Không đọc được NVML/driver hoặc kích thước file cũng fail-safe về 0.
+3. **Binary phải có backend CUDA.** Nếu build CPU-only, số layer không tạo ra GPU backend.
+ORT vẫn cố ý **không** bật CUDA: STT, TTS, VAD, wake, denoise, turn và embedding ONNX chạy CPU-only. Phép tự chọn chỉ áp dụng cho router/mmproj llama.cpp.
 
-Hệ quả: **task GPU downshift game-aware tự `return` ngay** vì `normal_layers == 0` (`liva-native-core/src/boot.rs:335-357`, `liva-desktop/src-tauri/src/lib.rs:439`) — cơ chế nhường GPU cho game hiện **[MỘT PHẦN]**, có code nhưng không bao giờ chạy tới nhánh làm việc.
+Hệ quả: watcher downshift chỉ có tác dụng khi số layer bình thường khác `LIVA_GAME_N_GPU_LAYERS`; trên máy được tự chọn 99, fullscreen có thể hạ về 0 rồi nạp lại model. Reload xóa KV cache nên đây vẫn là cơ chế **[MỘT PHẦN]**, cần tránh dao động.
 
 > 📌 Nguồn đầy đủ về ngưỡng governor và logic phát hiện tải nặng: [Thị giác passive và governor](../01-ban-ve/06-thi-giac-passive-va-governor.md)
 
@@ -412,14 +413,14 @@ mã nguồn hoặc chẩn đoán sâu.
 - [Triển khai và runtime](03-trien-khai-va-runtime.md) — lấy điều kiện tiên quyết build và checklist model trước khi chạy
 - [Đường ống thoại](../01-ban-ve/03-duong-ong-thoai.md) — lấy kích thước/tình trạng file model STT-TTS thật trên đĩa
 - [Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md) — lấy bảng GGUF ở `E:\AI_Models` và trạng thái router/expert/mmproj
-- [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — lấy bằng chứng "chạy CPU thuần, VRAM = 0" và các model thiếu
+- [Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — bằng chứng theo từng mốc; các kết luận CPU/VRAM cũ phải đọc kèm commit đo
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — lấy các cấu hình chết (`models.config.json`, `openblas`) và phụ thuộc EAGER `af_heart.bin`
 
 **Khi sửa code sau đây thì phải cập nhật tài liệu này:**
 
 - `data/liva-config.json` — nguồn thật của đường dẫn LLM GGUF (mục 1, mục 3)
-- `liva-native-core/src/lib.rs` — hằng số `DEFAULT_MODELS_DIR` / `DEFAULT_ROUTER_MODEL` / `DEFAULT_EXPERT_MODEL`, `configured_router_model_path()`, `configured_mmproj_path()`, `load_configured_router_model()` (mục 1, 3, 8)
-- `liva-desktop/src-tauri/src/lib.rs` — default `n_gpu_layers` và task GPU downshift ở phía vỏ Tauri, nơi nạp `EmbeddingEngine` (mục 5.1)
+- `liva-native-core/src/paths.rs` — hằng số và resolver đường dẫn model; `boot.rs` — autoload và `gpu_layers_mac_dinh` (mục 1, 3, 5)
+- `liva-native-core/src/boot.rs` — task GPU downshift dùng chung cho standalone và Tauri (mục 5.1)
 - `liva-native-core/src/llm/embedder.rs` — model embedding 384 chiều tách riêng (mục 2, 4, 5, 8)
 - `liva-native-core/Cargo.toml` + `liva-desktop/src-tauri/Cargo.toml` — khai báo và forward feature `cuda`/`vulkan`/`openblas`, phiên bản `ort` (mục 6.1, mục 7)
 - `Cargo.toml` (root) — override `opt-level = 3` cho `llama-cpp-*` ở profile dev (mục 6.1)

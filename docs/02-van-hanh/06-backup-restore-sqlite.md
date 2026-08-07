@@ -2,6 +2,7 @@
 title: "Runbook backup và restore SQLite"
 updated: 2026-07-31
 commit: 3688b5f
+stale-ok: bd11c84
 status: living
 covers:
   - liva-native-core/src/persistence_backup.rs

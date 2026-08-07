@@ -1,8 +1,8 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
-updated: 2026-08-06
-commit: 3688b5f
-status: living
+updated: 2026-08-07
+commit: bd11c84
+status: index
 owns: []
 covers:
   - docs/_data/capabilities.json
@@ -30,7 +30,7 @@ covers:
 ---
 # Tài liệu LIVA
 
-LIVA là một trợ lý AI chạy **cục bộ trên máy người dùng**: lõi Rust `liva-native-core` (LLM, STT, TTS, agent, WebSocket gateway cổng 8002) được vỏ Tauri v2 `liva-desktop` nhúng in-process, còn giao diện là ứng dụng Vue 3 `liva-ui`. Toàn bộ suy luận mặc định chạy offline bằng model cục bộ — `llama.cpp` cho LLM/vision, ONNX Runtime cho STT/TTS/VAD/denoise — dữ liệu nằm trong SQLite cục bộ. Tài liệu as-built phải bám code/test; tài liệu target và roadmap phải tự ghi rõ rằng chúng mô tả đích đến.
+LIVA là một trợ lý AI chạy **cục bộ trên máy người dùng**: lõi Rust `liva-native-core` (LLM, STT, TTS, agent, WebSocket gateway cổng 8002) được vỏ Tauri v2 `liva-desktop` nhúng in-process, còn giao diện là ứng dụng Vue 3 `liva-ui`. Suy luận mặc định chạy offline bằng model cục bộ — `llama.cpp` cho LLM/vision, ONNX Runtime cho STT/TTS/VAD/denoise — dữ liệu nằm trong SQLite cục bộ. Ngoại lệ mạng đều opt-in hoặc theo tool: weather/geolocation và HTTP tương thích OpenAI tắt mặc định. Tài liệu as-built phải bám code/test; tài liệu target và roadmap phải tự ghi rõ rằng chúng mô tả đích đến.
 
 Từ 30/07/2026, bộ tài liệu được di trú dần sang kiến trúc v2. Tài liệu **as-built**
 vẫn nằm trong `01-ban-ve/`, `02-van-hanh/` và `03-danh-gia/`; tầm nhìn, kiến trúc
@@ -213,7 +213,7 @@ Nguyên tắc cứng khi biên soạn và khi cập nhật:
 
 1. **Xác định phạm vi ảnh hưởng trước.** Chạy `impact({target: "symbolName", direction: "upstream"})` và `detect_changes()` (GitNexus MCP) để biết thay đổi chạm vào những module nào — từ đó suy ra file tài liệu nào phải sửa. Bảng ánh xạ module → tài liệu nằm ở [01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md](01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md).
 2. **Sửa bản vẽ trước, đánh giá sau.** Thứ tự: `01-ban-ve/` → `02-van-hanh/` → `03-danh-gia/`. Bản đánh giá tham chiếu các bản vẽ, nên sửa ngược lại sẽ sinh mâu thuẫn.
-3. **Cập nhật khối header** ở đầu file: đổi `**Cập nhật:**` sang ngày mới và `**Trạng thái:**` sang commit hash mới. Nếu nguồn không còn là đợt khảo sát 31 agent thì sửa luôn dòng `**Nguồn:**` cho trung thực.
+3. **Cập nhật front-matter đúng nghĩa:** có sửa nội dung thì đổi `updated:` + `commit:`; chỉ sau khi đọc hết diff và không cần sửa mới đặt `stale-ok:`. Không đổi `updated` cho sửa chính tả/metadata không làm nội dung kỹ thuật đổi.
 
    ⚠️ **Với `03-danh-gia/`, lỗi thời là LỖI chặn CI** (`docs-check.mjs --strict-stale=docs/03-danh-gia`, từ 26/07/2026). Khi bước này đỏ, chọn đúng một trong hai — chúng **không** thay thế nhau: sửa nội dung rồi bump `commit:`, **hoặc** nếu đọc diff thấy không cần sửa gì thì đặt `stale-ok: <sha>`. Bump `commit:` khi bạn không sửa gì là khẳng định một việc đối chiếu chưa xảy ra. 📌 Nguồn đầy đủ: [Hướng dẫn bảo trì](_meta/huong-dan-bao-tri.md)
 4. **Đổi nhãn khi trạng thái nối dây đổi.** Bật một tính năng opt-in thành mặc định thì nâng **[MỘT PHẦN]** → **[OK]**; xoá code mồ côi thì gỡ hẳn mục **[THIẾU]** tương ứng khỏi cả `03-danh-gia/02-no-ky-thuat-va-rui-ro.md`.
@@ -222,6 +222,9 @@ Nguyên tắc cứng khi biên soạn và khi cập nhật:
 7. **Cập nhật mục `## Liên quan`** ở cuối mỗi file bị ảnh hưởng — liên kết chéo phải luôn dùng **đường dẫn tương đối** so với vị trí file đó.
 8. **Không sửa file trong `99-luu-tru/`.** Chúng là ảnh chụp lịch sử. Nếu một tài liệu hiện hành trở nên lỗi thời, hãy chuyển nó vào lưu trữ và ghi lý do trong [99-luu-tru/README.md](99-luu-tru/README.md).
 9. **Không commit tự động.** Theo quy ước dự án (`AGENTS.md`), chỉ chạy `git commit`/`git push` khi người dùng yêu cầu rõ ràng.
+
+Rà theo lô bằng Gemini 3.6 Flash/3.1 Pro dùng workflow + schema fail-closed ở
+[Hướng dẫn bảo trì §7.5](_meta/huong-dan-bao-tri.md#75-rà-stale-theo-lô-bằng-gemini-36-flash--31-pro).
 
 ---
 
@@ -232,6 +235,6 @@ Nguyên tắc cứng khi biên soạn và khi cập nhật:
 - [01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md](01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md) — bản đồ tìm đường trong mã nguồn
 - [02-van-hanh/03-trien-khai-va-runtime.md](02-van-hanh/03-trien-khai-va-runtime.md) — cách chạy đúng
 - [03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md](03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) — tuyên bố vs thực tế
-- [03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md](03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) — việc cần làm tiếp (sửa lỗi GĐ0–GĐ4)
+- [06-ke-hoach/roadmap.md](06-ke-hoach/roadmap.md) — master roadmap duy nhất; các lộ trình trong `03-danh-gia/` là hồ sơ lịch sử/đối chiếu
 - [03-danh-gia/05-nang-cap-toan-dien.md](03-danh-gia/05-nang-cap-toan-dien.md) — backlog nâng cấp U1–U33 + đường cơ sở đo được + gói trình diễn (nhóm F)
 - [99-luu-tru/README.md](99-luu-tru/README.md) — cảnh báo tài liệu lỗi thời

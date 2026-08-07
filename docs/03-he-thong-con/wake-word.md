@@ -2,6 +2,7 @@
 title: "Wake word — kiến trúc và giới hạn sản phẩm"
 updated: 2026-08-02
 commit: 3688b5f
+stale-ok: bd11c84
 status: living
 owns:
   - wake-word-viec-con-lai

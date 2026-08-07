@@ -2,6 +2,7 @@
 title: "Voice SLO và acceptance gates"
 updated: 2026-07-30
 commit: 3688b5f
+stale-ok: bd11c84
 status: living
 owns:
   - bang-nguong-vad-aec-denoise

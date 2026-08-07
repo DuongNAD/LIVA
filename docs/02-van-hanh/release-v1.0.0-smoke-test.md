@@ -1,8 +1,8 @@
 ---
 title: "Báo cáo phát hành v1.0.0"
-updated: 2026-08-04
+updated: 2026-08-07
 commit: 596e8b6
-status: living
+status: frozen
 owns:
   - bao-cao-phat-hanh-v1
 covers:

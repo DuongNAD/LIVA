@@ -1,7 +1,7 @@
 ---
 title: "Phụ thuộc module và tra cứu file"
-updated: 2026-08-06
-commit: 95d641a
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - bang-module-va-loc
@@ -40,8 +40,8 @@ Sơ đồ dưới đây là bản đồ gốc của crate `liva-native-core`. M�
 ```mermaid
 flowchart TD
     subgraph ENTRY["Điểm vào"]
-        main["main.rs<br/>bin standalone"]
-        lib["lib.rs<br/>AppState + handle_command"]
+        main["main.rs<br/>entry standalone mỏng"]
+        lib["lib.rs<br/>AppState + public modules"]
     end
 
     subgraph AI["Lõi AI"]
@@ -126,7 +126,7 @@ flowchart TD
 
 ### 1.1 Đọc sơ đồ như thế nào
 
-- **`lib.rs` là hub trung tâm.** Gần như mọi thứ hoặc phụ thuộc vào nó (để lấy `AppState`), hoặc được nó gọi (qua `handle_command`). Sửa `AppState` = đụng cả `main.rs`, Tauri shell, `webrtc/pipeline`, `agent/graph`, `telegram.rs`.
+- **`AppState` vẫn là hub kiểu dữ liệu, nhưng `lib.rs` không còn là god-dispatcher.** `boot.rs` dựng state/dịch vụ dùng chung; `commands/*` sở hữu 11 miền lệnh; `paths.rs` resolve tài nguyên/model; `system_status.rs` đo health; `websocket.rs` vận chuyển. Sửa `AppState` vẫn có blast radius rộng, còn thêm một command phải sửa đúng miền + authorization thay vì nhét vào `lib.rs`.
 - **`stt`, `llm`, `tts` là lá thuần** — không `use crate::` gì cả. Đây là ba module an toàn nhất để refactor nội bộ: blast radius chỉ nằm ở biên API công khai của chúng.
 - **`db.rs → crypto.rs` là cạnh dữ liệu duy nhất.** Mã hoá chỉ áp cho `facts.value`.
 - **`vision → governor`**: `vision/capture.rs` hỏi governor xem có đang ở game mode không trước khi chụp màn hình.
@@ -155,8 +155,11 @@ Số dòng đếm trên toàn bộ `*.rs` của module (kể cả test nội tuy
 
 | Module | Số dòng | Trách nhiệm | Phụ thuộc vào | Được gọi bởi | Trạng thái |
 |---|---:|---|---|---|---|
-| `main.rs` | 1 249 | Điểm vào binary standalone: runtime Tokio, `AppState`, WS 8002, IPC stdio, Telegram | `lib`, `webrtc`, `llm`, `stt`, `tts`, `vision`, `db`, `crypto`, `mcp`, `governor`, `wake`, `telegram` | — | [MỘT PHẦN] |
-| `lib.rs` | 1 752 | `AppState`, `handle_command`, resolve config/model path | `db`, `crypto`, `llm`, `stt`, `tts`, `vision`, `webrtc`, `mcp`, `integrations` | `main.rs`, Tauri, `webrtc/pipeline`, `agent/graph`, `telegram` | [OK] |
+| `main.rs` | — | Điểm vào standalone mỏng: xử lý `--preflight`/`--setup-models`, rồi gọi composition root | `boot`, `preflight`, `setup_cli` | — | [OK] |
+| `lib.rs` | — | `AppState`, public module surface và re-export contract | `boot`, `commands`, `paths`, `system_status` cùng subsystem | `main.rs`, Tauri, pipeline/agent/Telegram | [OK] |
+| `commands/` | — | Dispatcher 77 lệnh/11 miền; mỗi miền có `owns` + `handle` | `authorization`, các subsystem | WebSocket và Tauri native IPC | [OK] |
+| `boot.rs` | — | Composition root dùng chung, autoload model, dịch vụ nền và GPU auto-select | `paths`, DB, model, governor | standalone + Tauri | [OK] |
+| `paths.rs` / `system_status.rs` / `preflight.rs` | — | Resolve path, health đo thật, báo cáo tài nguyên dùng chung CLI/UI | config/model/governor | commands + UI | [OK] |
 | `tts/` | 3 861 | Định tuyến VieNeu → Piper → Kokoro, chuẩn hoá tiếng Việt, G2P, phát audio | `tts::espeak` | `lib.rs`, `main.rs`, `webrtc/pipeline` | [OK] |
 | `llm/` | 1 623 | Nạp/hoán GGUF, sinh token, prefix-cache KV, sliding window, vision, prompt, persona | — | `lib.rs`, `main.rs`, `agent/graph`, `webrtc/pipeline` | [OK] |
 | `webrtc/` | 1 548 | VAD, GTCRN, AEC3, Smart Turn, actor STT→LLM→TTS, codec khung | `lib` (AppState), `agent`, `llm`, `tts`, `stt` | `main.rs`, `lib.rs` | [MỘT PHẦN] |
@@ -168,17 +171,17 @@ Số dòng đếm trên toàn bộ `*.rs` của module (kể cả test nội tuy
 | `governor.rs` | 541 | Phát hiện game fullscreen, đọc tải CPU thật, hạ ưu tiên tiến trình | — | `main.rs`, `vision/capture`, Tauri | [OK] |
 | `telegram.rs` | 531 | Bot teloxide 9 lệnh, voice → ffmpeg → STT | `lib` (AppState) | `main.rs` | [MỘT PHẦN] |
 | `evolution/` | 428 | Vòng tự sửa lỗi + sandbox `cargo test` | — | **Không ai** (chỉ tests) | **[THIẾU]** — **ngoài build mặc định** (`cfg experimental`) |
-| `mcp/` | 1 774 | `NativeMcpServer` (6 tool nội bộ), struct JSON-RPC, **MCP client stdio thật** | `mcp::protocol`, `integrations::{smart_home, os_control}` | `lib.rs` (`mcp:*` + `mcp_client:*`), `llm/tool_calling.rs` | [OK] — `client.rs` (1 143) đã nối dây 25–26/07/2026 |
+| `mcp/` | — | `NativeMcpServer` (7 tool nội bộ, gồm weather), struct JSON-RPC, MCP client stdio | `mcp::protocol`, `integrations::{smart_home, os_control, weather}` | `commands/*`, `llm/tool_calling.rs` | [OK] |
 | `wake_model.rs` | 334 | Wake-word ONNX 3 tầng (melspec → embedding → classifier) | — | `wake.rs` | [MỘT PHẦN] |
 | `wake.rs` | 331 | `WakeGate` 4 chế độ, cửa sổ tỉnh | `wake_model` | `main.rs` | [MỘT PHẦN] |
 | `crypto.rs` | 133 | `EncryptionEngine` AES-256-GCM (chỉ `facts.value`) | — | `db.rs`, `lib.rs`, `main.rs` | [OK] |
-| `integrations/` | 107 | Skill `smart_home` (light/ac/fan × on/off) | — | `lib.rs`, `agent/graph` | **[THIẾU]** stub |
+| `integrations/` | — | Smart-home placeholder, OS control thật, weather + geolocation coarse opt-in | network/Windows API tuỳ tool | MCP/tool calling/commands | **[MỘT PHẦN]** |
 
 > **`prng.rs` và `webrtc/signaling.rs` không còn trong bảng vì đã bị XOÁ khỏi repo** (mục 3.1 của đợt dọn dẹp tháng 7/2026): `prng.rs` 70 dòng và `webrtc/signaling.rs` 63 dòng, cả hai đều 0 caller. Đừng đi tìm chúng nữa.
 >
 > **Ba module mang nhãn "ngoài build mặc định"** (`passive/`, `evolution/`, `agent/dispatcher.rs` — 1 262 dòng) nằm sau `#[cfg(feature = "experimental")]` từ 22/07/2026 (commit `4c08f18`). Code vẫn ở trong repo, nhưng `cargo build`/`cargo test` thường **không dịch chúng**; dùng `cargo build --features experimental` để bật lại.
 
-**Cấu trúc đồ thị:** `gitnexus check --cycles` → *"No circular imports found."* `lib.rs` là hub trung tâm; `stt`, `llm`, `tts` là lá thuần. Chi tiết cách đọc và nguyên nhân code chết compile sạch: xem §1.1 và §1.2 ở trên.
+**Cấu trúc đồ thị:** snapshot `gitnexus check --cycles` trả *"No circular imports found."*. Sau hai lát tách `98efc55` và `2dc8e2e`, hub vận hành đã chia sang `boot`/`commands`/`paths`/`system_status`; `AppState` vẫn là điểm nối kiểu dữ liệu. Chi tiết code experimental xem §1.1–§1.2.
 
 ### 2.1 Hai điểm nghẽn kiến trúc cần nhớ trước khi sửa
 
@@ -207,8 +210,8 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 
 | Đường dẫn tuyệt đối | Vai trò | Dòng chốt |
 |---|---|---|
-| `E:\Project\LIVA\liva-native-core\src\main.rs` | Điểm vào binary standalone (1 191 dòng) | `fn main()` :30 · `async_main()` :51 · `start_websocket_server` :446 · `handle_ws_connection` :494 · `OP_MIC_IN` :589 · VAD loop :648 · legacy event :742 · `IpcRequest` :971 |
-| `E:\Project\LIVA\liva-native-core\src\lib.rs` | `AppState` + `handle_command` (1 485 dòng) | `AppState` :33-46 · `resolve_resource_path` :86 · `configured_router_model_path` :119 · `load_configured_router_model` :168 · `reload_llm_gpu_layers` :208 · `handle_command` :236 · `_ => Unknown` :1483 |
+| `E:\Project\LIVA\liva-native-core\src\main.rs` | Entry standalone + cờ CLI sớm | `main`; phần runtime dùng chung ở `boot::build_app_state`/`spawn_background_services` |
+| `E:\Project\LIVA\liva-native-core\src\lib.rs` | `AppState` + public surface | `AppState`; dispatcher ở `commands::handle`, path ở `paths`, health ở `system_status` |
 | `E:\Project\LIVA\liva-desktop\src-tauri\src\lib.rs` | Vỏ Tauri (577 dòng) | `get_stronghold_credentials` :123 · `read_vault_key` :151 · `native_ipc_call` :228 · `run()` :261 · **`AppState` với `None`** :355-368 · `gateway-ready` :461 · hit-test :468 |
 | `E:\Project\LIVA\scripts\start_all.ps1` | Khởi động dev (91 dòng) | kill port :24-35 · vite :56 · `tauri dev` :66 |
 
@@ -338,12 +341,12 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 
 | Tôi muốn… | Mở trước | Rồi tới |
 |---|---|---|
-| Thêm một lệnh API mới | `lib.rs:236` (`handle_command`), nhánh mặc định `liva-native-core/src/lib.rs#handle_command` | `liva-native-core/src/websocket.rs:1422-1512` (`IpcRequest` qua WS), `liva-native-core/src/websocket.rs:829-1458` (legacy event) |
-| Sửa hành vi khởi động / thứ tự nạp model | `main.rs:51` (`async_main`) | `liva-desktop\src-tauri\src\lib.rs:261` (`run()` — trình tự khác, `vad/denoiser/turn_shadow/aec = None`) |
+| Thêm một lệnh API mới | miền phù hợp trong `commands/*` (`OWNED` + `handle`) | `authorization.rs` + transport/client tương ứng; test giữ catalog không lệch |
+| Sửa hành vi khởi động / thứ tự nạp model | `boot.rs#build_app_state` / `spawn_background_services` | standalone và Tauri cùng gọi composition root; khác biệt vỏ nằm ở adapter/capability |
 | Đổi khung nhị phân voice (op code, header) | `webrtc\frame.rs:3-7`, `:17`, `:29` | `liva-ui\src\utils\speakerFrame.ts:36`, `liva-ui\src\composables\useVoicePipeline.ts:345-350` |
 | Sửa độ trễ / ngắt lời / barge-in | `webrtc\pipeline.rs:164` (`handle_vad_start`), `:437` (`cancel_active_operations`) | `webrtc\vad.rs:133`, `liva-ui\src\composables\useSpeakerPlayback.ts:180` (`stop`), `:207` (`flush`) |
 | Sửa chất lượng tiếng Việt của TTS | `tts\normalizer.rs:657` (`normalize`), `:668` (`normalize_vi`) | `tts\mod.rs:354` (`process_chunk`), `tts\vieneu\mod.rs:255` (`synthesize`) |
-| Đổi model LLM hoặc số layer GPU | `data\liva-config.json` (`ai.routerModel` :19) | `lib.rs:119` (`configured_router_model_path`), `lib.rs:168` (`load_configured_router_model`), `lib.rs:208` (`reload_llm_gpu_layers`) |
+| Đổi model LLM hoặc số layer GPU | `data\liva-config.json` + `data\models-manifest.json` | `paths.rs` resolver · `boot.rs#gpu_layers_mac_dinh`/autoload · `reload_llm_gpu_layers` |
 | Sửa prompt / persona | `llm\prompt\persona.rs:16` (`PERSONA_LIVA`), `:35` (`SYS_TASK_PLANNER`) | `llm\prompt\mod.rs:22` (`compile_prompt`), `:159` (ChatML) |
 | Thêm trường vào bộ nhớ / schema DB | `db.rs:188-354` (`init_schemas`) | `db.rs:467` (`set_fact`), `:839` (`search_hybrid_vectors`), `crypto.rs:23` |
 | Thêm skill / tool cho agent | `integrations\smart_home.rs:26` (`get_metadata`), `:51` (`execute` — stub) | `agent\graph.rs:129` (`tool_exec`), `mcp\server.rs:79` (`call_tool`) |
@@ -357,7 +360,7 @@ Bảng dẫn đường ngược, tổng hợp từ các bảng trên.
 ## 6. Nguyên tắc an toàn khi sửa
 
 1. **Chạy `impact({target, direction:"upstream"})` trước khi sửa bất kỳ symbol nào** (bắt buộc theo `CLAUDE.md`). Các symbol có blast radius lớn nhất theo bảng §2: `AppState`, `handle_command`, `VoiceFrame::decode`, `DatabasePool`, `TtsManager::process_chunk`, `LlamaEngine::swap_model`.
-2. **Sửa module lá (`stt`, `llm`, `tts`) rẻ hơn sửa hub (`lib.rs`).** Ba module này không `use crate::` gì cả — chỉ cần giữ nguyên biên API công khai.
+2. **Sửa module lá (`stt`, `llm`, `tts`) rẻ hơn sửa composition/dispatch (`AppState`, `boot`, `commands`).** Giữ nguyên biên API công khai và chạy impact analysis trước khi chạm hub.
 3. **Đừng tin `cargo build` sạch là code đang được dùng.** `#![allow(dead_code)]` cấp crate ở `lib.rs:1` đã được gỡ, nhưng 7 file trong `stt/`+`tts/` vẫn tự che (§1.2), và 1 262 dòng `cfg experimental` thì **không hề được biên dịch**. Kiểm bằng call-graph (GitNexus) chứ không bằng cảnh báo compiler.
 4. **Vision cần build RELEASE.** Debug bung assert do CRT-mix (`llm\engine.rs:371-377` chặn sẵn).
 5. **`models/nemotron-asr` là nested git repo có LFS**, luôn hiện "modified content" trong `git status` — đừng đụng vào.

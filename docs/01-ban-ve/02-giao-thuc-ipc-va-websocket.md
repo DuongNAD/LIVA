@@ -1,7 +1,7 @@
 ---
 title: "Giao thức IPC và WebSocket"
-updated: 2026-08-06
-commit: 95d641a
+updated: 2026-08-07
+commit: bd11c84
 status: living
 owns:
   - catalog-lenh-handle-command
@@ -117,7 +117,7 @@ flowchart LR
         WS["start_websocket_server<br/>liva-native-core/src/websocket.rs:286-405"]
         STDIO["Vòng đọc stdin<br/>liva-native-core/src/main.rs:173-244"]
         TAURI["native_ipc_call(_stream)<br/>src-tauri/lib.rs:228-258"]
-        HC["handle_command<br/>dispatcher theo miền — 76 lệnh"]
+        HC["handle_command<br/>dispatcher theo miền — 77 lệnh"]
         ACT["WebRTCActor<br/>webrtc/pipeline.rs"]
         ST["Arc&lt;AppState&gt;<br/>lib.rs:33-52"]
     end
@@ -674,13 +674,13 @@ pub async fn handle_command(
 
 Nhánh mặc định: `Err(format!("Unknown command: {}", command))`.
 
-**Snapshot 31/07/2026: 76 lệnh có tên, thuộc 11 miền.** Con số được đếm từ
+**Hiện hành 07/08/2026: 77 lệnh có tên, thuộc 11 miền.** Con số được đếm từ
 `commands/*::{owns,handle}` và các arm MCP/skill còn ở dispatcher; không được dùng
 như một hằng số giao thức. Nguồn sự thật là danh sách lệnh ngay trong từng module:
 
 | Miền | Số lệnh | Lệnh hiện hành | Nguồn |
 |---|---:|---|---|
-| Cấu hình/trạng thái | 12 | `ping`, `echo`, `status`, `get_config`, `update_config`, `get_ai_config`, `get_voice_status`, `get_voice_profiles`, `get_system_status`, `get_skills_list`, `get_user_profile`, `get_avatar_models` | `commands/config.rs::OWNED` |
+| Cấu hình/trạng thái | 13 | `ping`, `echo`, `status`, `get_config`, `update_config`, `get_ai_config`, `get_voice_status`, `get_voice_profiles`, `get_system_status`, `get_preflight_status`, `get_skills_list`, `get_user_profile`, `get_avatar_models` | `commands/config.rs::OWNED` |
 | Task | 4 | `get_tasks`, `add_task`, `delete_task`, `update_task` | `commands/task.rs::OWNED` |
 | LLM/chat | 5 | `llm:swap_model`, `llm:embed`, `llm:health_check`, `chat:completion`, `task_plan_chat` | `commands/llm.rs::OWNED` |
 | Memory | 11 | `get_memory_data`, `memory:set_fact`, `memory:get_fact`, `delete_memory_fact`, `memory:delete_conversation`, `memory:delete_subject`, `memory:sweep_retention`, `consolidate_memory`, `reset_memory`, `memory:search_hybrid`, `memory:upsert_vector` | `commands/memory.rs::OWNED` |
@@ -710,6 +710,9 @@ Các hợp đồng quan trọng mới:
   trên máy đang chạy.
 - `llm:swap_model` hiện kiểm đường dẫn phải nằm dưới thư mục model được cấu hình;
   khẳng định “không validate path” trong snapshot cũ đã hết đúng.
+- `get_preflight_status` chỉ được cấp cho Dashboard local. Nó trả
+  `{items:[{name,available,status,consequence}]}` từ chính `preflight::thu_thap`, nên CLI
+  `--preflight` và màn hình System không tự suy diễn hai bộ trạng thái khác nhau.
 
 <details>
 <summary>Snapshot 44 lệnh ngày 22/07/2026 — chỉ để truy nguyên, không dùng làm contract</summary>
@@ -832,7 +835,7 @@ Nguồn thiết kế: [`docs/99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.m
 | Sự kiện telemetry `system_status` đẩy định kỳ | có | **Chỉ tồn tại kiểu pull**: client phải gửi `{"event":"get_system_status"}` (`liva-native-core/src/websocket.rs:956-975`); không có push định kỳ | **LỆCH** |
 | "Two frame types" (JSON text + binary) trên **một** kết nối | có | `send_task` `tokio::select!` multiplex (`liva-native-core/src/websocket.rs:475-538`) | **KHỚP** |
 | Giữ stdin/stdout legacy, **dùng chung `Arc<AppState>`** | có | `liva-native-core/src/main.rs:173-244` dùng chính `state` đã dựng ở bước 17 | **KHỚP** |
-| Model phía server (router Gemma, TTS Kokoro) | "Gemma-4-E4B-it router model" + Kokoro | Router đã là **Qwen3-VL**; TTS định tuyến VieNeu → Piper → Kokoro | **LỆCH** — thiết kế lỗi thời (không ảnh hưởng hợp đồng dây, trừ `sample_rate` của `OP_SPEAKER_OUT`) |
+| Model phía server (router Gemma, TTS Kokoro) | "Gemma-4-E4B-it router model" + Kokoro | Router hiện lại là **Gemma-4 E4B QAT**; TTS định tuyến VieNeu → Piper → Kokoro | Tên họ router đã khớp lại, nhưng contract dây không được phụ thuộc một filename/model cụ thể |
 | Client "ultra-lightweight" không load model AI | có | `liva-ui` vẫn chạy **WakeWordWorker** phía client (`useVoicePipeline.ts:338-341`) | **LỆCH nhẹ** |
 | MCP server native | có | `NativeMcpServer` được khởi tạo **và đã nối vào dispatcher**: `mcp:list_tools` (`liva-native-core/src/lib.rs#handle_command`) + `mcp:call_tool` (`liva-native-core/src/lib.rs#handle_command`); ~~"không có nhánh `mcp:*` trong `handle_command`"~~ đúng cho tới trước 22/07/2026. Chưa client nào (UI hay mobile) gọi hai lệnh này. | **KHỚP** ở lớp lệnh, **[MỘT PHẦN]** ở phía client |
 
@@ -993,7 +996,7 @@ Client tham chiếu đầy đủ hơn (có `guiVaDoi` để đợi sự kiện k
 - [Đường ống thoại](03-duong-ong-thoai.md) — ngưỡng VAD/AEC/denoise, các mode wake gate, bảng backend TTS; §5.4 chỉ giữ hệ quả giao thức (khi nào có `OP_FLUSH`, `sample_rate` nào xuất hiện trong `OP_SPEAKER_OUT`).
 - [Hệ LLM và prompt](04-he-llm-va-prompt.md) — cấu hình LLM, `PERSONA_LIVA`, `sanitize_untrusted`; §6.2 và §7 (#21, #37, #38) chỉ mô tả phần dây, không lặp lại nội dung prompt.
 - [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) — bảng biến môi trường đầy đủ; §3.2 chỉ ghi mặc định tại đúng chỗ đọc trong `main.rs`.
-- [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — bảng model và RAM/VRAM, dùng ở §10.1 khi nói router đã đổi sang Qwen3-VL.
+- [Mô hình AI và tài nguyên](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) — bảng model và RAM/VRAM hiện hành; §10.1 chỉ ghi contract dây, không đóng đinh router.
 - [Triển khai và runtime](../02-van-hanh/03-trien-khai-va-runtime.md) — cách chạy đúng từng profile, tức cách để gateway 8002 thực sự sống.
 - [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) — bảng lệnh Tauri `invoke` và cấu hình cửa sổ, bổ sung cho §3.3 và §8.
 - [Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) — danh sách đầy đủ lệnh mồ côi hai chiều core ↔ client, nền cho §9.

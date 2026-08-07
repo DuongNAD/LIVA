@@ -2,6 +2,7 @@
 title: "Wake-word benchmark và acceptance gate"
 updated: 2026-07-31
 commit: 3688b5f
+stale-ok: bd11c84
 status: living
 owns:
   - wake-benchmark

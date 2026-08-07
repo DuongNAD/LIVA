@@ -1,7 +1,7 @@
 ---
 title: "Giao thức IPC và WebSocket"
 updated: 2026-08-07
-commit: bd11c84
+commit: dec1c14
 status: living
 owns:
   - catalog-lenh-handle-command
@@ -739,7 +739,7 @@ Ký hiệu: `*` = bắt buộc. Cột "Dòng" là số dòng trong `liva-native-
 | 12 | `get_voice_status` | — | `{stt: "ready"\|"offline", tts: …}` (`stt.model_dir.exists()`, `tts.is_some()`; hack test: `model_dir == "non_existent_dir"` ⇒ ready) | 536-556 | có | **[OK]** |
 | 13 | `get_voice_profiles` | — | mảng **chuỗi** tên file trong `data/voices` (path tương đối, **không** qua `resolve_resource_path`) | 557-572 | có | **[MỘT PHẦN]** — UI mong mảng object |
 | 14 | `get_system_status` | — | object health lớn — **phần lớn là số cứng giả** (`cpuUsage:12`, `uptime:3600`, `totalMemory:16000000000`…); chỉ `modelLoaded`/`model`/`aiEngine.status` là thật | 573-611 | có (poll 3s) | **[MỘT PHẦN]** |
-| 15 | `get_skills_list` | — | `[smart_home::get_metadata()]` — **đúng 1 skill** | 612-616 | có | **[MỘT PHẦN]** |
+| 15 | `get_skills_list` | — | `mcp_server.list_skills()` — **7 tool**, cùng nguồn với `system_status` (sửa 07/08/2026, mục U23) | `commands/config.rs` | có | **[OK]** |
 | 16 | `get_user_profile` | — | `data/user_profile.json`, hoặc profile hardcode | 617-638 | có | **[OK]** |
 | 17 | `get_tasks` | — | `{tasks:[{id,title,description,status,priority,result,createdAt,updatedAt}]}` từ SQLite `tasks` | 639-673 | có | **[OK]** |
 | 18 | `add_task` | `{title*, description, priority="medium", status="pending", id?}` | `{"success":true,"id":…}` (id = `rand::random::<u64>()` nếu thiếu) | 674-709 | có | **[OK]** |

@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-07
-commit: dce30da
-stale-ok: dce30da
+commit: dec1c14
+stale-ok: dec1c14
 status: living
 owns:
   - duong-co-so-do-luong
@@ -320,7 +320,7 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | ◐ **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) — **bước 1 (cổng đồng ý) xong 26/07**; chưa có dòng thu thập nào | F | — | còn thu thập |
 | **U21** | [Sổ đo mỗi lượt — `turn_telemetry`](#u21--sổ-đo-mỗi-lượt--turn_telemetry) | E | **U14** (và có ích cho U13) | 0,5–1 ngày |
 | **U22** | [Hỏi trước khi trả — nhịp truy xuất](#u22--hỏi-trước-khi-trả--nhịp-truy-xuất) | E | — | 1–2 ngày · **cuối hàng**, không chen ngang |
-| **U23** | [Màn Kỹ năng đang báo 1 trong khi lõi có 7](#u23--màn-kỹ-năng-đang-báo-1-trong-khi-lõi-có-7) — màn hình nói dối, không phải thiếu năng lực | F | Hồ sơ · Beta | 0,5 ngày |
+| ~~**U23**~~ ✅ **XONG 07/08/2026** | [Màn Kỹ năng đang báo 1 trong khi lõi có 7](#u23--màn-kỹ-năng-đang-báo-1-trong-khi-lõi-có-7) — màn hình nói dối, không phải thiếu năng lực | F | ~~Hồ sơ · Beta~~ | `list_skills()` dùng chung cho cả hai lệnh; **1 → 7**, +3 test |
 | ~~**U24**~~ ✅ **XONG 06/08/2026** | [Hai lỗi nối dây trên đường lip-sync widget](#u24--hai-lỗi-nối-dây-trên-đường-lip-sync-của-widget) — nhân đôi tiếng + analyser bám chunk chưa phát | C | Beta · Hồ sơ | đã sửa, 5 test mới |
 | ~~**U25**~~ ✅ **XONG 06/08/2026** | [`useVRM.ts` là code mồ côi](#u25--usevrmts-là-code-mồ-côi-và-nó-đã-làm-người-rà-kết-luận-sai) — ≈420 dòng mô tả sai hệ thống | C | — | đã xoá; hàm thuần tách sang `utils/avatarMath.ts` |
 | ~~**U26**~~ ✅ **XONG 06/08/2026** | [Control tag đọc được giữa câu](#u26--control-tag-đọc-được-giữa-câu-không-chỉ-ở-đầu-lượt) — danh sách trắng hai phía TS/Rust | E | — | đã sửa, 12 + 14 test |
@@ -1952,6 +1952,25 @@ Và một hệ **thứ hai** nữa: kho skill có schema riêng, bảng SQLite, 
 4. Không đụng `integrations:list` trong cùng lát — nó là miền khác và đang có nợ riêng.
 
 **File.** `liva-native-core/src/commands/config.rs`, `liva-native-core/src/system_status.rs`, `liva-native-core/src/mcp/server.rs` (chỉ đọc), `liva-native-core/src/commands/skill_store.rs` (chỉ đọc).
+
+---
+
+#### ✅ ĐÃ LÀM — 07/08/2026 tại `dec1c14`
+
+**Cách sửa đi vào gốc chứ không vá số.** Thêm `NativeMcpServer::list_skills()` — nó ánh xạ `list_tools()` sang đúng hình dạng JSON 5 khoá mà UI trông đợi. Rồi **cả hai** lệnh cùng gọi nó:
+
+| | Trước | Sau |
+|---|---|---|
+| `commands/config.rs` | `json!([smart_home::get_metadata()])` | `json!(state.mcp_server.list_skills())` |
+| `system_status.rs` | đếm độ dài của **chính mảng literal đó** | `state.mcp_server.list_skills().len()` |
+
+⇒ Hai màn **không thể lệch nhau nữa về mặt cấu trúc**, chứ không phải "đã kiểm thấy khớp". Đó là điểm khác nhau giữa sửa gốc và vá số.
+
+`SkillsView.vue` **không phải sửa một dòng nào** — hình dạng JSON giữ nguyên, đúng như mục này dự tính.
+
+**Nghiệm thu — 3 test trong `tests/verify_commands.rs`:** (a) `get_skills_list` trả **≥ 7** phần tử; (b) độ dài của nó **bằng** `skillsLoaded` trong `system_status` — đây mới là test đáng giá, nó khoá đúng chế độ hỏng cũ; (c) mỗi phần tử đủ 5 khoá `name`/`category`/`short_desc`/`description`/`parameters`.
+
+**Chưa làm, đúng phạm vi đã chốt:** kho skill SQLite (`commands/skill_store.rs`) vẫn chưa nối — kho đang rỗng và 7 lệnh `skills:*` vẫn chưa màn hình nào gọi. Công tắc bật/tắt cũng chưa đụng tới.
 
 **⚠️ Bắt buộc trước khi sửa:** `impact({target: "get_skills_list", direction: "upstream"})` — nó nằm trong allow-list phân quyền (`authorization.rs:58`) và có mặt ở cả hai đường vào (`websocket.rs:1042` và Tauri IPC), nên bán kính ảnh hưởng chạm cả hai profile chạy.
 

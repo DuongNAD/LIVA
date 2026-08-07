@@ -1,7 +1,7 @@
 ---
 title: "Tích hợp ngoài"
 updated: 2026-08-07
-commit: bd11c84
+commit: dec1c14
 status: living
 owns:
   - bang-tich-hop-ngoai
@@ -474,7 +474,7 @@ Thiết bị hỗ trợ: **light / ac / fan**; hành động: **on / off**. Meta
    - Vẫn là **định tuyến theo từ khoá**, chưa phải tool-calling có schema do LLM sinh — chính doc-comment trong mã ghi nhận điều đó.
    - Graph này chạy thật: `webrtc/pipeline.rs:279` gọi `crate::agent::graph::build_pipeline_graph(...)` trong LLM task.
 2. **IPC command** `"integration:smart_home_control"` — `liva-native-core/src/commands/integrations.rs:40-47`.
-3. **IPC command** `"integrations:list"` (`liva-native-core/src/commands/integrations.rs:40-50`) và `"get_skills_list"` (`lib.rs:612-616`) — cả hai chỉ trả `[smart_home::get_metadata()]`.
+3. **IPC command** `"integrations:list"` (`liva-native-core/src/commands/integrations.rs:40-50`) — vẫn chỉ trả `[smart_home::get_metadata()]`. *(`"get_skills_list"` từng cùng cảnh ngộ; từ 07/08/2026 nó gọi `mcp_server.list_skills()` và trả đủ **7 tool** — xem [U23](../03-danh-gia/05-nang-cap-toan-dien.md#u23--màn-kỹ-năng-đang-báo-1-trong-khi-lõi-có-7). `integrations:list` là miền khác và vẫn còn nợ này.)*
 
 > 📌 Nguồn đầy đủ về StateGraph sáu node và cách router chọn nhánh: [Agent và tool runtime](../03-he-thong-con/agent-tools.md) · về 3 lệnh IPC ở trên: [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 

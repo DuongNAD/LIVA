@@ -1,8 +1,8 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-08-07
-commit: deac6aa
-stale-ok: deac6aa
+commit: dec1c14
+stale-ok: dec1c14
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -104,7 +104,7 @@ không được đọc dòng “CRITICAL 3/3 đã khép” ở bảng trên thà
 
 | File | 05/08 tại `2dc8e2e` | Đỉnh điểm (trước tách) | 07/08 (hiện tại) | Chênh (so với 05/08) |
 |---|---:|---:|---:|---:|
-| `WidgetApp.vue` | 1.811 | 2.536 | **2.230** | **+419** |
+| `WidgetApp.vue` | 1.811 | 2.536 | **2.190** | **+379** |
 | `llm/tool_calling.rs` | 1.537 | 1.772 | **1.772** | **+235** |
 | `MemoryViewer.vue` | 1.667 | 1.667 | **1.667** | 0 |
 | `db.rs` | 1.641 | 1.641 | **1.641** | 0 |

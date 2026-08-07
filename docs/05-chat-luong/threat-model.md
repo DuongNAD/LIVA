@@ -2,6 +2,7 @@
 title: "Threat model — ranh giới tin cậy, mã hóa và kế hoạch hardening"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: dec1c14
 status: living
 owns:
   - so-do-ma-hoa

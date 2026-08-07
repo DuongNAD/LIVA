@@ -1,7 +1,7 @@
 ---
 title: "Phụ thuộc module và tra cứu file"
 updated: 2026-08-07
-commit: bd11c84
+commit: dec1c14
 status: living
 owns:
   - bang-module-va-loc
@@ -283,7 +283,7 @@ Quy ước rút gọn đường dẫn trong các bảng dưới:
 | `…\liva-ui\src\workers\LivaWakeWorker.ts` | Wake MLP-RMS (333 dòng) | import weights :19 · `DEFAULT_CONFIG` :41 · `loadModel` (không ONNX) :64 · `extractFeatures` :92 · `runInference` :132 · sliding window :179 |
 | `…\liva-ui\src\composables\use3DModel.ts` | Avatar 3D | interface :122-142 · `use3DModel` :178 · `debugProbe` :253 · throttle :494 · gate `vrm.value` :513 · idle sway :565 · blink :603 · procedural lipsync :677 · **`startAudioDrivenLipSync`** :760 · `updateAudioLipSync` :789 · `triggerMotion` :914 · lookAt :978 · Deep Dispose :1074 |
 | `…\liva-ui\src\composables\useFaceTracking.ts` | MediaPipe | `estimateHeadPose` :87 · `extractExpressions` :130 · `useFaceTracking` :183 · init :204-213 · `captureFrame` :353 |
-| `…\liva-ui\src\WidgetApp.vue` | Cửa sổ widget | `DEFAULT_WIDGET_MODEL` :23 · `resolveEngineFromConfig` :44 · `applyWidgetConfig` :78 · wake worker :230 · speaker :340-358 · `updateInteractiveZones` :379 · `openDashboard` :604 · **`forced-3d-bootstrap`** :625-630 · WS thô :650 · binary :677 · `OP_FLUSH` :697 · stream :780-864 |
+| `…\liva-ui\src\WidgetApp.vue` | Cửa sổ widget | `DEFAULT_WIDGET_MODEL` · `resolveEngineFromConfig` · `applyWidgetConfig` · wake worker · speaker · `updateInteractiveZones` · `openDashboard` · **`forced-3d-bootstrap`** · stream. ⚠️ **Số dòng đã gỡ và ba mục đã CHUYỂN FILE** (07/08/2026, mục A31-04): WebSocket thô, khung nhị phân và `OP_FLUSH` nay ở `composables/useWidgetTransport.ts`; điều khiển avatar ở `composables/useWidgetAvatarControl.ts`; hình dạng gói tin ở `types/gateway.ts`. Tìm theo tên symbol, đừng tìm theo số dòng |
 | `…\liva-ui\src\utils\HardwareDetector.ts` | Chọn engine avatar | `isIntegratedGPU` :48 · `cleanGPUName` :66 · `profileHardware` :90 · `detectOptimalEngine` :137 |
 | `…\packages\liva-common\src\types\websocket.ts` | Hợp đồng protocol | `WSClientEvent` :10-56 · `WSServerEvent` :59-101 · `WSMessage` :104 |
 

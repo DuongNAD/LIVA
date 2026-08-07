@@ -72,7 +72,8 @@
     ],
     "resources": {
       "../../node_modules/sqlite-vec-windows-x64/vec0.dll": "vec0.dll",
-      "../../data/models-manifest.json": "data/models-manifest.json"
+      "../../data/models-manifest.json": "data/models-manifest.json",
+      "cuda-redist": "./"
     },
     "windows": {
       "webviewInstallMode": {

@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod memory_consolidation;
 pub mod memory_retention;
 pub mod messaging;
+pub mod openai_api;
 #[cfg(feature = "experimental")]
 pub mod passive;
 mod paths;

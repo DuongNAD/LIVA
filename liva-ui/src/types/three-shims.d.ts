@@ -1,5 +1,7 @@
 declare module "three" {
   export class Object3D {
+    name: string;
+    parent: Object3D | null;
     animations: unknown[];
     geometry?: { dispose: () => void };
     isMesh?: boolean;
@@ -16,10 +18,23 @@ declare module "three" {
       y: number;
       z: number;
     };
+    quaternion: Quaternion;
     scale: {
+      x: number;
+      y: number;
+      z: number;
+      set: (x: number, y: number, z: number) => void;
       multiplyScalar: (scale: number) => void;
     };
+    visible: boolean;
     skeleton?: { dispose: () => void };
+    add: (...objects: unknown[]) => void;
+    remove: (...objects: unknown[]) => void;
+    updateMatrixWorld: (force?: boolean) => void;
+    updateWorldMatrix: (updateParents: boolean, updateChildren: boolean) => void;
+    getWorldPosition: (target: Vector3) => Vector3;
+    getWorldQuaternion: (target: Quaternion) => Quaternion;
+    worldToLocal: (vector: Vector3) => Vector3;
     traverse: (callback: (object: Object3D) => void) => void;
   }
 
@@ -31,6 +46,8 @@ declare module "three" {
   export class PerspectiveCamera extends Object3D {
     constructor(fov: number, aspect: number, near: number, far: number);
     aspect: number;
+    /** Góc mở dọc, tính bằng độ — cần để suy ra khung nhìn tại mặt phẳng nhân vật đứng */
+    fov: number;
     lookAt: (x: number, y: number, z: number) => void;
     updateProjectionMatrix: () => void;
   }
@@ -54,10 +71,25 @@ declare module "three" {
     x: number;
     y: number;
     z: number;
+    set: (x: number, y: number, z: number) => this;
+    add: (vector: Vector3) => this;
+    sub: (vector: Vector3) => this;
+    clone: () => Vector3;
+    /** Chiếu điểm world → toạ độ clip [-1,1] của camera (dùng để suy ra hộp bao trên màn hình) */
+    project: (camera: PerspectiveCamera) => this;
+  }
+
+  export class Quaternion {
+    constructor(x?: number, y?: number, z?: number, w?: number);
+    x: number;
+    y: number;
+    z: number;
+    w: number;
   }
 
   export class Box3 {
-    min: { y: number };
+    min: { x: number; y: number; z: number };
+    max: { x: number; y: number; z: number };
     getCenter: (target: Vector3) => Vector3;
     getSize: (target: Vector3) => Vector3;
     setFromObject: (object: Object3D) => this;

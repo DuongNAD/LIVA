@@ -30,8 +30,9 @@ const HAN_CHO: Duration = Duration::from_secs(6);
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WeatherArgs {
-    /// Tên địa điểm, ví dụ "Hà Nội", "Đà Nẵng", "Tokyo". Không dấu cũng được.
-    pub location: String,
+    /// Tên địa điểm nếu người dùng nói rõ. Bỏ trống để dùng profile hoặc vị trí IP đã opt-in.
+    #[serde(default)]
+    pub location: Option<String>,
 }
 
 /// Mã thời tiết WMO → mô tả tiếng Việt.
@@ -101,17 +102,14 @@ async fn tim_toa_do(client: &reqwest::Client, ten: &str) -> Result<(f64, f64, St
 pub async fn get_weather(arguments: serde_json::Value) -> Result<String, String> {
     let args: WeatherArgs = serde_json::from_value(arguments)
         .map_err(|e| format!("Tham số get_weather không hợp lệ: {e}"))?;
-    let ten = args.location.trim();
-    if ten.is_empty() {
-        return Err("Cần cho biết địa điểm, ví dụ: thời tiết Hà Nội.".to_string());
-    }
+    let ten = super::geolocation::resolve_location(args.location.as_deref()).await?;
 
     let client = reqwest::Client::builder()
         .timeout(HAN_CHO)
         .build()
         .map_err(|e| format!("Không dựng được HTTP client: {e}"))?;
 
-    let (lat, lon, nhan) = tim_toa_do(&client, ten).await?;
+    let (lat, lon, nhan) = tim_toa_do(&client, &ten).await?;
 
     let res = client
         .get("https://api.open-meteo.com/v1/forecast")
@@ -151,6 +149,31 @@ pub async fn get_weather(arguments: serde_json::Value) -> Result<String, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::integrations::geolocation::choose_known_location;
+
+    #[test]
+    fn vi_tri_nhap_tay_va_profile_co_uu_tien_hon_ip_cache() {
+        assert_eq!(
+            choose_known_location(Some("Đà Nẵng"), Some("Hà Nội"), true, Some("Tokyo")).unwrap(),
+            Some("Đà Nẵng".to_string())
+        );
+        assert_eq!(
+            choose_known_location(None, Some("Hà Nội"), true, Some("Tokyo")).unwrap(),
+            Some("Hà Nội".to_string())
+        );
+    }
+
+    #[test]
+    fn tat_opt_in_thi_khong_duoc_do_ip() {
+        let err = choose_known_location(None, None, false, None).unwrap_err();
+        assert!(err.contains("định vị IP"), "được: {err}");
+    }
+
+    #[test]
+    fn weather_cho_phep_bo_trong_location_de_dung_fallback() {
+        let args: WeatherArgs = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(args.location.is_none());
+    }
 
     #[test]
     fn mo_ta_wmo_gom_nhom_dung_va_khong_de_trong_ma_la() {
@@ -164,15 +187,10 @@ mod tests {
         assert_eq!(mo_ta_wmo(-1), "không rõ dạng thời tiết");
     }
 
-    #[tokio::test]
-    async fn dia_diem_rong_bi_tu_choi_truoc_khi_cham_mang() {
-        // Quan trọng: phải trượt ở tầng tham số, KHÔNG được đi ra Internet rồi
-        // mới hỏng — nếu không, test này sẽ nhấp nháy theo tình trạng mạng của
-        // máy chạy, đúng lớp lỗi đã cắn ba lần trong dự án.
-        let err = get_weather(serde_json::json!({ "location": "   " }))
-            .await
-            .unwrap_err();
-        assert!(err.contains("Cần cho biết địa điểm"), "được: {err}");
+    #[test]
+    fn dia_diem_rong_va_khong_opt_in_bi_tu_choi_truoc_khi_cham_mang() {
+        let err = choose_known_location(Some("   "), None, false, None).unwrap_err();
+        assert!(err.contains("định vị IP"), "được: {err}");
     }
 
     #[tokio::test]

@@ -86,7 +86,7 @@ fn embedded_manifest_la_trust_anchor_cho_model_va_vec0() {
 fn embedded_manifest_pin_dung_wake_v2_artifact() {
     assert_eq!(
         embedded_file_hash("models/wake_liva_en_v2.onnx").unwrap(),
-        "7487fcb480ce05a6ba02901ee48071caed73b593dfed5d9b55202ae1001c4780"
+        "459d3a803f199c6b228fe711b4a1eeb9dc0da2cd51ea36c5ff7e6a2c45cf0202"
     );
 }
 

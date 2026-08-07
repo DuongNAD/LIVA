@@ -3,7 +3,7 @@
  * =======================================
  * Inline, zero-dependency implementation of 2D OpenSimplex noise.
  * Value noise with smooth gradients — never repeats.
- * Used by: use3DModel.ts, useVRM.ts (idle micro-sway + breathing animations)
+ * Used by: use3DModel.ts (idle micro-sway + breathing animations)
  */
 export const STRETCH_2D = (Math.sqrt(3) - 1) / 2;
 export const SQUISH_2D = (1 / Math.sqrt(3) - 1) / 2;

@@ -20,8 +20,19 @@ tauri-build = { version = "2", features = [] }
 [features]
 # GPU acceleration for the embedded core (dashboard vision:ask + in-process LLM).
 # Build with `cargo build --release --features cuda` (or `tauri build -- --features cuda`).
-# Needs the CUDA toolkit; RTX 5060 Ti / Blackwell needs CUDA 12.8+ and
-# CUDAARCHS=120a-real for a fast targeted build.
+# Needs the CUDA toolkit; RTX 5060 Ti / Blackwell needs CUDA 12.8+.
+#
+# ⚠️ CUDAARCHS=120a-real IS A DEV-BOX SHORTCUT — NEVER SHIP A BUILD MADE WITH IT.
+# The default arch list llama-cpp-sys-2 passes to CMake is
+#   50-virtual;61-virtual;70-virtual;75-virtual;80-virtual;86-real;89-real;90-virtual;120a-real
+# and it is mostly `-virtual`, i.e. PTX the driver JIT-compiles at load time.
+# That PTX is exactly what makes one binary work on cards it was never compiled
+# for. Pinning `120a-real` throws all of it away, leaving SASS for Blackwell
+# only: on an RTX 30xx (sm_86) or 40xx (sm_89) the CUDA kernels then fail to
+# load at all. It cuts the binary 202 MB -> 74.5 MB and the build 20 min -> 6 min
+# with no speed loss *on this machine*, which is why it is worth using while
+# iterating locally — and why the measurement is easy to mistake for a release
+# decision. Release builds leave CUDAARCHS unset.
 cuda = ["liva-native-core/cuda"]
 vulkan = ["liva-native-core/vulkan"]
 

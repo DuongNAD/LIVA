@@ -3,7 +3,7 @@ title: "voice_pipeline"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-08-02T18:00:00+07:00"
+last_update: "2026-08-05T15:07:00+07:00"
 ---
 
 # Knowledge: Voice Pipeline
@@ -29,15 +29,18 @@ now the unified Rust core:
 - The wake worker only segments candidate utterances. It sends `OP_WAKE_PROBE`; Rust performs
   classifier/STT verification and returns `wake_word_triggered` or `wake_probe_rejected`.
   The former browser RMS MLP, weights JSON and browser ONNX artifact were removed on 2026-07-31.
-- Wake probes use a fail-closed two-tier decision. The synthetic classifier may directly wake only
-  above `max(LIVA_WAKE_THRESHOLD, 0.90)`; every lower score must be confirmed by exact STT phrase
-  matching. The response always returns the raw classifier score so field recordings can expose
-  synthetic-to-real domain shift instead of the UI displaying a fabricated 100%/0% value.
-- `wake_liva_en_v2.onnx` has only synthetic/augmented validation evidence. Production calibration
-  requires opt-in recordings of the owner's real `Hey Liva` plus ordinary-speech/noise hard
-  negatives; synthetic recall/FPPH alone must not be presented as real-room accuracy.
-- Runtime benchmark on 2026-08-02 measured 1/24 owner-positive clips at threshold 0.58
-  (4.17% recall); most misses scored 0.002–0.032, so lowering the threshold is prohibited.
+- Wake probes use a fail-closed two-tier decision. The promoted owner-calibrated classifier may
+  directly wake above `LIVA_WAKE_THRESHOLD`; lower scores still require exact STT phrase matching.
+  Do not add a second hard-coded direct threshold: it invalidates the benchmark/selection gate.
+  The response always returns the raw score, transcript and accepted/rejected outcome; diagnostics
+  displays that result instead of silently remaining `PASSIVE`.
+- `wake_liva_en_v2.onnx` was retrained on 2026-08-05 with 20 owner hard negatives and promoted only
+  after the matrix selector chose `fleurs_medium`. At threshold 0.58 its independent holdout result
+  was 4/4 owner positives, one false positive and 0.7685 FPPH over 1.3013 negative hours. This is a
+  production beta, not enough field evidence for a broad accuracy claim.
+- The 2026-08-02 pre-personalization result (1/24 owner positives at threshold 0.58) is superseded by
+  that retraining. Runtime observations at 0.595 and 0.641 on the owner's live microphone confirm
+  why the obsolete 0.90 safety cap must not override the evaluated 0.58 threshold.
 - A rejected core probe is acknowledged back to `LivaWakeWorker` and releases its cooldown
   immediately. An accepted probe keeps cooldown to prevent duplicate activation.
 - Personalization requires both owner positives and owner hard negatives. The preparation step

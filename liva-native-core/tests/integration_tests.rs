@@ -303,6 +303,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         )
         .unwrap(),
         llm_chunk_tx,
+        None,
         session_id,
         active_session_id,
     );
@@ -361,6 +362,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         )
         .unwrap(),
         llm_chunk_tx_2,
+        None,
         session_id,
         active_session_id_2,
     );

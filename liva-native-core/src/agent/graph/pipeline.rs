@@ -82,6 +82,7 @@ pub fn build_pipeline_graph(
     state_shared: Arc<AppState>,
     memory_scope: ConversationMemoryScope,
     llm_chunk_tx: mpsc::Sender<String>,
+    tool_event_tx: Option<mpsc::Sender<String>>,
     session_id: u64,
     active_session_id: Arc<std::sync::atomic::AtomicU64>,
 ) -> StateGraph {
@@ -191,8 +192,10 @@ pub fn build_pipeline_graph(
     // nhánh này nhận tên tool + tham số do LLM sinh, nên `execute_call` kiểm lại
     // allowlist một lần nữa ngay trước khi chạy.
     let ss_mcp = Arc::clone(&state_shared);
+    let tx_mcp = tool_event_tx;
     graph.add_node("mcp_tool_exec", move |mut state: AgentState| {
         let ss = Arc::clone(&ss_mcp);
+        let tx = tx_mcp.clone();
         async move {
             let goi = state
                 .context
@@ -206,7 +209,9 @@ pub fn build_pipeline_graph(
                 policy: crate::llm::ExecPolicy::Auto,
             };
 
-            let noi_dung = match crate::llm::tool_calling::execute_call(&ss, &call).await {
+            let noi_dung = match crate::llm::tool_calling::execute_call(&ss, &call, tx.as_ref())
+                .await
+            {
                 Ok(res) => {
                     let text = res
                         .content

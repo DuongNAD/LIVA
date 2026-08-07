@@ -47,6 +47,12 @@
 // mà **ghim cái sai lại vĩnh viễn** — và tệ hơn: sau khi ghim, bộ dò báo XANH
 // cho nó, vì ký hiệu đó có thật.
 //
+// Đo lại trên toàn bộ 762 chỗ (564 ứng viên) cho cùng kết luận: đối tên trực
+// tiếp chỉ giải được 86/762; tin `commit:` cho 533 chỗ nhưng sai ngay ca kiểm
+// tay đầu tiên; chốt nội dung/dải/khai báo còn 25 ứng viên vẫn có rác; và rổ
+// "lỗi thời chứng minh được" cho 2/3 dương tính giả khi kiểm tay. Không phép
+// đo nào đủ tin cậy để biến thành `--fix`.
+//
 // Đổi một trích dẫn là việc NGỮ NGHĨA: phải đọc câu văn quanh nó để biết nó
 // đang nói về cái gì. `--suggest` chỉ đưa ứng viên cho người đọc cân nhắc.
 //
@@ -353,6 +359,62 @@ for (const abs of docs) {
   })
 }
 
+// ─── Vùng đông lạnh: ĐO nhưng KHÔNG chặn ────────────────────────────────────
+//
+// `listDocs` bỏ hai vùng: cả thư mục `docs/99-luu-tru/` (dòng có `'99-luu-tru'`)
+// và mọi tài liệu `disposition: FREEZE`. Đó là quyết định đúng — snapshot có
+// ngày không được sửa để khớp HEAD, nên bắt nó phải xanh là bắt nó nói dối.
+//
+// Nhưng "không chặn" đã bị làm thành "không nhìn", và hai thứ đó khác nhau. Đo
+// ngày 05/08/2026: **270 trong 422** trích dẫn `lib.rs` của bộ tài liệu nằm
+// trong vùng này, tức cổng chỉ đọc được **95**. Ai đọc dòng `✅ Không có neo
+// hỏng` mà không biết điều đó sẽ hiểu nhầm nó thành "mọi trích dẫn đều đúng".
+//
+// Nên khối này quét vùng đông lạnh vào các biến RIÊNG, không cộng vào `total`
+// / `khongKiem` / `deXuat`, và **không bao giờ đụng vào exit code**. Nó chỉ trả
+// lời một câu: cổng đang KHÔNG kiểm bao nhiêu.
+//
+// ⚠️ Trích dẫn hỏng ở đây là chuyện BÌNH THƯỜNG, không phải nợ phải trả. Một
+// snapshot đóng băng mô tả mã nguồn của quá khứ; mã nguồn tiến lên thì toạ độ
+// của nó phải lệch đi. Con số dưới đây đo **khoảng cách giữa HEAD và các mốc
+// lịch sử**, không đo chất lượng tài liệu — đừng lập kế hoạch "hạ" nó, và
+// tuyệt đối đừng sửa nội dung tài liệu FREEZE để nó nhỏ lại.
+const listSkipped = (dir) =>
+  fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name)
+    const rel = path.relative(ROOT, p).replace(/\\/g, '/')
+    if (e.isDirectory()) return e.name === '99-luu-tru' ? listAll(p) : listSkipped(p)
+    if (!e.name.endsWith('.md')) return []
+    return FROZEN.has(rel) ? [p] : []
+  })
+const listAll = (dir) =>
+  fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name)
+    return e.isDirectory() ? listAll(p) : e.name.endsWith('.md') ? [p] : []
+  })
+
+const dongBang = { docs: 0, trichDan: 0, vuotBien: [] }
+for (const abs of listSkipped(DOCS)) {
+  dongBang.docs++
+  const raw = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
+  const relDoc = path.relative(ROOT, abs).replace(/\\/g, '/')
+  stripCode(raw).split('\n').forEach((line, i) => {
+    for (const m of line.matchAll(CITATION)) {
+      const [ca, file, startS] = m
+      if (file.endsWith('.md')) continue
+      const { ds, ngoaiRepo } = ungVien(file)
+      if (ngoaiRepo) continue
+      dongBang.trichDan++
+      if (!startS || !ds.length) continue
+      // "Vượt biên" = số dòng lớn hơn độ dài của MỌI ứng viên. Chỉ dùng phép
+      // kiểm này vì nó chứng minh được mà không cần phân giải tên file mơ hồ —
+      // đúng lớp bằng chứng dùng được trong một vùng không sửa được.
+      const daiNhat = Math.max(...ds.map((r) => docFile(r)?.soDong ?? 0))
+      if (Number(startS) > daiNhat) dongBang.vuotBien.push({ doc: relDoc, docLine: i + 1, cite: ca, daiNhat })
+    }
+  })
+}
+
 // ─── Báo cáo ────────────────────────────────────────────────────────────────
 
 const vuotChot = maxUnchecked !== null && khongKiem.length > maxUnchecked
@@ -374,6 +436,9 @@ if (argv.includes('--json')) {
     total, neoKyHieu, docs: docs.length,
     khongKiem: khongKiem.length, maxUnchecked, findings, deXuat: deXuat.length,
     frozenDocsSkipped, uncheckedByDoc, uncheckedByFile,
+    // Vùng ngoài phạm vi kiểm. Đo để biết cổng KHÔNG thấy gì, không phải hạn
+    // ngạch phải hạ — xem khối comment ở chỗ tính `dongBang`.
+    dongBang: { docs: dongBang.docs, trichDan: dongBang.trichDan, vuotBien: dongBang.vuotBien.length },
     ...(detailsDoc
       ? { unchecked: khongKiem.filter((item) => item.doc === detailsDoc) }
       : {}),
@@ -406,7 +471,33 @@ if (argv.includes('--json')) {
   }
 } else {
   console.log(`Đã quét ${docs.length} tài liệu, ${total} trích dẫn (${neoKyHieu} neo ký hiệu, ${total - neoKyHieu} toạ độ).\n`)
-  console.log(`Đã bỏ qua ${frozenDocsSkipped.length} snapshot FREEZE theo document inventory.\n`)
+
+  // Nói rõ phạm vi KHÔNG kiểm, ngay cạnh phạm vi có kiểm. Bản trước chỉ in
+  // "đã bỏ qua N snapshot" — đúng nhưng không cho biết bỏ qua bao nhiêu trích
+  // dẫn, nên `✅` phía dưới dễ bị đọc thành "tất cả đều đúng".
+  const phanTram = total + dongBang.trichDan > 0
+    ? Math.round((dongBang.trichDan / (total + dongBang.trichDan)) * 100)
+    : 0
+  console.log(`Ngoài phạm vi kiểm: ${dongBang.docs} tài liệu đông lạnh (${frozenDocsSkipped.length} FREEZE + docs/99-luu-tru/), ${dongBang.trichDan} trích dẫn — ${phanTram}% tổng số.`)
+  if (dongBang.vuotBien.length) {
+    console.log(`  ↳ ${dongBang.vuotBien.length} trong đó trỏ quá độ dài file. Đây là BÌNH THƯỜNG với snapshot có ngày —`)
+    console.log('    mã nguồn tiến lên thì toạ độ lịch sử phải lệch. KHÔNG sửa nội dung tài liệu FREEZE.')
+    console.log('    Xem danh sách:  node scripts/docs-citations.mjs --dong-bang')
+  }
+  console.log('')
+
+  if (argv.includes('--dong-bang')) {
+    const theoDoc = new Map()
+    for (const v of dongBang.vuotBien) {
+      if (!theoDoc.has(v.doc)) theoDoc.set(v.doc, [])
+      theoDoc.get(v.doc).push(v)
+    }
+    for (const [doc, vs] of [...theoDoc].sort((a, b) => b[1].length - a[1].length)) {
+      console.log(`  ${doc}  (${vs.length})`)
+      for (const v of vs) console.log(`    dòng ${v.docLine}: ${v.cite}  — file dài nhất chỉ ${v.daiNhat} dòng`)
+    }
+    console.log('')
+  }
 
   if (khongKiem.length) {
     const theoFile = new Map()

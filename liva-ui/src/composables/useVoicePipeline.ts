@@ -21,6 +21,12 @@ export type VoicePipelineErrorKind =
   | 'unsupported'
   | 'failure';
 
+export interface WakeProbeFeedback {
+  outcome: 'idle' | 'accepted' | 'rejected';
+  score: number | null;
+  transcript: string;
+}
+
 export interface UseVoicePipelineReturn {
   state: Ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>;
   volumeLevel: Ref<number>;
@@ -36,6 +42,8 @@ export interface UseVoicePipelineReturn {
   /** Reset the 15s inactivity timeout without changing state. Call on AI stream chunks. */
   keepAlive: () => void;
   wakeWordThreshold: Ref<number>;
+  /** Kết quả xác minh gần nhất để diagnostics không im lặng khi core từ chối. */
+  wakeProbeFeedback: Ref<WakeProbeFeedback>;
   diagnosticsPanelRef: Ref<HTMLElement | null>;
   setWakeWordThreshold: (threshold: number) => void;
   /** Loa bắt đầu phát TTS — ngưng nạp mic cho bộ wake-word (chống tự nghe). */
@@ -276,6 +284,11 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
   const volumeLevel = shallowRef<number>(0);
   const isReady = ref(false);
   const webSpeechFallbackActive = ref(false);
+  const wakeProbeFeedback = ref<WakeProbeFeedback>({
+    outcome: 'idle',
+    score: null,
+    transcript: '',
+  });
 
   let mediaStream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
@@ -443,6 +456,14 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     }
 
     if (parsed.event === 'wake_word_triggered') {
+      wakeProbeFeedback.value = {
+        outcome: 'accepted',
+        score:
+          typeof parsed.payload?.score === 'number' && Number.isFinite(parsed.payload.score)
+            ? parsed.payload.score
+            : null,
+        transcript: parsed.payload?.transcript?.trim() ?? '',
+      };
       logger.info('[WakeWord]', 'Core xác nhận cụm đánh thức:', parsed.payload?.transcript ?? '');
       sendToWorker('probeResult', { accepted: true });
       if (diagnosticsPanelRef.value) {
@@ -453,6 +474,14 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
       }
       detectedCallback?.();
     } else if (parsed.event === 'wake_probe_rejected') {
+      wakeProbeFeedback.value = {
+        outcome: 'rejected',
+        score:
+          typeof parsed.payload?.score === 'number' && Number.isFinite(parsed.payload.score)
+            ? parsed.payload.score
+            : null,
+        transcript: parsed.payload?.transcript?.trim() ?? '',
+      };
       // Không phải lỗi — đây là cổng đang làm đúng việc của nó. Nhưng phải log
       // ra transcript, vì "sao nó không thức" là câu hỏi không thể trả lời nếu
       // không biết core nghe ra cái gì.
@@ -540,6 +569,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     attachCoreListener(ws);
     pipelineError.value = '';
     pipelineErrorKind.value = 'none';
+    wakeProbeFeedback.value = { outcome: 'idle', score: null, transcript: '' };
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       const errStr = 'Trình duyệt/webview này không mở được micro (thiếu getUserMedia).';
@@ -944,6 +974,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
     setPassive,
     keepAlive,
     wakeWordThreshold,
+    wakeProbeFeedback,
     diagnosticsPanelRef,
     setWakeWordThreshold,
     muteWakeWord,

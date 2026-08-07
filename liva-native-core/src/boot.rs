@@ -118,7 +118,18 @@ pub struct Boot {
 /// đọc được VRAM ⇒ **0**, vì không biết thì đừng đánh cược.
 ///
 /// [U1b]: ../../docs/03-danh-gia/05-nang-cap-toan-dien.md
-fn gpu_layers_mac_dinh() -> u32 {
+/// Công khai vì `preflight` phải trả lời **cùng một câu hỏi** mà runtime hỏi.
+///
+/// Bản trước preflight chỉ đọc `LIVA_LLM_N_GPU_LAYERS` rồi kết luận "= 0 ⇒ vẫn
+/// ~80 s". Điều đó đúng cho tới `533f3c6`, commit thêm nhánh tự chọn theo VRAM
+/// ngay dưới đây — từ đó **thiếu biến môi trường không còn nghĩa là 0**. Đo trên
+/// máy sạch mô phỏng 05/08/2026: preflight in ✗ và doạ ~80 s, trong khi cùng
+/// binary đó chạy `e2e-vision-ipc` ra `n_gpu_layers=99` và vision **937 ms** —
+/// sai 85 lần, theo hướng doạ người dùng về một lỗi không tồn tại.
+///
+/// Bài học đáng giữ hơn bản vá: một phép chẩn đoán **chép lại** quyết định của
+/// runtime sẽ lệch đi ngay lần runtime đổi ý. Nó phải **gọi** quyết định đó.
+pub fn gpu_layers_mac_dinh() -> u32 {
     let can = [
         crate::configured_router_model_path(),
         crate::configured_mmproj_path(),
@@ -455,6 +466,20 @@ pub fn spawn_background_services(
                     }
                 }
                 Err(error) => error!("WebSocket server bind lỗi: {error}"),
+            }
+        }));
+    }
+
+    // 5b. Bề mặt HTTP tương thích OpenAI — **chỉ khi được yêu cầu**.
+    //
+    //     Không đặt `LIVA_OPENAI_PORT` thì không mở socket nào. Đây là bề mặt
+    //     mạng không xác thực, nên bật-mặc-định là mở thêm một cửa không khoá
+    //     mà người dùng không yêu cầu. Chi tiết ở `openai_api.rs`.
+    if let Some(addr) = crate::openai_api::configured_addr() {
+        let state = state.clone();
+        tasks.push(tokio::spawn(async move {
+            if let Err(error) = crate::openai_api::serve(state, addr).await {
+                error!("OpenAI API dừng: {error}");
             }
         }));
     }

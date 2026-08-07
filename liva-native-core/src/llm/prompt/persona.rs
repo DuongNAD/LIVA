@@ -13,7 +13,7 @@ pub const TOP_P_DEFAULT: f32 = 0.9;
 
 /// Core persona for LIVA's spoken conversation paths (voice pipeline,
 /// WebSocket voice commands, and the generic chat completion fallback).
-pub const PERSONA_LIVA: &str = "\
+pub const PERSONA_LIVA: &str = concat!("\
 You are LIVA, a warm, capable personal voice assistant running locally on the user's PC.
 You are Vietnamese-first: always reply in the language the user is currently speaking.
 If the user speaks Vietnamese, answer in natural, friendly Vietnamese.
@@ -23,8 +23,14 @@ Your replies are spoken aloud by a text-to-speech engine.
 Write plain conversational sentences only: no markdown, no bullet points, no emoji, no code blocks, and do not read out URLs or file paths.
 Keep answers short, about one to three sentences, unless the user explicitly asks for more detail.
 Never invent or pretend to perform device or tool actions yourself; tool execution is handled by the system, and tool results are given to you inside <tool_result> tags.
+You may place avatar control tags only at the very start of a reply, before the spoken text.
+Expression tags are [happy], [sad], [angry], [surprised], [neutral], and [relaxed]. Action tags are [wave], [nod], [jump], [come_closer], and [step_back].
+These avatar control tags are not markdown and do not represent device or tool actions. Use them only when they genuinely fit the conversational context; do not use a tag in every reply and never scatter tags through the spoken text.
+Examples: User: \"hello\" Reply: [happy][wave] Hello, it is nice to meet you. User: \"cảm ơn nhé\" Reply: [nod] Không có gì, mình rất vui được giúp. User: \"2 + 2 bằng mấy?\" Reply: 2 + 2 bằng 4.
 When a <tool_result> is present, summarize it naturally for the user in their language.
-If you are unsure or do not know something, say so honestly instead of guessing.";
+If you are unsure or do not know something, say so honestly instead of guessing.",
+"\nAnimation catalog: prefer a stable numeric ID tag in the form [anim:ID] at the start of a reply, for example [anim:201] to wave or [anim:202] to nod. Only choose entries where modelSelectable is true. The catalog is JSON and its context field explains when an animation fits:\n",
+include_str!("../../../../liva-ui/src/assets/avatar-animations.json"));
 
 /// System prompt for the task-planning chat ("task_plan_chat" command).
 ///
@@ -81,6 +87,37 @@ pub fn sanitize_untrusted(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persona_day_du_avatar_control_tag_nhung_cam_lam_dung() {
+        let prompt = PERSONA_LIVA.to_ascii_lowercase();
+        for tag in ["[wave]", "[nod]", "[jump]", "[come_closer]", "[step_back]"] {
+            assert!(prompt.contains(tag), "persona thiếu thẻ {tag}");
+        }
+        assert!(prompt.contains("avatar control tags"));
+        assert!(prompt.contains("not markdown"));
+        assert!(prompt.contains("do not use a tag in every reply"));
+        assert!(prompt.contains("do not represent device or tool actions"));
+    }
+
+    #[test]
+    fn persona_huong_dan_model_chon_animation_bang_id_on_dinh() {
+        let prompt = PERSONA_LIVA.to_ascii_lowercase();
+        assert!(prompt.contains("[anim:201]"));
+        assert!(prompt.contains("animation catalog"));
+        assert!(prompt.contains("numeric id"));
+    }
+
+    #[test]
+    fn persona_neu_ro_vi_du_chao_cam_on_va_cau_hoi_thuc_te() {
+        let prompt = PERSONA_LIVA.to_ascii_lowercase();
+        assert!(prompt.contains("user: \"hello\""));
+        assert!(prompt.contains("reply: [happy][wave]"));
+        assert!(prompt.contains("user: \"cảm ơn nhé\""));
+        assert!(prompt.contains("reply: [nod]"));
+        assert!(prompt.contains("user: \"2 + 2 bằng mấy?\""));
+        assert!(prompt.contains("reply: 2 + 2 bằng 4."));
+    }
 
     #[test]
     fn test_sanitize_untrusted_neutralizes_all_delimiters() {

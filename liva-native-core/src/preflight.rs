@@ -129,13 +129,29 @@ fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) ->
         return Muc::moi(
             TEN,
             Some(false),
-            "đủ release + CUDA + GPU, nhưng LIVA_LLM_N_GPU_LAYERS = 0",
+            "đủ release + CUDA + GPU, nhưng n_gpu_layers sẽ là 0",
         )
         .vi(
-            "Vẫn ~80 s mỗi lượt: mặc định là 0, và `use_gpu` của bộ nạp ảnh bằng \
-             `n_gpu_layers > 0` ⇒ GPU đứng không. Đây là cấu hình dễ tưởng là xong \
-             nhất trong bảng. Đặt `$env:LIVA_LLM_N_GPU_LAYERS = \"999\"` để đẩy hết \
-             lớp lên GPU.",
+            // Ba lý do khác nhau cùng ra 0, và nói nhầm lý do là đẩy người dùng
+            // đi săn một vấn đề họ không có. Ca "chưa có model" phải tách riêng:
+            // `gpu_layers_theo_vram` trả 0 ngay khi `can == 0`, tức khi không đo
+            // được kích thước model — trên máy mới cài thì đó là lý do DUY NHẤT,
+            // và VRAM hoàn toàn không liên quan.
+            if liva_native_core::configured_router_model_path().is_none_or(|p| !p.is_file()) {
+                "CHƯA CÓ MODEL nên chưa tính được — đây là hệ quả của dòng \
+                 `Model chat` bên dưới, không phải vấn đề GPU. Phép tự chọn cần \
+                 kích thước model + projector để biết nhét được bao nhiêu lớp; \
+                 không có file thì nó trả 0. Tải model xong dòng này tự xanh; \
+                 đừng đi chỉnh VRAM."
+            } else {
+                "Vẫn ~80 s mỗi lượt: `use_gpu` của bộ nạp ảnh bằng \
+                 `n_gpu_layers > 0` ⇒ GPU đứng không. Dòng này KHÔNG còn nghĩa là \
+                 'bạn quên đặt biến môi trường' — từ `533f3c6` lõi tự chọn theo \
+                 VRAM trống. Model CÓ trên đĩa mà vẫn ra 0 ⇒ VRAM trống không đủ \
+                 cho model + projector + dự phòng, hoặc không đọc được VRAM. Xem \
+                 dòng log `GPU:` lúc khởi động để biết vế nào. Ép bằng \
+                 `$env:LIVA_LLM_N_GPU_LAYERS = \"999\"` nếu bạn biết máy kham được."
+            },
         );
     }
     Muc::moi(
@@ -143,7 +159,14 @@ fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) ->
         Some(true),
         format!("release + CUDA + GPU, n_gpu_layers = {n_gpu_layers}"),
     )
-    .vi("Đo được ~1,4 s mỗi lượt ở cấu hình này.")
+    // Số đo, không phải ước lượng: `e2e-vision-ipc --release`, RTX 5060 Ti,
+    // gemma-4-E4B, bản CUDA 9 kiến trúc mặc định — p50 937 ms trên 3 lượt
+    // (min 844 · max 2031, lượt đầu đắt hơn vì dựng MtmdContext).
+    //
+    // Số cũ ở đây là ~1,4 s, đo trên bản ghim `CUDAARCHS=120a-real`. Giữ nguyên
+    // nó sau khi bản phát hành đổi sang 9 kiến trúc là để một con số cũ nói về
+    // một cấu hình không còn được phát hành — nên nó phải đi cùng cấu hình đã đo.
+    .vi("Đo được p50 ~0,9 s mỗi lượt ở cấu hình này (RTX 5060 Ti, mẫu 3 lượt).")
 }
 
 /// Dựng toàn bộ báo cáo. Thuần đọc — không mở DB, không nạp model.
@@ -186,12 +209,17 @@ fn thu_thap() -> Vec<Muc> {
         ),
     });
 
-    // Đọc y hệt `boot.rs`: parse lỗi cũng rơi về 0, để preflight không báo lạc
-    // quan hơn thứ lõi thực sự sẽ dùng.
+    // GỌI quyết định của `boot.rs`, đừng chép lại nó. Bản trước chép — đúng cho
+    // tới `533f3c6`, commit thêm nhánh tự chọn theo VRAM, và từ đó preflight
+    // doạ "~80 s mỗi lượt" trên đúng cái máy đang chạy vision 937 ms.
+    //
+    // Chuỗi ưu tiên giữ y hệt runtime: biến môi trường thắng, parse lỗi cũng
+    // rơi về `gpu_layers_mac_dinh()` chứ không rơi về 0 — vì đó là thứ
+    // `boot.rs` làm, và preflight không được lạc quan HAY bi quan hơn lõi.
     let n_gpu_layers = std::env::var("LIVA_LLM_N_GPU_LAYERS")
         .ok()
         .and_then(|v| v.trim().parse::<u32>().ok())
-        .unwrap_or(0);
+        .unwrap_or_else(liva_native_core::boot::gpu_layers_mac_dinh);
     muc.push(muc_vision(
         cfg!(debug_assertions),
         cfg!(feature = "cuda"),

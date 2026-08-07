@@ -1,4 +1,5 @@
 pub mod audio;
+mod avatar_control;
 pub mod engine;
 pub mod espeak;
 pub mod g2p;
@@ -13,6 +14,8 @@ use g2p::G2p;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokenizer::TtsTokenizer;
+
+pub(crate) use avatar_control::AvatarSpeechFilter;
 
 pub mod style_vector;
 

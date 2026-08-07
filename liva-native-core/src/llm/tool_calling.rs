@@ -747,6 +747,87 @@ pub struct ResolvedCall {
     pub policy: ExecPolicy,
 }
 
+fn tool_start_event(call: &ResolvedCall) -> Value {
+    let label = match call.name.as_str() {
+        "get_weather" => "Đang xem thời tiết…".to_string(),
+        name => format!("Đang dùng {name}…"),
+    };
+    json!({
+        "event": "tool_start",
+        "payload": {
+            "tool": call.name,
+            "label": label,
+        }
+    })
+}
+
+fn tool_result_event(
+    call: &ResolvedCall,
+    result: &Result<crate::mcp::protocol::CallToolResult, String>,
+) -> Value {
+    match result {
+        Ok(value) if !value.is_error => json!({
+            "event": "tool_result",
+            "payload": {
+                "tool": call.name,
+                "ok": true,
+                "data": value,
+            }
+        }),
+        Ok(value) => {
+            let reason = value
+                .content
+                .iter()
+                .find_map(|content| match content {
+                    crate::mcp::protocol::ToolContent::Text { text } if !text.trim().is_empty() => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or("Công cụ không hoàn tất.");
+            json!({
+                "event": "tool_result",
+                "payload": {
+                    "tool": call.name,
+                    "ok": false,
+                    "reason": reason,
+                }
+            })
+        }
+        Err(reason) => json!({
+            "event": "tool_result",
+            "payload": {
+                "tool": call.name,
+                "ok": false,
+                "reason": reason,
+            }
+        }),
+    }
+}
+
+async fn send_tool_event(sender: Option<&tokio::sync::mpsc::Sender<String>>, event: Value) {
+    let Some(sender) = sender else {
+        return;
+    };
+    if let Ok(serialized) = serde_json::to_string(&event) {
+        let _ = sender.send(serialized).await;
+    }
+}
+
+async fn execute_with_events<F>(
+    call: &ResolvedCall,
+    sender: Option<&tokio::sync::mpsc::Sender<String>>,
+    execution: F,
+) -> Result<crate::mcp::protocol::CallToolResult, String>
+where
+    F: std::future::Future<Output = Result<crate::mcp::protocol::CallToolResult, String>>,
+{
+    send_tool_event(sender, tool_start_event(call)).await;
+    let result = execution.await;
+    send_tool_event(sender, tool_result_event(call, &result)).await;
+    result
+}
+
 /// Vòng tool-calling có bật hay không. **Mặc định TẮT.**
 ///
 /// Vì sao tắt: nó thêm MỘT lượt LLM nữa cho mỗi câu chat. Trên máy beta chạy
@@ -919,6 +1000,7 @@ pub fn guard_direct_call(server: &str, name: &str) -> Result<(), String> {
 pub async fn execute_call(
     state: &crate::AppState,
     call: &ResolvedCall,
+    event_sender: Option<&tokio::sync::mpsc::Sender<String>>,
 ) -> Result<crate::mcp::protocol::CallToolResult, String> {
     if ExecPolicy::for_tool(&call.server, &call.name) != ExecPolicy::Auto {
         return Err(format!(
@@ -930,13 +1012,16 @@ pub async fn execute_call(
         name: call.name.clone(),
         arguments: call.arguments.clone(),
     };
-    if call.server == NATIVE_SERVER {
-        state.mcp_server.call_tool(req).await
-    } else {
-        crate::mcp::client::global_registry()
-            .call_tool(&call.server, req)
-            .await
-    }
+    let execution = async {
+        if call.server == NATIVE_SERVER {
+            state.mcp_server.call_tool(req).await
+        } else {
+            crate::mcp::client::global_registry()
+                .call_tool(&call.server, req)
+                .await
+        }
+    };
+    execute_with_events(call, event_sender, execution).await
 }
 
 impl ResolvedCall {
@@ -963,6 +1048,156 @@ impl ResolvedCall {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_start_event_dung_khuon_websocket_hien_co() {
+        let call = ResolvedCall {
+            server: NATIVE_SERVER.to_string(),
+            name: "get_weather".to_string(),
+            arguments: json!({ "location": "Hà Nội" }),
+            policy: ExecPolicy::Auto,
+        };
+
+        assert_eq!(
+            tool_start_event(&call),
+            json!({
+                "event": "tool_start",
+                "payload": {
+                    "tool": "get_weather",
+                    "label": "Đang xem thời tiết…",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn tool_result_event_mang_du_lieu_that_khi_thanh_cong() {
+        let call = ResolvedCall {
+            server: NATIVE_SERVER.to_string(),
+            name: "get_weather".to_string(),
+            arguments: json!({ "location": "Hà Nội" }),
+            policy: ExecPolicy::Auto,
+        };
+        let result = crate::mcp::protocol::CallToolResult {
+            content: vec![crate::mcp::protocol::ToolContent::Text {
+                text: "Hà Nội: 31°C, có mây, độ ẩm 70%.".to_string(),
+            }],
+            is_error: false,
+        };
+
+        assert_eq!(
+            tool_result_event(&call, &Ok(result)),
+            json!({
+                "event": "tool_result",
+                "payload": {
+                    "tool": "get_weather",
+                    "ok": true,
+                    "data": {
+                        "content": [{
+                            "type": "text",
+                            "text": "Hà Nội: 31°C, có mây, độ ẩm 70%."
+                        }],
+                        "isError": false,
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn tool_result_event_bao_ly_do_khi_tool_tra_is_error() {
+        let call = ResolvedCall {
+            server: NATIVE_SERVER.to_string(),
+            name: "get_weather".to_string(),
+            arguments: json!({ "location": "Hà Nội" }),
+            policy: ExecPolicy::Auto,
+        };
+        let result = crate::mcp::protocol::CallToolResult {
+            content: vec![crate::mcp::protocol::ToolContent::Text {
+                text: "Không lấy được thời tiết vì mất kết nối.".to_string(),
+            }],
+            is_error: true,
+        };
+
+        assert_eq!(
+            tool_result_event(&call, &Ok(result)),
+            json!({
+                "event": "tool_result",
+                "payload": {
+                    "tool": "get_weather",
+                    "ok": false,
+                    "reason": "Không lấy được thời tiết vì mất kết nối.",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn tool_result_event_bao_ly_do_khi_loi_thuc_thi() {
+        let call = ResolvedCall {
+            server: NATIVE_SERVER.to_string(),
+            name: "get_weather".to_string(),
+            arguments: json!({ "location": "Hà Nội" }),
+            policy: ExecPolicy::Auto,
+        };
+
+        assert_eq!(
+            tool_result_event(&call, &Err("MCP transport đã đóng.".to_string())),
+            json!({
+                "event": "tool_result",
+                "payload": {
+                    "tool": "get_weather",
+                    "ok": false,
+                    "reason": "MCP transport đã đóng.",
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_event_duoc_serialize_vao_kenh_text_websocket() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let event = json!({
+            "event": "tool_start",
+            "payload": { "tool": "get_weather", "label": "Đang xem thời tiết…" }
+        });
+
+        send_tool_event(Some(&tx), event.clone()).await;
+
+        let sent = rx.recv().await.expect("phải có sự kiện WebSocket");
+        assert_eq!(serde_json::from_str::<Value>(&sent).unwrap(), event);
+    }
+
+    #[tokio::test]
+    async fn thuc_thi_tool_phat_start_truoc_result() {
+        let call = ResolvedCall {
+            server: NATIVE_SERVER.to_string(),
+            name: "get_weather".to_string(),
+            arguments: json!({ "location": "Hà Nội" }),
+            policy: ExecPolicy::Auto,
+        };
+        let result = crate::mcp::protocol::CallToolResult {
+            content: vec![crate::mcp::protocol::ToolContent::Text {
+                text: "Hà Nội: 31°C, có mây.".to_string(),
+            }],
+            is_error: false,
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+
+        let returned = execute_with_events(&call, Some(&tx), async { Ok(result.clone()) })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(returned).unwrap(),
+            serde_json::to_value(result).unwrap()
+        );
+        let start: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        let finish: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(start["event"], "tool_start");
+        assert_eq!(finish["event"], "tool_result");
+        assert_eq!(finish["payload"]["ok"], true);
+    }
 
     fn tool(server: &str, name: &str, desc: &str, schema: Value) -> CatalogTool {
         CatalogTool {

@@ -21,6 +21,13 @@ export interface UseSpeakerPlaybackOptions {
   channel?: string;
   /** Route playback through a master GainNode (required for audio ducking). */
   useMasterGain?: boolean;
+  /**
+   * Insert a persistent AnalyserNode at the head of the output chain so a
+   * consumer can drive lip-sync from the audio that is actually audible.
+   * Read it with `getAnalyser()`. It lives as long as the AudioContext and is
+   * never rebuilt per chunk — see the note on `outputNode()`.
+   */
+  enableAnalyser?: boolean;
   /** First chunk of a run started playing — e.g. sendMsg("audio_play_started"). */
   onPlaybackStarted?: () => void;
   /** Run finished or was stopped — e.g. sendMsg("audio_play_finished"). */
@@ -53,6 +60,12 @@ export interface UseSpeakerPlaybackReturn {
   isBlocked: () => boolean;
   isPlaying: () => boolean;
   hasActiveSources: () => boolean;
+  /**
+   * The analyser sitting in the output chain, or null when `enableAnalyser`
+   * is off or nothing has been scheduled yet. Consumers read from it; they
+   * must not connect or disconnect it.
+   */
+  getAnalyser: () => AnalyserNode | null;
   /** Stop playback and close the AudioContext (component unmount). */
   close: () => void;
 }
@@ -70,6 +83,7 @@ export function useSpeakerPlayback(
 
   let audioCtx: AudioContext | null = null;
   let masterGain: GainNode | null = null;
+  let analyser: AnalyserNode | null = null;
   /** Gapless scheduling cursor: earliest time the next chunk may start. */
   let nextStartTime = 0;
   let activeSources: AudioBufferSourceNode[] = [];
@@ -88,7 +102,8 @@ export function useSpeakerPlayback(
     return audioCtx;
   }
 
-  function outputNode(ctx: AudioContext): AudioNode {
+  /** Tail of the output chain: the ducking gain when enabled, else the speakers. */
+  function sinkNode(ctx: AudioContext): AudioNode {
     if (options.useMasterGain) {
       if (!masterGain) {
         masterGain = ctx.createGain();
@@ -97,6 +112,29 @@ export function useSpeakerPlayback(
       return masterGain;
     }
     return ctx.destination;
+  }
+
+  /**
+   * Head of the output chain. Every scheduled source connects HERE and nowhere
+   * else, so the graph stays a single route to the speakers:
+   *   `source → analyser → masterGain → destination`
+   *
+   * The analyser sits *inside* that chain rather than hanging off the source as
+   * a second branch. A parallel tap looks harmless but is not: the same buffer
+   * would reach the destination twice (summed, ~2x amplitude), and
+   * `setMasterVolume()` would attenuate only one of the two routes, so audio
+   * ducking could never fully duck. It is also built once per context — never
+   * per chunk — because chunks are scheduled ahead of playback, so a
+   * per-chunk analyser spends most of its life attached to a source that has
+   * not started making sound yet.
+   */
+  function outputNode(ctx: AudioContext): AudioNode {
+    if (!options.enableAnalyser) return sinkNode(ctx);
+    if (!analyser) {
+      analyser = ctx.createAnalyser();
+      analyser.connect(sinkNode(ctx));
+    }
+    return analyser;
   }
 
   function handleSourceEnded(source: AudioBufferSourceNode): void {
@@ -223,6 +261,7 @@ export function useSpeakerPlayback(
     }
     audioCtx = null;
     masterGain = null;
+    analyser = null;
   }
 
   onUnmounted(close);
@@ -239,6 +278,7 @@ export function useSpeakerPlayback(
     isBlocked: () => blocked,
     isPlaying: () => playing,
     hasActiveSources: () => activeSources.length > 0,
+    getAnalyser: () => analyser,
     close,
   };
 }

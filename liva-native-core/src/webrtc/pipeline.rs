@@ -6,10 +6,24 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
+fn push_tts_token(
+    filter: &mut crate::tts::AvatarSpeechFilter,
+    chunker: &mut crate::tts::TtsChunker,
+    token: &str,
+) -> Vec<String> {
+    let spoken = filter.push(token);
+    if spoken.is_empty() {
+        Vec::new()
+    } else {
+        chunker.push(&spoken)
+    }
+}
+
 #[derive(Clone)]
 pub struct VoiceOutbound {
     speaker_tx: mpsc::Sender<VoiceFrame>,
     control_tx: mpsc::Sender<VoiceFrame>,
+    text_event_tx: Option<mpsc::Sender<String>>,
 }
 
 impl VoiceOutbound {
@@ -17,7 +31,13 @@ impl VoiceOutbound {
         Self {
             speaker_tx,
             control_tx,
+            text_event_tx: None,
         }
+    }
+
+    pub fn with_text_events(mut self, text_event_tx: mpsc::Sender<String>) -> Self {
+        self.text_event_tx = Some(text_event_tx);
+        self
     }
 
     /// Fail fast on backpressure and check cancellation around the enqueue side effect.
@@ -326,6 +346,7 @@ impl WebRTCActor {
         let event_tx = self.event_tx.clone();
         let state_clone = Arc::clone(&self.state_shared);
         let active_session_id_llm = Arc::clone(&self.active_session_id);
+        let tool_event_tx = self.outgoing.text_event_tx.clone();
 
         let (llm_chunk_tx, llm_chunk_rx) = mpsc::channel::<String>(100);
 
@@ -367,6 +388,7 @@ impl WebRTCActor {
                 Arc::clone(&state_llm),
                 memory_scope,
                 llm_chunk_tx,
+                tool_event_tx,
                 session_id,
                 Arc::clone(&active_session_id_llm_task),
             );
@@ -405,6 +427,7 @@ impl WebRTCActor {
         let session_aec = Arc::clone(&self.session_aec);
         let tts_handle = tokio::task::spawn_blocking(move || {
             let mut chunker = crate::tts::TtsChunker::new();
+            let mut avatar_speech_filter = crate::tts::AvatarSpeechFilter::default();
             let mut seq_id = 0u32;
             let mut is_speaking = false;
 
@@ -471,11 +494,12 @@ impl WebRTCActor {
                     {
                         return Err("Session cancelled".to_string());
                     }
-                    let chunks = chunker.push(&token);
+                    let chunks = push_tts_token(&mut avatar_speech_filter, &mut chunker, &token);
                     for chunk in chunks {
                         process_and_send_chunk(&chunk)?;
                     }
                 }
+                avatar_speech_filter.finish();
                 if let Some(remainder) = chunker.flush() {
                     process_and_send_chunk(&remainder)?;
                 }
@@ -589,6 +613,18 @@ mod outbound_tests {
             Ok(PipelineEvent::SpeakText(text))
                 if text == "Bạn muốn nhắn bằng Messenger hay Telegram?"
         ));
+    }
+
+    #[test]
+    fn avatar_control_bi_loc_truoc_khi_chia_clause_tts() {
+        let mut filter = crate::tts::AvatarSpeechFilter::default();
+        let mut chunker = crate::tts::TtsChunker::new();
+
+        assert!(super::push_tts_token(&mut filter, &mut chunker, "[wa").is_empty());
+        assert_eq!(
+            super::push_tts_token(&mut filter, &mut chunker, "ve]Xin chào."),
+            vec!["Xin chào.".to_string()]
+        );
     }
 
     #[tokio::test]

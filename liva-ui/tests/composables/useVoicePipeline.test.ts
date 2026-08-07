@@ -494,11 +494,19 @@ describe('useVoicePipeline — Composable State & Lifecycle', () => {
       mockWs.send.mockClear();
 
       listeners.get('message')?.({
-        data: JSON.stringify({ event: 'wake_word_triggered', payload: { score: 0.96 } }),
+        data: JSON.stringify({
+          event: 'wake_word_triggered',
+          payload: { score: 0.641, transcript: '' },
+        }),
       } as MessageEvent);
 
       expect(detected).toHaveBeenCalledOnce();
       expect(pipeline.state.value).toBe('ACTIVE');
+      expect(pipeline.wakeProbeFeedback.value).toEqual({
+        outcome: 'accepted',
+        score: 0.641,
+        transcript: '',
+      });
       expect(mockWs.send).not.toHaveBeenCalled();
       expect(worker.postMessage).toHaveBeenCalledWith(
         { type: 'probeResult', data: { accepted: true } },
@@ -533,10 +541,18 @@ describe('useVoicePipeline — Composable State & Lifecycle', () => {
       worker.postMessage.mockClear();
 
       listeners.get('message')?.({
-        data: JSON.stringify({ event: 'wake_probe_rejected', payload: { score: 0.12 } }),
+        data: JSON.stringify({
+          event: 'wake_probe_rejected',
+          payload: { score: 0.372, transcript: '' },
+        }),
       } as MessageEvent);
 
       expect(detected).not.toHaveBeenCalled();
+      expect(pipeline.wakeProbeFeedback.value).toEqual({
+        outcome: 'rejected',
+        score: 0.372,
+        transcript: '',
+      });
       expect(worker.postMessage).toHaveBeenCalledWith(
         { type: 'probeResult', data: { accepted: false } },
         []

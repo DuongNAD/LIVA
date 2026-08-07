@@ -17,14 +17,12 @@ const MIN_WS_AUTH_TOKEN_BYTES: usize = 32;
 const MAX_WS_AUTH_TOKEN_BYTES: usize = 4096;
 const WS_SESSION_TTL: Duration = Duration::from_secs(30);
 const MAX_OUTSTANDING_WS_SESSIONS: usize = 64;
-const WAKE_PROBE_DIRECT_ACCEPT_SCORE: f32 = 0.90;
-
-/// The synthetic classifier is only allowed to wake Liva by itself when its
-/// confidence is exceptionally high. Scores between the model's candidate
-/// threshold and this safety threshold must still be confirmed by exact STT.
+/// The promoted classifier has already passed the configured owner-positive
+/// and hard-negative gate. The runtime must therefore use that evaluated
+/// threshold directly; an extra hard-coded cap would silently invalidate the
+/// selection result and reject real owner scores that passed the gate.
 fn wake_probe_classifier_direct_accept(score: Option<f32>, model_threshold: f32) -> bool {
-    let direct_threshold = model_threshold.max(WAKE_PROBE_DIRECT_ACCEPT_SCORE);
-    score.is_some_and(|value| value.is_finite() && value > direct_threshold)
+    score.is_some_and(|value| value.is_finite() && value > model_threshold)
 }
 
 #[derive(Serialize)]
@@ -507,7 +505,8 @@ async fn handle_ws_connection(
         crate::webrtc::session::VoiceSessionAudio::from_app_state(state.as_ref()).await;
     let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(
         state.clone(),
-        crate::webrtc::pipeline::VoiceOutbound::new(speaker_tx.clone(), control_tx.clone()),
+        crate::webrtc::pipeline::VoiceOutbound::new(speaker_tx.clone(), control_tx.clone())
+            .with_text_events(text_tx.clone()),
         conversation_id.clone(),
         voice_session.aec_handle(),
     );
@@ -639,9 +638,9 @@ async fn handle_ws_connection(
                         }
                         OP_WAKE_PROBE => {
                             // Cổng đánh thức của widget. Client tự cắt MỘT câu ứng
-                            // viên bằng VAD năng lượng rẻ tiền rồi hỏi ở đây; chỉ
-                            // khi transcript thật sự chứa cụm đánh thức thì UI mới
-                            // được chuyển PASSIVE → ACTIVE.
+                            // viên bằng VAD năng lượng rẻ tiền rồi hỏi ở đây. UI chỉ
+                            // chuyển PASSIVE → ACTIVE khi classifier vượt ngưỡng đã
+                            // benchmark hoặc transcript thật sự chứa cụm đánh thức.
                             //
                             // Đường này KHÔNG chạm pipeline: không AEC/GTCRN/VAD,
                             // không TurnAudioBuffer, không on_vad_end. Nó chỉ trả
@@ -729,12 +728,10 @@ async fn handle_ws_connection(
                                     let rms = (samples_vec.iter().map(|s| s * s).sum::<f32>()
                                         / samples_vec.len().max(1) as f32)
                                         .sqrt();
-                                    let direct_threshold =
-                                        model_threshold.max(WAKE_PROBE_DIRECT_ACCEPT_SCORE);
                                     let classifier = match &best_score {
                                         Some((name, score)) => format!(
-                                            "{} {:.3} (candidate {:.2}, direct {:.2})",
-                                            name, score, model_threshold, direct_threshold
+                                            "{} {:.3} (threshold {:.2})",
+                                            name, score, model_threshold
                                         ),
                                         None => "không nạp được".to_string(),
                                     };
@@ -1576,9 +1573,11 @@ mod security_tests {
     }
 
     #[test]
-    fn wake_probe_diem_lung_chung_khong_duoc_tu_danh_thuc() {
+    fn wake_probe_dung_nguong_production_da_hieu_chuan_cho_owner() {
         assert!(wake_probe_classifier_direct_accept(Some(0.95), 0.58));
-        assert!(!wake_probe_classifier_direct_accept(Some(0.70), 0.58));
+        assert!(wake_probe_classifier_direct_accept(Some(0.641), 0.58));
+        assert!(wake_probe_classifier_direct_accept(Some(0.595), 0.58));
+        assert!(!wake_probe_classifier_direct_accept(Some(0.372), 0.58));
         assert!(!wake_probe_classifier_direct_accept(Some(0.58), 0.58));
         assert!(!wake_probe_classifier_direct_accept(None, 0.58));
         assert!(!wake_probe_classifier_direct_accept(Some(f32::NAN), 0.58));

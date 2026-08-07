@@ -163,6 +163,19 @@ models/wake_fixtures/
 data/wake-enrollment/
 data/benchmarks/
 tools/wakeword/work/
+# Bản lùi khi train lại wake word, ví dụ
+# `models/wake_liva_en_v2.onnx.rollback.20260805-125553` (956 KB). Luật `*.onnx`
+# ở trên KHÔNG bắt được: đuôi thật của file là dấu thời gian, không phải `.onnx`.
+# Cùng lý do với `reports-archive/` (6,7 MB) — sản phẩm phụ của một lần train,
+# không phải nguồn. Cả hai từng đứng untracked chờ một lệnh `git add -A` nuốt vào.
+models/*.rollback.*
+tools/wakeword/reports-archive/
+# Ba DLL runtime NVIDIA (752 MB, `cublasLt64_12.dll` một mình đã 643 MB) do
+# `scripts/stage-cuda-redist.mjs` chép từ CUDA Toolkit vào ngay trước
+# `tauri build`. Thư mục do `build.rs` tạo và phải tồn tại kể cả ở bản CPU;
+# rỗng thì bundler bỏ qua. Nội dung là bản phát hành lại của NVIDIA, không phải
+# nguồn của dự án.
+liva-desktop/src-tauri/cuda-redist/
 docs/99-luu-tru/bao-cao-lich-su/vieneu_poc_samples/
 # VieNeu-TTS large weights (.onnx/.bin already covered above; these are not).
 # Fetched out-of-band — see models/README.md. The small config/tokenizer/voices

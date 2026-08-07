@@ -13,15 +13,15 @@
     "topP": 0.9
   },
   "avatar": {
-    "activeFormat": "fbx",
-    "activeModel": "little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
+    "activeFormat": "vrm",
+    "activeModel": "Liva.vrm",
     "activeType": "3d",
     "autoBlinkEnabled": true,
     "engineMode": "3D",
     "lipSyncEnabled": true,
     "live2dModel": "models/live2d/pio/index.json",
     "lookAtMouseEnabled": true,
-    "vrmModel": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx"
+    "vrmModel": "models/vrm/Liva.vrm"
   },
   "system": {
     "digestFocusDeliverEmail": false,
@@ -55,8 +55,8 @@
   },
   "ui": {
     "activeModel": {
-      "filename": "models/vrm/little+Chinese+girl/tripo_convert_bcaf2e66-3815-45d1-b0e8-fd4df1e61afd.fbx",
-      "format": "fbx",
+      "filename": "models/vrm/Liva.vrm",
+      "format": "vrm",
       "type": "3d"
     },
     "avatarMode": "3D",

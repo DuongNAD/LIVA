@@ -373,8 +373,8 @@
       "dest": "models/wake_liva_en_v2.onnx",
       "url": null,
       "bytes": 956143,
-      "sha256": "7487fcb480ce05a6ba02901ee48071caed73b593dfed5d9b55202ae1001c4780",
-      "manual": "Tự train (2026-07-31). Hey Liva v2: threshold 0.58, recall 91.82%, FPPH 0.0773 trên 25.88h validation."
+      "sha256": "459d3a803f199c6b228fe711b4a1eeb9dc0da2cd51ea36c5ff7e6a2c45cf0202",
+      "manual": "Tự train (2026-08-05), fleurs_medium với owner hard negatives. Holdout tại threshold 0.58: recall 4/4, 1 false positive, FPPH 0.7685 trên 1.3013 giờ negative; production beta cần tiếp tục thu field evidence."
     },
     {
       "group": "wake",

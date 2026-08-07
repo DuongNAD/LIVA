@@ -6,6 +6,13 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21.0"
+# Bề mặt tương thích OpenAI (`openai_api.rs`). hyper 0.14 ĐÃ nằm trong cây phụ
+# thuộc từ trước qua `reqwest` — bật thêm feature server không kéo về crate mới
+# nào: httparse/http/http-body/tower-service/want/h2 đều đã có trong Cargo.lock.
+# Đó là lý do chọn hyper thay vì axum ở đây; axum sẽ là một cây mới hoàn toàn
+# trong khi crate này chỉ cần định tuyến ba đường dẫn.
+# `stream` là thứ cho `Body::wrap_stream` — cần cho SSE ở /v1/chat/completions.
+hyper = { version = "0.14", features = ["server", "http1", "tcp", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

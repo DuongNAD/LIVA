@@ -3492,6 +3492,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hkdf 0.13.0",
+ "hyper 0.14.32",
  "image",
  "llama-cpp-2",
  "ndarray 0.15.6",

@@ -1,6 +1,6 @@
 ---
 title: "Triển khai và runtime"
-updated: 2026-08-06
+updated: 2026-08-07
 commit: dce30da
 status: living
 owns:

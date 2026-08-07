@@ -1,6 +1,6 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-08-06
+updated: 2026-08-07
 commit: dce30da
 stale-ok: dce30da
 status: living
@@ -73,7 +73,7 @@ covers:
 
 ### 0.1 Việc tiếp theo — chọn từ trên xuống
 
-> 🔴 **Chen ngang, chốt 06/08/2026: [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đứng trước mọi mục trong bảng dưới.** Đây là triệu chứng **người dùng trực tiếp báo** (avatar khựng theo từng bước chân), tức hạng khác với backlog — cùng hạng với hồi quy ở bước 1 của giao thức. Và **bước 0 của nó là một dòng**: tắt `FootPlantIK`, đi lại, nhìn. Làm cái đó trước khi nhận bất kỳ mục nào khác; kết quả quyết định U30 hay [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là chỗ đáng đào.
+> 🔴 **Chen ngang, chốt 07/08/2026: [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đứng trước mọi mục trong bảng dưới.** Đây là triệu chứng **người dùng trực tiếp báo** (avatar khựng theo từng bước chân), tức hạng khác với backlog — cùng hạng với hồi quy ở bước 1 của giao thức. Và **bước 0 của nó là một dòng**: tắt `FootPlantIK`, đi lại, nhìn. Làm cái đó trước khi nhận bất kỳ mục nào khác; kết quả quyết định U30 hay [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là chỗ đáng đào.
 
 Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong nhóm A trước, **không đụng nhóm D** (U10/U11) khi A/B/C còn dở.
 
@@ -299,15 +299,15 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | ~~**U1b**~~ ✅ **XONG 26/07/2026** | [Ghim `CUDAARCHS` + quyết định cách phát hành](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) | A | ~~Beta · U2~~ | đã đo — **binary −63%; còn 752 MB DLL cuBLAS, xem U1c** |
 | ~~**U1c**~~ ✅ **XONG 26/07/2026** | [Thử bỏ phụ thuộc cuBLAS](#u1c--thử-bỏ-phụ-thuộc-cublas-ba-hướng-đều-thất-bại) | A | — | **kết quả ÂM TÍNH**: cả 3 hướng thất bại, cuBLAS là phụ thuộc cứng ⇒ U2 phải tính ~830 MB |
 | **U2** | [Installer hiện hành + thử trên máy sạch](#u2--installer-hiện-hành-và-thử-trên-máy-sạch) | A | Beta | 1–2 ngày |
-| ~~**U3**~~ ✅ **XONG 06/08/2026** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên--một-phần-cli-xong-26072026-ui-còn-nợ) | A | ~~Beta~~ | CLI 26/07; **màn hình UI xong 06/08** (`SystemView.vue` + `useGateway.ts`) |
+| ~~**U3**~~ ✅ **XONG 07/08/2026** | [Lệnh `preflight` báo trạng thái tài nguyên](#u3--lệnh-preflight-báo-trạng-thái-tài-nguyên--một-phần-cli-xong-26072026-ui-còn-nợ) | A | ~~Beta~~ | CLI 26/07; **màn hình UI xong 06/08** (`SystemView.vue` + `useGateway.ts`) |
 | ~~**U4**~~ ✅ **XONG 26/07/2026** | [Đồng bộ `03-danh-gia/` với code](#u4--đồng-bộ-03-danh-gia-với-code) | B | ~~Hồ sơ~~ | đã xong |
 | ~~**U5**~~ ✅ **XONG 26/07/2026** | [Biến drift tài liệu thành gate thật](#u5--biến-drift-tài-liệu-thành-gate-thật) | B | — | đã xong |
 | ~~**U6**~~ ✅ **XONG 26/07/2026** | [Sửa con trỏ chết trong AGENTS.md](#u6--sửa-con-trỏ-chết-trong-agentsmd) | B | — | đã xong |
 | ~~**U7**~~ ✅ **XONG 29/07/2026** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | ~~Beta~~ | **tiền đề SAI** — xem phân loại; đã vá nhiễm độc khoá + 6 test rác + 2 lỗi trong `voice_stress` |
-| ~~**U8**~~ ✅ **XONG 06/08/2026** | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | `boot.rs` xong 26/07; **hai bảng "năng lực theo profile" đã cập nhật 06/08** |
+| ~~**U8**~~ ✅ **XONG 07/08/2026** | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | `boot.rs` xong 26/07; **hai bảng "năng lực theo profile" đã cập nhật 06/08** |
 | ~~**U9**~~ ✅ **XONG 29/07/2026** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | ~~Hồ sơ~~ | đã đo — **p50 667 ms CPU · 18 ms CUDA** |
 | **U10** ◐ | [Tách `handle_command`](#u10--tách-handle_command) | D | — | **đang làm** — 6 miền tách xong, `lib.rs` 2 773 → 1 788 dòng |
-| ~~**U11**~~ ✅ **XONG 06/08/2026** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | line **73,89% → 80,70%**, chốt per-file **50 → 80** |
+| ~~**U11**~~ ✅ **XONG 07/08/2026** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | line **73,89% → 80,70%**, chốt per-file **50 → 80** |
 | **U12** | [Tool calling (đang làm dở)](#u12--tool-calling-đang-làm-dở) | E | — | đang chạy |
 | **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
 | **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |
@@ -328,7 +328,7 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | ~~**U28**~~ ✅ **XONG 06/08/2026** | [Endpoint tương thích OpenAI trên gateway](#u28--endpoint-tương-thích-openai-trên-gateway) — `/v1/models` · `/v1/chat/completions` (+SSE) · `/v1/audio/speech` | E | Hồ sơ | SDK OpenAI v7.4.0 **6/6**, 0 crate mới, mặc định TẮT |
 | **U29** | [Vòng lặp chủ động có ngân sách tick](#u29--vòng-lặp-chủ-động-có-ngân-sách-tick) — trụ "chủ động" | E | Ba trụ cột | nhiều tuần |
 | 🔴 **U30** | [Bù ngang ở pelvis — sóng răng cưa theo nhịp bước](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) — **triệu chứng người dùng báo**; bước 0 là một dòng | C | U33 | 0,5 ngày cho bậc 1 |
-| ~~**U31**~~ ✅ **XONG 06/08/2026** | [Ba khoản phí mỗi frame trên đường avatar](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) — **đo xong: (a) và (c) không đáng kể**, giá trị thật ở (b) và (d) | C | — | đã làm, +9 test |
+| ~~**U31**~~ ✅ **XONG 07/08/2026** | [Ba khoản phí mỗi frame trên đường avatar](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) — **đo xong: (a) và (c) không đáng kể**, giá trị thật ở (b) và (d) | C | — | đã làm, +9 test |
 | **U32** | [Retarget đang vứt đi phần lớn chuyển động](#u32--retarget-đang-vứt-đi-phần-lớn-chuyển-động) — giữ 11/52 track, bỏ hips position | E | — | 2–4 ngày |
 | **U33** | [Locomotion đúng: nhịp cố định, blendspace, distance matching](#u33--locomotion-đúng-nhịp-cố-định-blendspace-distance-matching) | E | — | **nhiều tuần** · cần U30 xong trước |
 
@@ -1109,7 +1109,7 @@ Số test giảm 394 → 384 (−34 test của `useVRM.test.ts`, +24 test của 
 
 ### U30 — Bù ngang ở pelvis: sóng răng cưa đồng bộ với nhịp bước
 
-> **Nguồn gốc.** Người dùng báo avatar "khựng khựng" khi đi. Một bản rà do ChatGPT thực hiện ngày 06/08/2026 chỉ vào `FootPlantIK`; **đã đối chiếu lại từng khẳng định với code và đo lại model** — xem "độ tin của bản rà" ở cuối mục. Chẩn đoán đứng vững, nhưng thứ tự thi hành mà bản rà đề xuất thì không.
+> **Nguồn gốc.** Người dùng báo avatar "khựng khựng" khi đi. Một bản rà do ChatGPT thực hiện ngày 07/08/2026 chỉ vào `FootPlantIK`; **đã đối chiếu lại từng khẳng định với code và đo lại model** — xem "độ tin của bản rà" ở cuối mục. Chẩn đoán đứng vững, nhưng thứ tự thi hành mà bản rà đề xuất thì không.
 
 **Cơ chế, đã kiểm.** `FootPlantIK` không phải IK. `footPlantIK.ts` (`update`) chọn bàn chân thấp hơn rồi neo toạ độ **thế giới** của nó; `useAvatarAnimation.ts` (`applyFootPlant`) bù sai lệch bằng cách **dịch cả `hips`** — không xoay đùi–gối–bàn chân.
 
@@ -1132,7 +1132,7 @@ Bản rà đề xuất dựng bộ đo RAF p50/p95/p99 + Long Animation Frames *
 
 ⚠️ **Và nếu tắt đi mà VẪN khựng thì toàn bộ mục này sai** — thủ phạm nằm chỗ khác, và [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là nơi đáng nhìn tiếp. Đừng bỏ qua nhánh đó: chưa ai trong hai bản rà **nhìn thấy** hiện tượng, cả hai đều là đọc code. Người duy nhất đã thấy là chủ dự án.
 
-**Công tắc đã có — 06/08/2026.** `LIVA_FOOT_PLANT` đọc trong `useAvatarAnimation.ts` (`footPlantEnabled`), theo đúng lối `LIVA_ECO_MODE` sẵn có. **Mặc định BẬT**, so sánh với `false` chứ không ép boolean, nên quên khai báo không vô tình tắt nó.
+**Công tắc đã có — 07/08/2026.** `LIVA_FOOT_PLANT` đọc trong `useAvatarAnimation.ts` (`footPlantEnabled`), theo đúng lối `LIVA_ECO_MODE` sẵn có. **Mặc định BẬT**, so sánh với `false` chứ không ép boolean, nên quên khai báo không vô tình tắt nó.
 
 ```js
 LIVA_FOOT_PLANT = false   // tắt ngay trong console, không build lại
@@ -1141,7 +1141,7 @@ LIVA_FOOT_PLANT = true    // bật lại để so sánh
 
 Khi tắt, `hips` được **trả về tư thế gốc** chứ không chỉ `return` sớm — thiếu bước đó thì độ lệch của lượt bù cuối cùng đóng băng vĩnh viễn, trông như một lỗi khác hẳn và đủ để làm hỏng chính phép A/B. Có test khoá cả hai vế (`LIVA_FOOT_PLANT = false tắt bù và trả hips về tư thế gốc`).
 
-⚠️ **Bẫy đo — trả giá 06/08/2026: không tự động hoá được phép A/B này.** Dựng dev server rồi bắt vị trí avatar trong 21 giây: toạ độ **không đổi một bit**. Nghi model chưa nạp — sai, `Liva.vrm` và cả **sáu** FBX đều tải 200. Nguyên nhân thật đo được bằng một phép thử:
+⚠️ **Bẫy đo — trả giá 07/08/2026: không tự động hoá được phép A/B này.** Dựng dev server rồi bắt vị trí avatar trong 21 giây: toạ độ **không đổi một bit**. Nghi model chưa nạp — sai, `Liva.vrm` và cả **sáu** FBX đều tải 200. Nguyên nhân thật đo được bằng một phép thử:
 
 ```
 requestAnimationFrame trong 1 giây: 0 lần   ·   document.hidden: true
@@ -1200,7 +1200,7 @@ Và các số còn lại khớp tuyệt đối: **250 bone · 44 481 triangle ·
 
 ---
 
-#### ✅ ĐÃ LÀM — 06/08/2026, và **hai trong bốn khoản hoá ra không đáng kể**
+#### ✅ ĐÃ LÀM — 07/08/2026, và **hai trong bốn khoản hoá ra không đáng kể**
 
 Đo riêng từng khoản đúng như nghiệm thu yêu cầu. Kết quả ngược với kỳ vọng ở nửa danh sách:
 
@@ -1599,7 +1599,7 @@ Trụ "chủ động" vẫn là mảnh thiếu lớn nhất trong ba trụ. AIRI
 
 `CONTROLLED_BONES` trong `useAvatarAnimation.ts` giữ đúng **11** xương — hai chân, hai tay, hips. Bị bỏ: toàn bộ **spine, shoulder, hand, finger**, và **toàn bộ hips position**.
 
-**Đo được (06/08/2026):** mỗi FBX Mixamo trong `liva-ui/public/animations/mixamo/` chứa **68 tên xương `mixamorig:` duy nhất** — đếm bằng `strings` trên `walk.fbx`, `run.fbx`, `idle.fbx`, cả ba đều ra 68. Trong đó có vài mục không phải xương động (`HeadTop_End`, và một `Hipsf` trông như rác), nên số track hoạt hình thật thấp hơn 68 nhưng vẫn **hơn 11 rất nhiều**. *(Bản rà gốc ghi "52 track quaternion + 1 track vị trí hips"; con số đó **chưa tự kiểm** — muốn chính xác phải nạp FBX qua three.js và đếm `clip.tracks`. Kết luận không đổi dù con số đúng là 52 hay khác.)*
+**Đo được (07/08/2026):** mỗi FBX Mixamo trong `liva-ui/public/animations/mixamo/` chứa **68 tên xương `mixamorig:` duy nhất** — đếm bằng `strings` trên `walk.fbx`, `run.fbx`, `idle.fbx`, cả ba đều ra 68. Trong đó có vài mục không phải xương động (`HeadTop_End`, và một `Hipsf` trông như rác), nên số track hoạt hình thật thấp hơn 68 nhưng vẫn **hơn 11 rất nhiều**. *(Bản rà gốc ghi "52 track quaternion + 1 track vị trí hips"; con số đó **chưa tự kiểm** — muốn chính xác phải nạp FBX qua three.js và đếm `clip.tracks`. Kết luận không đổi dù con số đúng là 52 hay khác.)*
 
 Hệ quả: dáng đi không có chuyển động thân trên, tay không đánh theo vai, và vì hips position bị bỏ nên không có thành phần nhấp nhô/đưa ngang tự nhiên của bước chân — thứ mà [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đang cố bù lại bằng một cơ chế sai.
 
@@ -1977,8 +1977,8 @@ Mục này tồn tại để phiên sau không đốt thời gian vào việc tr
 - **Đừng bỏ `DEFAULT_ENCRYPTION_KEY`** (`crypto.rs:16`) mà chưa có đường di trú dữ liệu. Nó cảnh báo lớn nhưng không chặn boot — đó là **quyết định có chủ đích**, đã ghim, không phải sơ suất.
 - **Đừng tin số ở §1 nếu ngày đã cũ.** Chạy lại lệnh. Đây là điều kiện tiên quyết, không phải lời khuyên.
 - **Đừng gộp nhiều mục U vào một lần sửa.** Mỗi mục có nghiệm thu riêng; gộp lại thì không biết cái nào hỏng khi cổng đỏ.
-- **Đừng dựng bộ đo trước khi thử tắt cái đang bị nghi.** Nếu nghi can có công tắc một dòng, bật/tắt nó rồi nhìn là phép thử rẻ nhất và quyết định nhất. Bộ đo dùng để **định lượng** một nguyên nhân đã xác định, hoặc để tìm nguyên nhân khi *không* có nghi can — không phải để chứng minh thứ mắt đã thấy. Đây là chỗ bản rà locomotion 06/08/2026 xếp sai thứ tự (xem [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước)).
-- **Đừng làm Motion Matching hay PFNN cho locomotion.** Motion matching chỉ phát huy khi có cơ sở dữ liệu lớn gồm start/stop/turn/pivot và nhiều quỹ đạo. Dự án hiện có **đúng sáu clip** (`idle`, `walk`, `run`, `jump`, `wave`, `thinking` — đếm trong `liva-ui/public/animations/mixamo/` ngày 06/08/2026); chi phí vượt xa lợi ích, và [U33](#u33--locomotion-đúng-nhịp-cố-định-blendspace-distance-matching) giải quyết được cùng vấn đề với công sức nhỏ hơn một bậc.
+- **Đừng dựng bộ đo trước khi thử tắt cái đang bị nghi.** Nếu nghi can có công tắc một dòng, bật/tắt nó rồi nhìn là phép thử rẻ nhất và quyết định nhất. Bộ đo dùng để **định lượng** một nguyên nhân đã xác định, hoặc để tìm nguyên nhân khi *không* có nghi can — không phải để chứng minh thứ mắt đã thấy. Đây là chỗ bản rà locomotion 07/08/2026 xếp sai thứ tự (xem [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước)).
+- **Đừng làm Motion Matching hay PFNN cho locomotion.** Motion matching chỉ phát huy khi có cơ sở dữ liệu lớn gồm start/stop/turn/pivot và nhiều quỹ đạo. Dự án hiện có **đúng sáu clip** (`idle`, `walk`, `run`, `jump`, `wave`, `thinking` — đếm trong `liva-ui/public/animations/mixamo/` ngày 07/08/2026); chi phí vượt xa lợi ích, và [U33](#u33--locomotion-đúng-nhịp-cố-định-blendspace-distance-matching) giải quyết được cùng vấn đề với công sức nhỏ hơn một bậc.
 - **Đừng tiết kiệm tài nguyên bằng cách hạ frame rate của avatar đang nhìn thấy.** Hạ DPR, tắt antialias, giảm tần suất spring bone — những thứ đó người dùng khó nhận ra. 5 FPS thì nhận ra ngay, và ECO Mode tồn tại để chạy đúng lúc người dùng vẫn đang nhìn (xem [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) khoản 4).
 
 ### Bốn thứ KHÔNG lấy từ proj-airi — chốt 06/08/2026

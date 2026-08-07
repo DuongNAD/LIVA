@@ -1,8 +1,8 @@
 ---
 title: "Master roadmap LIVA → JARVIS"
 updated: 2026-08-07
-commit: 3688b5f
-stale-ok: bd11c84
+commit: deac6aa
+stale-ok: deac6aa
 status: living
 owns:
   - master-roadmap-jarvis
@@ -92,11 +92,13 @@ thứ gì đã chạy.
 | S0.3 | xong 2026-07-31 | Identity/authorization cho command plane | S0.2 | Tauri label/capability cấp session ticket WS 256-bit TTL 30s single-use; mặc định WS remote; principal query nhận 403; replay/expired/non-loopback negative tests xanh |
 | S0.4 | xong 2026-07-31 | Ghim model/vec0 dưới canonical trust root + manifest | S0.3 | traversal/junction/tamper/hash tests xanh; không còn cwd/bare DLL |
 | M0.1 | xong 2026-07-31 | Persist messaging outbox xuống SQLite | migration DB | ciphertext sống qua pool restart, sai khóa fail-closed, consume một lần |
-| O0.1 | xong 2026-07-31 | Preflight UI và lỗi boot có hướng khắc phục | installer/preflight | fixture thiếu model blocking; setup/capability/installer + boot hint tests xanh |
+| O0.1 | xong 2026-07-31 | Preflight **luồng setup/installer** và lỗi boot có hướng khắc phục — *không phải* màn Hệ thống trong Dashboard, xem ghi chú dưới bảng | installer/preflight | fixture thiếu model blocking; setup/capability/installer + boot hint tests xanh |
 | V0.1 | mở | Đo voice SLO trên vỏ Tauri release | model thật | log p50/p95 và barge-in |
 | W0.1 | xong 2026-07-31 | Chỉ dùng “Hey Liva” kèm lệnh trong UX beta | — | regression gate khóa README/widget/trang thử mic; UI không hứa câu gọi đứng riêng |
 | W0.2 | artifact tổng hợp xong, corpus thật mở | Nghiệm thu “Hey Liva” v2 trên giọng thật | 20+ positive + 1 giờ negative | v2 conv-attention/hash pin đạt 91,82% recall, 0,0773 FPPH trên 25,88h tổng hợp; còn gate mic mục tiêu |
 | I0.1 | mở | Chạy Telegram E2E với tài khoản test | token test | send + receive + fail-closed allow-list |
+
+> **Hai thứ tên "preflight", đừng gộp.** **O0.1** (xong 31/07) là preflight của **luồng setup/installer** — chặn khi thiếu model, gợi ý khắc phục lúc boot. Màn **Hệ thống trong Dashboard** hiển thị trạng thái tài nguyên là việc khác, thuộc mục [U3](../03-danh-gia/05-nang-cap-toan-dien.md) và chỉ đóng ngày **07/08/2026** (`SystemView.vue` + `useGateway.ts`); trước đó bề mặt duy nhất là cờ CLI `--preflight`. Đọc O0.1 thành "Dashboard đã có màn preflight từ 31/07" là sai — chính chỗ này từng gây nhầm.
 
 Mốc D0.5: voice+wake, agent+tools, memory, security+data, vision+proactive+governor và
 desktop+frontend đã có nguồn chuẩn; các khảo sát cũ tương ứng được đóng băng. Kế hoạch kỹ thuật

@@ -186,5 +186,15 @@ models/vieneu/*.npz
 # ở trên, nhưng tokenizer.json (~16 MB) thì không — ignore cả thư mục để không ai
 # commit nhầm ~465 MB. Trống trên máy mới; xem models/README.md.
 models/embedding/
+# Model avatar VRM — tài sản nhị phân lấy ngoài băng, cùng loại với model weight
+# ở trên. `liva-ui/public/models/vrm/Liva.vrm` một mình đã **21 MB**; đưa vào
+# lịch sử git thì gần như không rút lại được, nên giữ ngoài cây cho nhất quán
+# với `*.gguf` / `*.onnx`.
+#
+# ⚠️ Luật này KHÔNG áp cho các clip Mixamo `liva-ui/public/animations/mixamo/*.fbx`
+# (6 file, tổng 3,4 MB): chúng đã được theo dõi từ `95d641a`, và `.gitignore`
+# không có tác dụng với file đã vào cây. Cỡ đó chấp nhận được nên giữ nguyên —
+# nếu sau này muốn bỏ ra thì phải `git rm --cached`, thêm dòng ignore là vô ích.
+*.vrm
 # Repo history-rewrite backups
 *.bundle

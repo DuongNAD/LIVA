@@ -46,8 +46,29 @@ export default defineConfig({
         // A31-06: tổng số đẹp từng che ba đường UI rủi ro cao. Giữ chốt
         // per-file để reconnect/command transport/vision không âm thầm tụt lại
         // dưới mức đã nghiệm thu ngày 31/07/2026.
+        //
+        // ⚠️ RE-BASE 07/08/2026, đọc trước khi coi đây là tiền lệ hạ ngưỡng.
+        //
+        // Bánh cóc per-file **phạt đúng cuộc tái cấu trúc mà A31-04 cần**. Khi
+        // bóc một khối ra composable, phần code chuyển đi thường được phủ TỐT
+        // HƠN trung bình của file, nên phần ở lại — vốn phủ kém — chiếm tỷ
+        // trọng lớn hơn và tỷ lệ tụt, dù không dòng nào mất test.
+        //
+        // Đo ở lát 3 (`useWidgetWindow.ts`): khối bóc ra phủ **93,58 %**,
+        // `WidgetApp.vue` tụt 83,71 → 81,72, còn **tổng gần như đứng yên**
+        // (80,88 → 80,84). Không có hồi quy nào, chỉ có phép đo bị lệch.
+        //
+        // Cách xử: cho bánh cóc **đi theo code**. Hạ chốt của file bị bóc về
+        // mức thật, ĐỒNG THỜI đặt chốt mới cho file nhận, để tổng mức bảo vệ
+        // không giảm mà chỉ dời chỗ. Lát sau lặp lại đúng công thức này.
+        //
+        // Cái KHÔNG được làm: hạ chốt mà không thêm chốt bù. Đó mới là dập cổng.
         'src/WidgetApp.vue': {
-          lines: 83,
+          lines: 81,
+        },
+        // Chốt bù cho lát 3 — khối hình học cửa sổ vừa rời WidgetApp.vue.
+        'src/composables/useWidgetWindow.ts': {
+          lines: 90,
         },
         'src/composables/useGateway.ts': {
           lines: 50,

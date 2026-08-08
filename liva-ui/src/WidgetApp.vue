@@ -45,6 +45,8 @@ import type {
   WidgetAvatarConfig,
   WidgetModelConfig,
 } from './types/gateway';
+import { useWidgetWindow } from './composables/useWidgetWindow';
+import type { ToolPanelView } from './types/ui';
 
 const platform = inject<IPlatformAdapter>('platform');
 
@@ -188,62 +190,13 @@ const isSensing = ref(false);
 let sensingTimeout: ReturnType<typeof setTimeout> | null = null;
 const isCameraActive = ref(false);
 
-type ToolPanelState = 'loading' | 'done' | 'error';
-interface ToolPanelView {
-  tool: string;
-  state: ToolPanelState;
-  payload: unknown;
-}
+
 const toolPanel = ref<ToolPanelView | null>(null);
 const TOOL_PRESENTATION_TIMEOUT_MS = 30_000;
 let toolPresentationTimer: ReturnType<typeof setTimeout> | null = null;
 const toolPresentationActive = ref(false);
 
-// ═══════════════════════════════════════════════════════
-//  Chat UI Dragging Logic
-// ═══════════════════════════════════════════════════════
-const dragOffset = ref({ x: 0, y: 0 });
-const isDragging = ref(false);
-let startMousePos = { x: 0, y: 0 };
-let startDragOffset = { x: 0, y: 0 };
 
-const onDragMove = (e: MouseEvent) => {
-  if (!isDragging.value) return;
-  const nextX = startDragOffset.x + (e.clientX - startMousePos.x);
-  const nextY = startDragOffset.y + (e.clientY - startMousePos.y);
-  const maxX = Math.max(window.innerWidth - 120, 0);
-  const maxY = Math.max(window.innerHeight - 120, 0);
-  dragOffset.value = {
-    x: Math.min(Math.max(nextX, -maxX), maxX),
-    y: Math.min(Math.max(nextY, -maxY), maxY),
-  };
-};
-
-const onDragEnd = () => {
-  isDragging.value = false;
-  globalThis.document.removeEventListener('mousemove', onDragMove);
-  globalThis.document.removeEventListener('mouseup', onDragEnd);
-
-  const currentWidth = isCollapsed.value ? 48 : 400;
-  const naturalLeft = window.innerWidth - 16 - currentWidth;
-  const currentCenterX = naturalLeft + dragOffset.value.x + currentWidth / 2;
-  snapPosition.value = currentCenterX < window.innerWidth / 2 ? 'left' : 'right';
-
-  const currentAbsoluteY = window.innerHeight - 60 + dragOffset.value.y;
-  verticalSnapPosition.value = currentAbsoluteY < window.innerHeight / 2 ? 'top' : 'bottom';
-
-  if (isCollapsed.value) {
-    snapToEdge();
-  }
-};
-
-const onDragStart = (e: MouseEvent) => {
-  isDragging.value = true;
-  startMousePos = { x: e.clientX, y: e.clientY };
-  startDragOffset = { ...dragOffset.value };
-  globalThis.document.addEventListener('mousemove', onDragMove);
-  globalThis.document.addEventListener('mouseup', onDragEnd);
-};
 
 // ═══════════════════════════════════════════════════════
 //  Thẻ xác nhận gửi tin nhắn
@@ -796,116 +749,37 @@ const avatarScale = ref(0.6);
 //  Platform Bridge (Agnostic IPC)
 // ═══════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════
-//  Phantom Bounding Box Fix — Rust Cursor Hit-Test System
-//  Rust polls cursor position every 30ms and toggles ghost mode
-//  based on whether cursor is inside interactive zones.
-//  We report the bounding rects of interactive elements to Rust.
-// ═══════════════════════════════════════════════════════
 const chatUIRef = ref<HTMLElement | null>(null);
 const miniIconsRef = ref<HTMLElement | null>(null);
 const toolPanelZoneRef = ref<HTMLElement | null>(null);
-let zonesInterval: ReturnType<typeof setInterval> | null = null;
 
-const updateInteractiveZones = () => {
-  if (!platform) return;
-  const zones: Array<{ x: number; y: number; width: number; height: number }> = [];
+const messagesLength = computed(() => messages.value.length);
+const {
+  dragOffset,
+  isDragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  snapPosition,
+  verticalSnapPosition,
+  snapToEdge,
+  toggleCollapse,
+  updateInteractiveZones,
+  startZonesInterval,
+  pauseZonesInterval,
+} = useWidgetWindow({
+  isCollapsed,
+  messagesLength,
+  toolPanel,
+  chatUIRef,
+  chatContainer,
+  miniIconsRef,
+  toolPanelZoneRef,
+  engineRef,
+  platform,
+});
 
-  // 1. Measure chat capsule/bar
-  if (chatUIRef.value) {
-    const rect = chatUIRef.value.getBoundingClientRect();
-    zones.push({
-      x: rect.left,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-  }
-
-  // 2. Measure messages container if visible
-  if (!isCollapsed.value && chatContainer.value) {
-    const rect = chatContainer.value.getBoundingClientRect();
-    zones.push({
-      x: rect.left,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-  }
-
-  // 3. Measure mini icons container if visible
-  if (miniIconsRef.value) {
-    const rect = miniIconsRef.value.getBoundingClientRect();
-    zones.push({
-      x: rect.left,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-  }
-
-  // 4. Tool panel chỉ bắt chuột khi đang hiển thị. Điều kiện state tách khỏi
-  //    transition DOM để click-through được trả lại ngay khi người dùng đóng.
-  if (toolPanel.value && toolPanelZoneRef.value) {
-    const rect = toolPanelZoneRef.value.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      zones.push({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-      });
-    }
-  }
-
-  // 5. Thân nhân vật — hộp bao chiếu từ 3D, không phải cả khung vẽ.
-  //    Khung vẽ giờ phủ trọn màn hình; đăng ký nguyên khung sẽ nuốt sạch chuột
-  //    của desktop, nên chỉ lấy đúng phần nhân vật thật sự chiếm chỗ.
-  const avatarBounds = engineRef.value?.getScreenBounds?.();
-  if (avatarBounds && avatarBounds.width > 0 && avatarBounds.height > 0) {
-    zones.push(avatarBounds);
-  }
-
-  platform.invokeBackend('update_interactive_zones', { zones }).catch((err) => {
-    logger.warn('[Widget] Failed to update interactive zones:', err);
-  });
-};
-
-watch(
-  [isCollapsed, isDragging, () => messages.value.length, toolPanel],
-  () => {
-    nextTick(() => {
-      updateInteractiveZones();
-    });
-  },
-  { deep: true }
-);
-
-// ═══════════════════════════════════════════════════════
-//  Collapse & Snap Logic
-// ═══════════════════════════════════════════════════════
-const snapPosition = ref('right');
-const verticalSnapPosition = ref('bottom');
-
-const snapToEdge = () => {
-  const collapsedWidth = 48; // w-12 is 48px
-  const naturalLeft = window.innerWidth - 16 - collapsedWidth;
-  const currentCenterX = naturalLeft + dragOffset.value.x + collapsedWidth / 2;
-
-  if (currentCenterX < window.innerWidth / 2) {
-    snapPosition.value = 'left';
-    dragOffset.value.x = 16 - naturalLeft;
-  } else {
-    snapPosition.value = 'right';
-    dragOffset.value.x = 0;
-  }
-};
-
-const toggleCollapse = () => {
-  isCollapsed.value = !isCollapsed.value;
-  const currentAbsoluteY = window.innerHeight - 60 + dragOffset.value.y;
-  verticalSnapPosition.value = currentAbsoluteY < window.innerHeight / 2 ? 'top' : 'bottom';
-};
+logger.debug('Window controls initialized', { onDragMove, onDragEnd, snapToEdge });
 
 // ═══════════════════════════════════════════════════════
 //  Thinking → trigger avatar motion (Extracted to useWidgetAvatarControl)
@@ -1155,7 +1029,7 @@ onMounted(() => {
     updateInteractiveZones();
     void connectWebSocket();
 });
-  zonesInterval = setInterval(updateInteractiveZones, 150);
+  startZonesInterval();
 
   // Expose global helper for clickable bubble buttons
   (window as LivaWindow).sendLIVAMessage = (text: string) => {
@@ -1180,10 +1054,7 @@ onUnmounted(() => {
   speaker.close();
   stopFrameCapture();
   voice.stopPipeline();
-  if (zonesInterval) {
-    clearInterval(zonesInterval);
-    zonesInterval = null;
-  }
+  pauseZonesInterval();
   clearToolPresentationTimer();
   engineRef.value?.setThinking?.(false);
   engineRef.value?.clearInspection?.();
@@ -1205,10 +1076,7 @@ onDeactivated(() => {
   // Widget hidden by KeepAlive — pause frame capture + zones interval to save CPU
   stopFrameCapture();
   // [Audit C-2] Also pause zonesInterval
-  if (zonesInterval) {
-    clearInterval(zonesInterval);
-    zonesInterval = null;
-  }
+  pauseZonesInterval();
 });
 </script>
 
@@ -1652,11 +1520,7 @@ onDeactivated(() => {
           :class="snapPosition === 'left' ? 'flex-row-reverse pl-1' : 'pr-1'"
         >
           <!-- Toggle Collapse Button -->
-          <button
-            @click="toggleCollapse"
-            class="chat-icon-btn bg-transparent border-none outline-none w-8 h-8 rounded-full flex justify-center items-center"
-            :title="t('wg_collapse')"
-          >
+          <button @click="toggleCollapse" class="chat-icon-btn bg-transparent border-none outline-none w-8 h-8 rounded-full flex justify-center items-center" :title="t('wg_collapse')">
             <svg
               v-if="snapPosition === 'left'"
               xmlns="http://www.w3.org/2000/svg"
@@ -1880,19 +1744,10 @@ onDeactivated(() => {
         class="chat-capsule collapsed-capsule w-12 h-12 flex items-center justify-center relative rounded-full shadow-lg ml-auto"
       >
         <!-- Outer Drag Ring -->
-        <div
-          class="absolute inset-0 rounded-full border-[2px] border-white/10 hover:border-purple-400/40 cursor-move transition-colors duration-300 z-10"
-          @mousedown.stop="onDragStart"
-          :title="t('wg_drag')"
-        ></div>
+        <div class="absolute inset-0 rounded-full border-[2px] border-white/10 hover:border-purple-400/40 cursor-move transition-colors duration-300 z-10" @mousedown.stop="onDragStart" :title="t('wg_drag')"></div>
 
         <!-- Expand Button — LIVA Sparkle Icon -->
-        <button
-          @mousedown.stop
-          @click="toggleCollapse"
-          class="bg-transparent border-none outline-none w-9 h-9 rounded-full flex justify-center items-center z-20 transition-all duration-200 hover:scale-110"
-          :title="t('wg_collapse')"
-        >
+        <button @mousedown.stop @click="toggleCollapse" class="bg-transparent border-none outline-none w-9 h-9 rounded-full flex justify-center items-center z-20 transition-all duration-200 hover:scale-110" :title="t('wg_collapse')">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"

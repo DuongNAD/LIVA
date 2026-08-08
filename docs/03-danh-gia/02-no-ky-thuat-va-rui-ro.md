@@ -1,8 +1,8 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-08-07
-commit: dec1c14
-stale-ok: dec1c14
+commit: eeed694
+stale-ok: eeed694
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -104,7 +104,7 @@ không được đọc dòng “CRITICAL 3/3 đã khép” ở bảng trên thà
 
 | File | 05/08 tại `2dc8e2e` | Đỉnh điểm (trước tách) | 07/08 (hiện tại) | Chênh (so với 05/08) |
 |---|---:|---:|---:|---:|
-| `WidgetApp.vue` | 1.811 | 2.536 | **2.190** | **+379** |
+| `WidgetApp.vue` | 1.811 | 2.536 | **2.045** | **+234** |
 | `llm/tool_calling.rs` | 1.537 | 1.772 | **1.772** | **+235** |
 | `MemoryViewer.vue` | 1.667 | 1.667 | **1.667** | 0 |
 | `db.rs` | 1.641 | 1.641 | **1.641** | 0 |
@@ -113,7 +113,18 @@ không được đọc dòng “CRITICAL 3/3 đã khép” ở bảng trên thà
 
 Số file >1.000 dòng vẫn là **10**, nhưng thứ hạng đã đổi: `tool_calling.rs` vượt lên **#2**, và `use3DModel.ts` **1.492** nay cũng nằm trong nhóm. `WidgetApp.vue` từng phình **40 %** chỉ trong hai ngày, nhưng hiện tại đã tách được `useWidgetTransport.ts` và một phần nhỏ, đang giảm dần số dòng. `tool_calling.rs` phình vì đường phát sự kiện tool.
 
-⚠️ **Đây là lý do đừng đọc [U11](05-nang-cap-toan-dien.md#u11--lấp-lỗ-test-widgetappvue) thành A31-04.** U11 đã đóng và đóng thật — `WidgetApp.vue` lên **80,70 % line** (hiện tại **83.71 %** sau tách), chốt per-file trong `vitest.config.ts` nâng **50 → 80**. Nhưng nó hạ rủi ro *hồi quy thầm lặng*, **không** hạ *blast radius*. Trong cùng khoảng thời gian đó blast radius **tăng**. Hai chỉ số đi ngược chiều nhau, và chỉ một trong hai được đo bởi một cổng CI — đó chính là cách một mục nợ trông như đang được xử lý trong khi thực tế thì không | **ĐANG TIẾN HÀNH — đang giảm nhiệt dần ở phía UI** |
+⚠️ **Đây là lý do đừng đọc [U11](05-nang-cap-toan-dien.md#u11--lấp-lỗ-test-widgetappvue) thành A31-04.** U11 đã đóng và đóng thật — `WidgetApp.vue` lên **80,70 % line** (sau lát 3 còn **81,72 %** — xem ghi chú bánh cóc bên dưới), chốt per-file trong `vitest.config.ts` nâng **50 → 80**. Nhưng nó hạ rủi ro *hồi quy thầm lặng*, **không** hạ *blast radius*. Trong cùng khoảng thời gian đó blast radius **tăng**. Hai chỉ số đi ngược chiều nhau, và chỉ một trong hai được đo bởi một cổng CI — đó chính là cách một mục nợ trông như đang được xử lý trong khi thực tế thì không | **ĐANG TIẾN HÀNH — đang giảm nhiệt dần ở phía UI** |
+
+📌 **Bánh cóc coverage phải ĐI THEO CODE khi tách file — quyết định 07/08/2026.**
+
+Chốt per-file **phạt đúng cuộc tái cấu trúc mà mục này cần**. Khối được bóc ra thường phủ TỐT HƠN trung bình của file, nên phần ở lại — vốn phủ kém — chiếm tỷ trọng lớn hơn và tỷ lệ TỤT, dù không dòng nào mất test.
+
+Đo ở lát 3: `useWidgetWindow.ts` phủ **93,58 %**, `WidgetApp.vue` tụt **83,71 → 81,72**, còn tổng **đứng yên** (80,88 → 80,86). Chốt 83 do chính lát 2 đặt ra khi đó lập tức khoá lát 3.
+
+Cách xử đã chốt: hạ chốt của file bị bóc về mức thật **và đặt chốt mới cho file nhận** (`useWidgetWindow.ts: { lines: 90 }`), để tổng mức bảo vệ không giảm mà chỉ dời chỗ. Lát sau lặp lại đúng công thức.
+
+⚠️ Đây **không phải tiền lệ hạ ngưỡng**. Hạ chốt mà **không** thêm chốt bù mới là dập cổng, và vẫn bị cấm.
+
 | **A31-05** | **P1** | Working tree hiện tại quá lớn cho một đơn vị review an toàn | `gitnexus detect-changes --scope all` sau reindex 31/07/2026: **139 file, 623 symbol, 166 execution flow, risk CRITICAL** | Một review duy nhất khó chứng minh security, persistence, Tauri capability, UI contract và tài liệu đều nhất quán; rollback không còn cục bộ | Chia thành các lát độc lập theo security/persistence/Tauri/UI/docs; mỗi lát có acceptance command riêng và `detect-changes` sau sửa; không trộn commit mã nguồn với commit cập nhật `commit:` tài liệu | **RỦI RO PHIÊN LÀM VIỆC** |
 | ~~**A31-06**~~ | **P2** | Coverage UI từng đạt gate tổng nhưng còn hotspot yếu | **Đã khép 31/07/2026:** thêm 10 test hành vi cho vision, widget reconnect/session/event/message/audio/drag và callback cleanup. Snapshot mới: 285 test; tổng **68,23% statement · 49,95% branch · 54,40% function · 70,46% line**. `WidgetApp.vue` **70,27% line**, `useGateway.ts` **50,13%**, `VisionView.vue` **100%** | Ba hotspot không còn ẩn dưới số tổng; `vitest.config.ts` có chốt per-file 50% line, không chỉ ghi mức đạt vào tài liệu | `npm run test:coverage -w liva-ui` exit 0 với 29 file/285 test; không hạ ngưỡng toàn cục. **Đo lại 04/08/2026 tại `596e8b6`: 30 file / 299 test — 73,85% stmt · 55,84% branch · 63,86% func · 75,88% line**, và bốn chốt per-file MỚI theo `functions` (`MemoryViewer` 60%, `SettingsView` 51,72%, `TaskManager` 58%, `useSpeakerPlayback` 91,5%) — bánh cóc chỉ đi lên | **ĐÃ KHÉP 31/07/2026** |
 | ~~**A31-07**~~ | **P2** | Gate tài liệu từng xanh nhưng vẫn để drift đi qua | **Đã khép 31/07/2026:** đối chiếu code thật và sửa các living docs; IPC chuyển từ bảng 44 lệnh lỗi thời sang catalog 76 lệnh/11 miền; model full sửa 29 file/5,95 GiB; runtime thêm setup/boot remediation; khảo sát CI 22/07 được freeze và thay bằng contract hiện hành; hướng dẫn người dùng sửa recovery DB; các cụm vision/proactive/governor và desktop/frontend đã có owner mới | Inventory phân loại 96 tài liệu; không dùng `stale-ok` hoặc bump commit mù. Workflow chạy capability-policy tests thay vì chỉ `cargo check` | `npm run docs:check` exit 0, **không còn cảnh báo stale**, capability/inventory/citation gates đều xanh; citation mơ hồ giảm còn 207 | **ĐÃ KHÉP 31/07/2026** |

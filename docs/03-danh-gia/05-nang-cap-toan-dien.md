@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-07
-commit: dec1c14
-stale-ok: dec1c14
+commit: eeed694
+stale-ok: eeed694
 status: living
 owns:
   - duong-co-so-do-luong
@@ -307,7 +307,7 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | ~~**U8**~~ ✅ **XONG 07/08/2026** | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | `boot.rs` xong 26/07; **hai bảng "năng lực theo profile" đã cập nhật 06/08** |
 | ~~**U9**~~ ✅ **XONG 29/07/2026** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | ~~Hồ sơ~~ | đã đo — **p50 667 ms CPU · 18 ms CUDA** |
 | **U10** ◐ | [Tách `handle_command`](#u10--tách-handle_command) | D | — | **đang làm** — 6 miền tách xong, `lib.rs` 2 773 → 1 788 dòng |
-| ~~**U11**~~ ✅ **XONG 07/08/2026** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | line **73,89% → 80,70%**, chốt per-file **50 → 80** |
+| ~~**U11**~~ ✅ **XONG 07/08/2026** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | line **73,89% → 80,70%**, chốt per-file **50 → 80**. *(Chốt nay là **81** — không phải U11 hạ, mà là re-base có bù khi A31-04 bóc file; lý do ở [02-no-ky-thuat](02-no-ky-thuat-va-rui-ro.md))* |
 | **U12** | [Tool calling (đang làm dở)](#u12--tool-calling-đang-làm-dở) | E | — | đang chạy |
 | **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
 | **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |

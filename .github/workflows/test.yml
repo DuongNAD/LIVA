@@ -113,11 +113,14 @@ jobs:
 
     # Pin the scanner version so an upstream CLI release cannot silently change
     # the gate contract between two runs of the same revision.
-    - name: Install cargo-audit
-      run: cargo install cargo-audit --version 0.22.2 --locked
+    # cargo-deny thay thế cargo-audit từ 08/08/2026: thêm license compliance
+    # và source control mà cargo-audit không có. Flag `-W unmaintained -W unsound`
+    # giữ behavior cũ: chỉ vulnerability mới là lỗi, unmaintained/unsound là warning.
+    - name: Install cargo-deny
+      run: cargo install cargo-deny --version 0.20.2 --locked
 
-    - name: Audit Rust Dependencies
-      run: cargo audit
+    - name: Audit Rust Dependencies (cargo-deny)
+      run: cargo deny check -W unmaintained -W unsound advisories licenses sources
 
     - name: Install LLVM
       run: choco install llvm -y

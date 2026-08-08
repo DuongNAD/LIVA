@@ -1,0 +1,71 @@
+# cargo-deny configuration for LIVA workspace
+# Generated for cargo-deny 0.20.2
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+# ─────────────────────────────────────────────────────────────────────
+# Graph — chỉ kiểm target thật sự dùng trong CI và production.
+# LIVA hiện chỉ ship trên Windows; thêm target khi mở rộng.
+# ─────────────────────────────────────────────────────────────────────
+[graph]
+targets = [{ triple = "x86_64-pc-windows-msvc" }]
+all-features = false
+no-default-features = false
+
+# ─────────────────────────────────────────────────────────────────────
+# Advisories — RustSec database
+# cargo-deny 0.20 mặc định: vulnerability = error, unmaintained = error.
+# Dùng CLI flag `-W unmaintained -W unsound` để hạ xuống warning,
+# khớp behavior cũ của cargo-audit (exit 0 cho unmaintained/unsound).
+# ─────────────────────────────────────────────────────────────────────
+[advisories]
+ignore = [
+    # Thêm advisory ID vào đây khi cần ignore với lý do cụ thể.
+    # Ví dụ:
+    # { id = "RUSTSEC-0000-0000", reason = "transitive dep, no attack surface" },
+]
+
+# ─────────────────────────────────────────────────────────────────────
+# Licenses — chỉ cho phép license tương thích với Personal & Internal Use
+# ─────────────────────────────────────────────────────────────────────
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "BSL-1.0",
+    "CC0-1.0",
+    "OpenSSL",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+# ring uses a custom ISC-style license that isn't machine-readable
+[[licenses.clarify]]
+crate = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# Workspace crates (liva-desktop, liva-native-core) are private and
+# unpublished — skip license checks for them.
+[licenses.private]
+ignore = true
+registries = []
+
+# ─────────────────────────────────────────────────────────────────────
+# Sources — chỉ cho phép crates.io và git repos đã khai trong Cargo.toml
+# ─────────────────────────────────────────────────────────────────────
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    # xcb patch cho quick-xml vulnerability — xem Cargo.toml [patch.crates-io]
+    "https://github.com/rust-x-bindings/rust-xcb",
+]

@@ -68,7 +68,7 @@ Trình tự gate hiện hành:
 4. AI DevKit lint bản ghim `0.47.0`;
 5. `npm audit --audit-level=high`;
 6. `cargo fmt --all -- --check`;
-7. cài `cargo-audit` ghim `0.22.2`, rồi `cargo audit`;
+7. cài `cargo-deny` ghim `0.20.2`, rồi `cargo deny check -W unmaintained -W unsound advisories licenses sources`;
 8. TypeScript typecheck, ESLint `--max-warnings 0`;
 9. UI coverage;
 10. build ba web client/workspace;
@@ -86,10 +86,10 @@ tooling xử lý file/diff không tin cậy trong CI. Không dùng `npm audit
 **Lần chạy đầy đủ đầu tiên có toàn bộ gate mới: `e6391eb` (01/08/2026) — 25 bước,
 kết luận `success`.** Hai điều rút ra khi đọc kết quả:
 
-- **`cargo audit` chỉ đỏ vì *vulnerability*.** Ở lần chạy đó nó exit 0 kèm **22
-  warning** `unmaintained`/`unsound` từ cây Tauri/GTK. Con số này trôi theo RustSec
-  chứ không theo mã LIVA, nên nó đổi **không** tự động là hồi quy — phải xem mục mới
-  có với tới mã của dự án không đã. Đừng biến nó thành hạn ngạch.
+- **`cargo-deny` thay `cargo-audit` từ 08/08/2026.** Thêm license compliance và source
+  control. Flag `-W unmaintained -W unsound` giữ behavior cũ: chỉ vulnerability mới
+  đỏ, unmaintained/unsound vẫn là warning (exit 0). Con số warning trôi theo RustSec
+  chứ không theo mã LIVA — đừng biến nó thành hạn ngạch.
 - **`cargo fmt --all -- --check` là gate cứng từ `98efc55`.** Trước đó không có, và
   `CLAUDE.md` từng ghi "No fmt gate" — câu đó đúng cho tới commit ấy.
 

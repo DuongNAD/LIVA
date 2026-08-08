@@ -127,7 +127,7 @@ Bảng này đo sau khi hạ **253 file** đang treo trong cây làm việc thà
 | ESLint | `npx eslint . --max-warnings 0` | **0 warning** | = |
 | Test + Coverage UI | `npm run test:coverage -w liva-ui` | **287 pass / 29 file** — **68,15 % stmt · 50,01 % branch · 54,33 % func · 70,37 % line** | ↑ cả bốn |
 | Lỗ hổng npm | `npm audit --audit-level=high` (**toàn workspace**, không còn `--omit=dev`) | **0 vulnerabilities** | phạm vi rộng hơn trước |
-| **Lỗ hổng Rust** (gate MỚI) | `cargo audit` (cargo-audit ghim `0.22.2`) | **exit 0** — 0 vulnerability trên 857 crate; **22 warning** `unmaintained`/`unsound` | mới có |
+| **Lỗ hổng Rust** (gate MỚI) | `cargo deny` (cargo-deny ghim `0.20.2`) | **exit 0** — 0 vulnerability trên 857 crate; **22 warning** `unmaintained`/`unsound` | mới có |
 | Vỏ Tauri | `cargo check -p liva-desktop` | **0** | = |
 | **Test vỏ Tauri** (gate MỚI) | `cargo test -p liva-desktop` | **xanh** (qua CI bước 22) | mới có |
 | Module thử nghiệm | `cargo check --all-targets --features experimental` | **0 lỗi** | = |

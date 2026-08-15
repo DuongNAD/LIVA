@@ -3,136 +3,23 @@ use liva_native_core::stt::anti_hallucination::{
 };
 use liva_native_core::stt::parakeet::ParakeetVi;
 use liva_native_core::stt::{ParakeetRecognizer, SttManager, StreamingTranscript};
-use rodio::{Decoder, Source};
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-// Cargo runs test binaries and the tests inside them in parallel by default. Every test here
-// is CPU-bound ASR, and that contention was landing in the latency numbers (e.g. 268-586ms
-// when fully parallel vs 107-129ms when serialized within the binary).
-static ASR_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+mod common;
 
-fn asr_serial_guard() -> std::sync::MutexGuard<'static, ()> {
-    ASR_SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+use common::{find_audio_file, load_audio_wav_16k, resolve_model_paths};
 
-fn resolve_model_paths() -> (PathBuf, PathBuf) {
-    let mut model_path = PathBuf::from("models/parakeet_vi.onnx");
-    let mut vocab_path = PathBuf::from("models/parakeet_vi_vocab.json");
-    if !model_path.exists() {
-        model_path = PathBuf::from("../models/parakeet_vi.onnx");
-        vocab_path = PathBuf::from("../models/parakeet_vi_vocab.json");
-    }
-    (model_path, vocab_path)
-}
-
-fn load_audio_wav_16k(path: &Path) -> Result<Vec<f32>, String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("open {:?}: {}", path, e))?;
-    let dec = Decoder::new(BufReader::new(file)).map_err(|e| format!("decode {:?}: {}", path, e))?;
-    let sr = dec.sample_rate();
-    let ch = dec.channels() as usize;
-    let samples: Vec<f32> = dec.convert_samples::<f32>().collect();
-
-    let mono: Vec<f32> = if ch > 1 {
-        samples
-            .chunks(ch)
-            .map(|c| c.iter().sum::<f32>() / ch as f32)
-            .collect()
-    } else {
-        samples
-    };
-
-    if sr == 16000 {
-        return Ok(mono);
-    }
-
-    let ratio = 16000.0f64 / sr as f64;
-    let out_len = (mono.len() as f64 * ratio) as usize;
-    let mut out = Vec::with_capacity(out_len);
-    for i in 0..out_len {
-        let src = i as f64 / ratio;
-        let i0 = src.floor() as usize;
-        let frac = (src - i0 as f64) as f32;
-        let s0 = mono.get(i0).copied().unwrap_or(0.0);
-        let s1 = mono.get(i0 + 1).copied().unwrap_or(s0);
-        out.push(s0 + (s1 - s0) * frac);
-    }
-    Ok(out)
-}
-
-fn find_audio_file(rel: &str) -> PathBuf {
-    let p = PathBuf::from(rel);
-    if p.exists() {
-        p
-    } else {
-        PathBuf::from("..").join(rel)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 1. EMPIRICAL FIRST-CHUNK LATENCY TEST (150ms uncontended steady-state budget, 250ms bound enforced under cargo's parallel defaults)
-// ---------------------------------------------------------------------------
-#[test]
-fn test_parakeet_first_chunk_latency_budget() {
-    let _guard = asr_serial_guard();
-    let (model_path, vocab_path) = resolve_model_paths();
-    if !model_path.exists() || !vocab_path.exists() {
-        eprintln!("Skipping test: Parakeet model files not found");
-        return;
-    }
-
-    let mut pk = ParakeetVi::load(&model_path, &vocab_path).expect("Failed to load ParakeetVi");
-    let audio_path = find_audio_file("data/benchmarks/fleurs-vi/audio/0000.wav");
-    let audio = load_audio_wav_16k(&audio_path).expect("Failed to load audio");
-
-    const CHUNK_SIZE: usize = 2560; // 160ms @ 16kHz
-    let first_chunk = &audio[0..CHUNK_SIZE.min(audio.len())];
-
-    // Warm-up run
-    let _ = pk.feed_chunk(first_chunk, false);
-    pk.reset_stream();
-
-    // Benchmark first chunk latency across 10 iterations
-    let mut latencies: Vec<Duration> = Vec::new();
-    for _ in 0..10 {
-        pk.reset_stream();
-        let t0 = Instant::now();
-        let _ = pk.feed_chunk(first_chunk, false).expect("feed_chunk failed");
-        latencies.push(t0.elapsed());
-    }
-
-    latencies.sort();
-    let min_lat = latencies[0];
-    let p50_lat = latencies[latencies.len() / 2];
-    let max_lat = latencies[latencies.len() - 1];
-
-    println!(
-        "[Challenger 1] First-Chunk Latency (160ms frame): Min={:?}, P50={:?}, Max={:?}",
-        min_lat, p50_lat, max_lat
-    );
-
-    // The measured band after serialization: P50 107-129ms, max up to 188ms.
-    // 250ms is a CI regression guard at roughly 1.9x the worst P50 observed, chosen because
-    // the other test binaries still run in parallel with this one.
-    // The 150ms figure in the section header is the uncontended steady-state goal, met at
-    // 74-105ms when this binary runs alone, and is not what CI enforces.
-    // Debug builds are unoptimized; the strict number is the release contract.
-    const SLOWDOWN: u32 = if cfg!(debug_assertions) { 10 } else { 1 };
-    assert!(
-        p50_lat < Duration::from_millis(250) * SLOWDOWN,
-        "First-chunk latency p50 ({:?}) must be < 250ms on CPU",
-        p50_lat
-    );
-}
+// The tests below assert correctness - cadence, monotonicity, WER, anti-hallucination - not
+// wall-clock latency, so they are unaffected by CPU contention and run in parallel as cargo
+// intends. The one test here that did measure latency now lives in tests/stt_latency_bench.rs,
+// which is #[ignore]d out of the default sweep and run alone; see that file for why.
 
 // ---------------------------------------------------------------------------
 // 2. PARTIAL TOKEN STREAMING CADENCE & MONOTONICITY
 // ---------------------------------------------------------------------------
 #[test]
 fn test_parakeet_partial_token_streaming_cadence() {
-    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         eprintln!("Skipping test: Parakeet model files not found");
@@ -205,7 +92,6 @@ fn test_parakeet_partial_token_streaming_cadence() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_cumulative_latency_scaling() {
-    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;
@@ -260,7 +146,6 @@ fn test_cumulative_latency_scaling() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_parakeet_vietnamese_wer_and_tonal_accuracy() {
-    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;
@@ -356,7 +241,6 @@ fn test_parakeet_vietnamese_wer_and_tonal_accuracy() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_anti_hallucination_adversarial_matrix() {
-    let _guard = asr_serial_guard();
     let filter = AntiHallucinationFilter::default();
 
     // Adversarial Case 1: Silence noise burst producing runaway tokens
@@ -421,7 +305,6 @@ fn test_anti_hallucination_adversarial_matrix() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_stt_manager_production_interface() {
-    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;
@@ -469,7 +352,6 @@ fn test_stt_manager_production_interface() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_concurrent_parakeet_streaming() {
-    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;

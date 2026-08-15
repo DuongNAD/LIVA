@@ -70,9 +70,14 @@ fn test_normalizer_100kb_payload_stress() {
         elapsed
     );
 
-    // Assert completed in under 200ms for 100KB
-    // Debug builds are unoptimized; the strict number is the release contract.
-    const SLOWDOWN: u32 = if cfg!(debug_assertions) { 5 } else { 1 };
+    // Assert completed in under 200ms for 100KB.
+    //
+    // Debug builds are unoptimized; the strict 200ms number is the release contract, measured
+    // at ~64ms. The debug factor is 10, not 5: at 5 the debug bound is 1000ms against a
+    // measured 838-906ms, which is 10-19% of headroom, and it duly failed once the other test
+    // binaries ran alongside this one. 10 puts the debug bound at 2000ms, ~2.2x the measured
+    // value, which is what the rest of these suites use.
+    const SLOWDOWN: u32 = if cfg!(debug_assertions) { 10 } else { 1 };
     assert!(
         elapsed < Duration::from_millis(200) * SLOWDOWN,
         "100KB normalization took {:?} (>200ms limit)",

@@ -9,6 +9,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+// Cargo runs test binaries and the tests inside them in parallel by default. Every test here
+// is CPU-bound ASR, and that contention was landing in the latency numbers (e.g. 268-586ms
+// when fully parallel vs 107-129ms when serialized within the binary).
+static ASR_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn asr_serial_guard() -> std::sync::MutexGuard<'static, ()> {
+    ASR_SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn resolve_model_paths() -> (PathBuf, PathBuf) {
     let mut model_path = PathBuf::from("models/parakeet_vi.onnx");
     let mut vocab_path = PathBuf::from("models/parakeet_vi_vocab.json");
@@ -63,10 +72,11 @@ fn find_audio_file(rel: &str) -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// 1. EMPIRICAL FIRST-CHUNK LATENCY TEST (<150ms BUDGET)
+// 1. EMPIRICAL FIRST-CHUNK LATENCY TEST (150ms uncontended steady-state budget, 250ms bound enforced under cargo's parallel defaults)
 // ---------------------------------------------------------------------------
 #[test]
 fn test_parakeet_first_chunk_latency_budget() {
+    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         eprintln!("Skipping test: Parakeet model files not found");
@@ -103,35 +113,17 @@ fn test_parakeet_first_chunk_latency_budget() {
         min_lat, p50_lat, max_lat
     );
 
-    // These bounds look 8x above the "<150ms BUDGET" in this section's header. They are not a
-    // mistake, and tightening them to 150ms makes the test fail - measured, not assumed:
-    //
-    //   cargo test --release ... --test stt_adversarial_stress                  (default: PARALLEL)
-    //     P50 268.7 / 504.8 / 534.0 / 586.5 ms      max up to 633.0 ms
-    //   cargo test --release ... -- --test-threads=1                            (SERIAL)
-    //     P50  74.2 /  79.6 / 102.7 / 105.0 ms      max up to 165.6 ms
-    //
-    // Cargo runs test binaries and the tests inside them in parallel by default, and ONNX
-    // inference is CPU-bound, so this measurement is dominated by contention from whatever else
-    // is running. The 150ms budget in the header describes uncontended steady-state inference;
-    // it is not achievable under `cargo test` defaults, where the same code measures 4-7x slower.
-    //
-    // 600ms is therefore the bound for the parallel case. Note it is genuinely marginal there
-    // (586.5ms observed against 600ms is 2% of headroom). To enforce the real 150ms budget this
-    // test needs to stop measuring under uncontrolled contention - run it serially, or move the
-    // latency claim into a dedicated single-threaded benchmark - rather than have the threshold
-    // absorb the scheduler.
+    // The measured band after serialization: P50 107-129ms, max up to 188ms.
+    // 250ms is a CI regression guard at roughly 1.9x the worst P50 observed, chosen because
+    // the other test binaries still run in parallel with this one.
+    // The 150ms figure in the section header is the uncontended steady-state goal, met at
+    // 74-105ms when this binary runs alone, and is not what CI enforces.
     // Debug builds are unoptimized; the strict number is the release contract.
     const SLOWDOWN: u32 = if cfg!(debug_assertions) { 10 } else { 1 };
     assert!(
-        p50_lat < Duration::from_millis(600) * SLOWDOWN,
-        "First-chunk latency p50 ({:?}) must be < 600ms on CPU",
+        p50_lat < Duration::from_millis(250) * SLOWDOWN,
+        "First-chunk latency p50 ({:?}) must be < 250ms on CPU",
         p50_lat
-    );
-    assert!(
-        min_lat < Duration::from_millis(550) * SLOWDOWN,
-        "First-chunk latency min ({:?}) must be < 550ms on CPU",
-        min_lat
     );
 }
 
@@ -140,6 +132,7 @@ fn test_parakeet_first_chunk_latency_budget() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_parakeet_partial_token_streaming_cadence() {
+    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         eprintln!("Skipping test: Parakeet model files not found");
@@ -212,6 +205,7 @@ fn test_parakeet_partial_token_streaming_cadence() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_cumulative_latency_scaling() {
+    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;
@@ -266,6 +260,7 @@ fn test_cumulative_latency_scaling() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_parakeet_vietnamese_wer_and_tonal_accuracy() {
+    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;
@@ -361,6 +356,7 @@ fn test_parakeet_vietnamese_wer_and_tonal_accuracy() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_anti_hallucination_adversarial_matrix() {
+    let _guard = asr_serial_guard();
     let filter = AntiHallucinationFilter::default();
 
     // Adversarial Case 1: Silence noise burst producing runaway tokens
@@ -425,6 +421,7 @@ fn test_anti_hallucination_adversarial_matrix() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_stt_manager_production_interface() {
+    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;
@@ -472,6 +469,7 @@ fn test_stt_manager_production_interface() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_concurrent_parakeet_streaming() {
+    let _guard = asr_serial_guard();
     let (model_path, vocab_path) = resolve_model_paths();
     if !model_path.exists() || !vocab_path.exists() {
         return;

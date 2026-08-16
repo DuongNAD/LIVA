@@ -217,6 +217,25 @@ impl LlamaRouterManager {
             .with_n_ctx(Some(
                 std::num::NonZeroU32::new(target_n_ctx as u32).ok_or("Invalid n_ctx")?,
             ))
+            // n_batch PHẢI đặt tường minh, và phải đặt vì `with_embeddings(true)` ngay dưới.
+            //
+            // llama.cpp (`llama-context.cpp:193`):
+            //     cparams.n_batch = cparams.causal_attn
+            //         ? std::min(cparams.n_ctx, params.n_batch)
+            //         : params.n_batch;
+            //
+            // Với attention nhân quả, n_batch tự được kẹp theo n_ctx nên không ai phải nghĩ tới nó.
+            // Nhưng `with_embeddings(true)` + pooling `Mean` đặt `causal_attn = false`, và ở nhánh đó
+            // n_batch giữ NGUYÊN mặc định thô (2048) — không được nâng theo n_ctx. Hậu quả: prompt dài
+            // 2049..n_ctx token lọt qua `check_prompt_fits` (hàm này chắn theo n_ctx, xem :95) rồi mới
+            // chết ở `GGML_ASSERT(n_tokens_all <= cparams.n_batch)` — tức `abort()` cả tiến trình, không
+            // phải trả Err. Đo 16/08/2026: một lượt `user_voice_command` làm lõi tắt hẳn, client treo
+            // đủ 180 s timeout rồi bỏ cuộc, nên phía người dùng triệu chứng là "LIVA im lặng vĩnh viễn".
+            //
+            // Đặt n_batch = n_ctx khôi phục đúng bất biến mà nhánh nhân quả vốn có: thứ gì qua được
+            // `check_prompt_fits` thì vừa batch. Không hạ `with_embeddings` xuống được — `llm/embed.rs:32`
+            // đọc `context.embeddings_seq_ith(0)` từ chính context này.
+            .with_n_batch(target_n_ctx as u32)
             .with_embeddings(true)
             .with_pooling_type(LlamaPoolingType::Mean)
             .with_type_k(KvCacheType::Q8_0)

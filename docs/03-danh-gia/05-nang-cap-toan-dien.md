@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-08-07
-commit: eeed694
-stale-ok: eeed694
+updated: 2026-08-16
+commit: 1d7a684
+stale-ok: 1d7a684
 status: living
 owns:
   - duong-co-so-do-luong
@@ -190,6 +190,64 @@ Dòng "Trích dẫn tài liệu" ở bảng trên **phải đọc kèm phạm vi
 **⚠️ Bẫy đo thứ ba, cùng họ với hai bẫy ở [§0.2 mục 3](#02-ba-cái-bẫy-đã-cắn-trong-phiên-2707--đọc-để-khỏi-mất-buổi) và bẫy `cargo test` ‖ `cargo clippy`.** Lần chạy `cargo test` đầu tiên đỏ với `CL.exe exited with code 1` giữa lúc biên dịch llama.cpp — trông y hệt build gãy ở HEAD. **Không phải:** lúc đó vitest + `vue-tsc` + `node --max-old-space-size=12288` + MSVC 20 luồng chạy song song, và MSVC chết vì cạn bộ nhớ. Chạy `cargo test` một mình: sạch, 657 pass. **Nhận dạng:** lỗi nằm trong C++ của *phụ thuộc* chứ không trong mã của bạn, và nó không tái hiện khi chạy đơn lẻ ⇒ nghi tài nguyên máy trước, đừng nghi HEAD. Quy tắc rút ra: **các cổng nặng chạy tuần tự, không song song** — đúng cùng kết luận với bẫy `cargo test` ‖ `cargo clippy`, chỉ khác nguyên nhân (bộ nhớ thay vì fingerprint).
 
 **Ba dòng vẫn chưa đo lại, nói rõ thay vì bỏ lửng:** E2E bộ nhớ (cần model embedding + DB trên đĩa), TTFT và độ trễ vision (cần build release + CUDA).
+
+#### Đo lại 16/08/2026 tại `68fd514` — 13 cổng, chỉ những dòng đã đổi
+
+⚠️ **Đọc kèm phạm vi:** lần đo này ở nhánh **`test/perf-threshold-baseline`**, trước `main` (`f35961c`) **4 commit và chưa merge**. Đây không phải ảnh chụp của `main`. Cổng nào không có tên dưới đây thì kết quả không đổi so với 05/08.
+
+| Cổng | Kết quả 16/08/2026 | So 05/08 |
+|---|---|---|
+| Test Rust | **744 pass · 0 fail · 5 ignored**, 31 binary test | ↑ từ 657 |
+| Test Rust *(đo lại 04:05 cùng đêm)* | **792 pass · 0 fail · 5 ignored**, 37 binary test | ↑ tiếp — **không phải do các bản vá dưới đây**, xem ghi chú |
+| Test + Coverage UI | **404 pass / 38 file** — **78,79 % stmt · 62,20 % branch · 70,60 % func · 81,14 % line** | ↑ cả bốn |
+| Test vỏ Tauri | **13 pass · 0 fail** | ↑ từ 12 |
+| Lỗ hổng Rust | exit 0 — **13 warning** (9 `unmaintained`, 3 `license-not-encountered`, 1 `unmatched-source`) | ↓ từ 22 — trôi theo advisory DB, **không** phải repo đổi |
+
+⚠️ **Hai con số Rust ở trên cách nhau 3 tiếng và KHÔNG so sánh trực tiếp được — đây lại là [bẫy đo song song ở §0.1](#01-việc-tiếp-theo--chọn-từ-trên-xuống), lần này bắt được đúng lúc.** Chênh **+48 test / +6 binary** giữa hai lần đo không đến từ bất kỳ thay đổi nào ghi trong tài liệu này. Truy bằng `mtime`: sáu file test mới (`cognitive_adversarial_challenge`, `cognitive_adversarial_tests`, `cognitive_memory_tests`, `cognitive_runtime_tests`, `reflex_lane_tests`, `adversarial_challenger_e2e_tests`) đều ở trạng thái `??` với mtime **02:17–02:42**, cùng cửa sổ với sửa đổi ở `liva-ui/src/composables/useSpeakerPlayback.ts` và `footPlantIK.ts` — một phiên làm việc song song, không phải phiên vá lỗi. **Ý nghĩa thật của lần đo 04:05 không phải con số 792, mà là `0 fail` trên cả 37 binary:** bốn bản vá dưới đây không phá gì, kể cả các test vừa xuất hiện. Ai so hai con số này như một chuỗi tiến bộ là đọc sai.
+
+**Mức tăng +87 test Rust và +105 test UI đến từ chính 4 commit chưa merge của nhánh** (50 test tích hợp adversarial cho VAD/STT/anti-hallucination/normalizer/duplex). Đó cũng là lý do [M3 ở `02-no-ky-thuat`](02-no-ky-thuat-va-rui-ro.md) đã được gạch cùng ngày.
+
+🔴 **Ba cổng đỏ khi bắt đầu đo, đã vá cùng phiên — và cả ba cùng một nguyên nhân.** `cargo fmt` **49 hunk / 13 file**; clippy **10 warning**; `docs-check` **3 lỗi**. Không cái nào là hồi quy của `main`: ba file test gây lỗi fmt/clippy **chưa tồn tại ở `main`**, chúng sinh ra trong `8eb97ad`..`68fd514`. Nguyên nhân chung: **loạt commit đó vào cây mà không chạy cổng cục bộ trước.** Đã vá phần thuộc mã đã commit; **15 hunk fmt + 1 clippy warning còn lại thuộc file đang sửa dở** (`stt/anti_hallucination.rs`, `stt/parakeet.rs`, `webrtc/vad.rs`, `bin/verify_duplex.rs`, `bin/verify_round2.rs`, `bin/parakeet_microbench.rs`) và **cố ý không đụng** — chạy `cargo fmt --all` khi xong việc là sạch.
+
+**Ba lỗi mã nguồn tìm ra và vá cùng phiên.** Không mục nào thuộc U1–U33; chúng lộ ra khi rà lại bằng một agent phụ rồi tự xác minh từng dòng. `impact()` đã chạy trước mỗi lần sửa, cả ba đều **risk LOW**.
+
+| # | Lỗi | Vị trí | Vá | Kiểm |
+|---|---|---|---|---|
+| 1 | 10 arm dispatch nuốt nhánh `Err` — client chờ event không bao giờ tới | `websocket.rs:933-1152` | `if let Ok` → `match` + gửi `<lệnh>_error` đúng quy ước sẵn có (`:908-923`, `:1316-1325`) | `e2e-gateway-ci` **8/8**; 10/10 event thành công còn nguyên |
+| 2 | File tạm Telegram rò ở **mọi** đường lỗi; token đọc từ env thay vì từ `Bot` | `telegram.rs:389-455` | RAII `TempFileGuard` + `Drop`; `bot.token()`; bỏ hai `.to_str().unwrap()` | `cargo check` exit 0 |
+| 3 | Chunk stream không phải JSON bị bỏ im lặng | `liva-desktop/src-tauri/src/lib.rs:585-589` | `if let Ok` → `match`, nhánh `Err` ghi `tracing::warn!` kèm 120 ký tự đầu; **không** dừng vòng lặp | `cargo check -p liva-desktop` exit 0 |
+| 4 | Listener stream Tauri bị huỷ ngay khi `invoke` resolve, làm rơi token cuối + chunk `done` | `liva-ui/src/composables/useGateway.ts:400-455` | `finally` vô điều kiện → chỉ huỷ ở nhánh `catch`; thêm timer an toàn có chặn trên | `vue-tsc` 0 · `eslint` 0 · UI **404/404** |
+
+⚠️ **Đọc kỹ phạm vi của lỗi 1 trước khi trích dẫn nó.** Đo sau khi vá: **5 trong 10 lệnh không bao giờ trả `Err`** — `get_voice_status` (`commands/config.rs:270-290`) chỉ có một đường ra `Ok`, tương tự `get_voice_profiles`, `get_skills_list`, `get_avatar_models`, `get_system_status` (lỗi được nuốt thành chuỗi `"offline"`). Nhánh `Err` của 5 lệnh đó là **phòng thủ thuần tuý, không bao giờ chạy**. Năm lệnh còn lại có lỗi thật nhưng chỉ khi trạng thái trên đĩa hỏng: `get_config`/`get_ai_config`/`get_user_profile` khi JSON hỏng, `get_tasks`/`get_memory_data` khi bảng SQLite hỏng. Cách nói đúng là *"config hỏng thì Dashboard treo thay vì báo lỗi"*, **không phải** *"10 lệnh lõi treo khi lỗi"*.
+
+🔴 **Và không viết được test hồi quy cho lỗi 1 — lý do là cấu trúc, không phải lười.** `main.rs:149` đặt `on_websocket_sessions_ready: None` kèm ghi chú *"Gateway độc lập không sở hữu WebView Tauri tin cậy"*, nên vé phiên đặc quyền chỉ cấp được bên trong tiến trình Tauri. Client test bên ngoài luôn là `WebSocketRemote`, mà 10 lệnh này nằm trong `WIDGET_COMMANDS`/`DASHBOARD_COMMANDS` chứ **không** trong `REMOTE_COMMANDS` — nên nó bị chặn ở `websocket.rs:908` và không bao giờ chạm tới arm đã vá. Muốn test phải sửa mã production chỉ để test được; **không khuyến nghị**. Đây cũng chính là lý do bug sống sót ngay cạnh một assertion viết ra để bắt đúng lớp lỗi đó (`e2e-gateway-ci` có kiểm *"lệnh không tồn tại trả `*_error` thay vì im lặng"*, nhưng chỉ phủ đường từ chối quyền và handler mặc định).
+
+#### 🔴 Hợp đồng `WSClientEvent` mô tả đúng chưa tới 40 % bề mặt lệnh — và lộ ra 4 nút bấm không làm gì
+
+Rà `packages/liva-common/src/types/websocket.ts` ngày 16/08/2026, đối chiếu với nguồn sự thật là bốn danh sách cho phép trong `authorization.rs` cộng bí danh `user_voice_command` (`websocket.rs:190-192`) — **69 lệnh client hợp lệ**. Bản cũ khai **27 lệnh thật, 15 lệnh không có handler, thiếu 42 lệnh có thật**.
+
+Nhưng phần đáng giá không phải con số. **11 trong 15 lệnh ma vẫn đang được UI gửi đi**, tức người dùng bấm vào thứ không nối đi đâu cả:
+
+| Lệnh | Nơi gọi | Người dùng thấy gì |
+|---|---|---|
+| `toggle_skill` · `toggle_all_skills` | `components/dashboard/SkillsView.vue:155` | bật/tắt kỹ năng, không có gì xảy ra |
+| `import_avatar_folder` | `components/dashboard/AvatarGallery.vue:130` | chọn thư mục avatar xong, im lặng |
+| `wake_word_triggered` | `WidgetApp.vue:326` | — |
+| `camera_frame` | `WidgetApp.vue:901` | — |
+
+Đáng chú ý `toggle_skill` nằm đúng màn Kỹ năng mà [U23](#u23--màn-kỹ-năng-đang-báo-1-trong-khi-lõi-có-7) đã kết luận là "màn hình nói dối": U23 sửa phần **đếm sai**, còn cái **công tắc không nối dây** thì vẫn còn.
+
+Đã làm: thêm đủ 42 lệnh thiếu; xoá 4 mục thật sự không ai gọi (`test_ai_connection`, `execute_task`, `explorer_ls`, `explorer_cat`); **giữ 11 mục kia nhưng gắn cảnh báo tại chỗ** kèm `file:dòng` của nơi gọi. Cố ý không xoá chúng: xoá trước khi bỏ lời gọi ở UI sẽ làm `vue-tsc` đỏ ngay, và quan trọng hơn là **giấu mất** vấn đề thay vì phơi ra. Quyết định "bỏ nút hay hiện thực handler" là việc của chủ dự án, không phải của phiên dọn dẹp.
+
+`VoiceProvider` (`types/config.ts:65`) cũng sửa cùng lần: `'hybrid' | 'python' | 'kokoro'` → `'hybrid'`. `python` là stack đã gỡ, `kokoro` là tên *model* chứ không phải nhà cung cấp, và `hybrid` là giá trị duy nhất hệ thống sinh ra (`data/liva-config.json` và default Rust `commands/config.rs:208`). Đã ghi rõ tại chỗ rằng trường này **hiện vô tác dụng** — Rust chỉ ghi rồi đọc lại, không rẽ nhánh; engine thoại chọn bằng `LIVA_TTS_VIENEU`/`LIVA_STT_VI_ENGINE`.
+
+Nghiệm thu: `vue-tsc` **0**, `eslint` **0**, `tsc` của `liva-common` **0**, `mobile_client` **0**, test UI **410 pass / 39 file**.
+
+#### Module `cognitive/` của phiên song song đã được đưa qua cổng
+
+Module `liva-native-core/src/cognitive/` (8 file) cùng 6 file test và `db/deletion.rs` · `tests/subject_retention.rs` xuất hiện lúc 01:57–02:42 từ một phiên làm việc khác, và **chưa từng chạy cổng nào**: **104 hunk `cargo fmt`** và **7 clippy warning**. Đã format toàn bộ và vá cả 7: `should_implement_trait` (đổi tên `from_str` → `from_text`, sửa call site duy nhất — không hiện thực `FromStr` được vì hàm trả `Self` chứ không phải `Result`), 3 × `collapsible_if` gộp bằng let-chain edition 2024, 3 × `unnecessary_lazy_evaluations` (`ok_or_else`/`unwrap_or_else` → dạng eager). Nghiệm thu: 6 binary test của module **48 pass · 0 fail**; fmt và clippy toàn workspace trở lại đúng mức nền (15 hunk và 1 warning, cả hai đều thuộc file đang sửa dở khác).
+
+⚠️ **Bẫy đo thứ tư, cùng họ với ba bẫy trên — lọc output rồi kết luận trên phần đã lọc.** Ba lần trong một phiên: (1) `cargo fmt … | tail -5; echo $?` trả **0** vì `$?` là exit của `tail`, không phải của cargo; (2) `git show <sha>:<file> | rustfmt --check` báo **sạch ở mọi commit** — rustfmt đọc stdin không kiểm gì cả, phát hiện bằng cách cho chính nó ăn một file *đã biết chắc là lỗi* và vẫn nhận exit 0; (3) `cargo test … | grep … | tail -50` cắt mất binary **586 test** chạy đầu tiên, còn **86 pass**, trông y hệt một vụ sập 657 → 86. **Quy tắc rút ra: ghi output đầy đủ ra file rồi mới tổng hợp; và lấy exit code trước khi qua pipe.** Một con số vô lý so với thứ bạn vừa đếm tay là tín hiệu nghi phép đo trước, đừng nghi repo.
 
 ---
 

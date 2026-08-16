@@ -2,7 +2,7 @@
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
 updated: 2026-08-05
 commit: 2dc8e2e
-stale-ok: 5657d42
+stale-ok: 406874c
 status: living
 owns:
   - de-xuat-openspace-g0-g4

@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-16
-commit: 6138f57
-stale-ok: 6138f57
+commit: 406874c
+stale-ok: 406874c
 status: living
 owns:
   - duong-co-so-do-luong
@@ -344,9 +344,22 @@ Cổng sau vá: `cargo test` **894 pass · 0 fail** · clippy **0** · fmt **0**
 
 ⚠️ **`impact()` KHÔNG chạy được** — GitNexus MCP không có trong phiên đó. Thay bằng lập luận kiểm được: bản vá chỉ thêm một lời gọi builder, **không đổi chữ ký hàm nào**, nên bán kính gói trong chỗ dựng context. Ghi ra đây vì `CLAUDE.md` bắt buộc bước này, và bỏ qua nó lặng lẽ mới là vấn đề.
 
-🔴 **Còn nợ, KHÔNG gộp vào bản vá trên: `e2e-memory` mới 4/6, đường cơ sở 26/07 là 6/6 ⇒ có hồi quy riêng.** Hai phép kiểm cứng đỏ đều cùng một dạng: *"KHÔNG thấy `Bún` trong owner-local"* và *"KHÔNG thấy `ORION-7` trong owner-local"*. Đáng chú ý là **kiểm mềm lại đạt** — LIVA nhớ đúng cả hai qua cả hai đường vào. Nghĩa là bộ nhớ *đang chạy* nhưng **không ghi vào scope `owner-local` mà bộ kiểm soi**. Cần một lát điều tra riêng cho đường ghi owner-local; đừng đọc "4/6" thành "bộ nhớ hỏng".
+✅ **`e2e-memory` 4/6 → 6/6 (`406874c`) — và bản ghi đầu tiên của chính mục này KẾT LUẬN SAI, sửa lại ở đây.** Nó viết *"có hồi quy riêng ở đường ghi owner-local"*. **Không phải.** Bộ nhớ ghi đúng từ đầu; **bộ kiểm mới là thứ mù.**
 
-📌 **Hệ quả cho đường cơ sở:** dòng "E2E bộ nhớ" nay **đo lại được** (model có đủ: `models/embedding/` có `model.onnx` + `tokenizer.json`, router ở `E:\AI_Models`), và số mới là **4/6 ngày 16/08**, xuống từ 6/6 ngày 26/07. Đây là con số đo thật, không phải trích lại.
+Truy bằng cách soi thẳng DB sau một lần chạy thật, nới lỏng từng vế trong 8 điều kiện AND của `conversationMemoryContains`:
+
+| Nới tới đâu | Số dòng |
+|---|---|
+| `type='conversation_turn'` + `domain='memory_owner:local'` | **4** ✅ |
+| + `instr(content, 'Bún') > 0` | **0** ❌ |
+
+Nhìn dữ liệu là rõ ngay: `content = "v2:5144473a…:7f5a49ac…"`. `vectors_meta.content` đã mã hoá thành bao `v2:` từ 22/07/2026, còn phép kiểm vẫn `instr(content, marker)` thẳng trong SQL — **tìm plaintext trong cột ciphertext**, không bao giờ khớp. Bốn dòng nằm đủ, đúng `domain`, đúng `consolidation_status`, giải mã ra đúng nội dung hội thoại.
+
+📌 **Dấu hiệu lẽ ra phải đọc ra sớm hơn: hai tín hiệu tự mâu thuẫn.** Kiểm cứng bảo "không có trong DB", kiểm mềm bảo "LIVA nhớ đúng `Bún` và `ORION-7`". Một hệ thống không thể vừa nhớ được vừa không có gì trong bộ nhớ — **mâu thuẫn đó là lệnh phải nghi phép đo trước, đừng nghi repo**, cùng bài học với các bẫy ở [§0.2](#02-ba-cái-bẫy-đã-cắn-trong-phiên-2707--đọc-để-khỏi-mất-buổi). Bản ghi trước đã vội gọi tên "hồi quy đường ghi" *trước khi* soi DB; soi mất đúng một truy vấn.
+
+Bản vá giữ **nguyên** mọi điều kiện phạm vi trong SQL (chúng lọc trên cột không mã hoá, và chính chúng làm nên sức mạnh phép kiểm), chỉ chuyển phép so **nội dung** ra JS sau khi giải mã — không nới lỏng điều kiện nào cho nó xanh. Giải mã khớp `crypto.rs`: `HKDF_INFO = "liva-facts-encryption-v2"` (`:18`), salt/iv/tag 16 byte (`:19`, `:263`), khoá `HKDF-SHA256(LIVA_ENCRYPTION_KEY, salt)` (`:128`). **IV 16 byte chứ không phải 12 byte mặc định của GCM** — Rust dùng `AesGcm<Aes256, U16>` (`:10`) — nên Node bắt buộc `{ authTagLength: 16 }`, thiếu là lệch âm thầm. Sai khoá thì **ném**, không trả `false`: bộ kiểm nuốt lỗi giải mã sẽ luôn báo "không thấy", tức đỏ vì lý do sai. +1 test chèn ciphertext v2 thật, để lần sau đổi định dạng mã hoá là đỏ ngay — bộ test cũ mù vì mọi fixture của nó đều plaintext.
+
+📌 **Hệ quả cho đường cơ sở:** dòng "E2E bộ nhớ" nay **đã đo lại**: **6/6 ngày 16/08** trên gateway thật + model thật (`models/embedding/` có sẵn, router ở `E:\AI_Models`). Bằng 26/07, và **chưa từng có hồi quy nào ở đây** — chỉ có một bộ kiểm lỗi thời suốt từ 22/07 mà không ai chạy nên không ai thấy.
 
 ⚠️ **Bẫy đo thứ năm — chạy song song cổng nặng làm chết khả năng spawn tiến trình của cả máy.** Cho `cargo test` chạy nền cùng 2 job agent (mà job lại tự chạy `cargo clippy`) ⇒ Windows Terminal bắt đầu trả `error 2147942632 (0x800700e8)` khi mở `bash.exe` và `where.exe` — cạn tài nguyên tiến trình, không phải hỏng cài đặt Git. Dừng job, process 436 → 415, spawn lại bình thường. Cùng kết luận với bẫy MSVC-cạn-bộ-nhớ ở bảng 05/08: **cổng nặng chạy tuần tự, một cái tại một thời điểm** — lần này thêm bằng chứng rằng cái giá không chỉ là một phép đo sai mà là cả phiên làm việc. Và bẫy `$?`-sau-pipe ở mục ngay trên vẫn cắn: `cargo fmt --check | tail -5; echo $?` cho **0** trong khi lệnh thật exit **1**; bắt được vì 28 dòng `Diff in` hiện ngay bên trên một chữ "EXIT=0".
 

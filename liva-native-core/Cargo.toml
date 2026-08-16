@@ -58,6 +58,8 @@ rodio = "0.17.3"
 
 # Fast text normalization and string processing
 regex = "1.10.3"
+unicode-normalization = "0.1"
+flate2 = "1.0"
 
 # Base64 decoding for audio chunks
 base64 = "0.22.1"
@@ -169,6 +171,42 @@ test = false
 [[bin]]
 name = "wer_bench"
 path = "src/bin/wer_bench.rs"
+test = false
+
+[[bin]]
+name = "debug_audio"
+path = "src/bin/debug_audio.rs"
+test = false
+
+[[bin]]
+name = "gemma4_probe"
+path = "src/bin/gemma4_probe.rs"
+test = false
+
+[[bin]]
+name = "model_compare"
+path = "src/bin/model_compare.rs"
+test = false
+
+[[bin]]
+name = "ttft_bench"
+path = "src/bin/ttft_bench.rs"
+test = false
+
+[[bin]]
+name = "verify_integrations"
+path = "src/bin/verify_integrations.rs"
+test = false
+
+[[bin]]
+name = "verify_voice"
+path = "src/bin/verify_voice.rs"
+test = false
+
+[[bin]]
+name = "wakeword_benchmark"
+path = "src/bin/wakeword_benchmark.rs"
+test = false
 
 [[bin]]
 name = "vieneu_probe"
@@ -196,3 +234,14 @@ test = false
 name = "os_control_probe"
 path = "src/bin/os_control_probe.rs"
 test = false
+
+[[bin]]
+name = "parakeet_microbench"
+path = "src/bin/parakeet_microbench.rs"
+test = false
+
+[[bin]]
+name = "liva_eval"
+path = "src/bin/liva_eval.rs"
+test = false
+

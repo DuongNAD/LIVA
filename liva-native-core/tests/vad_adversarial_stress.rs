@@ -1,5 +1,5 @@
 use liva_native_core::webrtc::vad::{
-    compute_stage0_metrics, resolve_model_path, VadConfig, VadEngine, VadEvent,
+    VadConfig, VadEngine, VadEvent, compute_stage0_metrics, resolve_model_path,
 };
 use std::time::{Duration, Instant};
 
@@ -122,8 +122,7 @@ fn stress_test_silero_onnx_frame_latencies_160_256_512() {
         let p50_lat = latencies[INFERENCE_ROUNDS * 50 / 100];
         let p95_lat = latencies[INFERENCE_ROUNDS * 95 / 100];
         let max_lat = latencies[INFERENCE_ROUNDS - 1];
-        let avg_lat: Duration =
-            latencies.iter().sum::<Duration>() / (INFERENCE_ROUNDS as u32);
+        let avg_lat: Duration = latencies.iter().sum::<Duration>() / (INFERENCE_ROUNDS as u32);
 
         println!(
             "[Silero VAD Benchmark] Frame {}: Avg = {:?}, Min = {:?}, P50 = {:?}, P95 = {:?}, Max = {:?}",
@@ -165,8 +164,16 @@ fn edge_case_transient_clicks_and_pops_immunity() {
     click_frame[10] = 1.0;
     click_frame[11] = -0.9;
 
-    let stage0 = compute_stage0_metrics(&click_frame, config.energy_threshold, config.zcr_min, config.zcr_max);
-    assert!(stage0.rms_energy > 0.05, "Click must register high RMS energy in Stage 0");
+    let stage0 = compute_stage0_metrics(
+        &click_frame,
+        config.energy_threshold,
+        config.zcr_min,
+        config.zcr_max,
+    );
+    assert!(
+        stage0.rms_energy > 0.05,
+        "Click must register high RMS energy in Stage 0"
+    );
 
     let events = engine.process_audio(&click_frame).expect("process click");
     let click_confidence = engine.last_confidence();
@@ -193,8 +200,9 @@ fn edge_case_transient_clicks_and_pops_immunity() {
 
     // 2. Burst of 3ms high-frequency white noise pop (e.g. mic unplug/bump) followed by silence
     let mut bump_frame = vec![0.0f32; 160];
-    for i in 0..48 { // 3ms at 16kHz
-        bump_frame[i] = if i % 2 == 0 { 0.8 } else { -0.8 };
+    for (i, sample) in bump_frame.iter_mut().enumerate().take(48) {
+        // 3ms at 16kHz
+        *sample = if i % 2 == 0 { 0.8 } else { -0.8 };
     }
     let events2 = engine.process_audio(&bump_frame).expect("process bump");
     let bump_confidence = engine.last_confidence();
@@ -233,19 +241,24 @@ fn edge_case_whispering_and_fricatives() {
     let mut whisper_frames = Vec::new();
     for f in 0..10 {
         let mut frame = vec![0.0f32; 160];
-        for i in 0..160 {
+        for (i, sample) in frame.iter_mut().enumerate() {
             let t = (f * 160 + i) as f32;
             // Mixed colored noise + low amplitude formant
-            let noise = ((t * 1337.0).sin() * 43758.5453).fract() - 0.5;
+            let noise = ((t * 1337.0).sin() * 43_758.547).fract() - 0.5;
             let formant = (2.0 * std::f32::consts::PI * 800.0 * (t / 16000.0)).sin() * 0.5;
-            frame[i] = (noise * 0.7 + formant * 0.3) * 0.008;
+            *sample = (noise * 0.7 + formant * 0.3) * 0.008;
         }
         whisper_frames.push(frame);
     }
 
     // Verify Stage 0 detects whisper activity and process through engine
     for (idx, frame) in whisper_frames.iter().enumerate() {
-        let m = compute_stage0_metrics(frame, config.energy_threshold, config.zcr_min, config.zcr_max);
+        let m = compute_stage0_metrics(
+            frame,
+            config.energy_threshold,
+            config.zcr_min,
+            config.zcr_max,
+        );
         assert!(
             m.is_active,
             "Frame {} of whisper should be active in Stage 0 (RMS: {:.5}, ZCR: {:.3})",
@@ -287,20 +300,34 @@ fn edge_case_extended_absolute_silence_and_dc_bias() {
     // 1. Long period of absolute silence (1000 frames = 10 seconds of 0.0)
     let zero_frame = vec![0.0f32; 160];
     for f in 0..1000 {
-        let events = engine.process_audio(&zero_frame).expect("process zero frame");
+        let events = engine
+            .process_audio(&zero_frame)
+            .expect("process zero frame");
         assert!(
             events.is_empty(),
             "Frame {} of pure silence must produce no events",
             f
         );
-        assert!(!engine.is_speaking(), "Engine must not be speaking during silence");
-        assert!(engine.last_confidence() < 0.05, "Confidence on silence must be < 0.05, got {}", engine.last_confidence());
+        assert!(
+            !engine.is_speaking(),
+            "Engine must not be speaking during silence"
+        );
+        assert!(
+            engine.last_confidence() < 0.05,
+            "Confidence on silence must be < 0.05, got {}",
+            engine.last_confidence()
+        );
     }
 
     // 2. DC Offset Bias (+0.05 constant level across all samples)
     // DC has high RMS (0.05), but Zero Crossing Rate is strictly 0.0 (no sign changes).
     let dc_frame = vec![0.05f32; 160];
-    let dc_metrics = compute_stage0_metrics(&dc_frame, config.energy_threshold, config.zcr_min, config.zcr_max);
+    let dc_metrics = compute_stage0_metrics(
+        &dc_frame,
+        config.energy_threshold,
+        config.zcr_min,
+        config.zcr_max,
+    );
     assert_eq!(dc_metrics.zcr, 0.0, "DC bias ZCR must be exactly 0.0");
 
     let dc_events = engine.process_audio(&dc_frame).expect("process dc frame");
@@ -338,7 +365,9 @@ fn edge_case_unaligned_audio_streaming_and_rapid_speech_bursts() {
 
     for &c_size in &chunk_sizes {
         let chunk = vec![0.0f32; c_size];
-        let _ = engine.process_audio(&chunk).expect("process unaligned chunk");
+        let _ = engine
+            .process_audio(&chunk)
+            .expect("process unaligned chunk");
         total_samples_fed += c_size;
     }
 
@@ -346,7 +375,9 @@ fn edge_case_unaligned_audio_streaming_and_rapid_speech_bursts() {
 
     // Push remaining to complete frames
     let remainder = (160 - expected_residual) % 160;
-    let _ = engine.process_audio(&vec![0.0f32; remainder]).expect("process remainder");
+    let _ = engine
+        .process_audio(&vec![0.0f32; remainder])
+        .expect("process remainder");
 
     // Test rapid bursts and debounce recovery:
     // 3 speech frames -> SpeechStart -> 25 silence frames -> SpeechEnd -> 3 speech frames -> SpeechStart
@@ -369,7 +400,11 @@ fn edge_case_unaligned_audio_streaming_and_rapid_speech_bursts() {
 
     // Speech burst 2
     let ev2 = engine.test_update_state_machine_with_confidence(true, 0.90, 0.02);
-    assert_eq!(ev2, Some(VadEvent::SpeechStart), "Burst 2 starts new speech utterance");
+    assert_eq!(
+        ev2,
+        Some(VadEvent::SpeechStart),
+        "Burst 2 starts new speech utterance"
+    );
     assert!(engine.is_speaking());
 }
 
@@ -399,12 +434,19 @@ fn stress_test_multithreaded_fork_sessions_race_free() {
                 let mut frame = vec![0.0f32; 160];
                 if is_speech_turn {
                     for (i, s) in frame.iter_mut().enumerate() {
-                        *s = (2.0 * std::f32::consts::PI * 300.0 * (i as f32 / 16000.0)).sin() * 0.4;
+                        *s =
+                            (2.0 * std::f32::consts::PI * 300.0 * (i as f32 / 16000.0)).sin() * 0.4;
                     }
                 }
 
                 let res = session.process_audio(&frame);
-                assert!(res.is_ok(), "Thread {} frame {} failed: {:?}", thread_id, f, res.err());
+                assert!(
+                    res.is_ok(),
+                    "Thread {} frame {} failed: {:?}",
+                    thread_id,
+                    f,
+                    res.err()
+                );
                 if session.is_speaking() {
                     speech_detected = true;
                 }
@@ -416,7 +458,10 @@ fn stress_test_multithreaded_fork_sessions_race_free() {
 
     for (id, handle) in handles.into_iter().enumerate() {
         let res = handle.join().expect("thread join");
-        println!("[Multithread Stress] Thread {} completed successfully (speech_detected={})", id, res);
+        println!(
+            "[Multithread Stress] Thread {} completed successfully (speech_detected={})",
+            id, res
+        );
     }
 
     // Prototype recurrent state must remain pristine zeroes
@@ -447,7 +492,7 @@ fn verify_e2e_speech_detection_latency_under_30ms() {
     let compute_duration = start.elapsed();
     let compute_duration_ms = compute_duration.as_secs_f64() * 1000.0;
 
-    let total_detection_latency_ms = physical_frame_duration_ms as f64 + compute_duration_ms;
+    let total_detection_latency_ms = physical_frame_duration_ms + compute_duration_ms;
 
     println!(
         "[VAD Latency Test - Fast Start Trigger] Frame Duration: {:.1}ms, Compute Latency: {:.3}ms, Total Detection Latency: {:.3}ms",

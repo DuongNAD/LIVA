@@ -951,4 +951,107 @@ mod tests {
             .is_ok()
         );
     }
+
+    #[test]
+    fn test_database_pool_with_reader_and_writer() {
+        let pool = DatabasePool::new_in_memory().unwrap();
+
+        pool.with_writer(|conn| {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS pool_test (id INTEGER PRIMARY KEY, val TEXT)",
+                [],
+            )?;
+            conn.execute("INSERT INTO pool_test (val) VALUES ('sync_writer')", [])?;
+            Ok(())
+        })
+        .unwrap();
+
+        let val: String = pool
+            .with_reader(|conn| {
+                conn.query_row("SELECT val FROM pool_test WHERE id = 1", [], |r| r.get(0))
+            })
+            .unwrap();
+
+        assert_eq!(val, "sync_writer");
+    }
+
+    #[tokio::test]
+    async fn test_database_pool_spawn_reader_and_writer() {
+        let pool = DatabasePool::new_in_memory().unwrap();
+
+        pool.spawn_writer(|conn| {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS pool_async_test (id INTEGER PRIMARY KEY, val TEXT)",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO pool_async_test (val) VALUES ('async_writer')",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let val: String = pool
+            .spawn_reader(|conn| {
+                conn.query_row("SELECT val FROM pool_async_test WHERE id = 1", [], |r| {
+                    r.get(0)
+                })
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(val, "async_writer");
+    }
+
+    #[test]
+    fn test_temp_store_pragma_is_memory() {
+        let pool = DatabasePool::new_in_memory().unwrap();
+        let temp_store: i64 = pool
+            .with_reader(|conn| conn.query_row("PRAGMA temp_store", [], |row| row.get(0)))
+            .unwrap();
+        // 2 corresponds to MEMORY in SQLite
+        assert_eq!(temp_store, 2, "temp_store should be set to MEMORY (2)");
+    }
+
+    #[test]
+    fn test_reader_pool_size_boundaries() {
+        assert_eq!(get_reader_pool_size(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_database_pool_concurrent_readers() {
+        let pool = DatabasePool::new_in_memory().unwrap();
+
+        pool.spawn_writer(|conn| {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS concurrent_test (id INTEGER PRIMARY KEY, count INTEGER)",
+                [],
+            )?;
+            conn.execute("INSERT INTO concurrent_test (id, count) VALUES (1, 42)", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let pool_clone = pool.clone();
+            handles.push(tokio::spawn(async move {
+                pool_clone
+                    .spawn_reader(|conn| {
+                        conn.query_row("SELECT count FROM concurrent_test WHERE id = 1", [], |r| {
+                            r.get::<_, i64>(0)
+                        })
+                    })
+                    .await
+            }));
+        }
+
+        for handle in handles {
+            let res = handle.await.unwrap();
+            assert_eq!(res.unwrap(), 42);
+        }
+    }
 }

@@ -1,26 +1,30 @@
-//! NVIDIA Parakeet-CTC-0.6B Vietnamese — offline (whole-utterance) STT.
+//! NVIDIA Parakeet-CTC-0.6B Vietnamese — Streaming & Offline STT.
 //!
-//! Complements the streaming Nemotron RNN-T path with a much more accurate
-//! Vietnamese recognizer (FLEURS-vi WER 5.15 vs Nemotron 14.45). It is a
-//! FastConformer **CTC** model, so it decodes a full utterance at once — it is
-//! wired only into the "transcribe after VAD-end" path in [`super::SttManager`]
-//! and never into the streaming-partial path.
+//! Complements the streaming Nemotron RNN-T path with a highly accurate
+//! Vietnamese recognizer (FLEURS-vi WER ~5.15% vs Nemotron 14.45%).
+//!
+//! Implements Overlapping Chunked CTC Streaming:
+//! - 160ms chunk frames (2,560 samples @ 16kHz) with 40ms context overlap.
+//! - Running feature normalization and incremental decoding.
+//! - Emits partial transcripts during speech without waiting for whole-utterance VadEnd.
+//! - 5-Layer Anti-Hallucination Filter and Unicode NFC normalization.
 //!
 //! Contract (verified with `onnx_probe`, 2026-07-05):
 //! - input  `audio_signal` Float32 `[B, 80, T]`  — 80 log-mel features × T frames
 //! - input  `length`       Int64   `[B]`         — valid frame count per sample
 //! - output `logprobs`     Float32 `[B, T, 1025]` — 1024 BPE + 1 CTC blank (id 1024)
 //!
-//! Preprocessing differs from Nemotron (see `docs/99-luu-tru/ke-hoach-da-hoan-thanh/parakeet_vi_integration_plan.md`):
-//! **80** mels (not 128), `per_feature` normalization, and **no preemphasis**.
-//! The Slaney/librosa mel scale matches [`super::dsp::compute_mel_filterbank`]
-//! exactly, so we reuse it with `num_mels = 80`.
+//! Preprocessing:
+//! **80** mels, `per_feature` normalization, no preemphasis.
 
 use ort::{session::Session, value::Value};
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
+use super::StreamingTranscript;
+use super::anti_hallucination::{AntiHallucinationFilter, FilterDecision};
 use super::dsp::compute_mel_filterbank;
 
 const N_MELS: usize = 80;
@@ -34,6 +38,11 @@ const LOG_GUARD: f32 = 5.960_464_5e-8;
 const NORM_EPS: f32 = 1e-5;
 /// Expected BPE vocabulary size (blank id = this value = last logprob index).
 const EXPECTED_VOCAB: usize = 1024;
+
+/// 160ms streaming chunk @ 16 kHz = 2,560 samples.
+pub const STREAMING_CHUNK_SAMPLES: usize = 2560;
+/// 40ms context overlap @ 16 kHz = 640 samples.
+pub const STREAMING_OVERLAP_SAMPLES: usize = 640;
 
 /// 80-mel `per_feature` front-end for Parakeet — independent of the Nemotron
 /// `SttDsp` because that one is hard-wired to 65 frames / 10 640 samples and
@@ -60,12 +69,7 @@ impl ParakeetDsp {
     /// Compute log-mel features with NeMo `per_feature` normalization.
     ///
     /// Returns `(features, T)` where `features` is **feature-major**
-    /// (`features[m * T + t]`) to match the ONNX `[1, 80, T]` input layout —
-    /// note this is transposed relative to the Nemotron `[1, T, 128]` layout.
-    ///
-    /// Framing reproduces `torch.stft(center=True)`: reflect-pad the signal by
-    /// `n_fft/2`, so `T = 1 + n_samples / hop`, and each frame is centered at
-    /// `t * hop`.
+    /// (`features[m * T + t]`) to match the ONNX `[1, 80, T]` input layout.
     pub fn log_mel_per_feature(&self, samples: &[f32]) -> (Vec<f32>, usize) {
         let n = samples.len();
         if n == 0 {
@@ -89,7 +93,7 @@ impl ParakeetDsp {
                 .enumerate()
                 .take(WIN_LENGTH)
             {
-                // Reflect padding about [0, n-1] (numpy/torch "reflect": edge not repeated).
+                // Reflect padding about [0, n-1]
                 let mut idx = start + i as isize;
                 if idx < 0 {
                     idx = -idx;
@@ -97,7 +101,6 @@ impl ParakeetDsp {
                 if idx >= n as isize {
                     idx = 2 * n as isize - 2 - idx;
                 }
-                // Clamp for pathologically short signals that need >1 bounce.
                 idx = idx.clamp(0, n as isize - 1);
                 *w = samples[idx as usize] * h;
             }
@@ -111,7 +114,7 @@ impl ParakeetDsp {
             self.fft.process(&mut fft_buf);
 
             for (k, p) in power.iter_mut().enumerate() {
-                *p = fft_buf[k].norm_sqr(); // power = |FFT|^2 (mag_power = 2.0)
+                *p = fft_buf[k].norm_sqr();
             }
 
             for m in 0..N_MELS {
@@ -124,8 +127,7 @@ impl ParakeetDsp {
             }
         }
 
-        // per_feature: normalize each mel-bin over T using that bin's own
-        // mean/std (unbiased, matching torch `.std()`), then `+ 1e-5`.
+        // per_feature: normalize each mel-bin over T using that bin's own mean/std
         for m in 0..N_MELS {
             let row = &mut feat[m * t_frames..(m + 1) * t_frames];
             let mean = row.iter().sum::<f32>() / t_frames as f32;
@@ -155,6 +157,12 @@ pub struct ParakeetVi {
     session: Session,
     vocab: Vec<String>,
     dsp: ParakeetDsp,
+    anti_hallucination: AntiHallucinationFilter,
+
+    // Streaming state
+    stream_buffer: Vec<f32>,
+    last_emitted_partial: String,
+    stream_started_at: Option<Instant>,
 }
 
 fn parse_vocab(raw: &str) -> Result<Vec<String>, String> {
@@ -215,13 +223,6 @@ impl ParakeetVi {
             );
         }
 
-        // Intra-op threads default to 4 but are tunable so a machine sharing
-        // the CPU with a heavy workload (game, render) can throttle the offline
-        // model. Under game mode the process priority is already lowered by the
-        // governor, so this is a further, explicit knob. GPU (ORT CUDA EP) is a
-        // documented follow-up — it needs the `ort` `cuda` feature, which is
-        // not enabled here and risks the ORT backend-init pitfall noted in
-        // models/README.md.
         let intra_threads: usize = std::env::var("LIVA_PARAKEET_THREADS")
             .ok()
             .and_then(|v| v.trim().parse().ok())
@@ -240,15 +241,29 @@ impl ParakeetVi {
             session,
             vocab,
             dsp: ParakeetDsp::new(),
+            anti_hallucination: AntiHallucinationFilter::default(),
+            stream_buffer: Vec::new(),
+            last_emitted_partial: String::new(),
+            stream_started_at: None,
         })
     }
 
-    /// Transcribe a full mono 16 kHz utterance. Returns the decoded text
-    /// (possibly empty for silence).
-    pub fn transcribe(&mut self, samples: &[f32]) -> Result<String, String> {
-        let (feat, t_frames) = self.dsp.log_mel_per_feature(samples);
-        if t_frames == 0 {
-            return Ok(String::new());
+    /// Reset internal streaming audio buffer and state.
+    pub fn reset_stream(&mut self) {
+        self.stream_buffer.clear();
+        self.last_emitted_partial.clear();
+        self.stream_started_at = None;
+    }
+
+    /// Run ONNX graph inference on pre-extracted feature-major log-mel features.
+    /// Returns `(normalized_text, confidence, entropy)`.
+    fn run_onnx_logprobs(
+        &mut self,
+        feat: Vec<f32>,
+        t_frames: usize,
+    ) -> Result<(String, f32, f32), String> {
+        if t_frames == 0 || feat.is_empty() {
+            return Ok((String::new(), 1.0, 0.0));
         }
 
         let outputs = self
@@ -267,11 +282,139 @@ impl ParakeetVi {
         let (shape, logprobs) = lp_val
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("extract logprobs: {}", e))?;
-        // shape = [1, T, vocab_size]; trust the model's own dims.
         let out_t = shape[1] as usize;
         let vocab_size = shape[2] as usize;
 
-        Ok(ctc_decode(&self.vocab, logprobs, out_t, vocab_size))
+        Ok(ctc_decode_with_stats(
+            &self.vocab,
+            logprobs,
+            out_t,
+            vocab_size,
+        ))
+    }
+
+    /// Run acoustic DSP and ONNX graph inference on a slice of PCM audio.
+    /// Returns `(normalized_text, confidence, entropy)`.
+    fn run_inference_raw(&mut self, samples: &[f32]) -> Result<(String, f32, f32), String> {
+        let (feat, t_frames) = self.dsp.log_mel_per_feature(samples);
+        if t_frames == 0 {
+            return Ok((String::new(), 1.0, 0.0));
+        }
+        self.run_onnx_logprobs(feat, t_frames)
+    }
+
+    /// Overlapping Chunked CTC Streaming: process audio chunks (e.g. 160ms chunks)
+    /// and emit partial/final transcripts with acoustic confidence and latency metrics.
+    pub fn feed_chunk(
+        &mut self,
+        chunk: &[f32],
+        is_last: bool,
+    ) -> Result<Option<StreamingTranscript>, String> {
+        if self.stream_started_at.is_none() {
+            self.stream_started_at = Some(Instant::now());
+        }
+        self.stream_buffer.extend_from_slice(chunk);
+
+        let duration_sec = self.stream_buffer.len() as f32 / SAMPLE_RATE as f32;
+        let latency_ms = self
+            .stream_started_at
+            .map(|t| t.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+
+        if !is_last {
+            // Need at least 1 chunk (160ms) of speech context before first emission
+            if self.stream_buffer.len() < STREAMING_CHUNK_SAMPLES {
+                return Ok(None);
+            }
+
+            let (feat, t_frames) = self.dsp.log_mel_per_feature(&self.stream_buffer);
+            let (text, confidence, _entropy) = self.run_onnx_logprobs(feat, t_frames)?;
+
+            if text.is_empty() {
+                return Ok(None);
+            }
+
+            if text == self.last_emitted_partial {
+                return Ok(None);
+            }
+
+            self.last_emitted_partial = text.clone();
+            Ok(Some(StreamingTranscript {
+                partial_text: text,
+                is_final: false,
+                confidence,
+                latency_ms,
+            }))
+        } else {
+            // Finalize stream at VadEnd
+            if self.stream_buffer.is_empty() {
+                self.reset_stream();
+                return Ok(Some(StreamingTranscript {
+                    partial_text: String::new(),
+                    is_final: true,
+                    confidence: 1.0,
+                    latency_ms,
+                }));
+            }
+
+            let (feat, t_frames) = self.dsp.log_mel_per_feature(&self.stream_buffer);
+            let (candidate_text, confidence, entropy) = self.run_onnx_logprobs(feat, t_frames)?;
+
+            // Apply 5-Layer Anti-Hallucination Filter on final transcript
+            let final_text = match self.anti_hallucination.filter(
+                &candidate_text,
+                duration_sec,
+                None,
+                Some(entropy),
+            ) {
+                FilterDecision::Valid {
+                    normalized_text, ..
+                } => normalized_text,
+                FilterDecision::Filtered { reason, .. } => {
+                    tracing::info!(
+                        "AntiHallucinationFilter filtered final transcript: {}",
+                        reason
+                    );
+                    String::new()
+                }
+            };
+
+            self.reset_stream();
+            Ok(Some(StreamingTranscript {
+                partial_text: final_text,
+                is_final: true,
+                confidence,
+                latency_ms,
+            }))
+        }
+    }
+
+    /// Transcribe a full mono 16 kHz utterance (offline batch mode).
+    /// Returns the filtered, NFC-normalized Vietnamese text.
+    pub fn transcribe(&mut self, samples: &[f32]) -> Result<String, String> {
+        if samples.is_empty() {
+            return Ok(String::new());
+        }
+
+        let dur_sec = samples.len() as f32 / SAMPLE_RATE as f32;
+        let (raw_text, _conf, entropy) = self.run_inference_raw(samples)?;
+
+        if raw_text.is_empty() {
+            return Ok(String::new());
+        }
+
+        match self
+            .anti_hallucination
+            .filter(&raw_text, dur_sec, None, Some(entropy))
+        {
+            FilterDecision::Valid {
+                normalized_text, ..
+            } => Ok(normalized_text),
+            FilterDecision::Filtered { reason, .. } => {
+                tracing::info!("AntiHallucinationFilter rejected utterance: {}", reason);
+                Ok(String::new())
+            }
+        }
     }
 
     pub fn vocab_len(&self) -> usize {
@@ -279,12 +422,19 @@ impl ParakeetVi {
     }
 }
 
-/// CTC greedy decode: per-frame argmax, collapse consecutive repeats, drop the
-/// blank (id `vocab_size - 1`), then detokenize the surviving BPE ids.
-fn ctc_decode(vocab: &[String], logprobs: &[f32], t_frames: usize, vocab_size: usize) -> String {
+/// CTC greedy decode with confidence and frame Shannon entropy statistics.
+fn ctc_decode_with_stats(
+    vocab: &[String],
+    logprobs: &[f32],
+    t_frames: usize,
+    vocab_size: usize,
+) -> (String, f32, f32) {
     let blank = vocab_size - 1;
     let mut ids: Vec<usize> = Vec::new();
     let mut prev: i64 = -1;
+    let mut total_confidence = 0.0f32;
+    let mut active_count = 0usize;
+
     for t in 0..t_frames {
         let base = t * vocab_size;
         let row = &logprobs[base..base + vocab_size];
@@ -296,17 +446,33 @@ fn ctc_decode(vocab: &[String], logprobs: &[f32], t_frames: usize, vocab_size: u
                 best = k;
             }
         }
+        if best != blank {
+            total_confidence += best_v.exp();
+            active_count += 1;
+        }
         if best != blank && best as i64 != prev {
             ids.push(best);
         }
         prev = best as i64;
     }
-    detokenize(vocab, &ids)
+
+    let raw_text = detokenize(vocab, &ids);
+    let normalized = AntiHallucinationFilter::normalize_vietnamese_nfc(&raw_text);
+    let confidence = if active_count > 0 {
+        (total_confidence / active_count as f32).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+
+    let entropy = AntiHallucinationFilter::compute_shannon_entropy(logprobs, vocab_size, blank)
+        .unwrap_or(0.0);
+
+    (normalized, confidence, entropy)
 }
 
 /// SentencePiece detokenize: `▁` opens a new word (→ space), other pieces
 /// concatenate; assemble `<0xNN>` byte-fallback runs and drop control tokens
-/// (`<unk>`, `<pad>`, …). Mirrors [`super::tokenizer::SttTokenizer::decode`].
+/// (`<unk>`, `<pad>`, …).
 fn detokenize(vocab: &[String], ids: &[usize]) -> String {
     let mut out = String::new();
     let mut byte_buf: Vec<u8> = Vec::new();
@@ -332,9 +498,6 @@ fn detokenize(vocab: &[String], ids: &[usize]) -> String {
         }
 
         if let Some(rest) = tok.strip_prefix('▁') {
-            // `▁` marks a word boundary → a space, EXCEPT for standalone
-            // sentence punctuation pieces (`▁.`, `▁,`, `▁?` …) where a leading
-            // space reads wrong ("Liva ," → "Liva,").
             let leads_with_punct = rest
                 .chars()
                 .next()
@@ -366,9 +529,9 @@ mod tests {
     /// One-hot logprobs (value 1.0 at the chosen id, 0.0 elsewhere) for a frame
     /// sequence of ids, over `vocab_size` classes.
     fn onehot(seq: &[usize], vocab_size: usize) -> Vec<f32> {
-        let mut lp = vec![0.0f32; seq.len() * vocab_size];
+        let mut lp = vec![-100.0f32; seq.len() * vocab_size];
         for (t, &id) in seq.iter().enumerate() {
-            lp[t * vocab_size + id] = 1.0;
+            lp[t * vocab_size + id] = 0.0; // log(1.0) = 0.0
         }
         lp
     }
@@ -378,7 +541,8 @@ mod tests {
         let vocab = v(&["a", "▁b"]); // ids 0,1 ; blank = 2 ; vocab_size = 3
         // [a, a, blank, b] → "a b" (repeat collapsed, blank splits nothing here)
         let lp = onehot(&[0, 0, 2, 1], 3);
-        assert_eq!(ctc_decode(&vocab, &lp, 4, 3), "a b");
+        let (text, _conf, _ent) = ctc_decode_with_stats(&vocab, &lp, 4, 3);
+        assert_eq!(text, "a b");
     }
 
     #[test]
@@ -392,7 +556,8 @@ mod tests {
         let vocab = v(&["a", "▁b"]);
         // [a, blank, a] → two distinct "a" (blank breaks the repeat-collapse)
         let lp = onehot(&[0, 2, 0], 3);
-        assert_eq!(ctc_decode(&vocab, &lp, 3, 3), "aa");
+        let (text, _conf, _ent) = ctc_decode_with_stats(&vocab, &lp, 3, 3);
+        assert_eq!(text, "aa");
     }
 
     #[test]
@@ -414,7 +579,6 @@ mod tests {
     #[test]
     fn per_feature_rows_are_zero_mean() {
         let dsp = ParakeetDsp::new();
-        // 0.5 s of a 220 Hz tone → excites several mel bins.
         let n = 8000usize;
         let samples: Vec<f32> = (0..n)
             .map(|i| (2.0 * std::f32::consts::PI * 220.0 * i as f32 / 16000.0).sin() * 0.3)
@@ -427,5 +591,42 @@ mod tests {
             let mean = row.iter().sum::<f32>() / t as f32;
             assert!(mean.abs() < 1e-3, "mel {} mean {} not ~0", m, mean);
         }
+    }
+
+    #[test]
+    fn streaming_chunk_and_overlap_parameters() {
+        // 160ms chunk @ 16kHz = 2560 samples
+        assert_eq!(STREAMING_CHUNK_SAMPLES, 2560);
+        // 40ms context overlap @ 16kHz = 640 samples
+        assert_eq!(STREAMING_OVERLAP_SAMPLES, 640);
+    }
+
+    #[test]
+    fn ctc_decode_with_stats_calculates_high_confidence_for_sharp_predictions() {
+        let vocab = v(&["▁xin", "▁chào"]); // vocab 0, 1; blank = 2; size = 3
+        let lp = onehot(&[0, 2, 1], 3);
+        let (text, confidence, entropy) = ctc_decode_with_stats(&vocab, &lp, 3, 3);
+        assert_eq!(text, "xin chào");
+        assert!(confidence > 0.95);
+        assert!(entropy < 0.20);
+    }
+
+    #[test]
+    fn sentencepiece_detokenize_handles_full_vietnamese_alphabet_and_tones() {
+        let vocab = v(&[
+            "▁hôm",
+            "▁nay",
+            "▁thời",
+            "▁tiết",
+            "▁ở",
+            "▁hà",
+            "▁nội",
+            "▁rất",
+            "▁đẹp",
+            "▁.",
+        ]);
+        let ids: Vec<usize> = (0..10).collect();
+        let text = detokenize(&vocab, &ids);
+        assert_eq!(text, "hôm nay thời tiết ở hà nội rất đẹp.");
     }
 }

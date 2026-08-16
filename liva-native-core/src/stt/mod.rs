@@ -1,3 +1,4 @@
+pub mod anti_hallucination;
 pub mod dsp;
 pub mod engine;
 pub mod lang;
@@ -7,8 +8,19 @@ pub mod tokenizer;
 use dsp::SttDsp;
 use engine::SttEngine;
 use parakeet::ParakeetVi;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use tokenizer::SttTokenizer;
+
+/// Streaming transcript output containing partial or final text and acoustic metrics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StreamingTranscript {
+    pub partial_text: String,
+    pub is_final: bool,
+    pub confidence: f32,
+    pub latency_ms: u64,
+}
 
 pub(crate) fn prefers_parakeet_vi(configured_engine: Option<&str>) -> bool {
     match configured_engine.map(str::trim) {
@@ -17,13 +29,31 @@ pub(crate) fn prefers_parakeet_vi(configured_engine: Option<&str>) -> bool {
     }
 }
 
-trait ParakeetRecognizer: Send {
+pub trait ParakeetRecognizer: Send {
     fn transcribe(&mut self, samples: &[f32]) -> Result<String, String>;
+    fn feed_chunk(
+        &mut self,
+        chunk: &[f32],
+        is_last: bool,
+    ) -> Result<Option<StreamingTranscript>, String>;
+    fn reset_stream(&mut self);
 }
 
 impl ParakeetRecognizer for ParakeetVi {
     fn transcribe(&mut self, samples: &[f32]) -> Result<String, String> {
         ParakeetVi::transcribe(self, samples)
+    }
+
+    fn feed_chunk(
+        &mut self,
+        chunk: &[f32],
+        is_last: bool,
+    ) -> Result<Option<StreamingTranscript>, String> {
+        ParakeetVi::feed_chunk(self, chunk, is_last)
+    }
+
+    fn reset_stream(&mut self) {
+        ParakeetVi::reset_stream(self);
     }
 }
 
@@ -35,6 +65,25 @@ impl ParakeetRecognizer for LoadedParakeetTestDouble {
     fn transcribe(&mut self, _samples: &[f32]) -> Result<String, String> {
         Ok(String::new())
     }
+
+    fn feed_chunk(
+        &mut self,
+        _chunk: &[f32],
+        is_last: bool,
+    ) -> Result<Option<StreamingTranscript>, String> {
+        if is_last {
+            Ok(Some(StreamingTranscript {
+                partial_text: String::new(),
+                is_final: true,
+                confidence: 1.0,
+                latency_ms: 0,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn reset_stream(&mut self) {}
 }
 
 pub struct SttManager {
@@ -44,10 +93,9 @@ pub struct SttManager {
     dsp: SttDsp,
     language: String,
 
-    // Default high-accuracy Vietnamese offline engine (Parakeet-CTC), opt-out
-    // via `LIVA_STT_VI_ENGINE=nemotron`. Used only for whole-utterance
-    // transcription when the active language is Vietnamese; the Nemotron
-    // streaming path below is left entirely untouched.
+    // Default high-accuracy Vietnamese engine (Parakeet-CTC), opt-out
+    // via `LIVA_STT_VI_ENGINE=nemotron`. Supports both Overlapping Chunked
+    // Streaming and whole-utterance batch transcription.
     parakeet: Option<Box<dyn ParakeetRecognizer>>,
     use_parakeet_vi: bool,
     parakeet_fallback_reason: Option<String>,
@@ -112,15 +160,11 @@ impl SttManager {
             self.engine = Some(engine);
             self.tokenizer = Some(tokenizer);
         }
-        // Parakeet is loaded lazily on the first Vietnamese utterance
-        // (`ensure_parakeet_loaded`) so the 2.4GB model never sits in RAM for
-        // English-only or Nemotron-only sessions.
         self.reset_stream();
         Ok(())
     }
 
     /// Configured to prefer Parakeet AND the active language is Vietnamese.
-    /// This does not imply the model is loaded yet — see [`Self::ensure_parakeet_loaded`].
     fn should_use_parakeet(&self) -> bool {
         self.use_parakeet_vi && {
             let norm = self.language.trim().to_lowercase();
@@ -129,8 +173,6 @@ impl SttManager {
     }
 
     /// Lazily load the Parakeet model on first use. Returns whether it is ready.
-    /// A hard failure (missing weights) disables the engine for the rest of the
-    /// process so we don't re-attempt a doomed 2.4GB load on every utterance.
     fn ensure_parakeet_loaded(&mut self) -> bool {
         if self.parakeet.is_some() {
             return true;
@@ -163,7 +205,7 @@ impl SttManager {
         }
     }
 
-    /// Engine tiếng Việt thực sự đã sẵn sàng phục vụ ở thời điểm quan sát.
+    /// Vietnamese engine currently ready.
     pub fn active_vietnamese_engine(&self) -> (&'static str, Option<&str>) {
         if self.parakeet.is_some() {
             ("Parakeet-vi", None)
@@ -194,7 +236,6 @@ impl SttManager {
     }
 
     /// Switch the recognition language ("vi", "en", "vi-VN", …).
-    /// Resets any in-flight stream; takes effect immediately.
     pub fn set_language(&mut self, code: &str) -> Result<(), String> {
         let id =
             lang::lang_id_for(code).ok_or_else(|| format!("Unsupported STT language: {}", code))?;
@@ -210,7 +251,7 @@ impl SttManager {
         &self.language
     }
 
-    /// Diagnostic-only: force a raw encoder lang_id (used by `stt_lang_probe`).
+    /// Diagnostic-only: force a raw encoder lang_id.
     pub fn set_lang_id_raw(&mut self, id: i64) {
         if let Some(ref mut eng) = self.engine {
             eng.set_lang_id(id);
@@ -221,6 +262,9 @@ impl SttManager {
         if let Some(ref mut eng) = self.engine {
             eng.reset_states();
         }
+        if let Some(ref mut pk) = self.parakeet {
+            pk.reset_stream();
+        }
         self.residual_samples.clear();
         self.raw_audio_buffer.clear();
         self.prev_sample = 0.0;
@@ -229,16 +273,38 @@ impl SttManager {
         self.is_streaming = false;
     }
 
+    /// Process streaming audio frame and return a structured `StreamingTranscript`.
+    pub fn feed_chunk(
+        &mut self,
+        pcm_chunk: &[f32],
+        is_last: bool,
+    ) -> Result<Option<StreamingTranscript>, String> {
+        if self.should_use_parakeet() && self.ensure_parakeet_loaded() {
+            return self
+                .parakeet
+                .as_mut()
+                .unwrap()
+                .feed_chunk(pcm_chunk, is_last);
+        }
+
+        let start = Instant::now();
+        let text_opt = self.feed_audio_inner(pcm_chunk, is_last, false)?;
+        let latency_ms = start.elapsed().as_millis() as u64;
+
+        Ok(text_opt.map(|partial_text| StreamingTranscript {
+            partial_text,
+            is_final: is_last,
+            confidence: 0.90,
+            latency_ms,
+        }))
+    }
+
     pub fn feed_audio(&mut self, audio: &[f32], is_last: bool) -> Result<Option<String>, String> {
         self.feed_audio_inner(audio, is_last, true)
     }
 
     /// Transcribe a full utterance for **wake-word** detection. Always uses the
-    /// lightweight streaming Nemotron engine even when Parakeet is the
-    /// configured command engine, so the always-listening asleep state never
-    /// pays the 2.4GB offline model's load/inference cost on every speech
-    /// segment. Accuracy for a single "liva" prefix is ample from Nemotron;
-    /// Parakeet is reserved for the actual command after wake.
+    /// lightweight streaming Nemotron engine.
     pub fn transcribe_for_wake(&mut self, audio: &[f32]) -> Result<Option<String>, String> {
         self.feed_audio_inner(audio, true, false)
     }
@@ -261,20 +327,13 @@ impl SttManager {
             self.init()?;
         }
 
-        // Offline Parakeet-CTC path for Vietnamese: accumulate the raw (never
-        // pre-emphasized) utterance and transcribe it whole at VAD-end. CTC is
-        // not causal, so we emit no streaming partials in this mode — callers
-        // that pass the full utterance in one `is_last` call (Telegram, WebRTC
-        // on_vad_end, post-wake command) get the full high-accuracy transcript.
+        // Parakeet-CTC path for Vietnamese: streaming chunk or whole-utterance decoding
         if allow_parakeet && self.should_use_parakeet() && self.ensure_parakeet_loaded() {
-            self.raw_audio_buffer.extend_from_slice(audio);
-            if !is_last {
-                return Ok(None);
+            let res = self.parakeet.as_mut().unwrap().feed_chunk(audio, is_last)?;
+            if is_last {
+                self.reset_stream();
             }
-            let buffer = std::mem::take(&mut self.raw_audio_buffer);
-            let text = self.parakeet.as_mut().unwrap().transcribe(&buffer)?;
-            self.reset_stream();
-            return Ok(Some(text));
+            return Ok(res.map(|t| t.partial_text));
         }
 
         let engine = self.engine.as_mut().unwrap();
@@ -312,7 +371,6 @@ impl SttManager {
 
         // 4. Handle end of stream (is_last)
         if is_last {
-            // If there's enough leftover samples (overlap 1680) or if we haven't run encoder at all yet
             if self.residual_samples.len() > 1680
                 || (!self.has_run_encoder && !self.residual_samples.is_empty())
             {
@@ -325,7 +383,6 @@ impl SttManager {
                 self.accumulated_tokens.extend(new_tokens);
             }
 
-            // Decode the final sequence
             let final_text = tokenizer.decode(&self.accumulated_tokens)?;
             self.reset_stream();
             return Ok(Some(final_text));
@@ -337,5 +394,44 @@ impl SttManager {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streaming_transcript_struct_serialization() {
+        let transcript = StreamingTranscript {
+            partial_text: "xin chào liva".to_string(),
+            is_final: false,
+            confidence: 0.94,
+            latency_ms: 110,
+        };
+
+        let json = serde_json::to_string(&transcript).unwrap();
+        let deserialized: StreamingTranscript = serde_json::from_str(&json).unwrap();
+        assert_eq!(transcript, deserialized);
+        assert!(!deserialized.is_final);
+        assert_eq!(deserialized.latency_ms, 110);
+    }
+
+    #[test]
+    fn stt_manager_feed_chunk_with_loaded_double() {
+        let mut stt = SttManager::new("models/nemotron-asr");
+        stt.set_language("vi").unwrap();
+        stt.record_parakeet_loaded_for_test();
+
+        let chunk = vec![0.0f32; 2560];
+        // Intermediate chunk
+        let res1 = stt.feed_chunk(&chunk, false).unwrap();
+        assert!(res1.is_none());
+
+        // Final chunk
+        let res2 = stt.feed_chunk(&chunk, true).unwrap();
+        assert!(res2.is_some());
+        let transcript = res2.unwrap();
+        assert!(transcript.is_final);
     }
 }

@@ -80,7 +80,11 @@ async fn main() -> Result<(), String> {
     // 1. Validating ASR sliding window logic and state resets
     // --------------------------------------------------------
     println!("\n[1] Testing ASR Sliding Window Logic and Resets...");
+    unsafe {
+        std::env::set_var("LIVA_STT_VI_ENGINE", "nemotron");
+    }
     let mut stt_mgr = SttManager::new(model_dir);
+    stt_mgr.set_language("en")?;
     stt_mgr.init()?;
 
     // Test case 1.1: Feed 10,639 samples (just under window size)

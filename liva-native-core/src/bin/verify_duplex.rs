@@ -2,7 +2,7 @@ use liva_native_core::webrtc::frame::{OP_FLUSH, VoiceFrame};
 use liva_native_core::webrtc::pipeline::{
     PipelineEvent, PipelineState, VoiceOutbound, WebRTCActor,
 };
-use liva_native_core::webrtc::vad::{VadConfig, VadEngine, VadEvent};
+use liva_native_core::webrtc::vad::{VadConfig, VadEngine, VadEvent, compute_stage0_metrics};
 use liva_native_core::{AppState, crypto, db, llm, stt, tts};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,8 +12,37 @@ use tokio::sync::mpsc;
 async fn main() -> Result<(), String> {
     println!("\n=== Running Duplex Voice Streaming Pipeline Verification ===\n");
 
-    // 1. Test VAD Debounce State Machine Transitions
-    println!("--- Testing VAD Debounce Logic Transitions ---");
+    // 1. Test Stage 0 Instantaneous Energy & ZCR Computation (<1ms)
+    println!("--- Testing Stage 0 Instantaneous Energy & ZCR Detector ---");
+    let silence_frame = vec![0.0f32; 160];
+    let stage0_silence = compute_stage0_metrics(&silence_frame, 0.001, 0.01, 0.50);
+    assert_eq!(stage0_silence.rms_energy, 0.0);
+    assert_eq!(stage0_silence.zcr, 0.0);
+    assert!(!stage0_silence.is_active, "Silence must be inactive");
+
+    // Generate 1kHz test sine tone at 16kHz
+    let mut speech_tone = Vec::with_capacity(160);
+    for i in 0..160 {
+        let sample = (2.0 * std::f32::consts::PI * i as f32 / 16.0).sin() * 0.4;
+        speech_tone.push(sample);
+    }
+    let stage0_start = Instant::now();
+    let stage0_speech = compute_stage0_metrics(&speech_tone, 0.001, 0.01, 0.50);
+    let stage0_latency = stage0_start.elapsed();
+    println!("Stage 0 Energy/ZCR compute latency: {:?}", stage0_latency);
+    assert!(
+        stage0_latency < Duration::from_millis(1),
+        "Stage 0 compute must be strictly under 1ms (<10µs typical)"
+    );
+    assert!(stage0_speech.is_active, "Speech tone must be active");
+    assert!(
+        stage0_speech.rms_energy > 0.25,
+        "Speech tone RMS energy should exceed threshold"
+    );
+    println!("✅ Stage 0 Energy & ZCR detector verified successfully.\n");
+
+    // 2. Test VAD Debounce State Machine Transitions & Fast Single-Frame Trigger
+    println!("--- Testing VAD Debounce Logic & Fast-Start Trigger Transitions ---");
     let mut model_dir =
         std::env::var("LIVA_STT_MODEL_DIR").unwrap_or_else(|_| "models/nemotron-asr".to_string());
     if !std::path::Path::new(&model_dir).exists() {
@@ -33,16 +62,16 @@ async fn main() -> Result<(), String> {
         "VAD engine should start in silent state"
     );
 
-    // Test transition to speech: requires 3 consecutive speech frames
+    // Standard debounce (low confidence): requires 3 consecutive speech frames
     let event1 = vad_engine.test_update_state_machine(true);
     assert_eq!(
         event1, None,
-        "1 frame of speech should not trigger SpeechStart"
+        "1 frame of low-confidence speech should not trigger SpeechStart"
     );
     let event2 = vad_engine.test_update_state_machine(true);
     assert_eq!(
         event2, None,
-        "2 frames of speech should not trigger SpeechStart"
+        "2 frames of low-confidence speech should not trigger SpeechStart"
     );
     let event3 = vad_engine.test_update_state_machine(true);
     assert_eq!(
@@ -74,27 +103,48 @@ async fn main() -> Result<(), String> {
         !vad_engine.is_speaking(),
         "VAD engine should be back to silent state"
     );
-    println!("✅ VAD Debounce Logic Transitions verified successfully.\n");
 
-    // 2. Test VAD Engine ONNX Model execution and latency
-    println!("--- Testing Real VAD ONNX Inference Execution ---");
-    let dummy_frame = vec![0.0f32; 512];
-
-    // Warmup run
-    let _ = vad_engine.process_audio(&dummy_frame)?;
-
-    // Measure inference latency
-    let start_inf = Instant::now();
-    let _ = vad_engine.process_audio(&dummy_frame)?;
-    let inf_latency = start_inf.elapsed();
-    println!("VAD ONNX CPU Inference latency: {:?}", inf_latency);
-    assert!(
-        inf_latency < Duration::from_millis(15),
-        "VAD inference latency must be under 15ms (ideally <8ms)"
+    // Test Fast Single-Frame Trigger (p >= 0.85)
+    let fast_event = vad_engine.test_update_state_machine_with_confidence(true, 0.92, 0.02);
+    assert_eq!(
+        fast_event,
+        Some(VadEvent::SpeechStart),
+        "Single high-confidence frame must trigger SpeechStart immediately (<=20-25ms target)"
     );
-    println!("✅ VAD ONNX Inference verified successfully.\n");
+    assert!(vad_engine.is_speaking());
+    vad_engine.reset();
+    println!("✅ VAD Debounce & Fast-Start Logic verified successfully.\n");
 
-    // 3. Test Coordinator State Machine, Interruptions, and Latency
+    // 3. Test Real VAD ONNX Inference Execution across Frame Sizes (160, 256, 512)
+    println!("--- Testing Real VAD ONNX Multi-Frame Inference (160, 256, 512 samples) ---");
+    for &frame_size in &[160usize, 256usize, 512usize] {
+        let config = VadConfig {
+            frame_size,
+            ..VadConfig::default()
+        };
+        let mut multi_engine = VadEngine::new(&vad_model_path, config)?;
+        let test_frame = vec![0.0f32; frame_size];
+
+        // Warmup
+        let _ = multi_engine.process_audio(&test_frame)?;
+
+        // Measure inference latency
+        let start_inf = Instant::now();
+        let _ = multi_engine.process_audio(&test_frame)?;
+        let inf_latency = start_inf.elapsed();
+        let duration_ms = (frame_size as f32 / 16000.0) * 1000.0;
+        println!(
+            "VAD frame size {} samples ({:.1}ms) - ONNX Inference latency: {:?}",
+            frame_size, duration_ms, inf_latency
+        );
+        assert!(
+            inf_latency < Duration::from_millis(15),
+            "VAD inference latency must be under 15ms"
+        );
+    }
+    println!("✅ Multi-frame VAD ONNX Inference verified successfully.\n");
+
+    // 4. Test Coordinator State Machine, Interruptions, and Preemption Latency
     println!("--- Testing Actor-Coordinator Pipeline Flow ---");
     let db = db::DatabasePool::new_in_memory().map_err(|e| e.to_string())?;
     let crypto = crypto::EncryptionEngine::new("00000000000000000000000000000000");
@@ -188,7 +238,7 @@ async fn main() -> Result<(), String> {
     assert_eq!(pipeline_handle.state(), PipelineState::VadStart);
     println!("✅ Interruption & Barge-in preemption latency verified successfully.\n");
 
-    // 4. Test Late/Stale Callback Safety (Monotonic Session ID)
+    // 5. Test Late/Stale Callback Safety (Monotonic Session ID)
     println!("--- Testing Monotonic Session ID Callback Safety ---");
     // Send SttCompleted with a stale session ID (the current session_id has incremented due to interruption)
     let stale_event = PipelineEvent::SttCompleted {
@@ -215,6 +265,6 @@ async fn main() -> Result<(), String> {
     actor_handle.abort();
     let _ = actor_handle.await;
 
-    println!("🎉 All verification checks passed successfully!");
+    println!("🎉 All duplex and VAD verification checks passed successfully!");
     Ok(())
 }

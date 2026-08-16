@@ -918,7 +918,10 @@ pub async fn build_catalog_with_disabled(
 /// khi có G1, tức đi tiếp sang `chat_completion`. Mọi lỗi trên đường đi (LLM
 /// hỏng, output không đọc được, tham số sai) đều thành `None` kèm log: rơi về
 /// hành vi cũ luôn tốt hơn là chạy bừa một tool.
-pub async fn select_tool(state: &crate::AppState, user_text: &str) -> Option<ResolvedCall> {
+pub async fn select_tool(
+    state: &std::sync::Arc<crate::AppState>,
+    user_text: &str,
+) -> Option<ResolvedCall> {
     if !enabled() {
         return None;
     }
@@ -928,11 +931,18 @@ pub async fn select_tool(state: &crate::AppState, user_text: &str) -> Option<Res
     }
 
     let top: Vec<usize> = {
-        let mut guard = state.embedder.lock().await;
-        match guard.as_mut() {
-            Some(e) => rank_tools(&catalog, user_text, Some(e), DEFAULT_TOP_K),
-            None => rank_tools(&catalog, user_text, None, DEFAULT_TOP_K),
-        }
+        let state = std::sync::Arc::clone(state);
+        let catalog = catalog.clone();
+        let query = user_text.to_string();
+        tokio::task::spawn_blocking(move || {
+            let mut guard = state.embedder.blocking_lock();
+            match guard.as_mut() {
+                Some(e) => rank_tools(&catalog, &query, Some(e), DEFAULT_TOP_K),
+                None => rank_tools(&catalog, &query, None, DEFAULT_TOP_K),
+            }
+        })
+        .await
+        .ok()?
     };
     let ung_vien: Vec<&CatalogTool> = top.iter().map(|&i| &catalog.tools()[i]).collect();
     if ung_vien.is_empty() {
@@ -947,10 +957,18 @@ pub async fn select_tool(state: &crate::AppState, user_text: &str) -> Option<Res
         }
     };
     let raw = {
-        let mut llm = state.llm.lock().await;
-        // temperature 0 + top_p 1: đây là quyết định phân loại, không phải sáng
-        // tác. Sampling ngẫu nhiên ở đây chỉ tạo ra kết quả không lặp lại được.
-        match llm.generate_completion(&prompt, 0.0, 1.0, |_| true) {
+        let state = std::sync::Arc::clone(state);
+        let prompt_clone = prompt.clone();
+        let completion_res = tokio::task::spawn_blocking(move || {
+            let mut llm = state.llm.blocking_lock();
+            // temperature 0 + top_p 1: đây là quyết định phân loại, không phải sáng
+            // tác. Sampling ngẫu nhiên ở đây chỉ tạo ra kết quả không lặp lại được.
+            llm.generate_completion(&prompt_clone, 0.0, 1.0, |_| true)
+        })
+        .await
+        .ok()?;
+
+        match completion_res {
             Ok(out) => out.text,
             Err(e) => {
                 tracing::warn!("chọn tool: LLM lỗi ({e}); rơi về route_intent");

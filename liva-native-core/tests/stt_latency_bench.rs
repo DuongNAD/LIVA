@@ -68,7 +68,9 @@ fn bench_parakeet_first_chunk_latency_budget() {
     for _ in 0..10 {
         pk.reset_stream();
         let t0 = Instant::now();
-        let _ = pk.feed_chunk(first_chunk, false).expect("feed_chunk failed");
+        let _ = pk
+            .feed_chunk(first_chunk, false)
+            .expect("feed_chunk failed");
         latencies.push(t0.elapsed());
     }
 

@@ -173,10 +173,12 @@ impl<A: CodeAgent> SelfCorrectionLoop<A> {
         let mut in_failures = false;
 
         for line in output.stderr.lines().chain(output.stdout.lines()) {
-            if line.contains("error[E") || line.contains("error:") || line.contains("--> ") {
-                error_summary.push_str(line);
-                error_summary.push('\n');
-            } else if line.contains("panicked at") || line.contains("failed") {
+            if line.contains("error[E")
+                || line.contains("error:")
+                || line.contains("--> ")
+                || line.contains("panicked at")
+                || line.contains("failed")
+            {
                 error_summary.push_str(line);
                 error_summary.push('\n');
             } else if line.contains("failures:") {

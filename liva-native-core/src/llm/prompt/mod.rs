@@ -1,4 +1,10 @@
+pub mod dynamic_prompt;
 pub mod persona;
+
+pub use dynamic_prompt::{
+    DynamicPromptAssembler, PromptAssemblyError, PromptBudget, PromptSlice, SkillDefinition,
+    SlicePriority,
+};
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};

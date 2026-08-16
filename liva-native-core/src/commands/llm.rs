@@ -207,6 +207,14 @@ async fn task_plan_chat(
     let compiled_prompt = llm::compile_prompt(&messages)?;
     let task_id_clone = task_id.clone();
 
+    #[derive(serde::Serialize)]
+    struct TaskStreamChunk<'a> {
+        #[serde(rename = "taskId")]
+        task_id: &'a str,
+        message: &'a str,
+        done: bool,
+    }
+
     let completion_output = tokio::task::spawn_blocking(move || {
         let mut llm_manager = state.llm.blocking_lock();
 
@@ -218,11 +226,11 @@ async fn task_plan_chat(
                 if piece.is_empty() {
                     return true;
                 }
-                let chunk = json!({
-                    "taskId": task_id_clone.clone(),
-                    "message": piece,
-                    "done": false
-                });
+                let chunk = TaskStreamChunk {
+                    task_id: &task_id_clone,
+                    message: piece,
+                    done: false,
+                };
                 if let Ok(chunk_str) = serde_json::to_string(&chunk) {
                     let _ = tx_inner.blocking_send(chunk_str);
                 }

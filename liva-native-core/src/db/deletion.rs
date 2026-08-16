@@ -307,25 +307,37 @@ pub fn delete_conversation(
 
 /// Xóa toàn bộ bộ nhớ cá nhân của subject local.
 ///
-/// Hiện một số projection lịch sử (`facts`, `turn_layer_nodes`, `l3_*`,
-/// checkpoint) chưa có cột owner. Vì vậy API cố ý từ chối owner khác `local`
-/// thay vì xóa chéo tenant. Scope local bao gồm cả
-/// `memory_owner:legacy_unowned`, là dữ liệu conversation trước migration v2.
+/// Xóa toàn bộ dữ liệu của một subject (người dùng) theo owner domain.
+/// Hỗ trợ cả chủ thể local lẫn các tenant ngoại vi (Telegram, REST, v.v.).
 pub fn delete_subject(
     conn: &Connection,
     owner_id: &str,
     dry_run: bool,
 ) -> Result<SubjectDeletionReport, rusqlite::Error> {
-    if owner_id.trim() != "local" {
+    let owner_id = owner_id.trim();
+    if owner_id.is_empty() {
         return Err(rusqlite::Error::InvalidParameterName(
-            "DeleteSubject currently supports only the local owner".to_string(),
+            "owner_id must not be empty".to_string(),
         ));
     }
 
-    let owner_domain = "memory_owner:local";
-    let legacy_domain = "memory_owner:legacy_unowned";
+    let is_local = owner_id == "local";
+    let (owner_domain, legacy_domain) = if is_local {
+        (
+            "memory_owner:local".to_string(),
+            Some("memory_owner:legacy_unowned".to_string()),
+        )
+    } else {
+        let dom = if owner_id.starts_with("memory_owner:") {
+            owner_id.to_string()
+        } else {
+            format!("memory_owner:{}", owner_id)
+        };
+        (dom, None)
+    };
+
     let request_id = format!("subdel_{}", uuid::Uuid::new_v4());
-    let scope_hash = subject_scope_hash(owner_domain);
+    let scope_hash = subject_scope_hash(&owner_domain);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -333,54 +345,118 @@ pub fn delete_subject(
 
     conn.execute_batch("PRAGMA secure_delete = ON;")?;
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
-    let domains = [owner_domain, legacy_domain];
-    let count_domains = |sql: &str| -> Result<i64, rusqlite::Error> {
-        tx.query_row(sql, domains, |row| row.get(0))
+
+    let (events, vectors_meta, vec_idx, vectors_fts, dlq, vector_dlq) = if let Some(ref leg) =
+        legacy_domain
+    {
+        let domains = [&owner_domain, leg];
+        let count_domains = |sql: &str| -> Result<i64, rusqlite::Error> {
+            tx.query_row(sql, domains, |row| row.get(0))
+        };
+        let events = count_domains("SELECT COUNT(*) FROM events WHERE domain IN (?1, ?2)")?;
+        let vectors_meta =
+            count_domains("SELECT COUNT(*) FROM vectors_meta WHERE domain IN (?1, ?2)")?;
+        let vec_idx = count_domains(
+            "SELECT COUNT(*) FROM vec_idx
+             WHERE rowid IN (
+                 SELECT id FROM vectors_meta WHERE domain IN (?1, ?2)
+             )",
+        )?;
+        let vectors_fts = count_domains(
+            "SELECT COUNT(*) FROM vectors_fts
+             WHERE rowid IN (
+                 SELECT id FROM vectors_meta WHERE domain IN (?1, ?2)
+             )",
+        )?;
+        let dlq = count_domains(
+            "SELECT COUNT(*) FROM dlq_consolidation
+             WHERE session_id IN (
+                 SELECT eventId FROM events WHERE domain IN (?1, ?2)
+             )",
+        )?;
+        let vector_dlq = count_domains(
+            "SELECT COUNT(*) FROM vector_dlq
+             WHERE instr(delete_filter, ?1) > 0 OR instr(delete_filter, ?2) > 0",
+        )?;
+        (events, vectors_meta, vec_idx, vectors_fts, dlq, vector_dlq)
+    } else {
+        let domains = [&owner_domain];
+        let count_domains = |sql: &str| -> Result<i64, rusqlite::Error> {
+            tx.query_row(sql, domains, |row| row.get(0))
+        };
+        let events = count_domains("SELECT COUNT(*) FROM events WHERE domain = ?1")?;
+        let vectors_meta = count_domains("SELECT COUNT(*) FROM vectors_meta WHERE domain = ?1")?;
+        let vec_idx = count_domains(
+            "SELECT COUNT(*) FROM vec_idx
+             WHERE rowid IN (
+                 SELECT id FROM vectors_meta WHERE domain = ?1
+             )",
+        )?;
+        let vectors_fts = count_domains(
+            "SELECT COUNT(*) FROM vectors_fts
+             WHERE rowid IN (
+                 SELECT id FROM vectors_meta WHERE domain = ?1
+             )",
+        )?;
+        let dlq = count_domains(
+            "SELECT COUNT(*) FROM dlq_consolidation
+             WHERE session_id IN (
+                 SELECT eventId FROM events WHERE domain = ?1
+             )",
+        )?;
+        let vector_dlq = count_domains(
+            "SELECT COUNT(*) FROM vector_dlq
+             WHERE instr(delete_filter, ?1) > 0",
+        )?;
+        (events, vectors_meta, vec_idx, vectors_fts, dlq, vector_dlq)
     };
-    let events = count_domains("SELECT COUNT(*) FROM events WHERE domain IN (?1, ?2)")?;
-    let vectors_meta = count_domains("SELECT COUNT(*) FROM vectors_meta WHERE domain IN (?1, ?2)")?;
-    let vec_idx = count_domains(
-        "SELECT COUNT(*) FROM vec_idx
-         WHERE rowid IN (
-             SELECT id FROM vectors_meta WHERE domain IN (?1, ?2)
-         )",
-    )?;
-    let vectors_fts = count_domains(
-        "SELECT COUNT(*) FROM vectors_fts
-         WHERE rowid IN (
-             SELECT id FROM vectors_meta WHERE domain IN (?1, ?2)
-         )",
-    )?;
-    let dlq = count_domains(
-        "SELECT COUNT(*) FROM dlq_consolidation
-         WHERE session_id IN (
-             SELECT eventId FROM events WHERE domain IN (?1, ?2)
-         )",
-    )?;
-    let vector_dlq = count_domains(
-        "SELECT COUNT(*) FROM vector_dlq
-         WHERE instr(delete_filter, ?1) > 0 OR instr(delete_filter, ?2) > 0",
-    )?;
+
     let scalar_count = |table: &str| -> Result<i64, rusqlite::Error> {
         tx.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
             row.get(0)
         })
     };
+
     let counts = SubjectDeletionCounts {
         events,
         vectors_meta,
         vec_idx,
         vectors_fts,
-        checkpoints: scalar_count("agent_checkpoints")?,
-        consolidation_checkpoints: scalar_count("consolidation_checkpoints")?,
+        checkpoints: if is_local {
+            scalar_count("agent_checkpoints")?
+        } else {
+            0
+        },
+        consolidation_checkpoints: if is_local {
+            scalar_count("consolidation_checkpoints")?
+        } else {
+            0
+        },
         dlq,
         vector_dlq,
-        facts: scalar_count("facts")?,
-        fact_backups: scalar_count("facts_locked_backup")?,
-        turns: scalar_count("turn_layer_nodes")?,
-        l3_edges: scalar_count("l3_edges")?,
-        l3_nodes: scalar_count("l3_nodes")?,
+        facts: if is_local { scalar_count("facts")? } else { 0 },
+        fact_backups: if is_local {
+            scalar_count("facts_locked_backup")?
+        } else {
+            0
+        },
+        turns: if is_local {
+            scalar_count("turn_layer_nodes")?
+        } else {
+            0
+        },
+        l3_edges: if is_local {
+            scalar_count("l3_edges")?
+        } else {
+            0
+        },
+        l3_nodes: if is_local {
+            scalar_count("l3_nodes")?
+        } else {
+            0
+        },
     };
+
     let counts_json = serde_json::to_string(&counts)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     tx.execute(
@@ -399,72 +475,128 @@ pub fn delete_subject(
                 }
                 Ok(())
             };
-        exact_delete(
-            "DELETE FROM facts_locked_backup",
-            counts.fact_backups,
-            "facts_locked_backup",
-        )?;
-        exact_delete("DELETE FROM facts", counts.facts, "facts")?;
-        let deleted = tx.execute(
-            "DELETE FROM dlq_consolidation
-             WHERE session_id IN (
-                 SELECT eventId FROM events WHERE domain IN (?1, ?2)
-             )",
-            domains,
-        )?;
-        if deleted as i64 != counts.dlq {
-            return Err(mismatch("dlq_consolidation", counts.dlq, deleted));
+
+        if is_local {
+            exact_delete(
+                "DELETE FROM facts_locked_backup",
+                counts.fact_backups,
+                "facts_locked_backup",
+            )?;
+            exact_delete("DELETE FROM facts", counts.facts, "facts")?;
         }
-        let deleted = tx.execute(
-            "DELETE FROM vector_dlq
-             WHERE instr(delete_filter, ?1) > 0 OR instr(delete_filter, ?2) > 0",
-            domains,
-        )?;
-        if deleted as i64 != counts.vector_dlq {
-            return Err(mismatch("vector_dlq", counts.vector_dlq, deleted));
-        }
-        for (table, expected) in [
-            ("vectors_fts", counts.vectors_fts),
-            ("vec_idx", counts.vec_idx),
-        ] {
+
+        if let Some(ref leg) = legacy_domain {
+            let domains = [&owner_domain, leg];
             let deleted = tx.execute(
-                &format!(
-                    "DELETE FROM {table}
-                     WHERE rowid IN (
-                         SELECT id FROM vectors_meta WHERE domain IN (?1, ?2)
-                     )"
-                ),
+                "DELETE FROM dlq_consolidation
+                 WHERE session_id IN (
+                     SELECT eventId FROM events WHERE domain IN (?1, ?2)
+                 )",
                 domains,
             )?;
-            if deleted as i64 != expected {
-                return Err(mismatch(table, expected, deleted));
+            if deleted as i64 != counts.dlq {
+                return Err(mismatch("dlq_consolidation", counts.dlq, deleted));
+            }
+            let deleted = tx.execute(
+                "DELETE FROM vector_dlq
+                 WHERE instr(delete_filter, ?1) > 0 OR instr(delete_filter, ?2) > 0",
+                domains,
+            )?;
+            if deleted as i64 != counts.vector_dlq {
+                return Err(mismatch("vector_dlq", counts.vector_dlq, deleted));
+            }
+            for (table, expected) in [
+                ("vectors_fts", counts.vectors_fts),
+                ("vec_idx", counts.vec_idx),
+            ] {
+                let deleted = tx.execute(
+                    &format!(
+                        "DELETE FROM {table}
+                         WHERE rowid IN (
+                             SELECT id FROM vectors_meta WHERE domain IN (?1, ?2)
+                         )"
+                    ),
+                    domains,
+                )?;
+                if deleted as i64 != expected {
+                    return Err(mismatch(table, expected, deleted));
+                }
+            }
+            let deleted =
+                tx.execute("DELETE FROM vectors_meta WHERE domain IN (?1, ?2)", domains)?;
+            if deleted as i64 != counts.vectors_meta {
+                return Err(mismatch("vectors_meta", counts.vectors_meta, deleted));
+            }
+            let deleted = tx.execute("DELETE FROM events WHERE domain IN (?1, ?2)", domains)?;
+            if deleted as i64 != counts.events {
+                return Err(mismatch("events", counts.events, deleted));
+            }
+        } else {
+            let domains = [&owner_domain];
+            let deleted = tx.execute(
+                "DELETE FROM dlq_consolidation
+                 WHERE session_id IN (
+                     SELECT eventId FROM events WHERE domain = ?1
+                 )",
+                domains,
+            )?;
+            if deleted as i64 != counts.dlq {
+                return Err(mismatch("dlq_consolidation", counts.dlq, deleted));
+            }
+            let deleted = tx.execute(
+                "DELETE FROM vector_dlq
+                 WHERE instr(delete_filter, ?1) > 0",
+                domains,
+            )?;
+            if deleted as i64 != counts.vector_dlq {
+                return Err(mismatch("vector_dlq", counts.vector_dlq, deleted));
+            }
+            for (table, expected) in [
+                ("vectors_fts", counts.vectors_fts),
+                ("vec_idx", counts.vec_idx),
+            ] {
+                let deleted = tx.execute(
+                    &format!(
+                        "DELETE FROM {table}
+                         WHERE rowid IN (
+                             SELECT id FROM vectors_meta WHERE domain = ?1
+                         )"
+                    ),
+                    domains,
+                )?;
+                if deleted as i64 != expected {
+                    return Err(mismatch(table, expected, deleted));
+                }
+            }
+            let deleted = tx.execute("DELETE FROM vectors_meta WHERE domain = ?1", domains)?;
+            if deleted as i64 != counts.vectors_meta {
+                return Err(mismatch("vectors_meta", counts.vectors_meta, deleted));
+            }
+            let deleted = tx.execute("DELETE FROM events WHERE domain = ?1", domains)?;
+            if deleted as i64 != counts.events {
+                return Err(mismatch("events", counts.events, deleted));
             }
         }
-        let deleted = tx.execute("DELETE FROM vectors_meta WHERE domain IN (?1, ?2)", domains)?;
-        if deleted as i64 != counts.vectors_meta {
-            return Err(mismatch("vectors_meta", counts.vectors_meta, deleted));
+
+        if is_local {
+            exact_delete(
+                "DELETE FROM agent_checkpoints",
+                counts.checkpoints,
+                "agent_checkpoints",
+            )?;
+            exact_delete(
+                "DELETE FROM consolidation_checkpoints",
+                counts.consolidation_checkpoints,
+                "consolidation_checkpoints",
+            )?;
+            exact_delete(
+                "DELETE FROM turn_layer_nodes",
+                counts.turns,
+                "turn_layer_nodes",
+            )?;
+            exact_delete("DELETE FROM l3_edges", counts.l3_edges, "l3_edges")?;
+            exact_delete("DELETE FROM l3_nodes", counts.l3_nodes, "l3_nodes")?;
         }
-        let deleted = tx.execute("DELETE FROM events WHERE domain IN (?1, ?2)", domains)?;
-        if deleted as i64 != counts.events {
-            return Err(mismatch("events", counts.events, deleted));
-        }
-        exact_delete(
-            "DELETE FROM agent_checkpoints",
-            counts.checkpoints,
-            "agent_checkpoints",
-        )?;
-        exact_delete(
-            "DELETE FROM consolidation_checkpoints",
-            counts.consolidation_checkpoints,
-            "consolidation_checkpoints",
-        )?;
-        exact_delete(
-            "DELETE FROM turn_layer_nodes",
-            counts.turns,
-            "turn_layer_nodes",
-        )?;
-        exact_delete("DELETE FROM l3_edges", counts.l3_edges, "l3_edges")?;
-        exact_delete("DELETE FROM l3_nodes", counts.l3_nodes, "l3_nodes")?;
     }
     tx.commit()?;
 

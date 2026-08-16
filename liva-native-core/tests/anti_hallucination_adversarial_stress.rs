@@ -37,14 +37,12 @@ fn test_shannon_entropy_white_noise_burst_rejected() {
         noisy_logprobs[base + blank_id] = -10.0; // Blank is not dominant
     }
 
-    let entropy = AntiHallucinationFilter::compute_shannon_entropy(&noisy_logprobs, vocab_size, blank_id);
+    let entropy =
+        AntiHallucinationFilter::compute_shannon_entropy(&noisy_logprobs, vocab_size, blank_id);
     assert!(entropy.is_some());
     let h = entropy.unwrap();
     // Theoretical max entropy for 1023 uniform classes = ln(1023) ≈ 6.93
-    assert!(
-        h > 6.0,
-        "Uniform noise entropy should be ~6.93, got {h:.2}"
-    );
+    assert!(h > 6.0, "Uniform noise entropy should be ~6.93, got {h:.2}");
 
     // Filter must reject candidate text generated under this acoustic noise
     let decision = filter.filter("xin chào buổi sáng", 1.5, Some(0.1), Some(h));
@@ -74,10 +72,14 @@ fn test_shannon_entropy_sharp_confident_speech_accepted() {
         speech_logprobs[base + blank_id] = -5.0;
     }
 
-    let entropy = AntiHallucinationFilter::compute_shannon_entropy(&speech_logprobs, vocab_size, blank_id);
+    let entropy =
+        AntiHallucinationFilter::compute_shannon_entropy(&speech_logprobs, vocab_size, blank_id);
     assert!(entropy.is_some());
     let h = entropy.unwrap();
-    assert!(h < 0.20, "Confident speech entropy should be < 0.20, got {h:.2}");
+    assert!(
+        h < 0.20,
+        "Confident speech entropy should be < 0.20, got {h:.2}"
+    );
 
     let decision = filter.filter("Hôm nay tôi đi làm", 1.8, Some(0.02), Some(h));
     assert!(decision.is_valid());
@@ -95,7 +97,8 @@ fn test_shannon_entropy_all_blank_silence_returns_zero() {
         silence_logprobs[base + blank_id] = 0.0; // 100% blank
     }
 
-    let entropy = AntiHallucinationFilter::compute_shannon_entropy(&silence_logprobs, vocab_size, blank_id);
+    let entropy =
+        AntiHallucinationFilter::compute_shannon_entropy(&silence_logprobs, vocab_size, blank_id);
     assert_eq!(entropy, Some(0.0));
 }
 
@@ -110,7 +113,8 @@ fn test_shannon_entropy_robust_against_nan_and_infinities() {
     bad_logprobs[2] = f32::NEG_INFINITY;
     bad_logprobs[blank_id] = -10.0;
 
-    let entropy = AntiHallucinationFilter::compute_shannon_entropy(&bad_logprobs, vocab_size, blank_id);
+    let entropy =
+        AntiHallucinationFilter::compute_shannon_entropy(&bad_logprobs, vocab_size, blank_id);
     assert!(entropy.is_some());
     assert!(entropy.unwrap().is_finite());
 }
@@ -269,7 +273,8 @@ fn test_layer5_vietnamese_phantom_phrases_blacklist() {
         assert!(matches!(
             decision,
             FilterDecision::Filtered {
-                reason: FilterReason::BlacklistPattern(_) | FilterReason::TooManySuspiciousWords { .. },
+                reason: FilterReason::BlacklistPattern(_)
+                    | FilterReason::TooManySuspiciousWords { .. },
                 ..
             }
         ));
@@ -309,8 +314,15 @@ fn test_filter_performance_and_fuzz_stress() {
     assert!(decision.is_valid());
     // Debug builds are unoptimized; the strict number is the release contract.
     const SLOWDOWN: u128 = if cfg!(debug_assertions) { 10 } else { 1 };
-    println!("[AntiHallucination Benchmark] Long natural-speech filter elapsed: {:?}", elapsed);
-    assert!(elapsed.as_millis() < 50 * SLOWDOWN, "Long text filter took too long: {:?}", elapsed);
+    println!(
+        "[AntiHallucination Benchmark] Long natural-speech filter elapsed: {:?}",
+        elapsed
+    );
+    assert!(
+        elapsed.as_millis() < 50 * SLOWDOWN,
+        "Long text filter took too long: {:?}",
+        elapsed
+    );
 
     // 2. 10,000 consecutive filter calls throughput test
     let text = "Hôm nay tôi muốn kiểm tra lịch làm việc";
@@ -320,10 +332,17 @@ fn test_filter_performance_and_fuzz_stress() {
     }
     let total_10k = start_10k.elapsed();
     let avg_per_call = total_10k / 10_000;
-    println!("[AntiHallucination Benchmark] 10,000 filter runs: Total = {:?}, Avg = {:?}", total_10k, avg_per_call);
+    println!(
+        "[AntiHallucination Benchmark] 10,000 filter runs: Total = {:?}, Avg = {:?}",
+        total_10k, avg_per_call
+    );
     // Release contract is 100µs; measured ~32µs per call, so that leaves ~3x headroom.
     // Debug multiplies by SLOWDOWN because the unoptimized build is not held to the SLA.
-    assert!(avg_per_call.as_micros() < 100 * SLOWDOWN, "Filter average latency too high: {:?}", avg_per_call);
+    assert!(
+        avg_per_call.as_micros() < 100 * SLOWDOWN,
+        "Filter average latency too high: {:?}",
+        avg_per_call
+    );
 }
 
 #[test]
@@ -488,7 +507,10 @@ fn test_vietnamese_all_6_tones_and_complex_vowels_zero_false_positives() {
         // Tone 3: Sắc (Rising)
         ("Sáng sớm mai chúng tôi sẽ đến khám phá vùng đất mới", 3.1),
         // Tone 4: Hỏi (Dipping-rising)
-        ("Bạn có thể giải thích rõ hơn về biểu mẫu này được không", 3.4),
+        (
+            "Bạn có thể giải thích rõ hơn về biểu mẫu này được không",
+            3.4,
+        ),
         // Tone 5: Ngã (Glottalized rising)
         ("Hãy luôn giữ vững niềm tin và nỗ lực trong cuộc sống", 3.3),
         // Tone 6: Nặng (Glottalized falling)
@@ -496,16 +518,43 @@ fn test_vietnamese_all_6_tones_and_complex_vowels_zero_false_positives() {
         // Mixed all 6 tones in a single sentence: ma mà má mả mã mạ
         ("Bác ba báu bảo bão bạt", 2.0),
         // Complex diphthongs and triphthongs (oanh, uyên, iêu, ươu, oeo, khuya, nghiêng, ngoằn ngoèo)
-        ("Con đường làng quanh co ngoằn ngoèo đưa chúng tôi về miền quê thanh bình", 4.0),
-        ("Đêm khuya nghe tiếng chim hót liếu lo trên cành phượng vĩ nghiêng bóng", 4.2),
-        ("Anh ấy có một câu chuyện rất thú vị về chuyến đi du thuyền vượt biển", 4.0),
+        (
+            "Con đường làng quanh co ngoằn ngoèo đưa chúng tôi về miền quê thanh bình",
+            4.0,
+        ),
+        (
+            "Đêm khuya nghe tiếng chim hót liếu lo trên cành phượng vĩ nghiêng bóng",
+            4.2,
+        ),
+        (
+            "Anh ấy có một câu chuyện rất thú vị về chuyến đi du thuyền vượt biển",
+            4.0,
+        ),
         // Real-world Voice Assistant queries
-        ("Bật đèn phòng khách và đặt điều hòa ở mức hai mươi tư độ C", 3.5),
-        ("Tạo một lời nhắc nhở lúc tám giờ tối nay để gọi điện cho mẹ", 3.6),
-        ("Tóm tắt các email quan trọng nhận được trong ngày hôm nay giúp tôi", 3.5),
-        ("Kiểm tra lịch trình cuộc họp sáng mai lúc chín giờ ba mươi", 3.2),
-        ("Đọc lại các ghi chú cá nhân về dự án phát triển phần mềm LIVA", 3.5),
-        ("Chuyển năm trăm nghìn đồng cho tài khoản ngân hàng Quân Đội", 3.0),
+        (
+            "Bật đèn phòng khách và đặt điều hòa ở mức hai mươi tư độ C",
+            3.5,
+        ),
+        (
+            "Tạo một lời nhắc nhở lúc tám giờ tối nay để gọi điện cho mẹ",
+            3.6,
+        ),
+        (
+            "Tóm tắt các email quan trọng nhận được trong ngày hôm nay giúp tôi",
+            3.5,
+        ),
+        (
+            "Kiểm tra lịch trình cuộc họp sáng mai lúc chín giờ ba mươi",
+            3.2,
+        ),
+        (
+            "Đọc lại các ghi chú cá nhân về dự án phát triển phần mềm LIVA",
+            3.5,
+        ),
+        (
+            "Chuyển năm trăm nghìn đồng cho tài khoản ngân hàng Quân Đội",
+            3.0,
+        ),
         // Short conversational confirmations
         ("Xin chào", 0.8),
         ("Được rồi", 0.7),
@@ -522,7 +571,10 @@ fn test_vietnamese_all_6_tones_and_complex_vowels_zero_false_positives() {
             "Sentence failed validation unexpectedly: '{sentence}' -> {:?}",
             decision
         );
-        if let FilterDecision::Valid { normalized_text, .. } = decision {
+        if let FilterDecision::Valid {
+            normalized_text, ..
+        } = decision
+        {
             // Must be normalized to Unicode NFC
             assert_eq!(normalized_text, sentence.nfc().collect::<String>());
         }
@@ -544,7 +596,10 @@ fn test_vietnamese_nfd_input_normalizes_to_identical_nfc() {
 
     let decision = filter.filter(&nfd_text, 3.5, Some(0.01), Some(1.10));
     assert!(decision.is_valid());
-    if let FilterDecision::Valid { normalized_text, .. } = decision {
+    if let FilterDecision::Valid {
+        normalized_text, ..
+    } = decision
+    {
         assert_eq!(normalized_text, nfc_text);
     }
 }

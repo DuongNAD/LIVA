@@ -238,9 +238,19 @@ fn delete_subject_dry_run_then_execute_removes_local_memory_and_keeps_other_owne
         .unwrap(),
         2
     );
-    assert!(
-        db::delete_subject(&conn, "telegram:42", false).is_err(),
-        "DeleteSubject is local-only until every projection has owner identity"
+    let tg_deleted =
+        db::delete_subject(&conn, "telegram:42", false).expect("DeleteSubject for telegram:42");
+    assert_eq!(tg_deleted.counts.events, 1);
+    assert_eq!(tg_deleted.counts.vectors_meta, 1);
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM events WHERE eventId = 'telegram-turn'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0,
+        "telegram:42 events must be deleted after DeleteSubject(telegram:42)"
     );
 
     drop(conn);

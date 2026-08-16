@@ -22,7 +22,8 @@ pub fn resolve_model_paths() -> (PathBuf, PathBuf) {
 /// Decode a WAV file to mono f32 at 16 kHz, resampling linearly when the source rate differs.
 pub fn load_audio_wav_16k(path: &Path) -> Result<Vec<f32>, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("open {:?}: {}", path, e))?;
-    let dec = Decoder::new(BufReader::new(file)).map_err(|e| format!("decode {:?}: {}", path, e))?;
+    let dec =
+        Decoder::new(BufReader::new(file)).map_err(|e| format!("decode {:?}: {}", path, e))?;
     let sr = dec.sample_rate();
     let ch = dec.channels() as usize;
     let samples: Vec<f32> = dec.convert_samples::<f32>().collect();

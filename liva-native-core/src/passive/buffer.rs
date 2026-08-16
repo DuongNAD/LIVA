@@ -96,24 +96,18 @@ impl ActiveSessionBuffer {
                     self.accumulated_text.push_str(&key);
                 }
 
-                if self.accumulated_text.len() >= self.length_threshold {
-                    if flushed.is_none() {
-                        flushed = self.flush();
-                    }
-                } else if should_flush_after {
-                    if flushed.is_none() {
-                        flushed = self.flush();
-                    }
+                if (self.accumulated_text.len() >= self.length_threshold || should_flush_after)
+                    && flushed.is_none()
+                {
+                    flushed = self.flush();
                 }
             }
             RawEvent::MouseClick { button, x, y, .. } => {
                 self.accumulated_text
                     .push_str(&format!(" [Click:{}({},{})] ", button, x, y));
 
-                if self.accumulated_text.len() >= self.length_threshold {
-                    if flushed.is_none() {
-                        flushed = self.flush();
-                    }
+                if self.accumulated_text.len() >= self.length_threshold && flushed.is_none() {
+                    flushed = self.flush();
                 }
             }
         }

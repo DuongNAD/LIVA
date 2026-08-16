@@ -20,17 +20,32 @@ fn test_normalizer_garbage_inputs_zero_panic() {
         ("empty_string", ""),
         ("spaces_tabs_newlines", "   \t\n\r\u{a0} \u{200b} "),
         ("pure_emojis", "🙂🙃🎉👍🏽🇻🇳❤️‍🔥👨‍👩‍👧‍👦"),
-        ("control_chars", "\u{0}\u{1}\u{7}\u{8}\u{1b}[31m\u{7f}\u{1f}"),
+        (
+            "control_chars",
+            "\u{0}\u{1}\u{7}\u{8}\u{1b}[31m\u{7f}\u{1f}",
+        ),
         ("pure_punctuation", "!!!???...,,,;;;:::---...///()[]{}"),
         ("bidi_override", "\u{202e}gnud iờn \u{202d}thuận"),
         ("unicode_replacement", "\u{fffd}\u{fffd}\u{fffd}\u{fffd}"),
-        ("decomposed_diacritics", "e\u{301}\u{323}\u{300}\u{302} a\u{303} u\u{31b}"),
-        ("mixed_scripts", "Привет мир, مرحبا, こんにちは, สวัสดี, Xin chào 123"),
+        (
+            "decomposed_diacritics",
+            "e\u{301}\u{323}\u{300}\u{302} a\u{303} u\u{31b}",
+        ),
+        (
+            "mixed_scripts",
+            "Привет мир, مرحبا, こんにちは, สวัสดี, Xin chào 123",
+        ),
         ("unclosed_regex_chars", "([{\\^$|?*+.)]}?*+"),
-        ("long_integer", "99999999999999999999999999999999999999999999999999"),
+        (
+            "long_integer",
+            "99999999999999999999999999999999999999999999999999",
+        ),
         ("nested_pathological_dots", pathological_dots.as_str()),
         ("malformed_date", "99/99/9999 lúc 99:99:99"),
-        ("negative_money_and_percent", "-1.000.000 đồng, $-50 và -15%"),
+        (
+            "negative_money_and_percent",
+            "-1.000.000 đồng, $-50 và -15%",
+        ),
         ("stuck_abbreviations", "TP.HCM.TS.PGS.v.v.Q.1P.5"),
         ("broken_phone", "0912345678901234567890"),
         ("math_formula", "f(x) = x^2 + 2x + 1/2 với x = 5/3"),
@@ -113,7 +128,10 @@ fn test_normalizer_thousands_vs_decimal_correctness() {
 
     // Version numbers with invalid grouping dots
     assert_eq!(normalize_vi("3.14.1"), "ba chấm mười bốn chấm một");
-    assert_eq!(normalize_vi("phiên bản 1.0.0"), "phiên bản một chấm không chấm không");
+    assert_eq!(
+        normalize_vi("phiên bản 1.0.0"),
+        "phiên bản một chấm không chấm không"
+    );
 }
 
 // =========================================================================

@@ -580,24 +580,23 @@ async fn native_ipc_call_stream(
     let principal = authorize_tauri_principal(window.label(), &command)?;
 
     let window_clone = window.clone();
-    let req_id_clone = req_id.clone();
+    let event_name = format!("ipc-stream:{}", req_id);
+    let req_id_log = req_id.clone();
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            match serde_json::from_str::<serde_json::Value>(&msg) {
+            match serde_json::value::RawValue::from_string(msg) {
                 Ok(resp) => {
-                    let _ = window_clone.emit(&format!("ipc-stream:{}", req_id_clone), resp);
+                    let _ = window_clone.emit(&event_name, &resp);
                 }
                 // Một producer ghi text thô thay vì JSON sẽ biến mất không dấu vết ở đây:
                 // chunk bị bỏ, không emit gì, và UI chỉ ngồi chờ tới lúc hết giờ. Ghi log
                 // để lần sau còn truy được, nhưng KHÔNG dừng vòng lặp — một chunk hỏng
                 // không được phép giết cả stream.
                 Err(err) => {
-                    let preview: String = msg.chars().take(120).collect();
                     tracing::warn!(
-                        "Chunk của stream '{}' không phải JSON, đã bỏ qua ({}). 120 ký tự đầu: {}",
-                        req_id_clone,
-                        err,
-                        preview
+                        "Chunk của stream '{}' không phải JSON, đã bỏ qua ({}).",
+                        req_id_log,
+                        err
                     );
                 }
             }

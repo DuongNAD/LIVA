@@ -2,10 +2,12 @@ pub mod agent;
 mod artifact_trust;
 mod authorization;
 pub mod boot;
+pub mod cognitive;
 pub mod commands;
 pub mod consent;
 pub mod crypto;
 pub mod db;
+pub mod eval;
 #[cfg(feature = "experimental")]
 pub mod evolution;
 pub mod governor;
@@ -84,13 +86,16 @@ pub struct AppState {
 }
 
 #[derive(serde::Serialize)]
-struct IpcResponse {
-    id: String,
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+struct IpcTokenChunkData<'a> {
+    token: &'a str,
+    done: bool,
+}
+
+#[derive(serde::Serialize)]
+struct IpcTokenChunkRef<'a> {
+    id: &'a str,
+    status: &'static str,
+    data: IpcTokenChunkData<'a>,
 }
 
 /// Đọc một biến môi trường dạng cờ bật/tắt.
@@ -519,11 +524,13 @@ pub async fn handle_chat_completion_scoped(
                 if piece.is_empty() {
                     return true;
                 }
-                let chunk_response = IpcResponse {
-                    id: req_id_inner.clone(),
-                    status: "ok".to_string(),
-                    data: Some(serde_json::json!({ "token": piece, "done": false })),
-                    error: None,
+                let chunk_response = IpcTokenChunkRef {
+                    id: &req_id_inner,
+                    status: "ok",
+                    data: IpcTokenChunkData {
+                        token: piece,
+                        done: false,
+                    },
                 };
                 if let Ok(chunk) = serde_json::to_string(&chunk_response) {
                     let _ = tx_inner.blocking_send(chunk);

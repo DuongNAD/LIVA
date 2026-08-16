@@ -25,6 +25,12 @@ opt-level = 3
 [profile.dev.package.blake2b_simd]
 opt-level = 3
 
+[profile.dev.package.aes-gcm]
+opt-level = 3
+
+[profile.dev.package.aes]
+opt-level = 3
+
 # `artifact_trust` băm SHA-256 TOÀN BỘ file model trước khi cho nạp. Với router
 # 4,2 GB (gemma-4-E4B từ 02/08/2026) `sha2` không tối ưu chậm tới mức lõi debug
 # KHÔNG nạp xong model trong 400 giây — mọi câu chat trong cửa sổ đó trả về
@@ -35,14 +41,57 @@ opt-level = 3
 [profile.dev.package.sha2]
 opt-level = 3
 
+[profile.dev.package.regex]
+opt-level = 3
+
+[profile.dev.package.regex-syntax]
+opt-level = 3
+
+[profile.dev.package.iota-crypto]
+opt-level = 3
+
+[profile.dev.package.iota_stronghold]
+opt-level = 3
+
+[profile.dev.package.stronghold_engine]
+opt-level = 3
+
+[profile.test.package.llama-cpp-2]
+opt-level = 3
+
+[profile.test.package.llama-cpp-sys-2]
+opt-level = 3
+
 [profile.test.package.rust-argon2]
+opt-level = 3
+
+[profile.test.package.regex]
+opt-level = 3
+
+[profile.test.package.regex-syntax]
 opt-level = 3
 
 [profile.test.package.blake2b_simd]
 opt-level = 3
 
+[profile.test.package.aes-gcm]
+opt-level = 3
+
+[profile.test.package.aes]
+opt-level = 3
+
 [profile.test.package.sha2]
 opt-level = 3
+
+[profile.test.package.iota-crypto]
+opt-level = 3
+
+[profile.test.package.iota_stronghold]
+opt-level = 3
+
+[profile.test.package.stronghold_engine]
+opt-level = 3
+
 
 [patch.crates-io]
 # xcb 1.7.0 on crates.io still pins vulnerable quick-xml 0.30. Upstream

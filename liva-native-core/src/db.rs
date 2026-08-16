@@ -54,6 +54,7 @@ fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqli
         PRAGMA cache_size = -8192;
         PRAGMA page_size = 32768;
         PRAGMA mmap_size = 268435456;
+        PRAGMA temp_store = MEMORY;
     ",
     )?;
 
@@ -220,6 +221,15 @@ pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
     }
 }
 
+pub fn get_reader_pool_size() -> u32 {
+    std::env::var("LIVA_DB_READER_POOL_SIZE")
+        .or_else(|_| std::env::var("LIVA_DB_READERS"))
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|&v| (1..=64).contains(&v))
+        .unwrap_or(4)
+}
+
 #[derive(Clone)]
 pub struct DatabasePool {
     pub writer: Pool<CustomSqliteManager>,
@@ -238,10 +248,13 @@ impl DatabasePool {
             read_only: false,
         })?;
 
-        let readers = Pool::builder().max_size(4).build(CustomSqliteManager {
-            inner: Arc::new(read_manager),
-            read_only: true,
-        })?;
+        let readers_size = get_reader_pool_size();
+        let readers = Pool::builder()
+            .max_size(readers_size)
+            .build(CustomSqliteManager {
+                inner: Arc::new(read_manager),
+                read_only: true,
+            })?;
 
         let conn = writer.get()?;
         init_schemas(&conn)?;
@@ -266,15 +279,68 @@ impl DatabasePool {
             read_only: false,
         })?;
 
-        let readers = Pool::builder().max_size(4).build(CustomSqliteManager {
-            inner: Arc::new(read_manager),
-            read_only: true,
-        })?;
+        let readers_size = get_reader_pool_size();
+        let readers = Pool::builder()
+            .max_size(readers_size)
+            .build(CustomSqliteManager {
+                inner: Arc::new(read_manager),
+                read_only: true,
+            })?;
 
         let conn = writer.get()?;
         init_schemas(&conn)?;
 
         Ok(DatabasePool { writer, readers })
+    }
+
+    /// Execute a read-only closure synchronously with a pooled reader connection.
+    pub fn with_reader<F, R>(&self, f: F) -> Result<R, rusqlite::Error>
+    where
+        F: FnOnce(&rusqlite::Connection) -> Result<R, rusqlite::Error>,
+    {
+        let conn = self.readers.get().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "Failed to acquire SQLite reader connection from pool: {e}"
+            ))))
+        })?;
+        f(&conn)
+    }
+
+    /// Execute a write closure synchronously with the pooled writer connection.
+    pub fn with_writer<F, R>(&self, f: F) -> Result<R, rusqlite::Error>
+    where
+        F: FnOnce(&mut rusqlite::Connection) -> Result<R, rusqlite::Error>,
+    {
+        let mut conn = self.writer.get().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "Failed to acquire SQLite writer connection from pool: {e}"
+            ))))
+        })?;
+        f(&mut conn)
+    }
+
+    /// Execute a read-only closure asynchronously on tokio's blocking threadpool with a pooled reader connection.
+    pub async fn spawn_reader<F, R>(&self, f: F) -> Result<R, String>
+    where
+        F: FnOnce(&rusqlite::Connection) -> Result<R, rusqlite::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        let pool = self.clone();
+        tokio::task::spawn_blocking(move || pool.with_reader(f).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("spawn_reader blocking task panicked: {e}"))?
+    }
+
+    /// Execute a write closure asynchronously on tokio's blocking threadpool with the pooled writer connection.
+    pub async fn spawn_writer<F, R>(&self, f: F) -> Result<R, String>
+    where
+        F: FnOnce(&mut rusqlite::Connection) -> Result<R, rusqlite::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        let pool = self.clone();
+        tokio::task::spawn_blocking(move || pool.with_writer(f).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("spawn_writer blocking task panicked: {e}"))?
     }
 }
 
@@ -439,6 +505,60 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             FOREIGN KEY(source) REFERENCES l3_nodes(id),
             FOREIGN KEY(target) REFERENCES l3_nodes(id)
         );
+
+        CREATE TABLE IF NOT EXISTS idempotency_records (
+            idempotency_key TEXT PRIMARY KEY,
+            action_id TEXT NOT NULL,
+            tool_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            response_json TEXT,
+            created_at_ms INTEGER NOT NULL,
+            expires_at_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_records(expires_at_ms);
+
+        CREATE TABLE IF NOT EXISTS action_audit_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_id TEXT UNIQUE NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            source_event_id TEXT,
+            tool_id TEXT NOT NULL,
+            risk_tier TEXT NOT NULL,
+            policy_decision TEXT NOT NULL,
+            principal TEXT NOT NULL,
+            redacted_params TEXT NOT NULL,
+            redacted_observation TEXT,
+            status TEXT NOT NULL,
+            duration_ms INTEGER,
+            created_at_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_action_audit_created ON action_audit_ledger(created_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_action_audit_tool ON action_audit_ledger(tool_id, status);
+
+        CREATE TABLE IF NOT EXISTS memory_conflict_queue (
+            conflict_id TEXT PRIMARY KEY,
+            fact_key TEXT NOT NULL,
+            domain TEXT NOT NULL DEFAULT 'memory_owner:local',
+            existing_value TEXT NOT NULL,
+            proposed_value TEXT NOT NULL,
+            source_event_id TEXT,
+            conflict_type TEXT NOT NULL DEFAULT 'contradiction',
+            resolution_status TEXT NOT NULL DEFAULT 'pending',
+            created_at_ms INTEGER NOT NULL,
+            resolved_at_ms INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_conflict_queue_domain_status ON memory_conflict_queue(domain, resolution_status);
+
+        CREATE TABLE IF NOT EXISTS facts_history (
+            history_id TEXT PRIMARY KEY,
+            key TEXT NOT NULL,
+            domain TEXT NOT NULL DEFAULT 'memory_owner:local',
+            old_value TEXT NOT NULL,
+            archived_at_ms INTEGER NOT NULL,
+            superseded_by TEXT,
+            reason TEXT NOT NULL DEFAULT 'superseded'
+        );
+        CREATE INDEX IF NOT EXISTS idx_facts_history_key ON facts_history(key, domain);
     ")?;
 
     let count: i64 = conn.query_row(
@@ -485,7 +605,7 @@ fn ensure_foreign_key_integrity(conn: &Connection) -> Result<(), rusqlite::Error
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -625,6 +745,64 @@ const MIGRATIONS: &[(i64, &str)] = &[
          );
          CREATE INDEX IF NOT EXISTS idx_deletion_audit_created
              ON deletion_audit(created_at);",
+    ),
+    // Migration 8: Cognitive Runtime v1 — Idempotency Records and Redacted Action Audit Ledger
+    (
+        8,
+        "CREATE TABLE IF NOT EXISTS idempotency_records (
+             idempotency_key TEXT PRIMARY KEY,
+             action_id TEXT NOT NULL,
+             tool_id TEXT NOT NULL,
+             status TEXT NOT NULL,
+             response_json TEXT,
+             created_at_ms INTEGER NOT NULL,
+             expires_at_ms INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_records(expires_at_ms);
+         CREATE TABLE IF NOT EXISTS action_audit_ledger (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             action_id TEXT UNIQUE NOT NULL,
+             idempotency_key TEXT NOT NULL,
+             source_event_id TEXT,
+             tool_id TEXT NOT NULL,
+             risk_tier TEXT NOT NULL,
+             policy_decision TEXT NOT NULL,
+             principal TEXT NOT NULL,
+             redacted_params TEXT NOT NULL,
+             redacted_observation TEXT,
+             status TEXT NOT NULL,
+             duration_ms INTEGER,
+             created_at_ms INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_action_audit_created ON action_audit_ledger(created_at_ms);
+         CREATE INDEX IF NOT EXISTS idx_action_audit_tool ON action_audit_ledger(tool_id, status);",
+    ),
+    // Migration 9: Cognitive Memory Architecture — Memory Conflict Queue and Facts History
+    (
+        9,
+        "CREATE TABLE IF NOT EXISTS memory_conflict_queue (
+             conflict_id TEXT PRIMARY KEY,
+             fact_key TEXT NOT NULL,
+             domain TEXT NOT NULL DEFAULT 'memory_owner:local',
+             existing_value TEXT NOT NULL,
+             proposed_value TEXT NOT NULL,
+             source_event_id TEXT,
+             conflict_type TEXT NOT NULL DEFAULT 'contradiction',
+             resolution_status TEXT NOT NULL DEFAULT 'pending',
+             created_at_ms INTEGER NOT NULL,
+             resolved_at_ms INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS idx_conflict_queue_domain_status ON memory_conflict_queue(domain, resolution_status);
+         CREATE TABLE IF NOT EXISTS facts_history (
+             history_id TEXT PRIMARY KEY,
+             key TEXT NOT NULL,
+             domain TEXT NOT NULL DEFAULT 'memory_owner:local',
+             old_value TEXT NOT NULL,
+             archived_at_ms INTEGER NOT NULL,
+             superseded_by TEXT,
+             reason TEXT NOT NULL DEFAULT 'superseded'
+         );
+         CREATE INDEX IF NOT EXISTS idx_facts_history_key ON facts_history(key, domain);",
     ),
 ];
 
@@ -1630,6 +1808,102 @@ pub fn search_hybrid_vectors(
     results.truncate(top_k);
 
     Ok(results)
+}
+
+// ── Cognitive Runtime v1: Idempotency and Audit Ledger DB Accessors ──
+
+pub fn record_action_audit(
+    conn: &Connection,
+    record: &crate::cognitive::ActionAuditRecord,
+) -> Result<i64, rusqlite::Error> {
+    crate::cognitive::RedactedAuditLedger::record_action(conn, record)
+}
+
+pub fn get_action_audit(
+    conn: &Connection,
+    action_id: &str,
+) -> Result<Option<crate::cognitive::ActionAuditRecord>, rusqlite::Error> {
+    crate::cognitive::RedactedAuditLedger::query_by_action_id(conn, action_id)
+}
+
+pub fn get_recent_action_audits(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<crate::cognitive::ActionAuditRecord>, rusqlite::Error> {
+    crate::cognitive::RedactedAuditLedger::query_recent(conn, limit)
+}
+
+pub fn get_idempotency_record(
+    conn: &Connection,
+    key: &str,
+) -> Result<Option<crate::cognitive::IdempotencyRecord>, rusqlite::Error> {
+    crate::cognitive::IdempotencyManager::db_get(conn, key)
+}
+
+pub fn set_idempotency_record(
+    conn: &Connection,
+    record: &crate::cognitive::IdempotencyRecord,
+) -> Result<(), rusqlite::Error> {
+    crate::cognitive::IdempotencyManager::db_upsert(conn, record)
+}
+
+// ── Cognitive Memory Architecture (Milestone 2) DB Accessors ──
+
+pub use crate::cognitive::memory::{
+    CognitiveFact, CognitiveMemoryCoordinator, ConflictResolutionAction, FactDeletionCounts,
+    FactHistoryRecord, FactUpsertOutcome, MemoryConflictRecord, MemoryDeleteCoordinator,
+    MemoryProvenance,
+};
+
+pub fn upsert_cognitive_fact(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    fact: &CognitiveFact,
+    auto_archive_on_supersede: bool,
+) -> Result<FactUpsertOutcome, rusqlite::Error> {
+    CognitiveMemoryCoordinator::upsert_cognitive_fact(conn, engine, fact, auto_archive_on_supersede)
+}
+
+pub fn stage_memory_conflict(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    conflict: &MemoryConflictRecord,
+) -> Result<(), rusqlite::Error> {
+    CognitiveMemoryCoordinator::stage_conflict(conn, engine, conflict)
+}
+
+pub fn get_pending_conflicts(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    domain: &str,
+) -> Result<Vec<MemoryConflictRecord>, rusqlite::Error> {
+    CognitiveMemoryCoordinator::get_pending_conflicts(conn, engine, domain)
+}
+
+pub fn resolve_memory_conflict(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    conflict_id: &str,
+    action: ConflictResolutionAction,
+) -> Result<bool, rusqlite::Error> {
+    CognitiveMemoryCoordinator::resolve_conflict(conn, engine, conflict_id, action)
+}
+
+pub fn get_fact_history(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    key: &str,
+    domain: &str,
+) -> Result<Vec<FactHistoryRecord>, rusqlite::Error> {
+    CognitiveMemoryCoordinator::get_fact_history(conn, engine, key, domain)
+}
+
+pub fn delete_fact_cascade(
+    conn: &Connection,
+    key: &str,
+    domain: &str,
+) -> Result<FactDeletionCounts, rusqlite::Error> {
+    MemoryDeleteCoordinator::delete_fact_cascade(conn, key, domain)
 }
 
 #[cfg(test)]

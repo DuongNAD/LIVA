@@ -345,7 +345,10 @@ async fn test_channel_saturation_does_not_block_preemption() {
     assert_eq!(flush.op_code, OP_FLUSH);
     // Debug builds are unoptimized; the strict number is the release contract.
     const SLOWDOWN: u32 = if cfg!(debug_assertions) { 10 } else { 1 };
-    println!("[Saturated Channel Benchmark] Preemption elapsed: {:?}", elapsed);
+    println!(
+        "[Saturated Channel Benchmark] Preemption elapsed: {:?}",
+        elapsed
+    );
     assert!(
         elapsed < Duration::from_millis(5) * SLOWDOWN,
         "Preemption took {:?} on saturated channel (must be <5ms)",

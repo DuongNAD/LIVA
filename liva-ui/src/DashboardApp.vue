@@ -21,10 +21,13 @@ onErrorCaptured((err, _instance, info) => {
 import TitleBar from "./components/dashboard/TitleBar.vue";
 import Sidebar from "./components/dashboard/Sidebar.vue";
 import StatusBar from "./components/dashboard/StatusBar.vue";
+import ToastContainer from "./components/ToastContainer.vue";
 
 import AvatarGallery from "./components/dashboard/AvatarGallery.vue";
 import AISettings from "./components/dashboard/AISettings.vue";
 import TaskManager from "./components/dashboard/TaskManager.vue";
+import BiAnalyticsView from "./components/dashboard/BiAnalyticsView.vue";
+import ObsidianVaultView from "./components/dashboard/ObsidianVaultView.vue";
 import SkillsView from "./components/dashboard/SkillsView.vue";
 import SystemView from "./components/dashboard/SystemView.vue";
 import UserProfile from "./components/dashboard/UserProfile.vue";
@@ -43,6 +46,8 @@ const pageMap: Record<string, Component> = {
   api: markRaw(ApiManagementView),
   voice: markRaw(VoiceManagementView),
   tasks: markRaw(TaskManager),
+  bi: markRaw(BiAnalyticsView),
+  obsidian: markRaw(ObsidianVaultView),
   memory: markRaw(MemoryViewer),
   skills: markRaw(SkillsView),
   system: markRaw(SystemView),
@@ -166,6 +171,9 @@ onUnmounted(() => {
         <div class="gpu-setup-loader"></div>
       </div>
     </div>
+
+    <!-- Global Toast Presentation Layer -->
+    <ToastContainer />
   </div>
 </template>
 

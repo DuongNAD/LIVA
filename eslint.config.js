@@ -35,7 +35,8 @@ export default tseslint.config(
       // (22/07/2026) chúng làm `eslint .` chạy từ gốc repo báo lỗi parse — kể
       // cả khi mã nguồn thật hoàn toàn sạch.
       ".agents/**/*",
-      "scripts/**/*"
+      "scripts/**/*",
+      "target/**/*"
     ]
   },
   eslint.configs.recommended,

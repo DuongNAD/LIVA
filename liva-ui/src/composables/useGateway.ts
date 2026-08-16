@@ -262,6 +262,7 @@ const isProfileLoading = ref<boolean>(true);
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let profileTimeout: ReturnType<typeof setTimeout> | null = null;
+let isTearingDown = false;
 
 // Gửi message
 const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
@@ -323,7 +324,9 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       if (_memoryUpdatedCallback) _memoryUpdatedCallback();
       break;
     case 'task_plan_chat':
-      if (_taskPlanReplyCallback) _taskPlanReplyCallback(res as TaskPlanReplyPayload);
+      if (_taskPlanReplyCallback && !(payload && typeof payload === 'object' && (payload as Record<string, unknown>).stream === true)) {
+        _taskPlanReplyCallback(res as TaskPlanReplyPayload);
+      }
       break;
     case 'test_skill':
       if (_skillCheckResultCallback) _skillCheckResultCallback(res);
@@ -391,6 +394,102 @@ const requestBootstrapData = () => {
   }
 };
 
+// Track active stream unlisten callbacks to prevent memory leaks and support cleanup on destroy
+const activeStreamUnlistens = new Map<string, () => void>();
+
+// Safety timeout (5 minutes) for Tauri IPC streams. Complex LLM task planning
+// can stream tokens for several minutes, but any stream should conclude within 5m.
+// If done is never emitted (e.g. backend crash/cancellation), we unlisten to prevent leaks.
+const TAURI_STREAM_SAFETY_TIMEOUT_MS = 300_000;
+const activeStreamTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const handleTauriStream = async (
+  event: WSClientEvent | string,
+  payload: Record<string, unknown>,
+  reqId: string,
+) => {
+  let unlisten: (() => void) | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    unlisten = await listen(`ipc-stream:${reqId}`, (tauriEvent: { payload: unknown }) => {
+      const data = tauriEvent.payload as {
+        event?: string;
+        payload?: TaskPlanReplyPayload;
+        token?: string;
+        done?: boolean;
+      } | null;
+      logger.debug(`[useGateway] Stream chunk for ${reqId}:`, data);
+      if (data) {
+        if (data.token !== undefined) {
+          if (_taskPlanReplyCallback) {
+            _taskPlanReplyCallback({
+              taskId: (payload.taskId as string) || '',
+              message: data.token,
+              done: data.done || false,
+            });
+          }
+        } else if (data.event === 'task_plan_reply' || data.payload) {
+          if (_taskPlanReplyCallback) {
+            _taskPlanReplyCallback((data.payload ?? data) as TaskPlanReplyPayload);
+          }
+        }
+        if (data.done === true) {
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+            activeStreamTimers.delete(reqId);
+          }
+          if (unlisten) {
+            unlisten();
+            unlisten = null;
+            activeStreamUnlistens.delete(reqId);
+          }
+        }
+      }
+    });
+
+    if (isTearingDown) {
+      if (unlisten) {
+        unlisten();
+        unlisten = null;
+      }
+      return;
+    }
+
+    activeStreamUnlistens.set(reqId, unlisten);
+
+    timer = setTimeout(() => {
+      timer = null;
+      activeStreamTimers.delete(reqId);
+      if (unlisten) {
+        logger.warn(`[useGateway] Stream ${reqId} timed out after ${TAURI_STREAM_SAFETY_TIMEOUT_MS}ms without completion chunk`);
+        unlisten();
+        unlisten = null;
+        activeStreamUnlistens.delete(reqId);
+      }
+    }, TAURI_STREAM_SAFETY_TIMEOUT_MS);
+    activeStreamTimers.set(reqId, timer);
+
+    const { invoke } = await import('@tauri-apps/api/core');
+    const res = await invoke('native_ipc_call_stream', { command: event, payload, reqId });
+    logger.info(`[useGateway] Tauri IPC stream success: ${event}`, res);
+    mapTauriResponse(event as string, res, payload);
+  } catch (err) {
+    logger.error(`[useGateway] Tauri IPC stream error: ${event}`, err);
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+      activeStreamTimers.delete(reqId);
+    }
+    if (unlisten) {
+      unlisten();
+      unlisten = null;
+      activeStreamUnlistens.delete(reqId);
+    }
+  }
+};
+
 // Gửi message
 const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean => {
   logger.debug('[useGateway] Sending event:', event);
@@ -398,53 +497,22 @@ const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean 
     const isStream = payload && typeof payload === 'object' && (payload as Record<string, unknown>).stream === true;
     if (isStream) {
       const req_id = `req_${Math.random().toString(36).substring(2, 9)}`;
-      import("@tauri-apps/api/event").then(({ listen }) => {
-        listen(`ipc-stream:${req_id}`, (tauriEvent: { payload: unknown }) => {
-          const data = tauriEvent.payload as { event?: string; payload?: TaskPlanReplyPayload; token?: string; done?: boolean } | null;
-          logger.debug(`[useGateway] Stream chunk for ${req_id}:`, data);
-          if (data) {
-            if (data.event === 'task_plan_reply' || event === 'task_plan_chat') {
-              if (_taskPlanReplyCallback) {
-                _taskPlanReplyCallback((data.payload ?? data) as TaskPlanReplyPayload);
-              }
-            } else if (data.token) {
-              if (_taskPlanReplyCallback) {
-                _taskPlanReplyCallback({
-                  taskId: (payload as Record<string, unknown>).taskId as string || '',
-                  message: data.token,
-                  done: data.done || false
-                });
-              }
-            }
+      handleTauriStream(event, payload as Record<string, unknown>, req_id);
+      return true;
+    }
+    import("@tauri-apps/api/core").then(({ invoke }) => {
+      invoke("native_ipc_call", { command: event, payload })
+        .then((res) => {
+          logger.info(`[useGateway] Tauri IPC success: ${event}`, res);
+          mapTauriResponse(event, res, payload);
+        })
+        .catch((err) => {
+          logger.error(`[useGateway] Tauri IPC error: ${event}`, err);
+          if (event === 'vision:ask') {
+            finishVision('', err instanceof Error ? err.message : String(err));
           }
         });
-      });
-
-      import("@tauri-apps/api/core").then(({ invoke }) => {
-        invoke("native_ipc_call_stream", { command: event, payload, reqId: req_id })
-          .then((res) => {
-            logger.info(`[useGateway] Tauri IPC stream success: ${event}`, res);
-            mapTauriResponse(event, res, payload);
-          })
-          .catch((err) => {
-            logger.error(`[useGateway] Tauri IPC stream error: ${event}`, err);
-          });
-      });
-    } else {
-      import("@tauri-apps/api/core").then(({ invoke }) => {
-        invoke("native_ipc_call", { command: event, payload })
-          .then((res) => {
-            logger.info(`[useGateway] Tauri IPC success: ${event}`, res);
-            mapTauriResponse(event, res, payload);
-          })
-          .catch((err) => {
-            logger.error(`[useGateway] Tauri IPC error: ${event}`, err);
-            if (event === 'vision:ask') {
-              finishVision('', err instanceof Error ? err.message : String(err));
-            }
-          });
-      });
-    }
+    });
     return true;
   }
 
@@ -457,6 +525,7 @@ const sendMsg = (event: WSClientEvent | string, payload: unknown = {}): boolean 
   };
 
 const connect = () => {
+  isTearingDown = false;
   if (isTauri) {
     isConnected.value = true;
     isProfileLoading.value = false;
@@ -696,6 +765,7 @@ const connect = () => {
   socket.onclose = () => {
     isConnected.value = false;
     ws.value = null;
+    if (isTearingDown) return;
     logger.warn('[useGateway]', 'Mất kết nối. Đang thử lại sau 3s...');
 
     // Guard: clear any existing timer before scheduling a new one
@@ -723,6 +793,8 @@ export function useGateway() {
   };
 
   const destroy = () => {
+    isTearingDown = true;
+    stopWatchTimer();
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -731,6 +803,22 @@ export function useGateway() {
       clearTimeout(profileTimeout);
       profileTimeout = null;
     }
+    if (visionTimeout) {
+      clearTimeout(visionTimeout);
+      visionTimeout = null;
+    }
+    for (const timer of activeStreamTimers.values()) {
+      clearTimeout(timer);
+    }
+    activeStreamTimers.clear();
+    for (const [reqId, unlisten] of activeStreamUnlistens.entries()) {
+      try {
+        unlisten();
+      } catch (err) {
+        logger.warn(`[useGateway] Error unlistening stream ${reqId} on destroy:`, err);
+      }
+    }
+    activeStreamUnlistens.clear();
     if (ws.value) ws.value.close();
   };
 

@@ -11,7 +11,9 @@ import type { ModelFormat } from "../../composables/use3DModel";
 import type { AIProvider } from "liva-common";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
+import { useToast } from "../../composables/useToast";
 import { detectPlatform } from "../../platform";
+import { logger } from "../../utils/logger";
 
 // Props from parent (DashboardApp passes currentModelFormat)
 const props = defineProps<{
@@ -54,10 +56,42 @@ const toggleProvider = (p: AIProvider) => {
 let currentPickerTarget: 'router' | 'expert' = 'router';
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
-const openModelPicker = (target: 'router' | 'expert') => {
+const openModelPicker = async (target: 'router' | 'expert') => {
   currentPickerTarget = target;
-  if (fileInputRef.value) {
-    fileInputRef.value.click();
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'GGUF Models', extensions: ['gguf'] }],
+      title: 'Chọn file model GGUF (.gguf)'
+    });
+    if (!selected) return;
+
+    const fullPath = Array.isArray(selected) ? selected[0] : selected;
+    if (typeof fullPath === 'string' && fullPath) {
+      const lastSlash = Math.max(fullPath.lastIndexOf('\\'), fullPath.lastIndexOf('/'));
+      if (lastSlash !== -1) {
+        localModelsDir.value = fullPath.substring(0, lastSlash);
+        const filename = fullPath.substring(lastSlash + 1);
+        if (target === 'router') {
+          routerModel.value = filename;
+        } else {
+          expertModel.value = filename;
+        }
+      } else {
+        if (target === 'router') {
+          routerModel.value = fullPath;
+        } else {
+          expertModel.value = fullPath;
+        }
+      }
+    }
+  } catch (e) {
+    logger.debug('[AISettings]', 'Native dialog unavailable, falling back to file input', e);
+    if (fileInputRef.value) {
+      fileInputRef.value.click();
+    }
   }
 };
 
@@ -92,6 +126,7 @@ const onFileSelected = (e: Event) => {
 
 const gateway = useGateway();
 const { t } = useI18n();
+const toast = useToast();
 const platform = detectPlatform();
 
 // Watch for external config updates (e.g. from backend on initial load)
@@ -135,10 +170,14 @@ const saveConfig = async () => {
       }
     });
 
-    saveMessage.value = t('ai_saved');
+    const msg = t('ai_saved');
+    saveMessage.value = msg;
+    toast.success(msg);
     setTimeout(() => { saveMessage.value = ''; }, 3000);
   } catch (error) {
-    saveMessage.value = `Không thể lưu secret: ${String(error)}`;
+    const errMsg = `Không thể lưu secret: ${String(error)}`;
+    saveMessage.value = errMsg;
+    toast.error(errMsg);
   } finally {
     isSaving.value = false;
   }

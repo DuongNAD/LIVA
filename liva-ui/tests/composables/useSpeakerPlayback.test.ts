@@ -29,7 +29,12 @@ describe("useSpeakerPlayback", () => {
   interface GainNodeMock {
     connect: ReturnType<typeof vi.fn>;
     context: unknown;
-    gain: { value: number; setTargetAtTime: ReturnType<typeof vi.fn> };
+    gain: {
+      value: number;
+      setTargetAtTime: ReturnType<typeof vi.fn>;
+      setValueAtTime: ReturnType<typeof vi.fn>;
+      linearRampToValueAtTime: ReturnType<typeof vi.fn>;
+    };
   }
 
   interface AnalyserNodeMock {
@@ -65,7 +70,12 @@ describe("useSpeakerPlayback", () => {
       const gain: GainNodeMock = {
         connect: vi.fn(),
         context: this,
-        gain: { value: 1, setTargetAtTime: vi.fn() },
+        gain: {
+          value: 1,
+          setTargetAtTime: vi.fn(),
+          setValueAtTime: vi.fn(),
+          linearRampToValueAtTime: vi.fn(),
+        },
       };
       gains.push(gain);
       return gain;
@@ -152,6 +162,21 @@ describe("useSpeakerPlayback", () => {
     expect(speaker.isBlocked()).toBe(false);
     speaker.close();
     expect(speaker.getContext()).toBeNull();
+  });
+
+  it("applies 15ms linear gain rampdown before stopping audio during barge-in / stop", async () => {
+    const speaker = useSpeakerPlayback({ useMasterGain: true });
+    await speaker.enqueueSpeakerPayload(pcmChunk());
+
+    expect(sources).toHaveLength(1);
+    expect(gains).toHaveLength(1);
+
+    const masterGain = gains[0];
+    speaker.stop();
+
+    expect(masterGain.gain.setValueAtTime).toHaveBeenCalledWith(1, 0);
+    expect(masterGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, 0.015);
+    expect(sources[0].stop).toHaveBeenCalledWith(0.015);
   });
 
   // ── U24 · lỗi 1: nguồn âm từng mắc song song ─────────────────────────────

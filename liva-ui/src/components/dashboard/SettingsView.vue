@@ -2,6 +2,7 @@
 import { ref, watch, onActivated, onMounted, onDeactivated } from 'vue';
 import { useGateway } from '../../composables/useGateway';
 import { useI18n } from '../../composables/useI18n';
+import { useToast } from '../../composables/useToast';
 import { logger } from '../../utils/logger';
 // U20 bước 1 — công tắc đồng ý quan sát thụ động. Đặt ở Cài đặt vì đây là quyết
 // định quyền riêng tư, không phải một tuỳ chọn tính năng.
@@ -12,6 +13,7 @@ let resetTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const gateway = useGateway();
 const { t } = useI18n();
+const toast = useToast();
 const isGeoEnabled = ref(false);
 const digestInterestsEnabled = ref(false);
 const digestInterestsHour = ref(7);
@@ -147,13 +149,17 @@ const openResetConfirm = () => {
 
 // Gateway trả callback kiểu unknown, nên ép về MemoryResetResult ngay tại điểm dùng
 const onMemoryResetResult = (payload: unknown) => {
-    resetResult.value = payload as MemoryResetResult;
+    const res = payload as MemoryResetResult;
+    resetResult.value = res;
     isResetting.value = false;
     gateway.offMemoryResetResult();
     if (resetTimeout) { clearTimeout(resetTimeout); resetTimeout = null; }
     // Auto-close modal after 2s on success
-    if ((payload as MemoryResetResult).success) {
+    if (res.success) {
+        toast.success(t('set_wipe_success'));
         resetTimeout = setTimeout(() => { showResetConfirm.value = false; resetTimeout = null; }, 2000);
+    } else if (res.error) {
+        toast.error(t('set_wipe_error', { error: res.error }));
     }
 };
 
@@ -174,6 +180,7 @@ const confirmReset = () => {
         if (isResetting.value) {
             isResetting.value = false;
             resetResult.value = { success: false, error: 'Timeout — không nhận được phản hồi từ Gateway.' };
+            toast.error('Timeout — không nhận được phản hồi từ Gateway.');
         }
     }, 15000);
 };

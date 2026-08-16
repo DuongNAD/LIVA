@@ -226,6 +226,8 @@ vi.mock("../../src/composables/useI18n", () => ({
 import AISettings from "../../src/components/dashboard/AISettings.vue";
 import ApiManagementView from "../../src/components/dashboard/ApiManagementView.vue";
 import AvatarGallery from "../../src/components/dashboard/AvatarGallery.vue";
+import BiAnalyticsView from "../../src/components/dashboard/BiAnalyticsView.vue";
+import ObsidianVaultView from "../../src/components/dashboard/ObsidianVaultView.vue";
 import MemoryViewer from "../../src/components/dashboard/MemoryViewer.vue";
 import SettingsView from "../../src/components/dashboard/SettingsView.vue";
 import SkillsView from "../../src/components/dashboard/SkillsView.vue";
@@ -588,6 +590,28 @@ describe("Dashboard Views", () => {
     if (profileCard.exists()) {
       await profileCard.trigger("click");
       expect(gatewayMock.sendMsg).toHaveBeenCalledWith("select_voice_profile", expect.any(Object));
+    }
+  });
+
+  it("should mount and exercise BiAnalyticsView.vue", async () => {
+    const wrapper = mount(BiAnalyticsView);
+    expect(wrapper.exists()).toBe(true);
+    expect(wrapper.text()).toContain("Total Queries");
+
+    const timeBtns = wrapper.findAll(".time-btn");
+    if (timeBtns.length > 0) {
+      await timeBtns[0].trigger("click");
+    }
+  });
+
+  it("should mount and exercise ObsidianVaultView.vue", async () => {
+    const wrapper = mount(ObsidianVaultView);
+    expect(wrapper.exists()).toBe(true);
+    expect(wrapper.text()).toContain("teamwork_projects/obsidian_llm_wiki/vault/");
+
+    const chips = wrapper.findAll(".chip-btn");
+    if (chips.length > 1) {
+      await chips[1].trigger("click");
     }
   });
 });

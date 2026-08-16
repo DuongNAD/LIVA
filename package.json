@@ -17,6 +17,7 @@
     "setup:models": "node scripts/models.mjs fetch",
     "doctor": "node scripts/models.mjs doctor",
     "test:models": "node --test scripts/models.test.mjs",
+    "test:e2e": "node scripts/e2e-test-suite.mjs",
     "e2e:gateway": "node scripts/e2e-gateway-ci.mjs",
     "e2e:gateway:release": "node scripts/e2e-gateway-ci.mjs --release",
     "dev": "powershell -ExecutionPolicy Bypass -File scripts/start_all.ps1",
@@ -78,7 +79,9 @@
     "adm-zip": "0.6.0",
     "esbuild": "0.28.1",
     "gh-pages": "6.3.0",
+    "nanoid": "^3.3.18",
     "sharp": "0.35.3",
     "tar": "7.5.22"
   }
 }
+

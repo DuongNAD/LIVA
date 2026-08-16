@@ -13,6 +13,8 @@ const enUS = {
   nav_vision: 'Vision',
   nav_profile: 'Profile',
   nav_memory: 'Memory Space',
+  nav_bi: 'BI Analytics',
+  nav_vault: 'Knowledge Vault',
   nav_sys_settings: 'Settings',
   
   // Dashboard App
@@ -289,6 +291,8 @@ const viVN = {
   nav_vision: 'Nhìn màn hình',
   nav_profile: 'Hồ sơ',
   nav_memory: 'Không gian Trí nhớ',
+  nav_bi: 'Phân tích BI',
+  nav_vault: 'Kho Tri thức PKM',
   nav_sys_settings: 'Cài đặt',
 
   // Dashboard App

@@ -316,11 +316,9 @@ describe("useAvatarAnimation", () => {
     scene.position.x += 0.05;
     for (let frame = 0; frame < 20; frame++) anim.update(vrm, 1 / 60);
 
-    // ⚠️ Test này khoá đúng hành vi đang bị NGHI là nguồn của "khựng theo từng
-    // bước chân" (mục U30): root tiến +0.05 thì hips bị kéo lùi -0.05, tức bù
-    // theo phương NGANG. Nếu U30 kết luận phải bỏ bù ngang thì kỳ vọng dưới đây
-    // sai theo — sửa test, đừng sửa code cho vừa test.
-    expect(hips.position.x).toBeCloseTo(-0.05, 3);
+    // U30: Horizontal compensation is eliminated on hips to prevent sawtooth stutter,
+    // confining FootPlant correction to vertical damping only.
+    expect(hips.position.x).toBeCloseTo(0, 5);
   });
 
   it("chỉ duyệt lại đồ thị MỘT lần mỗi khung hình khi đặt bàn chân", () => {
@@ -394,11 +392,11 @@ describe("useAvatarAnimation", () => {
     });
     anim.setState("walk");
 
-    // Bật (mặc định) — hips bị kéo lùi như test trên.
+    // Bật (mặc định) — hips không bị kéo lùi theo phương ngang (U30).
     anim.update(vrm, 1 / 60);
     scene.position.x += 0.05;
     for (let frame = 0; frame < 20; frame++) anim.update(vrm, 1 / 60);
-    expect(hips.position.x).toBeCloseTo(-0.05, 3);
+    expect(hips.position.x).toBeCloseTo(0, 5);
 
     // Tắt — hips phải TRỞ VỀ 0, không đóng băng ở lượt bù cuối. Đây là phần
     // dễ sót nhất: chỉ `return` sớm thì độ lệch cuối cùng nằm lại vĩnh viễn và

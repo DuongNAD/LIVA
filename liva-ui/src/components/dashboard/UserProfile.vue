@@ -2,9 +2,11 @@
 import { ref, watch, onMounted } from 'vue';
 import { useGateway } from '../../composables/useGateway';
 import { useI18n } from '../../composables/useI18n';
+import { useToast } from '../../composables/useToast';
 
 const gateway = useGateway();
 const { t } = useI18n();
+const toast = useToast();
 
 const form = ref({
   name: '',
@@ -41,7 +43,9 @@ const saveProfile = async () => {
   // Simulate network delay for UX
   await new Promise(r => setTimeout(r, 600));
   isSaving.value = false;
-  saveMessage.value = t('pr_saved');
+  const msg = t('pr_saved');
+  saveMessage.value = msg;
+  toast.success(msg);
   setTimeout(() => { saveMessage.value = ''; }, 3000);
 };
 

@@ -9,7 +9,10 @@
     "./config": "./src/types/config.ts",
     "./websocket": "./src/types/websocket.ts"
   },
-  "scripts": {},
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit"
+  },
   "peerDependencies": {
     "zod": "^3.0.0 || ^4.0.0"
   }

@@ -26,7 +26,6 @@ export default defineConfig({
         'src/App.vue',          // Root component (tested via integration)
         'src/router/**',        // Router config (tested via integration)
         'src/assets/**',        // Static assets
-        'src/components/VisionSensor.vue', // Empty file causing compilation error
       ],
       // Ngưỡng này TRƯỚC NAY VÔ HIỆU: script test là `vitest run` (không kèm
       // `--coverage`), nên coverage không bao giờ được đo và ngưỡng không bao

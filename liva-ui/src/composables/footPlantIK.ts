@@ -1,4 +1,4 @@
-import type { LocomotionState } from "./useAvatarAnimation";
+export type LocomotionState = "idle" | "walk" | "run" | "jump";
 
 export interface Point3 {
   x: number;
@@ -87,9 +87,9 @@ export class FootPlantIK {
 
     const clamp = (value: number) => Math.min(Math.max(value, -this.maximumCorrection), this.maximumCorrection);
     return this.dampCorrection({
-      x: clamp(this.anchor.x - lockedPoint.x),
+      x: 0,
       y: clamp(this.anchor.y - lockedPoint.y),
-      z: clamp(this.anchor.z - lockedPoint.z),
+      z: 0,
     }, frame.delta);
   }
 }

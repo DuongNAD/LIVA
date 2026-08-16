@@ -1,4 +1,17 @@
-import type { ControlledBone, Pose } from "./useAvatarAnimation";
+/** Các xương mà lớp animation điều khiển. Cố tình không có spine/head/neck. */
+export const CONTROLLED_BONES = [
+  "leftUpperLeg", "leftLowerLeg", "leftFoot",
+  "rightUpperLeg", "rightLowerLeg", "rightFoot",
+  "leftUpperArm", "leftLowerArm",
+  "rightUpperArm", "rightLowerArm",
+  "hips",
+] as const;
+
+export type ControlledBone = (typeof CONTROLLED_BONES)[number];
+
+/** Góc Euler (radian) theo thứ tự X, Y, Z */
+export type Euler3 = readonly [number, number, number];
+export type Pose = Partial<Record<ControlledBone, Euler3>>;
 
 export type QuaternionTuple = readonly [number, number, number, number];
 

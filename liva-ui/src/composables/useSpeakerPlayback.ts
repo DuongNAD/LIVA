@@ -220,16 +220,58 @@ export function useSpeakerPlayback(
     const sources = activeSources;
     activeSources = [];
 
-    for (const source of sources) {
+    if (audioCtx && masterGain && sources.length > 0) {
+      const now = audioCtx.currentTime;
       try {
-        source.stop();
+        if (typeof masterGain.gain.setValueAtTime === "function") {
+          masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+        }
+        if (typeof masterGain.gain.linearRampToValueAtTime === "function") {
+          masterGain.gain.linearRampToValueAtTime(0, now + 0.015);
+        }
       } catch {
-        // Source may already have ended or may not have reached its scheduled start.
+        // Fallback if audio param method fails
       }
+
+      for (const source of sources) {
+        try {
+          source.stop(now + 0.015);
+        } catch {
+          try {
+            source.stop();
+          } catch {
+            // Source may already have ended or may not have reached its scheduled start.
+          }
+        }
+      }
+
+      const currentGain = masterGain;
+      const currentCtx = audioCtx;
+      setTimeout(() => {
+        if (currentGain) {
+          try {
+            if (typeof currentGain.gain.setValueAtTime === "function" && currentCtx) {
+              currentGain.gain.setValueAtTime(1.0, currentCtx.currentTime);
+            } else {
+              currentGain.gain.value = 1.0;
+            }
+          } catch {
+            currentGain.gain.value = 1.0;
+          }
+        }
+      }, 16);
+    } else {
+      for (const source of sources) {
+        try {
+          source.stop();
+        } catch {
+          // Source may already have ended or may not have reached its scheduled start.
+        }
+      }
+      if (masterGain) masterGain.gain.value = 1.0;
     }
 
     nextStartTime = audioCtx ? audioCtx.currentTime : 0;
-    if (masterGain) masterGain.gain.value = 1.0;
 
     if (options.onQueueDrained) options.onQueueDrained();
     if (playing) {

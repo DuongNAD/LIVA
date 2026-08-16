@@ -450,3 +450,117 @@ describe('useGateway — Message Dispatch & Error Handlers', () => {
     expect(gw.isConnected.value).toBe(false);
   });
 });
+
+describe('useGateway — Tauri Streaming Lifecycle & Cleanup', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('awaits listen before invoke, triggers taskPlanReply callback, and unlistens on done/finally', async () => {
+    vi.resetModules();
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+
+    let listenerCallback: ((event: { payload: unknown }) => void) | null = null;
+    const unlistenFn = vi.fn();
+    const listenMock = vi.fn().mockImplementation(async (_eventName: string, cb: (event: { payload: unknown }) => void) => {
+      listenerCallback = cb;
+      return unlistenFn;
+    });
+
+    let invokeCalled = false;
+    let listenCalledBeforeInvoke = false;
+    const invokeMock = vi.fn().mockImplementation(async (command: string, args: Record<string, unknown>) => {
+      if (listenMock.mock.calls.length > 0) {
+        listenCalledBeforeInvoke = true;
+      }
+      invokeCalled = true;
+      return { success: true };
+    });
+
+    vi.doMock('@tauri-apps/api/event', () => ({ listen: listenMock }));
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+
+    try {
+      const { useGateway: useTauriGateway } = await import('../../src/composables/useGateway');
+      const gw = useTauriGateway();
+
+      const replyCb = vi.fn();
+      gw.onTaskPlanReply(replyCb);
+
+      const sent = gw.sendMsg('task_plan_chat', { taskId: 'task-123', stream: true });
+      expect(sent).toBe(true);
+
+      // Wait for async handleTauriStream to set up listener and call invoke
+      await vi.waitFor(() => expect(invokeCalled).toBe(true));
+      expect(listenCalledBeforeInvoke).toBe(true);
+      expect(listenMock).toHaveBeenCalledWith(expect.stringMatching(/^ipc-stream:req_/), expect.any(Function));
+
+      // Simulate streaming token chunk
+      expect(listenerCallback).not.toBeNull();
+      listenerCallback!({
+        payload: {
+          token: 'Hello world',
+          done: false,
+        },
+      });
+
+      expect(replyCb).toHaveBeenCalledWith({
+        taskId: 'task-123',
+        message: 'Hello world',
+        done: false,
+      });
+
+      // Simulate done chunk
+      listenerCallback!({
+        payload: {
+          token: '',
+          done: true,
+        },
+      });
+
+      // unlisten must have been called
+      expect(unlistenFn).toHaveBeenCalled();
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      vi.doUnmock('@tauri-apps/api/event');
+      vi.doUnmock('@tauri-apps/api/core');
+      vi.resetModules();
+    }
+  });
+
+  it('unregisters remaining active streams on destroy()', async () => {
+    vi.resetModules();
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+
+    const unlistenFn = vi.fn();
+    const listenMock = vi.fn().mockResolvedValue(unlistenFn);
+    // Never resolve invoke to simulate ongoing active stream
+    let resolveInvoke: (val: unknown) => void = () => {};
+    const invokePromise = new Promise((resolve) => { resolveInvoke = resolve; });
+    const invokeMock = vi.fn().mockImplementation(() => invokePromise);
+
+    vi.doMock('@tauri-apps/api/event', () => ({ listen: listenMock }));
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+
+    try {
+      const { useGateway: useTauriGateway } = await import('../../src/composables/useGateway');
+      const gw = useTauriGateway();
+
+      gw.sendMsg('task_plan_chat', { taskId: 'task-456', stream: true });
+      await vi.waitFor(() => expect(listenMock).toHaveBeenCalled());
+
+      // Stream is active, destroy() should cleanup
+      gw.destroy();
+      expect(unlistenFn).toHaveBeenCalled();
+
+      // Resolve pending promise to avoid dangling promise
+      resolveInvoke({ success: true });
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      vi.doUnmock('@tauri-apps/api/event');
+      vi.doUnmock('@tauri-apps/api/core');
+      vi.resetModules();
+    }
+  });
+});
+

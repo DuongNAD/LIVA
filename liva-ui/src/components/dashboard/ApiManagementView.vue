@@ -5,9 +5,11 @@
  */
 import { computed, onActivated, onMounted, ref } from "vue";
 import { useGateway } from "../../composables/useGateway";
+import { useToast } from "../../composables/useToast";
 import { detectPlatform } from "../../platform";
 
 const gateway = useGateway();
+const toast = useToast();
 const platform = detectPlatform();
 const isSavingEnv = ref(false);
 const envMessage = ref("");
@@ -157,9 +159,13 @@ const saveEnvConfig = async () => {
     zaloAppSecret.value = "";
     emailPass.value = "";
     googleSecret.value = "";
-    envMessage.value = "✅ Đã lưu cấu hình công khai và secret vào Stronghold.";
+    const successMsg = "✅ Đã lưu cấu hình công khai và secret vào Stronghold.";
+    envMessage.value = successMsg;
+    toast.success("Đã lưu cấu hình và secret vào Stronghold.");
   } catch (error) {
-    envMessage.value = "❌ Không thể lưu cấu hình: " + String(error);
+    const errorMsg = "❌ Không thể lưu cấu hình: " + String(error);
+    envMessage.value = errorMsg;
+    toast.error("Không thể lưu cấu hình: " + String(error));
   } finally {
     isSavingEnv.value = false;
   }

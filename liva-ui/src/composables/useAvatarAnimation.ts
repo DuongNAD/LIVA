@@ -15,27 +15,31 @@
  */
 import type { VRM } from "@pixiv/three-vrm";
 import { Vector3 } from "three";
-import { sampleRetargetedClip, type RetargetedClip } from "./mixamoRetarget";
-import { FootPlantIK } from "./footPlantIK";
+import {
+  sampleRetargetedClip,
+  type RetargetedClip,
+  CONTROLLED_BONES,
+  type ControlledBone,
+  type Euler3,
+  type Pose,
+} from "./mixamoRetarget";
+import { FootPlantIK, type LocomotionState } from "./footPlantIK";
 
-export type LocomotionState = "idle" | "walk" | "run" | "jump";
+export type { LocomotionState };
+
 export type GestureName = "wave" | "nod" | "shake";
+
 export type AvatarClipState = LocomotionState | "wave" | "thinking";
 
 /** Các xương mà lớp này điều khiển. Cố tình không có spine/head/neck. */
-const CONTROLLED_BONES = [
-  "leftUpperLeg", "leftLowerLeg", "leftFoot",
-  "rightUpperLeg", "rightLowerLeg", "rightFoot",
-  "leftUpperArm", "leftLowerArm",
-  "rightUpperArm", "rightLowerArm",
-  "hips",
-] as const;
+export {
+  CONTROLLED_BONES,
+  type ControlledBone,
+  type Euler3,
+  type Pose,
+};
 
-export type ControlledBone = (typeof CONTROLLED_BONES)[number];
 
-/** Góc Euler (radian) theo thứ tự X, Y, Z */
-type Euler3 = readonly [number, number, number];
-export type Pose = Partial<Record<ControlledBone, Euler3>>;
 
 /** Tần số bước mỗi giây cho từng trạng thái */
 const STRIDE_HZ: Record<LocomotionState, number> = {

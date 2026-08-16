@@ -4,7 +4,7 @@
 //! WebView/WebSocket/Telegram principal is fail-closed and must appear in an
 //! explicit allow-list here before it can reach [`crate::handle_command`].
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum CommandPrincipal {
     LocalCli,
     Test,
@@ -54,14 +54,17 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "get_ai_config",
     "get_voice_status",
     "get_voice_profiles",
+    "select_voice_profile",
     "get_system_status",
     "get_preflight_status",
     "get_skills_list",
     "toggle_skill",
     "toggle_all_skills",
     "get_user_profile",
+    "update_user_profile",
     "get_avatar_models",
     "import_avatar_folder",
+    "delete_avatar_model",
     "consent:get",
     "consent:grant",
     "consent:revoke",
@@ -130,6 +133,14 @@ const REMOTE_COMMANDS: &[&str] = &[
 
 const TELEGRAM_COMMANDS: &[&str] = &["ping", "status", "chat:completion"];
 
+pub fn is_known_command(command: &str) -> bool {
+    SETUP_COMMANDS.contains(&command)
+        || WIDGET_COMMANDS.contains(&command)
+        || DASHBOARD_COMMANDS.contains(&command)
+        || REMOTE_COMMANDS.contains(&command)
+        || TELEGRAM_COMMANDS.contains(&command)
+}
+
 pub fn authorize_command(principal: CommandPrincipal, command: &str) -> Result<(), String> {
     let allowed = match principal {
         CommandPrincipal::LocalCli | CommandPrincipal::Test => true,
@@ -192,6 +203,22 @@ mod tests {
     #[test]
     fn toggle_skills_chi_mo_cho_dashboard() {
         for cmd in ["toggle_skill", "toggle_all_skills"] {
+            assert!(authorize_command(CommandPrincipal::TauriDashboard, cmd).is_ok());
+            assert!(authorize_command(CommandPrincipal::WebSocketDashboard, cmd).is_ok());
+            assert!(authorize_command(CommandPrincipal::TauriWidget, cmd).is_err());
+            assert!(authorize_command(CommandPrincipal::WebSocketWidget, cmd).is_err());
+            assert!(authorize_command(CommandPrincipal::WebSocketRemote, cmd).is_err());
+            assert!(authorize_command(CommandPrincipal::Telegram, cmd).is_err());
+        }
+    }
+
+    #[test]
+    fn disk_modifying_config_commands_chi_mo_cho_dashboard() {
+        for cmd in [
+            "update_user_profile",
+            "select_voice_profile",
+            "delete_avatar_model",
+        ] {
             assert!(authorize_command(CommandPrincipal::TauriDashboard, cmd).is_ok());
             assert!(authorize_command(CommandPrincipal::WebSocketDashboard, cmd).is_ok());
             assert!(authorize_command(CommandPrincipal::TauriWidget, cmd).is_err());

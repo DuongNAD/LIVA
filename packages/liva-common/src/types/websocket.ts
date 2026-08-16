@@ -30,6 +30,7 @@ export type WSClientEvent =
     // Voice — trạng thái & hồ sơ
     | 'get_voice_status'
     | 'get_voice_profiles'
+    | 'select_voice_profile'
     // Voice — đường ống STT/TTS
     | 'voice:stt_start'
     | 'voice:stt_chunk'
@@ -42,6 +43,7 @@ export type WSClientEvent =
     // Avatar
     | 'get_avatar_models'
     | 'import_avatar_folder'
+    | 'delete_avatar_model'
     // Skills
     | 'get_skills_list'
     | 'toggle_skill'
@@ -53,6 +55,7 @@ export type WSClientEvent =
     // System & người dùng
     | 'get_system_status'
     | 'get_user_profile'
+    | 'update_user_profile'
     // Tasks
     | 'get_tasks'
     | 'add_task'
@@ -122,12 +125,10 @@ export type WSClientEvent =
     //     `useVoicePipeline.ts:220` ghi rõ "UI chỉ chuyển ACTIVE khi core trả
     //     `wake_word_triggered`". Đã chuyển xuống `WSServerEvent` và bỏ lời gọi
     //     `sendMsg` ở `WidgetApp.vue`.
-    | 'update_ai_config'
-    | 'select_voice_profile'
+    //   • Voice training (`start_voice_training`, `stop_voice_training`) bị chặn ở thượng nguồn
+    //     (backlog item U17b, thiếu 2 model). Không tự ý hiện thực nếu chưa giải quyết U17b.
     | 'start_voice_training'
-    | 'stop_voice_training'
-    | 'delete_avatar_model'
-    | 'update_user_profile';
+    | 'stop_voice_training';
 
 // ─── Gateway → Client (Responses / Broadcasts) ───
 export type WSServerEvent =
@@ -136,6 +137,7 @@ export type WSServerEvent =
     | 'config_updated'
     | 'config_error'
     | 'ai_config'
+    | 'update_ai_config'
     | 'ai_config_updated'
     // Voice
     | 'voice_status'

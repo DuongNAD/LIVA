@@ -106,14 +106,17 @@ const OWNED: &[&str] = &[
     "get_ai_config",
     "get_voice_status",
     "get_voice_profiles",
+    "select_voice_profile",
     "get_system_status",
     "get_preflight_status",
     "get_skills_list",
     "toggle_skill",
     "toggle_all_skills",
     "get_user_profile",
+    "update_user_profile",
     "get_avatar_models",
     "import_avatar_folder",
+    "delete_avatar_model",
 ];
 
 /// Lệnh này có thuộc miền cấu hình/trạng thái không.
@@ -135,6 +138,7 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         "get_ai_config" => get_ai_config(),
         "get_voice_status" => get_voice_status(state).await,
         "get_voice_profiles" => Ok(json!(liet_ke_thu_muc(std::path::Path::new("data/voices")))),
+        "select_voice_profile" => select_voice_profile(payload).await,
         "get_system_status" => system_status(state).await,
         "get_preflight_status" => {
             let items = tokio::task::spawn_blocking(crate::preflight::thu_thap)
@@ -146,11 +150,13 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         "toggle_skill" => toggle_skill(state, payload).await,
         "toggle_all_skills" => toggle_all_skills(state, payload).await,
         "get_user_profile" => get_user_profile(),
+        "update_user_profile" => update_user_profile(&payload),
         "get_avatar_models" => Ok(json!({
             "models2d": liet_ke_thu_muc(&resolve_resource_path("models/live2d")),
             "models3d": liet_ke_thu_muc(&resolve_resource_path("models/vrm")),
         })),
         "import_avatar_folder" => import_avatar_folder(&payload),
+        "delete_avatar_model" => delete_avatar_model(&payload),
         // `owns()` đã lọc trước, nên nhánh này chỉ chạy khi hai danh sách lệch
         // nhau — tức là lỗi lập trình, không phải lệnh lạ từ client.
         _ => Err(format!("Unknown command: {command}")),
@@ -444,8 +450,41 @@ async fn get_voice_status(state: Arc<AppState>) -> Result<Value, String> {
     }))
 }
 
-fn get_user_profile() -> Result<Value, String> {
-    let path = std::path::Path::new("data/user_profile.json");
+pub fn select_voice_profile_at(
+    payload: &Value,
+    config_path: &std::path::Path,
+) -> Result<Value, String> {
+    let profile = payload
+        .get("profile")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Missing or invalid 'profile' field in payload".to_string())?;
+
+    if profile.trim().is_empty() {
+        return Err("Field 'profile' cannot be empty".to_string());
+    }
+
+    let patch = json!({
+        "voice": {
+            "activeProfile": profile
+        }
+    });
+
+    update_config_file_at(config_path, &patch)?;
+
+    Ok(json!({
+        "success": true,
+        "activeProfile": profile
+    }))
+}
+
+async fn select_voice_profile(payload: Value) -> Result<Value, String> {
+    let path = config_file_path();
+    tokio::task::spawn_blocking(move || select_voice_profile_at(&payload, &path))
+        .await
+        .map_err(|error| format!("Config writer task failed: {error}"))?
+}
+
+pub fn get_user_profile_from(path: &std::path::Path) -> Result<Value, String> {
     if path.exists() {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read user profile: {}", e))?;
@@ -463,6 +502,41 @@ fn get_user_profile() -> Result<Value, String> {
         "profession": "Engineer",
         "location": "Hanoi"
     }))
+}
+
+fn get_user_profile() -> Result<Value, String> {
+    get_user_profile_from(std::path::Path::new("data/user_profile.json"))
+}
+
+pub fn update_user_profile_at(payload: &Value, path: &std::path::Path) -> Result<Value, String> {
+    if !payload.is_object() {
+        return Err("Payload must be a JSON object".to_string());
+    }
+
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory '{}': {}", parent.display(), e))?;
+    }
+
+    let serialized = serde_json::to_string_pretty(payload)
+        .map_err(|e| format!("Failed to serialize user profile: {}", e))?;
+
+    std::fs::write(path, serialized).map_err(|e| {
+        format!(
+            "Failed to write user profile to '{}': {}",
+            path.display(),
+            e
+        )
+    })?;
+
+    Ok(json!({ "success": true }))
+}
+
+fn update_user_profile(payload: &Value) -> Result<Value, String> {
+    update_user_profile_at(payload, std::path::Path::new("data/user_profile.json"))
 }
 
 pub fn import_avatar_folder(payload: &Value) -> Result<Value, String> {
@@ -617,6 +691,55 @@ fn import_avatar_folder_to(payload: &Value, dest_dir: &std::path::Path) -> Resul
     }))
 }
 
+pub fn delete_avatar_model(payload: &Value) -> Result<Value, String> {
+    let dirs = vec![
+        resolve_resource_path("models/vrm"),
+        resolve_resource_path("models/live2d"),
+    ];
+    delete_avatar_model_from_dirs(payload, &dirs)
+}
+
+pub fn delete_avatar_model_from_dirs(
+    payload: &Value,
+    model_dirs: &[std::path::PathBuf],
+) -> Result<Value, String> {
+    let filename = payload
+        .get("filename")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Missing or invalid 'filename' field in payload".to_string())?;
+
+    if filename.trim().is_empty() {
+        return Err("Field 'filename' cannot be empty".to_string());
+    }
+
+    let path = std::path::Path::new(filename);
+    let final_component = path.file_name().and_then(|n| n.to_str());
+    if final_component != Some(filename) || filename.contains('/') || filename.contains('\\') {
+        return Err(format!("Invalid filename: '{filename}'"));
+    }
+
+    for dir in model_dirs {
+        let candidate = dir.join(filename);
+        if candidate.is_file() {
+            std::fs::remove_file(&candidate).map_err(|e| {
+                format!(
+                    "Failed to delete avatar model '{}': {}",
+                    candidate.display(),
+                    e
+                )
+            })?;
+            return Ok(json!({
+                "success": true,
+                "deleted": candidate.display().to_string()
+            }));
+        }
+    }
+
+    Err(format!(
+        "Avatar model '{filename}' not found in model directories"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,7 +777,7 @@ mod tests {
         // thêm nhánh vào `handle` mà quên `OWNED` sẽ làm test này đỏ.
         assert_eq!(
             OWNED.len(),
-            16,
+            19,
             "đổi số nhánh thì cập nhật cả OWNED lẫn test"
         );
         for name in OWNED {
@@ -669,6 +792,9 @@ mod tests {
         assert!(owns("import_avatar_folder"));
         assert!(owns("toggle_skill"));
         assert!(owns("toggle_all_skills"));
+        assert!(owns("select_voice_profile"));
+        assert!(owns("update_user_profile"));
+        assert!(owns("delete_avatar_model"));
     }
 
     /// Thư mục không tồn tại phải trả danh sách RỖNG, không panic — cả ba lệnh
@@ -1050,5 +1176,162 @@ mod tests {
                 skill["name"]
             );
         }
+    }
+
+    #[test]
+    fn update_user_profile_va_get_user_profile_roundtrip() {
+        let (_guard, temp_dir) = tao_thu_muc_tam("user_profile_roundtrip");
+        let profile_path = temp_dir.join("subfolder").join("user_profile.json");
+
+        let new_profile = json!({
+            "name": "Test User",
+            "birthYear": 1995,
+            "nationality": "Việt Nam",
+            "language": "vi-VN",
+            "hobbies": "Coding & Reading",
+            "preferences": "Concise",
+            "age": 31,
+            "profession": "Software Architect",
+            "location": "Da Nang"
+        });
+
+        let write_res = update_user_profile_at(&new_profile, &profile_path).unwrap();
+        assert_eq!(write_res["success"], true);
+
+        let read_back = get_user_profile_from(&profile_path).unwrap();
+        assert_eq!(read_back, new_profile);
+    }
+
+    #[test]
+    fn update_user_profile_non_object_tra_ve_err() {
+        let (_guard, temp_dir) = tao_thu_muc_tam("user_profile_invalid");
+        let profile_path = temp_dir.join("user_profile.json");
+
+        assert!(update_user_profile_at(&json!("just a string"), &profile_path).is_err());
+        assert!(update_user_profile_at(&json!([1, 2, 3]), &profile_path).is_err());
+        assert!(update_user_profile_at(&json!(42), &profile_path).is_err());
+        assert!(update_user_profile_at(&json!(null), &profile_path).is_err());
+    }
+
+    #[test]
+    fn select_voice_profile_cap_nhat_dung_active_profile() {
+        let (_guard, temp_dir) = tao_thu_muc_tam("select_voice_profile");
+        let config_file = temp_dir.join("liva-config.json");
+
+        let initial_config = json!({
+            "voice": {
+                "enabled": true,
+                "provider": "hybrid",
+                "activeProfile": "old_profile",
+                "language": "vi-VN",
+                "sampleRate": 16000,
+                "trainingEnabled": false
+            },
+            "ui": {
+                "dashboardTheme": "dark"
+            }
+        });
+        std::fs::write(
+            &config_file,
+            serde_json::to_string_pretty(&initial_config).unwrap(),
+        )
+        .unwrap();
+
+        let res = select_voice_profile_at(&json!({ "profile": "vi_female_custom" }), &config_file)
+            .unwrap();
+        assert_eq!(res["success"], true);
+        assert_eq!(res["activeProfile"], "vi_female_custom");
+
+        let content = std::fs::read_to_string(&config_file).unwrap();
+        let parsed: Value = serde_json::from_str(&content).unwrap();
+
+        // Active profile changed
+        assert_eq!(parsed["voice"]["activeProfile"], "vi_female_custom");
+        // Other voice keys untouched
+        assert_eq!(parsed["voice"]["enabled"], true);
+        assert_eq!(parsed["voice"]["provider"], "hybrid");
+        assert_eq!(parsed["voice"]["language"], "vi-VN");
+        assert_eq!(parsed["voice"]["sampleRate"], 16000);
+        assert_eq!(parsed["voice"]["trainingEnabled"], false);
+        // Other top-level keys untouched
+        assert_eq!(parsed["ui"]["dashboardTheme"], "dark");
+
+        // Error cases: missing, empty, non-string profile
+        assert!(select_voice_profile_at(&json!({}), &config_file).is_err());
+        assert!(select_voice_profile_at(&json!({ "profile": "" }), &config_file).is_err());
+        assert!(select_voice_profile_at(&json!({ "profile": "   " }), &config_file).is_err());
+        assert!(select_voice_profile_at(&json!({ "profile": 123 }), &config_file).is_err());
+        assert!(select_voice_profile_at(&json!({ "profile": null }), &config_file).is_err());
+        assert!(select_voice_profile_at(&json!("not_an_object"), &config_file).is_err());
+    }
+
+    #[test]
+    fn delete_avatar_model_xoa_file_thanh_cong() {
+        let (_vrm_guard, vrm_dir) = tao_thu_muc_tam("delete_avatar_vrm");
+        let (_live2d_guard, live2d_dir) = tao_thu_muc_tam("delete_avatar_live2d");
+
+        let target_file = vrm_dir.join("sample_avatar.vrm");
+        std::fs::write(&target_file, b"AVATAR_VRM_DATA").unwrap();
+        assert!(target_file.exists());
+
+        let dirs = vec![vrm_dir.clone(), live2d_dir.clone()];
+        let res = delete_avatar_model_from_dirs(&json!({ "filename": "sample_avatar.vrm" }), &dirs)
+            .unwrap();
+
+        assert_eq!(res["success"], true);
+        assert_eq!(res["deleted"], target_file.display().to_string());
+        assert!(!target_file.exists());
+    }
+
+    #[test]
+    fn delete_avatar_model_bao_mat_chong_path_traversal() {
+        let (_vrm_guard, vrm_dir) = tao_thu_muc_tam("delete_sec_vrm");
+        let (_parent_guard, parent_dir) = tao_thu_muc_tam("delete_sec_parent");
+
+        let outside_file = parent_dir.join("escape.txt");
+        std::fs::write(&outside_file, b"OUTSIDE_DATA").unwrap();
+
+        let sub_dir = vrm_dir.join("sub");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        let sub_file = sub_dir.join("dir.vrm");
+        std::fs::write(&sub_file, b"SUB_DATA").unwrap();
+
+        let dirs = vec![vrm_dir.clone()];
+
+        // Case 1: ../escape.txt
+        let err1 = delete_avatar_model_from_dirs(&json!({ "filename": "../escape.txt" }), &dirs)
+            .unwrap_err();
+        assert!(err1.contains("Invalid filename"));
+
+        // Case 2: sub/dir.vrm
+        let err2 = delete_avatar_model_from_dirs(&json!({ "filename": "sub/dir.vrm" }), &dirs)
+            .unwrap_err();
+        assert!(err2.contains("Invalid filename"));
+
+        // Case 3: absolute path
+        let abs_str = outside_file.to_string_lossy().to_string();
+        let err3 =
+            delete_avatar_model_from_dirs(&json!({ "filename": abs_str }), &dirs).unwrap_err();
+        assert!(err3.contains("Invalid filename"));
+
+        // Case 4: empty string or whitespace
+        assert!(delete_avatar_model_from_dirs(&json!({ "filename": "" }), &dirs).is_err());
+        assert!(delete_avatar_model_from_dirs(&json!({ "filename": "   " }), &dirs).is_err());
+
+        // File outside still exists!
+        assert!(outside_file.exists());
+        assert_eq!(std::fs::read(&outside_file).unwrap(), b"OUTSIDE_DATA");
+        // Sub file still exists (not deleted)!
+        assert!(sub_file.exists());
+    }
+
+    #[test]
+    fn delete_avatar_model_khong_tim_thay_tra_ve_err() {
+        let (_vrm_guard, vrm_dir) = tao_thu_muc_tam("delete_missing_vrm");
+        let dirs = vec![vrm_dir];
+
+        let err = delete_avatar_model_from_dirs(&json!({ "filename": "non_existent.vrm" }), &dirs)
+            .unwrap_err();
+        assert!(err.contains("not found in model directories"));
     }
 }

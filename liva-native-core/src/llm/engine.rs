@@ -292,6 +292,17 @@ impl LlamaRouterManager {
             .str_to_token(prompt, AddBos::Always)
             .map_err(|e| format!("StringToTokenError: {:?}", e))?;
         let prompt_tokens_len = prompt_tokens.len();
+        // Đo được thì mới quản được. Trước 16/08/2026 không chỗ nào ghi con số
+        // này ra, nên không ai biết prompt nền đã **2237 token** ở lượt đầu —
+        // chưa có lịch sử, RAG chưa có gì, người dùng mới gõ một câu 30 chữ.
+        // Nó nằm ngay trên trần `n_batch` mặc định 2048, và đó là lý do lõi
+        // `abort()` ở MỌI lượt thoại chứ không phải thỉnh thoảng.
+        tracing::debug!(
+            "prompt = {} token (n_ctx = {}, chừa {} cho câu trả lời)",
+            prompt_tokens_len,
+            self.n_ctx,
+            RESERVE_FOR_COMPLETION
+        );
 
         // Lớp 2 của F2 — guard cứng. Prefill ở bước 3 nạp toàn bộ tail_tokens
         // vào MỘT batch rồi mới tới vòng lặp có prune_kv_cache, nên prompt dài

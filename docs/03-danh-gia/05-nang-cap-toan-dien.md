@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-16
-commit: 5657d42
-stale-ok: 5657d42
+commit: 6138f57
+stale-ok: 6138f57
 status: living
 owns:
   - duong-co-so-do-luong
@@ -301,7 +301,7 @@ Module `liva-native-core/src/cognitive/` (8 file) cùng 6 file test và `db/dele
 
 🔴 **`scripts/e2e-test-suite.mjs` (chưa commit) xanh do cấu tạo — đừng tính nó là bằng chứng.** `TEST_READY.md` khai *"All 177 test assertions pass genuinely"* và `PROJECT.md` ghi M5 `DONE (177/177)`. Con số 177 là thật (đếm được: 75+75+15+7+5 lần gọi `reporter.test`), nhưng `scripts/e2e/helpers.mjs` **viết lại thuật toán của LIVA bằng JavaScript** rồi test chính bản JS đó: `class StateGraph` thay Swarm DAG, `class SecretScrubber` thay bộ khử bí mật, `computeRRF()` thay RRF, `node:crypto` thay AES-256-GCM, `DatabaseSync(':memory:')` với schema gõ tay thay pool WAL. Suite **không** mở socket, **không** spawn binary lõi, **không** import gì từ `liva-ui/src` hay `liva-native-core`. 61 chỗ gọi các helper này; vài assertion không thể đỏ (dựng object literal rồi assert lại chính thứ vừa ghi; đẩy 1000 phần tử vào mảng JS rồi assert mảng có 1000; `tier2-boundary.mjs:148` assert `process.arch === 'x64'`). **Phép thử quyết định: xoá thân một hàm Rust, xoá một component Vue, hay revert một `PRAGMA` production — suite vẫn 100 % xanh** miễn `cargo clippy` còn qua. Đã thu hồi tuyên bố trong `TEST_READY.md` và hạ M5 xuống `NOT ACCEPTED` trong `PROJECT.md`. Tín hiệu E2E thật vẫn chỉ là `e2e-gateway-ci.mjs` 8/8 và `e2e-memory.mjs` 6/6. Đúng thứ `CLAUDE.md` đã dặn: *"treat any always-green check as suspect"*.
 
-#### 🔴 Một câu thoại bình thường làm lõi `abort()` — tìm được 16/08/2026, CHƯA VÁ
+#### ✅ Một câu thoại bình thường làm lõi `abort()` — tìm và vá 16/08/2026 (`6138f57`)
 
 Đi đo nốt dòng "E2E bộ nhớ" (chưa đo lại từ 26/07) thì lộ ra lỗi này. **Nó nặng hơn mọi mục U1–U33 còn mở**, vì hậu quả không phải trả lỗi sai mà là **chết cả tiến trình lõi**.
 
@@ -322,9 +322,31 @@ llama.cpp/src/llama-context.cpp:1712: GGML_ASSERT(n_tokens_all <= cparams.n_batc
 
 ⚠️ **Ba thứ CHƯA kiểm, nói rõ thay vì đoán:** (a) release build có nổ không — `GGML_ASSERT` thường vẫn sống ở release, nhưng **chưa đo**; (b) ngưỡng thật bao nhiêu token, và vì sao một câu ngắn lại chạm nó — dòng `embeddings required` ngay trước assert gợi ý prompt thật lớn hơn nhiều thứ người dùng gõ (lịch sử + ngữ cảnh RAG), nhưng **chưa truy**; (c) có tái lập với model khác không.
 
-**Hướng vá đề xuất, chưa làm:** đặt `n_batch` tường minh khi dựng context; cho `check_prompt_fits` chắn theo `min(n_ctx − RESERVE_FOR_COMPLETION, n_batch)` thay vì chỉ `n_ctx`; và gọi nó trên **cả** đường thoại. Chạm hàm nhiều người gọi ⇒ bắt buộc chạy `impact()` trước khi sửa, theo `CLAUDE.md`.
+✅ **ĐÃ VÁ — `6138f57`.** Bằng chứng nguồn nằm ở `llama-context.cpp:193`:
 
-📌 **Hệ quả cho đường cơ sở:** dòng "E2E bộ nhớ" **vẫn chưa đo lại được** — không phải vì thiếu model (đã có đủ: `models/embedding/` có `model.onnx` + `tokenizer.json`, router có ở `E:\AI_Models`), mà vì lõi chết trước khi kịp trả lượt đầu. Số gần nhất vẫn là 6/6 ngày 26/07. Đừng ghi nó thành "đã đo".
+```cpp
+cparams.n_batch = cparams.causal_attn ? std::min(cparams.n_ctx, params.n_batch) : params.n_batch;
+```
+
+Với attention nhân quả, `n_batch` **tự được kẹp theo `n_ctx`** — đó là lý do không ai từng phải đặt nó, và cũng là lý do sự vắng mặt của nó không gây chuyện suốt thời gian dài. Nhưng `with_embeddings(true)` + pooling `Mean` (`engine.rs:220-221`) đặt `causal_attn = false`, và ở nhánh đó `n_batch` giữ **nguyên mặc định thô 2048**, không nâng theo `n_ctx = 4096`. Prompt dài 2049..3583 token vì thế lọt cổng rồi mới nổ.
+
+Bản vá là một lời gọi builder: `.with_n_batch(target_n_ctx)`, khôi phục đúng bất biến mà nhánh nhân quả vốn có — thứ gì qua được `check_prompt_fits` thì vừa batch. **Không hạ `with_embeddings` xuống được**: `llm/embed.rs:32` đọc `embeddings_seq_ith(0)` từ chính context này, tức context vừa sinh chữ vừa làm embedding.
+
+| | trước vá | sau vá |
+|---|---|---|
+| `e2e-memory.mjs` | **0/1**, lõi abort | **4/6**, lõi sống |
+| `GGML_ASSERT` trong log | có | **0** |
+| Lượt 1 | treo hết 180 s timeout | trả lời 84,3 s · 31 chunk |
+| Lượt 2 (nhớ xuyên lượt) | không tới được | ✅ nhớ đúng "Bún", 6,7 s |
+| `chat:completion` | không tới được | ✅ nhớ đúng "ORION-7" |
+
+Cổng sau vá: `cargo test` **894 pass · 0 fail** · clippy **0** · fmt **0** · `e2e-gateway-ci` **8/8** · `e2e-test-suite` **36/36**.
+
+⚠️ **`impact()` KHÔNG chạy được** — GitNexus MCP không có trong phiên đó. Thay bằng lập luận kiểm được: bản vá chỉ thêm một lời gọi builder, **không đổi chữ ký hàm nào**, nên bán kính gói trong chỗ dựng context. Ghi ra đây vì `CLAUDE.md` bắt buộc bước này, và bỏ qua nó lặng lẽ mới là vấn đề.
+
+🔴 **Còn nợ, KHÔNG gộp vào bản vá trên: `e2e-memory` mới 4/6, đường cơ sở 26/07 là 6/6 ⇒ có hồi quy riêng.** Hai phép kiểm cứng đỏ đều cùng một dạng: *"KHÔNG thấy `Bún` trong owner-local"* và *"KHÔNG thấy `ORION-7` trong owner-local"*. Đáng chú ý là **kiểm mềm lại đạt** — LIVA nhớ đúng cả hai qua cả hai đường vào. Nghĩa là bộ nhớ *đang chạy* nhưng **không ghi vào scope `owner-local` mà bộ kiểm soi**. Cần một lát điều tra riêng cho đường ghi owner-local; đừng đọc "4/6" thành "bộ nhớ hỏng".
+
+📌 **Hệ quả cho đường cơ sở:** dòng "E2E bộ nhớ" nay **đo lại được** (model có đủ: `models/embedding/` có `model.onnx` + `tokenizer.json`, router ở `E:\AI_Models`), và số mới là **4/6 ngày 16/08**, xuống từ 6/6 ngày 26/07. Đây là con số đo thật, không phải trích lại.
 
 ⚠️ **Bẫy đo thứ năm — chạy song song cổng nặng làm chết khả năng spawn tiến trình của cả máy.** Cho `cargo test` chạy nền cùng 2 job agent (mà job lại tự chạy `cargo clippy`) ⇒ Windows Terminal bắt đầu trả `error 2147942632 (0x800700e8)` khi mở `bash.exe` và `where.exe` — cạn tài nguyên tiến trình, không phải hỏng cài đặt Git. Dừng job, process 436 → 415, spawn lại bình thường. Cùng kết luận với bẫy MSVC-cạn-bộ-nhớ ở bảng 05/08: **cổng nặng chạy tuần tự, một cái tại một thời điểm** — lần này thêm bằng chứng rằng cái giá không chỉ là một phép đo sai mà là cả phiên làm việc. Và bẫy `$?`-sau-pipe ở mục ngay trên vẫn cắn: `cargo fmt --check | tail -5; echo $?` cho **0** trong khi lệnh thật exit **1**; bắt được vì 28 dòng `Diff in` hiện ngay bên trên một chữ "EXIT=0".
 

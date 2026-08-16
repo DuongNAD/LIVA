@@ -789,6 +789,35 @@
       "wave": "archive",
       "targets": [],
       "rationale": "Yêu cầu gốc được bảo toàn nguyên trạng."
+    },
+    {
+      "path": "docs/03-danh-gia/LIVA_4TIER_MEMORY_ARCHITECTURE_AUDIT_AND_BLUEPRINT.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Kiến trúc và kế hoạch tối ưu hệ thống bộ nhớ 4 tầng LIVA-UHM."
+    },
+    {
+      "path": "docs/03-danh-gia/LIVA_SYSTEM_AUDIT_AND_ROADMAP_2026.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Báo cáo kiểm tra và lộ trình nâng cấp hệ thống LIVA 2026."
+    },
+    {
+      "path": "docs/architecture/4_tier_memory_deep_audit_report.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Báo cáo kiểm toán chuyên sâu bộ nhớ 4 tầng."
+    },
+    {
+      "path": "docs/architecture/4_tier_memory_optimization_blueprint.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Bản thiết kế tối ưu hoá bộ nhớ 4 tầng."
     }
   ]
 }
+

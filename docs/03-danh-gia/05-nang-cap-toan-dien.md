@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-16
-commit: 1d7a684
-stale-ok: 1d7a684
+commit: 5657d42
+stale-ok: 5657d42
 status: living
 owns:
   - duong-co-so-do-luong
@@ -73,7 +73,7 @@ covers:
 
 ### 0.1 Việc tiếp theo — chọn từ trên xuống
 
-> 🔴 **Chen ngang, chốt 07/08/2026: [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đứng trước mọi mục trong bảng dưới.** Đây là triệu chứng **người dùng trực tiếp báo** (avatar khựng theo từng bước chân), tức hạng khác với backlog — cùng hạng với hồi quy ở bước 1 của giao thức. Và **bước 0 của nó là một dòng**: tắt `FootPlantIK`, đi lại, nhìn. Làm cái đó trước khi nhận bất kỳ mục nào khác; kết quả quyết định U30 hay [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là chỗ đáng đào.
+> ◐ **Chen ngang, chốt 07/08/2026 — cập nhật 16/08: [U30](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) đã được vá ở mã, nhưng vẫn đứng đầu hàng vì chưa ai nhìn.** Đây là triệu chứng **người dùng trực tiếp báo** (avatar khựng theo từng bước chân), tức hạng khác với backlog — cùng hạng với hồi quy ở bước 1 của giao thức. `footPlantIK.ts` nay đã bỏ bù ngang (`x: 0`, `z: 0`) và có test khoá, nhưng **nghiệm thu của mục này là mắt người, không phải test** — `requestAnimationFrame` treo khi khung nhìn ẩn nên không đo tự động được. Việc còn lại: mở `npm run dev -w liva-ui`, cho avatar đi, bật/tắt `LIVA_FOOT_PLANT` để so. Nếu vá rồi mà **vẫn** khựng thì mục này sai chỗ và [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là nơi đáng đào.
 
 Chốt ngày **29/07/2026**. Thứ tự đã áp quy tắc chặn ở §2: xong nhóm A trước, **không đụng nhóm D** (U10/U11) khi A/B/C còn dở.
 
@@ -243,11 +243,65 @@ Nhưng phần đáng giá không phải con số. **11 trong 15 lệnh ma vẫn 
 
 Nghiệm thu: `vue-tsc` **0**, `eslint` **0**, `tsc` của `liva-common` **0**, `mobile_client` **0**, test UI **410 pass / 39 file**.
 
+#### Kết toán từng event ma — không cái nào xử theo mặc định "cứ hiện thực cho đủ"
+
+Rà nốt 11 mục. Mỗi cái đối chiếu với cơ chế backend **thật** rồi mới quyết, vì nối một nút vào đường ống không tồn tại chỉ tạo ra một nút chết có thêm handler để đổ lỗi.
+
+| Event | Cơ chế backend | Quyết định |
+|---|---|---|
+| `toggle_skill` · `toggle_all_skills` | không có khái niệm bật/tắt; `list_skills()` trả MCP tool, không field `enabled` | **đã nối** — kèm lọc catalog ở `tool_calling.rs`, phần khiến công tắc là thật |
+| `import_avatar_folder` | `get_avatar_models` đọc `models/vrm` + `models/live2d` | **đã nối** |
+| `delete_avatar_model` | đối xứng với cái trên | **đã nối** |
+| `update_user_profile` | `get_user_profile` đọc `data/user_profile.json`, chưa có đường ghi | **đã nối** — viết chiều ngược lại |
+| `select_voice_profile` | `voice.activeProfile` có sẵn trong config | **đã nối** |
+| `camera_frame` | **không có đường nhận ảnh** từ client; vision là lõi tự chụp màn hình | **xoá cả bên gửi** |
+| `wake_word_triggered` | là event server→client (`websocket.rs:749`) | **xoá lời gọi**, chuyển xuống `WSServerEvent` |
+| `update_ai_config` | UI không gửi, chỉ nhận (`useGateway.ts:275`) | **chuyển sang `WSServerEvent`** — cùng loại nhầm chiều |
+| `start_voice_training` · `stop_voice_training` | cần model của U17b, mà §0.1 ghi "đang bị chặn, **đừng nhận**" | **cố ý KHÔNG nối** |
+| `test_all_skills` (`SkillsView.vue:150`, không có cả trong type) | "test một skill" chưa được định nghĩa | **cần chủ dự án quyết** |
+
+⚠️ **Hai mục cuối là chỗ dễ làm sai nhất, nên ghi rõ lý do từ chối.** Voice training: §U17b cảnh báo lấy speaker encoder không đúng loại đã train VieNeu sẽ cho **giọng sai chứ không phải hơi khác** — dựng đường ống trước khi có model là làm đẹp bảng thống kê, không phải làm cho người dùng. `test_all_skills`: gọi thử tool với input giả, kiểm schema, hay ping MCP server là ba sản phẩm khác nhau; chọn bừa thì đẻ ra một nút nói dối kiểu mới, đúng thứ vừa bỏ công dọn.
+
+**Bảo mật hai lệnh ghi/xoá file**, vì cả hai nhận đường dẫn qua socket: chỉ có trong `DASHBOARD_COMMANDS`, không remote/widget. `import_avatar_folder` dựng tên đích chỉ từ `entry.file_name()`, không đệ quy, chặn trên 200 file, không ghi đè. `delete_avatar_model` so `file_name()` với chuỗi gốc rồi mới chặn thêm dấu phân cách — chặn `..`, đường dẫn tuyệt đối và `sub/dir.vrm` bằng **một** phép kiểm thay vì lọc danh sách đen (danh sách đen luôn sót); và **không tìm thấy thì trả `Err`**, để UI không hiện "đã xoá" cho thứ vẫn còn.
+
+Nghiệm thu: `commands::config` **20 pass**, `cargo test` toàn workspace **868 pass · 0 fail**, `vue-tsc` 0, `eslint` 0.
+
+⚠️ **AGY vi phạm ràng buộc trong lượt này — ghi lại vì nó sẽ lặp.** Được lệnh không đụng 6 file đang sửa dở, nó vẫn chạy `cargo fmt --all` và format cả 6. Không đổi ngữ nghĩa (868 test xác nhận) nhưng **không hoàn tác sạch được**: "un-format" không phải thao tác tất định. Bài học: cấm bằng lời là không đủ với một lệnh có phạm vi toàn workspace như `fmt --all` — phải cấm đích danh chính lệnh đó, như đã làm được với `cargo clippy --all-targets`.
+
 #### Module `cognitive/` của phiên song song đã được đưa qua cổng
 
 Module `liva-native-core/src/cognitive/` (8 file) cùng 6 file test và `db/deletion.rs` · `tests/subject_retention.rs` xuất hiện lúc 01:57–02:42 từ một phiên làm việc khác, và **chưa từng chạy cổng nào**: **104 hunk `cargo fmt`** và **7 clippy warning**. Đã format toàn bộ và vá cả 7: `should_implement_trait` (đổi tên `from_str` → `from_text`, sửa call site duy nhất — không hiện thực `FromStr` được vì hàm trả `Self` chứ không phải `Result`), 3 × `collapsible_if` gộp bằng let-chain edition 2024, 3 × `unnecessary_lazy_evaluations` (`ok_or_else`/`unwrap_or_else` → dạng eager). Nghiệm thu: 6 binary test của module **48 pass · 0 fail**; fmt và clippy toàn workspace trở lại đúng mức nền (15 hunk và 1 warning, cả hai đều thuộc file đang sửa dở khác).
 
 ⚠️ **Bẫy đo thứ tư, cùng họ với ba bẫy trên — lọc output rồi kết luận trên phần đã lọc.** Ba lần trong một phiên: (1) `cargo fmt … | tail -5; echo $?` trả **0** vì `$?` là exit của `tail`, không phải của cargo; (2) `git show <sha>:<file> | rustfmt --check` báo **sạch ở mọi commit** — rustfmt đọc stdin không kiểm gì cả, phát hiện bằng cách cho chính nó ăn một file *đã biết chắc là lỗi* và vẫn nhận exit 0; (3) `cargo test … | grep … | tail -50` cắt mất binary **586 test** chạy đầu tiên, còn **86 pass**, trông y hệt một vụ sập 657 → 86. **Quy tắc rút ra: ghi output đầy đủ ra file rồi mới tổng hợp; và lấy exit code trước khi qua pipe.** Một con số vô lý so với thứ bạn vừa đếm tay là tín hiệu nghi phép đo trước, đừng nghi repo.
+
+#### Đo lại 16/08/2026 tối — **14 cổng, toàn bộ xanh sau khi vá một hồi quy**
+
+⚠️ **Đọc kèm phạm vi:** đo trên **cây làm việc chưa commit** (139 path ở trạng thái `M`/`A`/`??`, gồm cả `src/eval/` và `liva-ai-tests/`), **không phải ảnh chụp của một commit**. Cùng loại cảnh báo với bảng 16/08 phía trên.
+
+| Cổng | Kết quả 16/08 tối | So mốc gần nhất |
+|---|---|---|
+| Test Rust | **894 pass · 0 fail · 5 ignored**, 43 binary | ↑ từ 792 (43 binary vì gồm cả 4 binary của `liva-desktop`) |
+| **Format** | 🔴 **exit 1 — 28 hunk / 6 file** → chạy `cargo fmt --all` → **exit 0, 0 hunk** | **hồi quy duy nhất của phiên** |
+| Clippy | **0 warning · 0 error** | = |
+| Test + Coverage UI | **444 pass / 44 file** — **79,31 % stmt · 63,40 % branch · 72,05 % func · 81,53 % line** | ↑ cả bốn, từ 404 pass |
+| Test vỏ Tauri | **13 pass · 0 fail** | = |
+| Typecheck · ESLint · npm audit | 0 lỗi · 0 warning · 0 vulnerability | = |
+| Lỗ hổng Rust (`cargo deny` 0.20.2) | `advisories ok, licenses ok, sources ok` | = |
+| `cargo check -p liva-desktop` · `--features experimental` | exit 0 · exit 0 | = |
+| Sức khoẻ tài liệu · Trích dẫn | exit 0 · **0 neo hỏng** (780 toạ độ có thể chuyển sang neo ký hiệu) | = |
+| **E2E WebSocket** | **8/8 đạt** trên gateway thật | = |
+
+**Về hồi quy fmt:** 28 hunk nằm ở `src/eval/` (`runner.rs` 11, `metrics.rs` 5, `dataset.rs`, `mod.rs`), `db.rs`, `db/tests.rs`, `commands/llm.rs`, `tests/liva_eval_tests.rs` — **không** phải 6 file mà bảng 16/08 sáng cố ý bỏ qua; những file đó đã sạch khi đo. Tức đây là lứa mã mới hơn, lại vào cây mà không chạy cổng cục bộ — **lần thứ ba liên tiếp cùng một nguyên nhân**. `cargo fmt --all` đúng như bảng trên đã dặn; xác nhận sau khi vá: **894 pass · 0 fail trên cả 43 binary**.
+
+✅ **Đã vá nguyên nhân gốc, không chỉ triệu chứng — `.husky/pre-commit` nay có cổng fmt.** Ba lần vá tay không ngăn được lần thứ tư, nên cổng chuyển về pre-commit: khi có `.rs` được staged thì chạy **đúng nguyên văn lệnh CI** (`cargo fmt --all -- --check`). Dùng `cargo fmt` chứ không phải `rustfmt` đứng riêng vì crate là `edition = "2024"` còn rustfmt standalone mặc định 2015 ⇒ phán sai; và không bao giờ đưa qua stdin (bẫy rustfmt-đọc-stdin-trả-0 ở mục trên). Thiếu `cargo` trên PATH thì **chặn commit** chứ không bỏ qua âm thầm — một cổng lặng lẽ không chạy còn tệ hơn không có cổng. Chi phí đo được: **0,96 s** toàn workspace. Nghiệm thu cả hai chiều: cây sạch → cho qua; cố ý thêm một hàm sai định dạng → **chặn, exit 1**; khôi phục xong md5 file khớp nguyên trạng. Trước đó pre-commit **không có cổng Rust nào** — chỉ ESLint cho `*.{ts,vue}` — nên cả ba lứa fmt hỏng đều đi thẳng vào cây không gặp cản nào.
+
+**Việc vặt cùng phiên:** `.gitignore` có `scratch.*` (dấu **chấm**) nên không bắt được năm file `scratch_*.txt` gạch dưới ở gốc repo, cộng `out_test.txt` — sáu file output debug đang chờ bị commit nhầm. Đã thêm `scratch_*` và `out_test.txt`; kiểm bằng `git check-ignore` từng file, và `git status` không còn thấy chúng.
+
+**Năm module chưa commit đều được nối thật**, không phải code mồ côi: `lib.rs:5` `pub mod cognitive;` · `lib.rs:10` `pub mod eval;` · `llm/mod.rs:7` `pub mod scoped_tool_registry;` · `stt/mod.rs:1` `pub mod anti_hallucination;` · `llm/prompt/mod.rs:1` `pub mod dynamic_prompt;`.
+
+🔴 **`scripts/e2e-test-suite.mjs` (chưa commit) xanh do cấu tạo — đừng tính nó là bằng chứng.** `TEST_READY.md` khai *"All 177 test assertions pass genuinely"* và `PROJECT.md` ghi M5 `DONE (177/177)`. Con số 177 là thật (đếm được: 75+75+15+7+5 lần gọi `reporter.test`), nhưng `scripts/e2e/helpers.mjs` **viết lại thuật toán của LIVA bằng JavaScript** rồi test chính bản JS đó: `class StateGraph` thay Swarm DAG, `class SecretScrubber` thay bộ khử bí mật, `computeRRF()` thay RRF, `node:crypto` thay AES-256-GCM, `DatabaseSync(':memory:')` với schema gõ tay thay pool WAL. Suite **không** mở socket, **không** spawn binary lõi, **không** import gì từ `liva-ui/src` hay `liva-native-core`. 61 chỗ gọi các helper này; vài assertion không thể đỏ (dựng object literal rồi assert lại chính thứ vừa ghi; đẩy 1000 phần tử vào mảng JS rồi assert mảng có 1000; `tier2-boundary.mjs:148` assert `process.arch === 'x64'`). **Phép thử quyết định: xoá thân một hàm Rust, xoá một component Vue, hay revert một `PRAGMA` production — suite vẫn 100 % xanh** miễn `cargo clippy` còn qua. Đã thu hồi tuyên bố trong `TEST_READY.md` và hạ M5 xuống `NOT ACCEPTED` trong `PROJECT.md`. Tín hiệu E2E thật vẫn chỉ là `e2e-gateway-ci.mjs` 8/8 và `e2e-memory.mjs` 6/6. Đúng thứ `CLAUDE.md` đã dặn: *"treat any always-green check as suspect"*.
+
+⚠️ **Bẫy đo thứ năm — chạy song song cổng nặng làm chết khả năng spawn tiến trình của cả máy.** Cho `cargo test` chạy nền cùng 2 job agent (mà job lại tự chạy `cargo clippy`) ⇒ Windows Terminal bắt đầu trả `error 2147942632 (0x800700e8)` khi mở `bash.exe` và `where.exe` — cạn tài nguyên tiến trình, không phải hỏng cài đặt Git. Dừng job, process 436 → 415, spawn lại bình thường. Cùng kết luận với bẫy MSVC-cạn-bộ-nhớ ở bảng 05/08: **cổng nặng chạy tuần tự, một cái tại một thời điểm** — lần này thêm bằng chứng rằng cái giá không chỉ là một phép đo sai mà là cả phiên làm việc. Và bẫy `$?`-sau-pipe ở mục ngay trên vẫn cắn: `cargo fmt --check | tail -5; echo $?` cho **0** trong khi lệnh thật exit **1**; bắt được vì 28 dòng `Diff in` hiện ngay bên trên một chữ "EXIT=0".
 
 ---
 
@@ -385,7 +439,7 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | **U27** ◐ | [Hợp đồng giao thức + SDK công khai cho cổng 8002](#u27--hợp-đồng-giao-thức--sdk-công-khai-cho-cổng-8002) — **tiền đề mục này SAI một phần**: hợp đồng đã có 974 dòng, client 0-dep đã có | E | Hồ sơ | ví dụ chạy được **xong 06/08** (3/3 trên gateway thật); còn phép đo trên người + gói npm |
 | ~~**U28**~~ ✅ **XONG 06/08/2026** | [Endpoint tương thích OpenAI trên gateway](#u28--endpoint-tương-thích-openai-trên-gateway) — `/v1/models` · `/v1/chat/completions` (+SSE) · `/v1/audio/speech` | E | Hồ sơ | SDK OpenAI v7.4.0 **6/6**, 0 crate mới, mặc định TẮT |
 | **U29** | [Vòng lặp chủ động có ngân sách tick](#u29--vòng-lặp-chủ-động-có-ngân-sách-tick) — trụ "chủ động" | E | Ba trụ cột | nhiều tuần |
-| 🔴 **U30** | [Bù ngang ở pelvis — sóng răng cưa theo nhịp bước](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) — **triệu chứng người dùng báo**; bước 0 là một dòng | C | U33 | 0,5 ngày cho bậc 1 |
+| ◐ **U30** | [Bù ngang ở pelvis — sóng răng cưa theo nhịp bước](#u30--bù-ngang-ở-pelvis-sóng-răng-cưa-đồng-bộ-với-nhịp-bước) — **mã đã vá 16/08 + có test khoá; CHƯA nghiệm thu bằng mắt người** | C | U33 | còn đúng phép A/B |
 | ~~**U31**~~ ✅ **XONG 07/08/2026** | [Ba khoản phí mỗi frame trên đường avatar](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) — **đo xong: (a) và (c) không đáng kể**, giá trị thật ở (b) và (d) | C | — | đã làm, +9 test |
 | **U32** | [Retarget đang vứt đi phần lớn chuyển động](#u32--retarget-đang-vứt-đi-phần-lớn-chuyển-động) — giữ 11/52 track, bỏ hips position | E | — | 2–4 ngày |
 | **U33** | [Locomotion đúng: nhịp cố định, blendspace, distance matching](#u33--locomotion-đúng-nhịp-cố-định-blendspace-distance-matching) | E | — | **nhiều tuần** · cần U30 xong trước |
@@ -1166,6 +1220,12 @@ Số test giảm 394 → 384 (−34 test của `useVRM.test.ts`, +24 test của 
 ---
 
 ### U30 — Bù ngang ở pelvis: sóng răng cưa đồng bộ với nhịp bước
+
+> ✅◐ **CẬP NHẬT 16/08/2026 — mã đã vá, nhưng mục CHƯA đóng.** Bản vá nằm trong lứa việc chưa commit của phiên song song, phát hiện khi đọc diff để đối chiếu tài liệu (chứ không phải do ai báo). `footPlantIK.ts:90,92` nay là `x: 0` và `z: 0`, giữ nguyên `y: clamp(this.anchor.y - lockedPoint.y)` — tức **bỏ hẳn bù theo phương ngang, chỉ còn bù đứng**, đúng cách mục này kê. Có test khoá hành vi: *"eliminates horizontal (x, z) translation to prevent sawtooth wave pelvis stutter while avatar advances"* (`liva-ui/tests/composables/footPlantIK.test.ts`), và `first` được assert bằng `{ x: 0, y: 0, z: 0 }`.
+>
+> ⚠️ **Nhưng cài đặt KHÔNG phải nghiệm thu, và đây đúng là mục không được lẫn hai thứ đó.** Nghiệm thu của U30 là **người mở cửa sổ ra nhìn avatar đi** — không tự động hoá được, vì `requestAnimationFrame` bị treo khi khung nhìn ẩn (đo 07/08: 0 lần gọi trong 1 giây, `document.hidden: true`), nên mọi số thu được bằng máy đều vô nghĩa. Một unit test khoá `x === 0` chứng minh *hàm trả về đúng thứ ta muốn*; nó **không** chứng minh *mắt người hết thấy khựng*. Hai nhánh vẫn còn nguyên: nếu vá rồi mà vẫn khựng thì thủ phạm ở chỗ khác và [U31](#u31--ba-khoản-phí-mỗi-frame-trên-đường-avatar) mới là nơi đáng đào tiếp.
+>
+> ⇒ Việc còn lại đúng một phép: `npm run dev -w liva-ui`, cho avatar đi, bật/tắt `LIVA_FOOT_PLANT` trong console để so hai bên. Chưa làm thì mục còn ◐.
 
 > **Nguồn gốc.** Người dùng báo avatar "khựng khựng" khi đi. Một bản rà do ChatGPT thực hiện ngày 07/08/2026 chỉ vào `FootPlantIK`; **đã đối chiếu lại từng khẳng định với code và đo lại model** — xem "độ tin của bản rà" ở cuối mục. Chẩn đoán đứng vững, nhưng thứ tự thi hành mà bản rà đề xuất thì không.
 

@@ -14,7 +14,6 @@ import {
   defineAsyncComponent,
   onMounted,
   onUnmounted,
-  onActivated,
   onDeactivated,
   nextTick,
   watch,
@@ -323,12 +322,12 @@ const forceTriggerWakeWord = async () => {
   handleWakeWordDetection();
   if (voice.state.value === 'PASSIVE') {
     voice.state.value = 'ACTIVE';
-    sendMsg('wake_word_triggered');
+    // Bỏ `sendMsg('wake_word_triggered')` ngày 16/08/2026: đó là event
+    // *server→client*. Lõi báo lên kèm `{ score, transcript }` và UI nhận ở
+    // `useVoicePipeline.ts:458`. Chiều ngược lại không có handler nào ở backend,
+    // gateway cũng không broadcast — lời gọi cũ chỉ rơi vào "Unknown command".
   }
 };
-
-// Camera frame capture interval (send to AI every 10s)
-let frameCaptureInterval: ReturnType<typeof setInterval> | null = null;
 
 
 // ═══════════════════════════════════════════════════════
@@ -877,38 +876,28 @@ watch(
   () => engineRef.value?.isCameraOn?.value,
   (val) => {
     isCameraActive.value = !!val;
-    if (val) {
-      startFrameCapture();
-    } else {
-      stopFrameCapture();
-    }
   }
 );
 
 // ═══════════════════════════════════════════════════════
-//  Camera Frame Capture → AI Vision
+//  Camera Frame Capture → AI Vision — ĐÃ GỠ 16/08/2026
 // ═══════════════════════════════════════════════════════
-
-/** Send webcam frame to Gateway every 10s for AI multimodal processing */
-function startFrameCapture() {
-  if (frameCaptureInterval) return;
-  frameCaptureInterval = setInterval(() => {
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return;
-    if (!engineRef.value?.captureFrameForAI) return;
-
-    const frame = engineRef.value.captureFrameForAI();
-    if (frame) {
-      sendMsg('camera_frame', { image: frame, timestamp: Date.now() });
-    }
-  }, 10000); // Every 10 seconds
-}
-
-function stopFrameCapture() {
-  if (frameCaptureInterval) {
-    clearInterval(frameCaptureInterval);
-    frameCaptureInterval = null;
-  }
-}
+//
+// Chỗ này từng chạy `setInterval` 10 giây một lần: gọi `captureFrameForAI()` rồi
+// `sendMsg('camera_frame', { image, timestamp })`. Lõi **không có đường nhận ảnh nào
+// từ client** — grep `camera` trong `websocket.rs` và `vision/mod.rs` ra rỗng, và
+// `camera_frame` không nằm trong bất kỳ danh sách nào của `authorization.rs`. Nghĩa là
+// mỗi frame chỉ đi tới nhánh "Unknown command" rồi bị vứt.
+//
+// Vision của LIVA hoạt động theo hướng ngược lại: lõi tự **chụp màn hình** qua
+// `vision:capture` / `vision:ask`. Không có bên nào tiêu thụ frame do client đẩy lên.
+//
+// Vì vậy đây không phải "chưa nối dây" mà là chi phí thuần: encode một frame và đẩy
+// qua socket mỗi 10 giây, cộng rủi ro riêng tư, đổi lấy đúng con số không. Nối handler
+// vào sẽ là hợp thức hoá một đường dữ liệu chưa ai định nghĩa mục đích.
+//
+// `VRMEngine.captureFrameForAI()` (`components/VRMEngine.vue:212`) nay không còn nơi
+// gọi. Giữ nguyên vì nó là năng lực của component, không phải rác của màn này.
 
 const scrollToBottom = async () => {
   await nextTick();
@@ -1052,7 +1041,6 @@ onUnmounted(() => {
   globalThis.removeEventListener('keydown', handleKeydown);
   closeTransport();
   speaker.close();
-  stopFrameCapture();
   voice.stopPipeline();
   pauseZonesInterval();
   clearToolPresentationTimer();
@@ -1065,16 +1053,9 @@ onUnmounted(() => {
   }
 });
 
-onActivated(() => {
-  // Widget became visible again — restart frame capture if camera was active
-  if (isCameraActive.value) {
-    startFrameCapture();
-  }
-});
-
 onDeactivated(() => {
-  // Widget hidden by KeepAlive — pause frame capture + zones interval to save CPU
-  stopFrameCapture();
+  // Widget hidden by KeepAlive — pause zones interval to save CPU.
+  // (Vòng chụp frame đã gỡ 16/08/2026, xem ghi chú ở khối "Camera Frame Capture".)
   // [Audit C-2] Also pause zonesInterval
   pauseZonesInterval();
 });

@@ -906,7 +906,14 @@ describe('WidgetApp.vue', () => {
     voiceMock.state.value = 'PASSIVE';
     await (wrapper.vm as any).forceTriggerWakeWord();
     expect(voiceMock.state.value).toBe('ACTIVE');
-    expect(socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw).event)).toContain(
+    // Đảo chiều khẳng định ngày 16/08/2026. Test cũ đòi widget PHẢI gửi
+    // `wake_word_triggered` lên gateway. Lời gọi đó không đi tới đâu cả:
+    // backend không có handler (không nằm trong danh sách nào của
+    // `authorization.rs`), gateway không broadcast, và `wake_word_triggered`
+    // thực chất là event *server→client* — lõi báo lên kèm `{ score, transcript }`
+    // và UI nhận ở `useVoicePipeline.ts:458`. Nay khoá theo chiều ngược lại để
+    // không ai nối lại nhầm.
+    expect(socket.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw).event)).not.toContain(
       'wake_word_triggered'
     );
     expect((wrapper.vm as any).messages.at(-1).text).toBe('wg_wake_word_ack');

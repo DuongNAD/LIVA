@@ -135,7 +135,7 @@ Bảng này đo sau khi hạ **253 file** đang treo trong cây làm việc thà
 | Trích dẫn tài liệu | `node scripts/docs-citations.mjs --max-unchecked=508` | pass — 56 tài liệu · 1 086 trích dẫn, **207 không kiểm được**, **0 neo hỏng** | phạm vi đổi, xem ghi chú |
 | E2E WebSocket | `node scripts/e2e-gateway-ci.mjs` (tự dựng + tự chạy binary debug) | **8/8 đạt** | = |
 | E2E bộ nhớ | gateway :8099 + `node scripts/e2e-memory.mjs` | *chưa đo lại* — số gần nhất **6/6** (26/07) | không đo |
-| **TTFT** ([U9](#u9--một-con-số-ttft-đo-được)) | `.\target\release\ttft_bench.exe 20` | *chưa đo lại* — số gần nhất **p50 667 ms CPU · 18 ms CUDA** (29/07) | không đo |
+| **TTFT** ([U9](#u9--một-con-số-ttft-đo-được)) | `.\target\release\ttft_bench.exe 10` | **đo lại 17/08: p50 4 874 ms CPU** (min 2 310 · max 13 476) trên gemma-4-E4B — **KHÔNG so được** với 667 ms cũ, số đó đo trên Qwen3-VL-2B | đã đo |
 
 #### Đo lại 04/08/2026 tại `596e8b6` — chỉ những dòng đã đổi
 
@@ -299,7 +299,27 @@ Module `liva-native-core/src/cognitive/` (8 file) cùng 6 file test và `db/dele
 
 **Năm module chưa commit đều được nối thật**, không phải code mồ côi: `lib.rs:5` `pub mod cognitive;` · `lib.rs:10` `pub mod eval;` · `llm/mod.rs:7` `pub mod scoped_tool_registry;` · `stt/mod.rs:1` `pub mod anti_hallucination;` · `llm/prompt/mod.rs:1` `pub mod dynamic_prompt;`.
 
-🔴 **`scripts/e2e-test-suite.mjs` (chưa commit) xanh do cấu tạo — đừng tính nó là bằng chứng.** `TEST_READY.md` khai *"All 177 test assertions pass genuinely"* và `PROJECT.md` ghi M5 `DONE (177/177)`. Con số 177 là thật (đếm được: 75+75+15+7+5 lần gọi `reporter.test`), nhưng `scripts/e2e/helpers.mjs` **viết lại thuật toán của LIVA bằng JavaScript** rồi test chính bản JS đó: `class StateGraph` thay Swarm DAG, `class SecretScrubber` thay bộ khử bí mật, `computeRRF()` thay RRF, `node:crypto` thay AES-256-GCM, `DatabaseSync(':memory:')` với schema gõ tay thay pool WAL. Suite **không** mở socket, **không** spawn binary lõi, **không** import gì từ `liva-ui/src` hay `liva-native-core`. 61 chỗ gọi các helper này; vài assertion không thể đỏ (dựng object literal rồi assert lại chính thứ vừa ghi; đẩy 1000 phần tử vào mảng JS rồi assert mảng có 1000; `tier2-boundary.mjs:148` assert `process.arch === 'x64'`). **Phép thử quyết định: xoá thân một hàm Rust, xoá một component Vue, hay revert một `PRAGMA` production — suite vẫn 100 % xanh** miễn `cargo clippy` còn qua. Đã thu hồi tuyên bố trong `TEST_READY.md` và hạ M5 xuống `NOT ACCEPTED` trong `PROJECT.md`. Tín hiệu E2E thật vẫn chỉ là `e2e-gateway-ci.mjs` 8/8 và `e2e-memory.mjs` 6/6. Đúng thứ `CLAUDE.md` đã dặn: *"treat any always-green check as suspect"*.
+🔴 **`scripts/e2e-test-suite.mjs` (chưa commit) xanh do cấu tạo — đừng tính nó là bằng chứng.** `TEST_READY.md` khai *"All 177 test assertions pass genuinely"* và `PROJECT.md` ghi M5 `DONE (177/177)`. Con số 177 là thật (đếm được: 75+75+15+7+5 lần gọi `reporter.test`), nhưng `scripts/e2e/helpers.mjs` **viết lại thuật toán của LIVA bằng JavaScript** rồi test chính bản JS đó: `class StateGraph` thay Swarm DAG, `class SecretScrubber` thay bộ khử bí mật, `computeRRF()` thay RRF, `node:crypto` thay AES-256-GCM, `DatabaseSync(':memory:')` với schema gõ tay thay pool WAL. Suite **không** mở socket, **không** spawn binary lõi, **không** import gì từ `liva-ui/src` hay `liva-native-core`. 61 chỗ gọi các helper này; vài assertion không thể đỏ (dựng object literal rồi assert lại chính thứ vừa ghi; đẩy 1000 phần tử vào mảng JS rồi assert mảng có 1000; một phép kiểm biên assert `process.arch === 'x64'`, tức kiểm kiến trúc CPU chứ không kiểm LIVA). *(Các file `tier1..tier5` nói tới ở đây đã bị xoá khi thay bộ test ở `63419b8`, nên không còn toạ độ `file:dòng` để trích — nội dung trên đọc được trong lịch sử git.)* **Phép thử quyết định: xoá thân một hàm Rust, xoá một component Vue, hay revert một `PRAGMA` production — suite vẫn 100 % xanh** miễn `cargo clippy` còn qua. Đã thu hồi tuyên bố trong `TEST_READY.md` và hạ M5 xuống `NOT ACCEPTED` trong `PROJECT.md`. Tín hiệu E2E thật vẫn chỉ là `e2e-gateway-ci.mjs` 8/8 và `e2e-memory.mjs` 6/6. Đúng thứ `CLAUDE.md` đã dặn: *"treat any always-green check as suspect"*.
+
+#### TTFT đo lại 17/08/2026 trên **release** — và tại sao KHÔNG so được với mốc 667 ms
+
+Dòng TTFT ở bảng §1 để trống từ 29/07. Nay đo lại được vì đã có build release: `.\target\release\ttft_bench.exe 10`, router **gemma-4-E4B-it-qat-UD-Q4_K_XL**, `LIVA_LLM_N_GPU_LAYERS=0` (CPU thuần).
+
+| | Giá trị |
+|---|---|
+| TTFT p50 | **4 874 ms** |
+| min · max | **2 310 ms** · **13 476 ms** |
+| Thông lượng sau token đầu | **1,5 token/s** (320 token, tối đa 32 mỗi lượt) |
+
+⚠️ **KHÔNG đọc đây thành "hồi quy 667 ms → 4 874 ms".** Mốc 667 ms đo ngày 29/07 trên **Qwen3-VL-2B**; router đã đổi sang **gemma-4-E4B (7,46 B tham số)** ngày 02/08 (`6723114`), và [§ĐỔI ROUTER](#-đổi-router-02082026--một-phần-bảng-trên-đã-hết-hiệu-lực) đã ghi sẵn rằng mọi số phụ thuộc model trong bảng cũ đều đo trên Qwen. Hai con số này **đo hai model khác nhau, lệch ~3,7 lần số tham số** — đặt cạnh nhau như một chuỗi tiến/lùi là sai. Con số 18 ms CUDA cũng vậy: lần này chạy CPU thuần, không có vế CUDA để so.
+
+📌 **Thứ đáng chú ý không phải p50 mà là ĐỘ TÁN.** Mười lượt: `4859 · 4874 · 13476 · 5350 · 3339 · 2310 · 3459 · 6166 · 9726 · 8951`. Biên độ **5,8 lần** giữa min và max, không có xu hướng nào — nhiễu thuần. Với một trợ lý thoại, độ tán mới là thứ người dùng cảm thấy: cùng một câu hỏi, khi 2,3 s khi 13,5 s.
+
+⚠️ **Và đây là chỗ tôi suýt kết luận sai — đúng "bẫy đo thứ tư" (lọc output rồi kết luận trên phần đã lọc) mà chính tài liệu này đã ghi ở mục đo 05/08.** Nhìn `tail` của output thấy `2310 → 3459 → 6166 → 9726` và đọc ngay ra "TTFT tăng dần theo lượt, nghi tích luỹ trạng thái/KV cache". Xem đủ mười lượt thì giả thuyết đó tan: lượt 3 đã là 13 476 ms rồi tụt xuống 2 310 ở lượt 6. **Lọc output rồi kết luận trên phần đã lọc** — lỗi y hệt lần `cargo test | tail -50` cắt mất binary 586 test.
+
+⚠️ **`n = 10` nên p95 ở đây CHÍNH LÀ max, không phải ước lượng đuôi** — chính công cụ in ra cảnh báo đó. Muốn một p95 nói được điều gì thì cần `ttft_bench 50` trở lên; chưa chạy vì mỗi lượt phải prefill ~2 237 token trên CPU (20 lượt đã vượt 10 phút).
+
+📌 Dòng `init: embeddings required but some input tokens were not marked as outputs -> overriding` in ra ở **mọi lượt** — cùng dòng xuất hiện ngay trước assert của lỗi `abort()` bên dưới. Nó xác nhận context sinh chữ đang chạy ở chế độ embedding, tức `with_embeddings(true)` không phải chuyện chỉ ảnh hưởng lúc lỗi mà là trạng thái thường trực của đường nóng.
 
 #### ✅ Một câu thoại bình thường làm lõi `abort()` — tìm và vá 16/08/2026 (`6138f57`)
 
@@ -320,7 +340,23 @@ llama.cpp/src/llama-context.cpp:1712: GGML_ASSERT(n_tokens_all <= cparams.n_batc
 2. **Cổng chắn chắn nhầm bound.** `check_prompt_fits(prompt_tokens_len, n_ctx)` (`llm/engine.rs:95`) so với **`n_ctx` = 4096**. Nhưng assert nổ là về **`n_batch`** — một trần *khác và nhỏ hơn*. Prompt nằm giữa `n_batch` và `n_ctx` **qua được cổng rồi mới chết**: cổng có mà vẫn lọt.
 3. **Đường thoại không gọi cổng đó lần nào.** `grep -rn "check_prompt_fits" liva-native-core/src/websocket.rs` rỗng; điểm gọi thật duy nhất là `engine.rs:283`. Mà lượt làm nổ assert đi vào qua `user_voice_command` — thấy trong log ngay trước dòng assert.
 
-⚠️ **Ba thứ chưa kiểm lúc ghi lần đầu — (b) nay ĐÃ ĐO, kết quả nặng hơn dự đoán.** Còn lại: (a) release build có nổ không — `GGML_ASSERT` thường vẫn sống ở release, nhưng **chưa đo**; (c) có tái lập với model khác không — **chưa đo**.
+⚠️ **Ba thứ chưa kiểm lúc ghi lần đầu — (a) và (b) nay ĐÃ ĐO, cả hai đều nặng hơn dự đoán.** Chỉ còn (c) có tái lập với model khác không — **chưa đo**.
+
+##### (a) Đo xong: release CŨNG nổ, và im lặng hơn debug
+
+Gỡ đúng dòng `.with_n_batch(...)`, build lại release, chạy lại kịch bản cũ:
+
+| | debug | release |
+|---|---|---|
+| `GGML_ASSERT` trong log | 1 | **1** |
+| Tiến trình lõi sau đó | chết | **chết** |
+| Có hộp thoại báo lỗi không | có — MSVC *"Debug Error!"* | **KHÔNG có gì** |
+
+⇒ Lỗi này **không phải chuyện của riêng bản debug**. Nó ăn vào mọi profile, và ở release còn **khó nhận ra hơn**: debug CRT ít nhất còn bật một hộp thoại, release chết câm. Người dùng thật chỉ thấy LIVA im lặng vĩnh viễn — không thông báo, không dấu vết trên màn hình, client treo tới hết timeout. Ghép với [số đo (b) bên dưới](#b-đo-xong-prompt-nền-2237-token-và-giả-thuyết-ban-đầu-sai) (prompt nền 2 237 token > `n_batch` 2 048 ngay lượt đầu), kết luận đầy đủ là: **trước `6138f57`, mọi lượt thoại đầu tiên trên mọi bản build đều giết tiến trình lõi.**
+
+Khôi phục bản vá xong: `git diff HEAD` rỗng, release chạy lại `e2e-memory` **6/6**, `GGML_ASSERT` **0**.
+
+⚠️ **Một bẫy nhỏ khi khôi phục, ghi lại vì nó sẽ lặp:** so `md5sum` trước/sau `git checkout` cho hai giá trị **khác nhau** và trông như khôi phục hỏng. Thủ phạm là `core.autocrlf` — checkout ghi lại file bằng CRLF. Trọng tài đúng là `git diff HEAD` (rỗng); muốn so hash thì phải chuẩn hoá trước: `tr -d '\r' < file | md5sum` — làm vậy thì khớp chính xác.
 
 ##### (b) Đo xong: prompt nền **2237 token**, và giả thuyết ban đầu SAI
 

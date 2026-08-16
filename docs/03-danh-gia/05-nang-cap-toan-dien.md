@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-16
-commit: 406874c
-stale-ok: 406874c
+commit: 1915ad8
+stale-ok: 1915ad8
 status: living
 owns:
   - duong-co-so-do-luong
@@ -320,7 +320,32 @@ llama.cpp/src/llama-context.cpp:1712: GGML_ASSERT(n_tokens_all <= cparams.n_batc
 2. **Cổng chắn chắn nhầm bound.** `check_prompt_fits(prompt_tokens_len, n_ctx)` (`llm/engine.rs:95`) so với **`n_ctx` = 4096**. Nhưng assert nổ là về **`n_batch`** — một trần *khác và nhỏ hơn*. Prompt nằm giữa `n_batch` và `n_ctx` **qua được cổng rồi mới chết**: cổng có mà vẫn lọt.
 3. **Đường thoại không gọi cổng đó lần nào.** `grep -rn "check_prompt_fits" liva-native-core/src/websocket.rs` rỗng; điểm gọi thật duy nhất là `engine.rs:283`. Mà lượt làm nổ assert đi vào qua `user_voice_command` — thấy trong log ngay trước dòng assert.
 
-⚠️ **Ba thứ CHƯA kiểm, nói rõ thay vì đoán:** (a) release build có nổ không — `GGML_ASSERT` thường vẫn sống ở release, nhưng **chưa đo**; (b) ngưỡng thật bao nhiêu token, và vì sao một câu ngắn lại chạm nó — dòng `embeddings required` ngay trước assert gợi ý prompt thật lớn hơn nhiều thứ người dùng gõ (lịch sử + ngữ cảnh RAG), nhưng **chưa truy**; (c) có tái lập với model khác không.
+⚠️ **Ba thứ chưa kiểm lúc ghi lần đầu — (b) nay ĐÃ ĐO, kết quả nặng hơn dự đoán.** Còn lại: (a) release build có nổ không — `GGML_ASSERT` thường vẫn sống ở release, nhưng **chưa đo**; (c) có tái lập với model khác không — **chưa đo**.
+
+##### (b) Đo xong: prompt nền **2237 token**, và giả thuyết ban đầu SAI
+
+Dự đoán ban đầu là "lịch sử + ngữ cảnh RAG nong prompt lên". **Không phải.** Đo bằng một dòng log tại `engine.rs:294` (nay giữ lại ở mức `debug!`), chạy trên gateway thật:
+
+```
+prompt = 2237 token (n_ctx = 4096)      ← lượt ĐẦU: chưa có lịch sử, RAG chưa có gì
+prompt = 2316 token (n_ctx = 4096)
+```
+
+Người dùng mới gõ một câu 30 chữ. Nghĩa là **phần khung của prompt đã ~2200 token trước khi ai nói gì** — `PERSONA_LIVA` chỉ 2 494 ký tự (~620 token), phần còn lại là các khối SKILLS/TOOLS được ghép vào.
+
+🔴 **Hệ quả phải đọc kỹ: lỗi `abort()` KHÔNG phải trường hợp biên.** 2237 > 2048 ngay ở lượt đầu tiên, không cần lịch sử dài, không cần prompt bất thường. Lõi sẽ chết ở **mọi lượt thoại**, trên máy mọi người dùng, ngay từ câu đầu. Ghi lại vì bản mô tả đầu tiên của mục này ("prompt dài 2049..3583 token lọt cổng rồi mới chết") đọc như một điều kiện hiếm — nó không hiếm, nó là **mặc định**.
+
+📌 Và con số 2237 tự nó là một khoản nợ: nó ăn **55 % của `n_ctx = 4096`** trước khi tính lịch sử hội thoại lẫn chỗ chừa cho câu trả lời. Đây là ngân sách prompt, không phải lỗi — nhưng chưa ai đo nên chưa ai biết để quản.
+
+##### 🔴 `DynamicPromptAssembler` — đúng cơ chế chặn lỗi này, nhưng chưa nối vào đâu
+
+`llm/prompt/dynamic_prompt.rs` hiện thực `PromptBudget { max_system_tokens, max_tool_tokens, reserve_response_tokens }` cùng `assemble_prompt` biết cắt bớt SKILLS/TOOLS cho vừa ngân sách. **Đó chính xác là thứ đã ngăn được prompt 2237 token.** Nhưng nó **chưa chạy ở đâu cả**:
+
+- `grep -rn "assemble_prompt\|PromptBudget::new"` ngoài file → **rỗng**
+- Hai tham chiếu ngoài file duy nhất (`llm/mod.rs:17`, `llm/prompt/mod.rs:5`) là lệnh **`pub use` tái xuất**, không phải lời gọi
+- Người gọi thật duy nhất: `tests/dynamic_prompt_assembly_tests.rs`
+
+⇒ Module được khai báo, có test, và **chỉ test của chính nó chạy nó** — đúng định nghĩa HALF-DONE. Nó cũng không có `impl Default for PromptBudget`, nên nối vào còn phải chọn ba con số ngân sách; đó là quyết định thiết kế, không phải việc nối dây, nên **không gộp vào bản vá `n_batch`**. Đây là một mục backlog xứng đáng đứng riêng.
 
 ✅ **ĐÃ VÁ — `6138f57`.** Bằng chứng nguồn nằm ở `llama-context.cpp:193`:
 

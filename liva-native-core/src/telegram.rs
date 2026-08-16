@@ -391,29 +391,56 @@ async fn process_voice_message(
     file_id: &str,
     state: &Arc<AppState>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    struct TempFileGuard {
+        input: std::path::PathBuf,
+        output: std::path::PathBuf,
+    }
+
+    impl Drop for TempFileGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.input);
+            let _ = std::fs::remove_file(&self.output);
+        }
+    }
+
     let file = bot.get_file(file_id).await?;
-    let token = std::env::var("TELEGRAM_BOT_TOKEN").unwrap_or_default();
-    let file_url = format!("https://api.telegram.org/file/bot{}/{}", token, file.path);
+    let file_url = format!(
+        "https://api.telegram.org/file/bot{}/{}",
+        bot.token(),
+        file.path
+    );
 
     let response = reqwest::get(&file_url).await?;
     let audio_bytes = response.bytes().await?;
 
     let temp_input_path = std::env::temp_dir().join(format!("tg_voice_{}.ogg", file_id));
     let temp_output_path = std::env::temp_dir().join(format!("tg_voice_{}.raw", file_id));
+    let _guard = TempFileGuard {
+        input: temp_input_path.clone(),
+        output: temp_output_path.clone(),
+    };
+
     tokio::fs::write(&temp_input_path, audio_bytes).await?;
+
+    let input_path_str = temp_input_path
+        .to_str()
+        .ok_or("Temp input path is not valid UTF-8")?;
+    let output_path_str = temp_output_path
+        .to_str()
+        .ok_or("Temp output path is not valid UTF-8")?;
 
     let status = tokio::process::Command::new("ffmpeg")
         .args([
             "-y",
             "-i",
-            temp_input_path.to_str().unwrap(),
+            input_path_str,
             "-ar",
             "16000",
             "-ac",
             "1",
             "-f",
             "f32le",
-            temp_output_path.to_str().unwrap(),
+            output_path_str,
         ])
         .status()
         .await?;
@@ -427,9 +454,6 @@ async fn process_voice_message(
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect();
-
-    let _ = tokio::fs::remove_file(temp_input_path).await;
-    let _ = tokio::fs::remove_file(temp_output_path).await;
 
     let text = tokio::task::spawn_blocking({
         let state_clone = Arc::clone(state);

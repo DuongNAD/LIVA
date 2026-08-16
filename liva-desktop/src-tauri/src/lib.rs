@@ -583,8 +583,23 @@ async fn native_ipc_call_stream(
     let req_id_clone = req_id.clone();
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&msg) {
-                let _ = window_clone.emit(&format!("ipc-stream:{}", req_id_clone), resp);
+            match serde_json::from_str::<serde_json::Value>(&msg) {
+                Ok(resp) => {
+                    let _ = window_clone.emit(&format!("ipc-stream:{}", req_id_clone), resp);
+                }
+                // Một producer ghi text thô thay vì JSON sẽ biến mất không dấu vết ở đây:
+                // chunk bị bỏ, không emit gì, và UI chỉ ngồi chờ tới lúc hết giờ. Ghi log
+                // để lần sau còn truy được, nhưng KHÔNG dừng vòng lặp — một chunk hỏng
+                // không được phép giết cả stream.
+                Err(err) => {
+                    let preview: String = msg.chars().take(120).collect();
+                    tracing::warn!(
+                        "Chunk của stream '{}' không phải JSON, đã bỏ qua ({}). 120 ký tự đầu: {}",
+                        req_id_clone,
+                        err,
+                        preview
+                    );
+                }
             }
         }
     });

@@ -931,7 +931,7 @@ async fn handle_ws_connection(
                         tokio::spawn(async move {
                             match event_name.as_str() {
                                 "get_config" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_config",
@@ -941,19 +941,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "config_data",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "config_data",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_config' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_config_error",
+                                                        "payload": {
+                                                            "command": "get_config",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_ai_config" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_ai_config",
@@ -963,19 +980,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "ai_config",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "ai_config",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_ai_config' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_ai_config_error",
+                                                        "payload": {
+                                                            "command": "get_ai_config",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_voice_status" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_voice_status",
@@ -985,19 +1019,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "voice_status",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "voice_status",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_voice_status' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_voice_status_error",
+                                                        "payload": {
+                                                            "command": "get_voice_status",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_voice_profiles" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_voice_profiles",
@@ -1007,19 +1058,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "voice_profiles",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "voice_profiles",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_voice_profiles' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_voice_profiles_error",
+                                                        "payload": {
+                                                            "command": "get_voice_profiles",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_system_status" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_system_status",
@@ -1029,19 +1097,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "system_status",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "system_status",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_system_status' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_system_status_error",
+                                                        "payload": {
+                                                            "command": "get_system_status",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_skills_list" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_skills_list",
@@ -1051,19 +1136,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "skills_list",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "skills_list",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_skills_list' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_skills_list_error",
+                                                        "payload": {
+                                                            "command": "get_skills_list",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_user_profile" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_user_profile",
@@ -1073,19 +1175,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "user_profile",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "user_profile",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_user_profile' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_user_profile_error",
+                                                        "payload": {
+                                                            "command": "get_user_profile",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_tasks" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_tasks",
@@ -1095,19 +1214,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "tasks_list",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "tasks_list",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_tasks' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_tasks_error",
+                                                        "payload": {
+                                                            "command": "get_tasks",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_avatar_models" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_avatar_models",
@@ -1117,19 +1253,36 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "avatar_models_list",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "avatar_models_list",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_avatar_models' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_avatar_models_error",
+                                                        "payload": {
+                                                            "command": "get_avatar_models",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "get_memory_data" => {
-                                    if let Ok(res) = handle_command_as(
+                                    match handle_command_as(
                                         principal,
                                         state_clone,
                                         "get_memory_data",
@@ -1139,15 +1292,32 @@ async fn handle_ws_connection(
                                     )
                                     .await
                                     {
-                                        let _ = text_tx_clone
-                                            .send(
-                                                serde_json::json!({
-                                                    "event": "memory_data",
-                                                    "payload": res
-                                                })
-                                                .to_string(),
-                                            )
-                                            .await;
+                                        Ok(res) => {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "memory_data",
+                                                        "payload": res
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+                                        Err(err) => {
+                                            warn!("Lenh 'get_memory_data' that bai: {}", err);
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "get_memory_data_error",
+                                                        "payload": {
+                                                            "command": "get_memory_data",
+                                                            "error": err
+                                                        }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
                                     }
                                 }
                                 "user_voice_command" => {

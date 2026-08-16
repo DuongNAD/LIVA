@@ -1,8 +1,8 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-08-16
-commit: 1d7a684
-stale-ok: 1d7a684
+commit: 4cb5ecd
+stale-ok: 4cb5ecd
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -434,6 +434,10 @@ Chỗ **từng chưa gộp được** là `LIVA_TTS_VIENEU` trong `tts/mod.rs`: 
 
 **M9 — I/O chặn.** `lib.rs` có 9 lần `std::fs::` (đọc/ghi config, quét thư mục model) gọi trực tiếp trong hàm `async` mà không `spawn_blocking` — ví dụ `lib.rs:354` `std::fs::read_to_string` trong `get_config`, `lib.rs:414` `std::fs::write` trong `update_config`. Trên ổ chậm/AV scan, chặn worker Tokio. Mức độ nhẹ nhưng dễ sửa.
 
+⚠️ **Mô thức này tái diễn ở chỗ mới, 16/08/2026 — và người mắc lại chính là phiên đang vá thứ khác trong cùng file.** Ba handler vừa thêm vào `commands/config.rs` (`update_user_profile`, `import_avatar_folder`, `delete_avatar_model`) gọi thẳng I/O đồng bộ trên runtime async, **trong khi cùng file đó đã bọc `spawn_blocking` cho `update_config` (:267) và `toggle_skill` (:384)** — quy ước đúng nằm cách vài chục dòng. `import_avatar_folder` nặng nhất: copy tới 200 file, giữ worker Tokio hàng giây, nghẽn cả audio lẫn nhịp WebSocket dùng chung runtime. Đã bọc cả ba.
+
+Điều đáng rút ra không phải "nhớ dùng `spawn_blocking`", mà là: **M9 mô tả một mô thức nhưng được ghi như một danh sách toạ độ trong `lib.rs`.** Ai đọc M9 rồi thêm code ở file khác sẽ không nhận ra mình đang lặp lại nó. Một quy tắc chỉ chặn được tái phạm khi nó nằm ở nơi người ta viết code — cân nhắc một lint hoặc test kiến trúc, thay vì thêm toạ độ mới vào danh sách này.
+
 ---
 
 ## 4. LOW
@@ -594,9 +598,24 @@ Tauri chỉ là passthrough thuần ở tầng lệnh: `native_ipc_call(command,
 
 **(a) Frontend vẫn có event legacy không khớp handler**, nhưng snapshot grep “22 event”
 đã bị loại vì đếm sai tên truyền qua biến và từng báo oan cả nhóm memory. Catalog hiện hành
-có 76 command/11 miền; 11 command memory đều có owner. Các ví dụ còn cần xử lý theo
-test adapter/dispatcher là `select_voice_profile`, `save_env_config` và một số thao tác
-avatar/skill legacy.
+có 76 command/11 miền; 11 command memory đều có owner.
+
+✅ **Đã kết toán trọn vẹn 16/08/2026 — không còn "một số thao tác legacy" mơ hồ.** Đối chiếu
+`WSClientEvent` với bốn danh sách trong `authorization.rs`: **69 lệnh client hợp lệ**, trong khi
+type khai 27 lệnh thật, **15 lệnh không có handler**, và thiếu 42 lệnh có thật. Trong 15 lệnh ma,
+**11 cái UI vẫn đang gửi** — tức nút bấm không làm gì. Xử từng cái, không cái nào theo mặc định
+"cứ hiện thực cho đủ":
+
+- **Đã nối (5):** `select_voice_profile` (chính ví dụ nêu ở đoạn trên), `toggle_skill` ·
+  `toggle_all_skills` (kèm lọc catalog ở `tool_calling.rs` — phần khiến công tắc là thật chứ
+  không chỉ đổi màu), `import_avatar_folder`, `delete_avatar_model`, `update_user_profile`.
+- **Xoá hoặc chuyển chiều (3):** `camera_frame` (lõi không có đường nhận ảnh từ client —
+  vòng lặp cũ encode một frame mỗi 10 giây rồi đẩy vào hư không), `wake_word_triggered` và
+  `update_ai_config` (cả hai là event **server→client** bị xếp nhầm vào union client).
+- **Cố ý KHÔNG nối (2):** `start_voice_training` · `stop_voice_training` — chặn ở U17b, thiếu 2 model.
+- **Chờ chủ dự án (1):** `test_all_skills` — "test một skill" chưa được định nghĩa.
+
+`save_env_config` chưa rà trong đợt này. Chi tiết và nghiệm thu ở [§1 bảng đo 16/08](05-nang-cap-toan-dien.md).
 
 > 📌 Nguồn hiện hành: [Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md)
 

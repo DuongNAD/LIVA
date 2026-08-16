@@ -14,6 +14,37 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Cổng định dạng Rust — chỉ chạy khi có file .rs được staged.
+#
+# Vì sao có mục này: `cargo fmt` là gate CỨNG ở bước 6/25 của CI (từ 98efc55), và khi nó đỏ thì
+# 19 bước sau KHÔNG chạy — hỏng một bước sớm che mất mọi thứ phía sau. Tính đến 16/08/2026 đã ba
+# lần liên tiếp mã Rust vào cây ở trạng thái chưa format (49 hunk/13 file · 104 hunk · 28 hunk/6
+# file), cả ba cùng một nguyên nhân: commit mà không chạy cổng cục bộ. Vá thủ công lần thứ ba
+# không ngăn được lần thứ tư, nên cổng chuyển về đây.
+#
+# `cargo fmt --all -- --check` chứ KHÔNG phải `rustfmt --check`, vì hai lý do:
+#   1. crate dùng `edition = "2024"`; rustfmt đứng riêng mặc định edition 2015 và sẽ phán sai.
+#   2. đây đúng nguyên văn lệnh CI chạy — qua được ở đây thì qua được ở đó, không lệch cấu hình.
+# Và KHÔNG bao giờ đưa file qua stdin (`git show … | rustfmt --check`): rustfmt đọc stdin thì
+# không kiểm gì cả và trả exit 0 với mọi input — cái bẫy đã ghi ở §1 của 05-nang-cap-toan-dien.md.
+#
+# Đo 16/08/2026: 0,96 s trên toàn workspace, nên không lọc theo từng file — kiểm cả workspace cho
+# khớp CI. Nếu thiếu cargo thì DỪNG chứ không bỏ qua im lặng: một cổng có thể lặng lẽ không chạy
+# còn tệ hơn không có cổng.
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '\.rs$'; then
+    echo "🦀 Rust staged — running cargo fmt gate (same command as CI)..."
+    if ! command -v cargo > /dev/null 2>&1; then
+        echo "❌ Có file .rs được staged nhưng không tìm thấy 'cargo' trên PATH."
+        echo "   Không thể kiểm định dạng ⇒ chặn commit thay vì bỏ qua âm thầm."
+        exit 1
+    fi
+    if ! cargo fmt --all -- --check; then
+        echo "❌ cargo fmt gate failed — CI sẽ đỏ ở bước 6/25 và 19 bước sau sẽ không chạy."
+        echo "   Sửa: chạy 'cargo fmt --all' rồi 'git add' lại các file vừa được format."
+        exit 1
+    fi
+fi
+
 # Run AI pre-commit checks
 # (.cjs vì package.json gốc khai "type": "module" — script này là CommonJS)
 echo "🤖 Running AI Pre-Commit Auditor..."

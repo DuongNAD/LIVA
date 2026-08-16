@@ -74,6 +74,12 @@ liva-dataset/
 **/*_errors.txt
 gitnexus_log.txt
 scratch.*
+# `scratch.*` ở trên dùng dấu CHẤM nên không bắt được `scratch_check.txt`,
+# `scratch_clippy.txt`, `scratch_out.txt`, `scratch_test_err.txt`,
+# `scratch_test_out.txt` — năm file gạch dưới nằm ở gốc repo ngày 16/08/2026,
+# tất cả đều là output debug đổ ra tay, và tất cả đều đang chờ bị commit nhầm.
+scratch_*
+out_test.txt
 download_*.py
 download_*.bat
 script_*.py

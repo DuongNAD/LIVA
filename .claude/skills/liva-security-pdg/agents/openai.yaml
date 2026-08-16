@@ -1,0 +1,14 @@
+interface:
+  display_name: "LIVA Security PDG"
+  short_description: "Audit vulnerabilities via Program Dependence Graph taint tracking"
+  default_prompt: "Use $liva-security-pdg to trace source-to-sink taint flows and audit security vulnerabilities using GitNexus PDG."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "gitnexus"
+      description: "Perform taint analysis, control dependence queries, and blast radius calculations."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search security rules and store vulnerability audit reports."
+policy:
+  allow_implicit_invocation: true

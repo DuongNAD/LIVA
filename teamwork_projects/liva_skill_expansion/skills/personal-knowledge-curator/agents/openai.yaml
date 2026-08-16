@@ -1,0 +1,14 @@
+interface:
+  display_name: "Personal Knowledge Curator"
+  short_description: "Curate atomic notes, maintain Obsidian graph connections, and consolidate long-term memory"
+  default_prompt: "Use $personal-knowledge-curator to organize notes, link related concepts, and manage Obsidian vault taxonomy."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search, read, and write markdown notes and metadata in the Obsidian vault."
+    - type: "builtin"
+      value: "memory"
+      description: "Query and persist structured memory facts and relations into LIVA SQLite memory."
+policy:
+  allow_implicit_invocation: true

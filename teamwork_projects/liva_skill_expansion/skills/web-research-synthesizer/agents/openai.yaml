@@ -1,0 +1,17 @@
+interface:
+  display_name: "Web Research Synthesizer"
+  short_description: "Conduct deep multi-source web investigations, verify facts, and produce cited research briefs"
+  default_prompt: "Use $web-research-synthesizer to search the web, fetch technical documentation, verify facts, and compile a structured research dossier."
+dependencies:
+  tools:
+    - type: "builtin"
+      value: "search_web"
+      description: "Search web search engines for multi-source articles and technical documentation."
+    - type: "builtin"
+      value: "read_url_content"
+      description: "Fetch and extract clean markdown content from public URLs."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist structured research briefs and citations into the Obsidian vault."
+policy:
+  allow_implicit_invocation: true

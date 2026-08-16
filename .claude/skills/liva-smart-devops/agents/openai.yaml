@@ -1,0 +1,14 @@
+interface:
+  display_name: "LIVA Smart DevOps"
+  short_description: "Diagnose CI/CD build failures, container logs, and infrastructure configurations"
+  default_prompt: "Use $liva-smart-devops to analyze container logs, triage pipeline failures, and formulate safe remediation patches."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search and record infrastructure incident post-mortems."
+    - type: "mcp"
+      value: "gitnexus"
+      description: "Analyze blast radius and impact of build and configuration changes."
+policy:
+  allow_implicit_invocation: true

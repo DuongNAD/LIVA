@@ -1,0 +1,14 @@
+interface:
+  display_name: "Security PDG Code Auditor"
+  short_description: "Analyze source code vulnerabilities using PDG taint analysis, control dependencies, and reachability tracing"
+  default_prompt: "Use $security-pdg-code-auditor to audit source code for security vulnerabilities, trace taint flows from source to sink, and verify sanitization barriers."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "gitnexus"
+      description: "Query Program Dependence Graph (PDG), analyze taint flows, and compute impact blast radius."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist vulnerability audit reports and remediation dossiers into Obsidian vault."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,17 @@
+interface:
+  display_name: "Smart DevOps Assistant"
+  short_description: "Diagnose CI/CD pipeline failures, monitor container health, and triage infrastructure errors"
+  default_prompt: "Use $smart-devops-assistant to analyze CI/CD build logs, diagnose container runtime failures, and propose safe remediation steps."
+dependencies:
+  tools:
+    - type: "builtin"
+      value: "run_command"
+      description: "Execute controlled diagnostic and build commands in local shell."
+    - type: "mcp"
+      value: "gitnexus"
+      description: "Perform upstream impact and change detection on modified configuration and source files."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist incident postmortems and DevOps runbooks into Obsidian vault."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,20 @@
+interface:
+  display_name: "Enterprise Document RAG & Contract Auditor"
+  short_description: "Audit enterprise documents, multi-page PDFs, and contracts with hybrid RAG and risk redlining"
+  default_prompt: "Use $enterprise-doc-rag-auditor to ingest and index documents, analyze contract clauses, identify legal risks, and generate redline recommendations."
+dependencies:
+  tools:
+    - type: "builtin"
+      value: "rag:query_hybrid"
+      description: "Perform hybrid dense vector and sparse FTS5 retrieval across indexed enterprise documents."
+    - type: "builtin"
+      value: "rag:ingest_doc"
+      description: "Parse, chunk, and index multi-page PDF, DOCX, and scanned documents."
+    - type: "builtin"
+      value: "rag:redline_diff"
+      description: "Generate structured clause diffs and risk severity classifications."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist structured contract audit dossiers and cross-reference knowledge into the Obsidian vault."
+policy:
+  allow_implicit_invocation: true

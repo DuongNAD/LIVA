@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA PKM Obsidian"
+  short_description: "Manage personal notes and knowledge in Obsidian Vault"
+  default_prompt: "Use $liva-pkm-obsidian to search, create, and organize personal knowledge notes in Obsidian."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search, read, and write markdown notes in Obsidian vault."
+policy:
+  allow_implicit_invocation: true

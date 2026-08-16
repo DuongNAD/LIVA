@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Doc RAG Auditor"
+  short_description: "Audit contracts, invoices, and documents using local RAG"
+  default_prompt: "Use $liva-doc-rag-auditor to index documents, extract key clauses, and audit financial or legal risks."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Read reference compliance checklists and store audit reports."
+policy:
+  allow_implicit_invocation: true

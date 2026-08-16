@@ -1,0 +1,23 @@
+interface:
+  display_name: "Business Intelligence & Text-to-SQL Analyst"
+  short_description: "Synthesize Text-to-SQL queries, discover database schemas, compute business KPIs, and generate charts"
+  default_prompt: "Use $business-intelligence-analyst to introspect database schemas, synthesize and validate SQL queries, calculate business KPIs, and generate charts."
+dependencies:
+  tools:
+    - type: "builtin"
+      value: "db:introspect_schema"
+      description: "Introspect database tables, column types, foreign keys, and indices."
+    - type: "builtin"
+      value: "db:explain_query"
+      description: "Inspect SQL execution plan and cost estimates before running."
+    - type: "builtin"
+      value: "db:execute_query"
+      description: "Execute validated read-only SQL queries with row limits and timeouts."
+    - type: "builtin"
+      value: "db:generate_chart"
+      description: "Generate declarative Vega-Lite or Mermaid chart specifications."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist structured BI analytics and KPI definitions into Obsidian vault."
+policy:
+  allow_implicit_invocation: true

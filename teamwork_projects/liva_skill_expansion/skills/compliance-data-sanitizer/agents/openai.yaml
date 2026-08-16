@@ -1,0 +1,23 @@
+interface:
+  display_name: "Compliance Data Sanitizer & Privacy Vault"
+  short_description: "Detect and mask multi-lingual PII/PHI, encrypt sensitive tokens, and ensure GDPR/Decree 13 compliance"
+  default_prompt: "Use $compliance-data-sanitizer to inspect payloads, redact sensitive PII/PHI and credentials, encrypt reversible tokens, and audit regulatory compliance."
+dependencies:
+  tools:
+    - type: "builtin"
+      value: "compliance:scan_pii"
+      description: "Detect multi-lingual PII, Vietnamese CCCD, phone numbers, emails, and credentials."
+    - type: "builtin"
+      value: "compliance:mask_payload"
+      description: "Replace sensitive entities with deterministic surrogate tokens."
+    - type: "builtin"
+      value: "compliance:tokenize_reversible"
+      description: "Encrypt and store surrogate mappings in local AES-256-GCM Privacy Vault."
+    - type: "builtin"
+      value: "compliance:audit_report"
+      description: "Generate regulatory compliance audit reports and cryptographic receipts."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist compliance audit logs and privacy guidelines into the Obsidian vault."
+policy:
+  allow_implicit_invocation: true

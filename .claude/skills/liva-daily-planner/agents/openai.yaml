@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Daily Planner"
+  short_description: "Manage daily schedules, focus blocks, and productivity briefings"
+  default_prompt: "Use $liva-daily-planner to organize today's schedule, prioritize tasks, and prepare briefings."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Read and update daily notes and task logs."
+policy:
+  allow_implicit_invocation: true

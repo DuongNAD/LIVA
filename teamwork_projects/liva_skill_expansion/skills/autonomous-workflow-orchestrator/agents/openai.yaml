@@ -1,0 +1,23 @@
+interface:
+  display_name: "Autonomous Workflow Orchestrator & Swarm Manager"
+  short_description: "Decompose multi-agent task graphs, coordinate subagents, manage consensus, and enforce HITL gates"
+  default_prompt: "Use $autonomous-workflow-orchestrator to decompose complex objectives into DAGs, dispatch specialized subagents, manage consensus voting, and enforce HITL safety gates."
+dependencies:
+  tools:
+    - type: "builtin"
+      value: "orchestrator:decompose_plan"
+      description: "Deconstruct goals into DAG task graphs and perform topological sort."
+    - type: "builtin"
+      value: "orchestrator:dispatch_task"
+      description: "Dispatch tasks to specialized subagents with scoped tool permissions."
+    - type: "builtin"
+      value: "orchestrator:vote_consensus"
+      description: "Collect and evaluate consensus votes across multiple participating agents."
+    - type: "builtin"
+      value: "orchestrator:hitl_checkpoint"
+      description: "Suspend execution and request explicit Human-in-the-Loop approval."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist execution graphs and workflow logs into the Obsidian vault."
+policy:
+  allow_implicit_invocation: true

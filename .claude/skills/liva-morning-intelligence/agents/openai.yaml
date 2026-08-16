@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Morning Intelligence"
+  short_description: "Scrape web intelligence and generate personalized morning briefings"
+  default_prompt: "Use $liva-morning-intelligence to crawl real-time updates across GitHub, social, and news feeds, and synthesize a morning briefing."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Read user topics and store daily briefings."
+policy:
+  allow_implicit_invocation: true

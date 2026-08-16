@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Workflow Orchestrator"
+  short_description: "Decompose missions into DAG workflows and coordinate multi-agent consensus"
+  default_prompt: "Use $liva-workflow-orchestrator to decompose complex tasks into DAG workflows, dispatch subagents, and manage consensus gates."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search workflow templates and archive multi-agent run reports."
+policy:
+  allow_implicit_invocation: true

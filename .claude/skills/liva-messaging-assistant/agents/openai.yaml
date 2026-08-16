@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Messaging Assistant"
+  short_description: "Manage contacts and draft safe messages via Telegram & Messenger"
+  default_prompt: "Use $liva-messaging-assistant to look up contacts and safely draft messages for confirmation."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search contact notes and messaging guidelines."
+policy:
+  allow_implicit_invocation: true

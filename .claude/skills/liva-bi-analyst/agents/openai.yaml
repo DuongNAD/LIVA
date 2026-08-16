@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA BI Analyst"
+  short_description: "Synthesize safe Text-to-SQL queries, compute KPIs, and render charts"
+  default_prompt: "Use $liva-bi-analyst to inspect schemas, synthesize read-only SQL queries, compute business KPIs, and generate charts."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Read analytics business definitions and store BI dashboard reports."
+policy:
+  allow_implicit_invocation: true

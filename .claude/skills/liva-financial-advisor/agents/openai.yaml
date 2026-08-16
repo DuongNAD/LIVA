@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Financial Advisor"
+  short_description: "Analyze financial statements, forecast cash flows, and manage budgets securely"
+  default_prompt: "Use $liva-financial-advisor to parse financial statements, project cash flows, and evaluate balance sheet health."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search financial runbooks and archive financial health audit reports."
+policy:
+  allow_implicit_invocation: true

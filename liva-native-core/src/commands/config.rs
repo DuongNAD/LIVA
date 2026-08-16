@@ -137,7 +137,12 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         "update_config" => update_config(state, payload).await,
         "get_ai_config" => get_ai_config(),
         "get_voice_status" => get_voice_status(state).await,
-        "get_voice_profiles" => Ok(json!(liet_ke_thu_muc(std::path::Path::new("data/voices")))),
+        // `resolve_resource_path` chứ không phải đường dẫn tương đối trần: chạy ngoài
+        // gốc repo (bản Tauri đã đóng gói) thì `data/voices` trỏ vào CWD và trả rỗng —
+        // im lặng, trông y như "máy không có giọng nào".
+        "get_voice_profiles" => Ok(json!(liet_ke_thu_muc(&resolve_resource_path(
+            "data/voices"
+        )))),
         "select_voice_profile" => select_voice_profile(payload).await,
         "get_system_status" => system_status(state).await,
         "get_preflight_status" => {
@@ -150,13 +155,25 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         "toggle_skill" => toggle_skill(state, payload).await,
         "toggle_all_skills" => toggle_all_skills(state, payload).await,
         "get_user_profile" => get_user_profile(),
-        "update_user_profile" => update_user_profile(&payload),
+        // Ba nhánh dưới đây chạm đĩa, nên phải rời khỏi worker async — cùng lý do
+        // `update_config` (:267) và `toggle_skill` (:384) đã làm. `import_avatar_folder`
+        // là ca xấu nhất: nó copy tới 200 file, giữ worker hàng giây và làm nghẽn cả
+        // audio lẫn nhịp WebSocket đang chạy trên cùng runtime.
+        "update_user_profile" => tokio::task::spawn_blocking(move || update_user_profile(&payload))
+            .await
+            .map_err(|error| format!("User profile writer task failed: {error}"))?,
         "get_avatar_models" => Ok(json!({
-            "models2d": liet_ke_thu_muc(&resolve_resource_path("models/live2d")),
-            "models3d": liet_ke_thu_muc(&resolve_resource_path("models/vrm")),
+            "models2d": liet_ke_avatar(&resolve_resource_path("models/live2d"), true),
+            "models3d": liet_ke_avatar(&resolve_resource_path("models/vrm"), false),
         })),
-        "import_avatar_folder" => import_avatar_folder(&payload),
-        "delete_avatar_model" => delete_avatar_model(&payload),
+        "import_avatar_folder" => {
+            tokio::task::spawn_blocking(move || import_avatar_folder(&payload))
+                .await
+                .map_err(|error| format!("Avatar import task failed: {error}"))?
+        }
+        "delete_avatar_model" => tokio::task::spawn_blocking(move || delete_avatar_model(&payload))
+            .await
+            .map_err(|error| format!("Avatar delete task failed: {error}"))?,
         // `owns()` đã lọc trước, nên nhánh này chỉ chạy khi hai danh sách lệch
         // nhau — tức là lỗi lập trình, không phải lệnh lạ từ client.
         _ => Err(format!("Unknown command: {command}")),
@@ -179,6 +196,62 @@ fn liet_ke_thu_muc(path: &std::path::Path) -> Vec<String> {
             {
                 ra.push(name.to_string());
             }
+        }
+    }
+    ra
+}
+
+/// Mục avatar kèm đủ trường UI đọc, thay vì một mảng chuỗi tên.
+///
+/// Vì sao không dùng chung [`liet_ke_thu_muc`]: hàm đó trả `Vec<String>`, còn cả hai
+/// đầu client đều đọc `get_avatar_models` như mảng **object** — `AvatarModelsPayload`
+/// (`types/websocket.ts:202`) khai `Array<Record<string, unknown>>`, và
+/// `AvatarGallery.vue:33-41` lấy `m.filename` / `m.name` / `m.size`. Trên một chuỗi thì
+/// cả ba đều là `undefined`, nên mọi thẻ model hiện tên "Model" với `filename: ""`.
+///
+/// Hậu quả không dừng ở hiển thị: bấm xoá gửi `delete_avatar_model` với `filename` rỗng,
+/// và handler từ chối — nút xoá **không thể** chạy chừng nào phía này còn trả chuỗi.
+/// Đây là lệch hợp đồng có sẵn từ trước, chỉ lộ ra khi nút xoá được nối dây.
+fn liet_ke_avatar(path: &std::path::Path, la_2d: bool) -> Vec<Value> {
+    let mut ra = Vec::new();
+    if path.is_dir()
+        && let Ok(entries) = std::fs::read_dir(path)
+    {
+        for entry in entries.flatten() {
+            let Some(filename) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            // Kích thước là "tốt nhất có thể": không stat được thì bỏ trống chứ không
+            // bịa số 0 — UI in thẳng chuỗi này cho người dùng đọc.
+            let size = entry
+                .metadata()
+                .ok()
+                .map(|m| m.len().to_string())
+                .unwrap_or_default();
+            let format = if la_2d {
+                "live2d"
+            } else {
+                match std::path::Path::new(&filename)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref()
+                {
+                    Some("vrm") => "vrm",
+                    _ => "fbx",
+                }
+            };
+            let name = std::path::Path::new(&filename)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&filename)
+                .to_string();
+            ra.push(json!({
+                "name": name,
+                "filename": filename,
+                "size": size,
+                "format": format,
+            }));
         }
     }
     ra
@@ -1263,6 +1336,54 @@ mod tests {
         assert!(select_voice_profile_at(&json!({ "profile": 123 }), &config_file).is_err());
         assert!(select_voice_profile_at(&json!({ "profile": null }), &config_file).is_err());
         assert!(select_voice_profile_at(&json!("not_an_object"), &config_file).is_err());
+    }
+
+    #[test]
+    fn liet_ke_avatar_tra_object_chu_khong_phai_chuoi() {
+        // Hợp đồng: `AvatarModelsPayload` (`types/websocket.ts:202`) khai mảng OBJECT, và
+        // `AvatarGallery.vue:33-41` đọc `m.filename`. Nếu chỗ này trả `Vec<String>` thì
+        // `m.filename` là `undefined` → thẻ model mang `filename: ""` → nút xoá gửi chuỗi
+        // rỗng và luôn thất bại. Test khoá đúng cái ràng buộc đó.
+        let (_guard, dir) = tao_thu_muc_tam("liet_ke_avatar_shape");
+        std::fs::write(dir.join("Liva.vrm"), b"VRM").unwrap();
+
+        let ra = liet_ke_avatar(&dir, false);
+        assert_eq!(ra.len(), 1);
+
+        let m = &ra[0];
+        assert!(m.is_object(), "mỗi mục phải là object, không phải chuỗi");
+        assert_eq!(m["filename"], "Liva.vrm", "UI dùng đúng trường này để xoá");
+        assert_eq!(m["name"], "Liva", "tên hiển thị bỏ phần đuôi");
+        assert_eq!(m["format"], "vrm");
+        assert_eq!(m["size"], "3");
+    }
+
+    #[test]
+    fn liet_ke_avatar_roi_xoa_duoc_bang_chinh_filename_da_tra() {
+        // Vòng khép kín mà UI thực sự đi: liệt kê → người dùng bấm xoá → gửi lại đúng
+        // `filename` vừa nhận. Nếu hai đầu lệch nhau thì test này đỏ, dù mỗi đầu tự nó đúng.
+        let (_guard, dir) = tao_thu_muc_tam("liet_ke_roi_xoa");
+        std::fs::write(dir.join("Round.Trip.vrm"), b"X").unwrap();
+
+        let listed = liet_ke_avatar(&dir, false);
+        let filename = listed[0]["filename"].as_str().unwrap().to_string();
+
+        let dirs = vec![dir.clone()];
+        delete_avatar_model_from_dirs(&json!({ "filename": filename }), &dirs).unwrap();
+
+        assert!(
+            !dir.join("Round.Trip.vrm").exists(),
+            "filename do liệt kê trả ra phải xoá được nguyên trạng"
+        );
+    }
+
+    #[test]
+    fn liet_ke_avatar_2d_danh_dau_dung_dinh_dang() {
+        let (_guard, dir) = tao_thu_muc_tam("liet_ke_avatar_2d");
+        std::fs::write(dir.join("pio.json"), b"{}").unwrap();
+
+        let ra = liet_ke_avatar(&dir, true);
+        assert_eq!(ra[0]["format"], "live2d");
     }
 
     #[test]

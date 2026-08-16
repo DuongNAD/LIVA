@@ -15,7 +15,15 @@ const gateway = useGateway();
 const { t } = useI18n();
 
 // Task như Gateway trả về: rộng hơn TaskItem của liva-common
-// (status là chuỗi thô cần normalize, thêm result + created_at snake_case).
+// (status là chuỗi thô cần normalize, thêm result).
+//
+// ⚠️ `createdAt` là camelCase, không phải `created_at`. Backend gửi camelCase ở
+// `commands/task.rs:73-74`; bản trước khai snake_case nên `task.created_at` luôn
+// `undefined` và cột ngày tạo **không bao giờ hiện** — im lặng, vì `fmtDate` trả
+// chuỗi rỗng cho `undefined` thay vì báo lỗi. Sửa 16/08/2026.
+//
+// Đơn vị là **giây** (`task.rs:34 bay_gio()` dùng `as_secs()`), còn `new Date()`
+// nhận mili — nên phải nhân 1000, nếu không mọi task hiện ngày tháng 1/1970.
 interface TaskRow {
   id: string;
   title: string;
@@ -23,7 +31,7 @@ interface TaskRow {
   status: string;
   priority?: string;
   result?: string;
-  created_at?: number;
+  createdAt?: number;
 }
 
 const tasks = computed<TaskRow[]>(() => gateway.tasksList.value || []);
@@ -188,7 +196,9 @@ const deleteTask = (id: string) => {
 
 const statusIcon = (s: string) => normalizeStatus(s) === 'done' ? '✅' : normalizeStatus(s) === 'in-progress' ? '⏳' : '⏹️';
 const priorityBadge = (p?: string) => p === 'high' ? 'badge-danger' : p === 'medium' ? 'badge-warning' : 'badge-info';
-const fmtDate = (ts?: number) => ts ? new Date(ts).toLocaleString(t('lang_code') || 'vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+// `ts` là GIÂY (backend dùng `as_secs()`), `Date` nhận MILI — thiếu ×1000 thì mọi
+// mốc rơi về tháng 1/1970 mà không có gì báo sai.
+const fmtDate = (ts?: number) => ts ? new Date(ts * 1000).toLocaleString(t('lang_code') || 'vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 
 onActivated(() => { gateway.sendMsg('get_tasks'); });
 onMounted(() => { gateway.sendMsg('get_tasks'); });
@@ -329,7 +339,7 @@ onDeactivated(() => {
           <div class="tc-footer">
             <div class="tc-meta">
               <span :class="['badge', priorityBadge(task.priority)]">{{ t(task.priority === 'high' ? 'tm_high' : task.priority === 'medium' ? 'tm_medium' : 'tm_low') }}</span>
-              <span class="tc-date">{{ fmtDate(task.created_at) }}</span>
+              <span class="tc-date">{{ fmtDate(task.createdAt) }}</span>
             </div>
             <div class="tc-actions">
               <button v-if="normalizeStatus(task.status) !== 'done'" class="btn btn-accent btn-sm" @click="startPlanning(task)">{{ t('tm_btn_plan') }}</button>

@@ -66,9 +66,18 @@ fn send_text(payload: Value) -> Result<Value, String> {
     let bot = teloxide::prelude::Bot::new(token);
     tokio::spawn(async move {
         use teloxide::prelude::Requester;
-        let _ = bot
+        // Fire-and-forget là **có chủ đích** (xem ghi chú đầu module): lệnh trả
+        // `success` ngay, nghĩa là "đã nhận lệnh", không phải "Telegram đã nhận tin".
+        // Nhưng "không chờ kết quả" khác với "vứt kết quả": token hết hạn, mất mạng,
+        // chat_id sai hay bị rate-limit trước đây đều biến mất không dấu vết, nên khi
+        // tin không tới thì không có gì để lần. Ghi log rồi vẫn đi tiếp, giữ nguyên
+        // ngữ nghĩa cũ và chỉ thêm cái để truy.
+        if let Err(error) = bot
             .send_message(teloxide::prelude::ChatId(chat_id), text)
-            .await;
+            .await
+        {
+            tracing::warn!("telegram:send_text tới chat {chat_id} thất bại: {error}");
+        }
     });
 
     Ok(json!({ "success": true }))

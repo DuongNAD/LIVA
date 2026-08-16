@@ -860,17 +860,52 @@ fn external_servers() -> Vec<String> {
 }
 
 /// Dựng catalog từ trạng thái ứng dụng: tool nội bộ + các server ngoài đã bật.
+/// Đã lọc theo danh sách kỹ năng bị vô hiệu hoá (`skills.disabled`) trong config.
 pub async fn build_catalog(state: &crate::AppState) -> ToolCatalog {
+    let disabled = crate::commands::config::load_disabled_skills();
+    build_catalog_with_disabled(state, &disabled).await
+}
+
+/// Dựng catalog với đường dẫn config chỉ định (dùng cho test/cấu hình tuỳ chỉnh).
+pub async fn build_catalog_from_path(
+    state: &crate::AppState,
+    config_path: &std::path::Path,
+) -> ToolCatalog {
+    let disabled = crate::commands::config::load_disabled_skills_from(config_path);
+    build_catalog_with_disabled(state, &disabled).await
+}
+
+/// Dựng catalog đã lọc theo tập disabled.
+pub async fn build_catalog_with_disabled(
+    state: &crate::AppState,
+    disabled: &std::collections::HashSet<String>,
+) -> ToolCatalog {
     let mut catalog = ToolCatalog::new();
-    catalog.add_server(NATIVE_SERVER, &state.mcp_server.list_tools().tools);
-    // Ví dụ cách nói cho 4 tool nội bộ — chỉ vào embedding, không vào prompt.
+    let native_tools: Vec<_> = state
+        .mcp_server
+        .list_tools()
+        .tools
+        .into_iter()
+        .filter(|t| !disabled.contains(&t.name))
+        .collect();
+    catalog.add_server(NATIVE_SERVER, &native_tools);
+    // Ví dụ cách nói cho các tool nội bộ — chỉ vào embedding, không vào prompt.
     for (ten, vi_du) in crate::mcp::server::NativeMcpServer::retrieval_examples() {
-        catalog.set_embed_extra(NATIVE_SERVER, ten, vi_du);
+        if !disabled.contains(*ten) {
+            catalog.set_embed_extra(NATIVE_SERVER, ten, vi_du);
+        }
     }
 
     for ten in external_servers() {
         match crate::mcp::client::global_registry().list_tools(&ten).await {
-            Ok(list) => catalog.add_server(&ten, &list.tools),
+            Ok(list) => {
+                let ext_tools: Vec<_> = list
+                    .tools
+                    .into_iter()
+                    .filter(|t| !disabled.contains(&t.name))
+                    .collect();
+                catalog.add_server(&ten, &ext_tools);
+            }
             Err(e) => tracing::warn!("không lấy được tool của MCP server '{ten}': {e}"),
         }
     }
@@ -1048,6 +1083,7 @@ impl ResolvedCall {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn tool_start_event_dung_khuon_websocket_hien_co() {
@@ -1768,5 +1804,108 @@ mod tests {
                 ExecPolicy::ProposeOnly
             );
         });
+    }
+
+    fn test_state() -> Arc<crate::AppState> {
+        let db = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
+        let stt = tokio::sync::Mutex::new(crate::stt::SttManager::new("non-existent-model"));
+        let llm = tokio::sync::Mutex::new(
+            crate::llm::LlamaRouterManager::new(2048, 0).expect("LLM manager"),
+        );
+        let mock_capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
+            64,
+            64,
+            crate::vision::capture::PixelFormat::Rgba,
+        ));
+        Arc::new(crate::AppState {
+            db,
+            crypto: crate::crypto::EncryptionEngine::new("00000000000000000000000000000000"),
+            stt,
+            tts: tokio::sync::Mutex::new(None),
+            tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
+            llm,
+            vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
+            mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
+            vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
+                mock_capturer,
+                crate::vision::VisionConfig::default(),
+            )),
+            embedder: tokio::sync::Mutex::new(None),
+        })
+    }
+
+    struct TempDirGuard(std::path::PathBuf);
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tao_thu_muc_tam(prefix: &str) -> (TempDirGuard, std::path::PathBuf) {
+        let unique = format!(
+            "liva_test_tc_{}_{}_{}",
+            prefix,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&path).unwrap();
+        (TempDirGuard(path.clone()), path)
+    }
+
+    #[tokio::test]
+    async fn build_catalog_loai_bo_tool_bi_disabled() {
+        let state = test_state();
+        let (_guard, temp_dir) = tao_thu_muc_tam("build_catalog_disabled");
+        let config_file = temp_dir.join("liva-config.json");
+
+        // Ghi config tắt 'control_volume' và 'read_markdown'
+        let config_content = json!({
+            "skills": {
+                "disabled": ["control_volume", "read_markdown"]
+            }
+        });
+        std::fs::write(
+            &config_file,
+            serde_json::to_string(&config_content).unwrap(),
+        )
+        .unwrap();
+
+        let catalog = build_catalog_from_path(&state, &config_file).await;
+
+        // Tool bị tắt PHẢI vắng mặt trong catalog
+        assert!(catalog.find(NATIVE_SERVER, "control_volume").is_none());
+        assert!(catalog.find(NATIVE_SERVER, "read_markdown").is_none());
+
+        // Các tool khác PHẢI còn nguyên
+        assert!(catalog.find(NATIVE_SERVER, "control_smarthome").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "write_markdown").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "search_vault").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "get_weather").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "control_media").is_some());
+    }
+
+    #[tokio::test]
+    async fn build_catalog_fallback_khi_config_hong() {
+        let state = test_state();
+        let (_guard, temp_dir) = tao_thu_muc_tam("build_catalog_corrupt");
+        let config_file = temp_dir.join("liva-config.json");
+
+        // Ghi file config bị hỏng JSON
+        std::fs::write(&config_file, b"{ corrupted_json: [invalid").unwrap();
+
+        let catalog = build_catalog_from_path(&state, &config_file).await;
+
+        // Khi config lỗi, fallback về không tắt gì cả → đủ cả 7 tool
+        assert_eq!(catalog.tools().len(), 7);
+        assert!(catalog.find(NATIVE_SERVER, "control_volume").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "read_markdown").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "control_smarthome").is_some());
     }
 }

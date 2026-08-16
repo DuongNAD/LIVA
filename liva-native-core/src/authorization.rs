@@ -57,8 +57,11 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "get_system_status",
     "get_preflight_status",
     "get_skills_list",
+    "toggle_skill",
+    "toggle_all_skills",
     "get_user_profile",
     "get_avatar_models",
+    "import_avatar_folder",
     "consent:get",
     "consent:grant",
     "consent:revoke",
@@ -166,5 +169,35 @@ mod tests {
         assert!(
             authorize_command(CommandPrincipal::WebSocketRemote, "get_preflight_status").is_err()
         );
+    }
+
+    #[test]
+    fn import_avatar_folder_chi_mo_cho_dashboard() {
+        assert!(
+            authorize_command(CommandPrincipal::TauriDashboard, "import_avatar_folder").is_ok()
+        );
+        assert!(
+            authorize_command(CommandPrincipal::WebSocketDashboard, "import_avatar_folder").is_ok()
+        );
+        assert!(authorize_command(CommandPrincipal::TauriWidget, "import_avatar_folder").is_err());
+        assert!(
+            authorize_command(CommandPrincipal::WebSocketWidget, "import_avatar_folder").is_err()
+        );
+        assert!(
+            authorize_command(CommandPrincipal::WebSocketRemote, "import_avatar_folder").is_err()
+        );
+        assert!(authorize_command(CommandPrincipal::Telegram, "import_avatar_folder").is_err());
+    }
+
+    #[test]
+    fn toggle_skills_chi_mo_cho_dashboard() {
+        for cmd in ["toggle_skill", "toggle_all_skills"] {
+            assert!(authorize_command(CommandPrincipal::TauriDashboard, cmd).is_ok());
+            assert!(authorize_command(CommandPrincipal::WebSocketDashboard, cmd).is_ok());
+            assert!(authorize_command(CommandPrincipal::TauriWidget, cmd).is_err());
+            assert!(authorize_command(CommandPrincipal::WebSocketWidget, cmd).is_err());
+            assert!(authorize_command(CommandPrincipal::WebSocketRemote, cmd).is_err());
+            assert!(authorize_command(CommandPrincipal::Telegram, cmd).is_err());
+        }
     }
 }

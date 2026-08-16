@@ -62,7 +62,18 @@ export interface IntegrationConfig {
 }
 
 // ─── Voice Configuration ───
-export type VoiceProvider = 'hybrid' | 'python' | 'kokoro';
+//
+// Đối chiếu 16/08/2026. Bản trước khai `'hybrid' | 'python' | 'kokoro'`: `python` trỏ tới
+// stack Python đã gỡ khi chuyển sang lõi Rust, còn `kokoro` là tên một *model* TTS chứ
+// không phải nhà cung cấp. Giá trị duy nhất hệ thống thật sự sinh ra là `hybrid` — cả
+// trong `data/liva-config.json` lẫn default của Rust (`commands/config.rs:208`).
+//
+// ⚠️ Trường này hiện KHÔNG có tác dụng: lõi Rust chỉ *ghi* nó rồi đọc lại nguyên văn,
+// không rẽ nhánh theo giá trị ở bất kỳ đâu. Engine thoại thật được chọn bằng biến môi
+// trường (`LIVA_TTS_VIENEU`, `LIVA_STT_VI_ENGINE`), không bằng khoá này. Union chỉ còn
+// một giá trị là để phản ánh đúng điều đó, không phải vì viết thiếu. Muốn thêm giá trị
+// thì phải thêm nhánh xử lý ở Rust trước — nếu không lại đẻ ra một hợp đồng nói dối nữa.
+export type VoiceProvider = 'hybrid';
 
 export interface VoiceConfig {
     enabled: boolean;

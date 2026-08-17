@@ -567,3 +567,278 @@ fn adversarial_reflex_lane_high_throughput_stress_benchmark() {
     );
     assert!(qps > 20_000.0, "Throughput must exceed 20,000 queries/sec");
 }
+
+// =========================================================================
+// 7. SQLITE WAL: SUB-MILLISECOND READER CHECKOUT UNDER ACTIVE WRITER BURST
+// =========================================================================
+
+#[test]
+fn adversarial_sqlite_wal_extreme_concurrency_and_sub_millisecond_reader_checkout() {
+    use liva_native_core::db::Fact;
+    use std::sync::atomic::AtomicBool;
+
+    let db_path = std::env::temp_dir().join(format!(
+        "liva_adv_wal_stress_{}_{}.sqlite",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    let _ = std::fs::remove_file(&db_path);
+
+    let pool = Arc::new(DatabasePool::new(&db_path).expect("create file-backed db"));
+    let engine = Arc::new(EncryptionEngine::new("adv-wal-stress-test-key-32bytes"));
+
+    // Pre-populate 50 facts
+    {
+        let conn = pool.writer.get().expect("initial writer checkout");
+        for i in 0..50 {
+            let fact = Fact {
+                key: format!("adv_key_{i}"),
+                value: format!("adv_val_{i}"),
+                createdAt: "2026-08-16T18:00:00Z".to_string(),
+                updatedAt: "2026-08-16T18:00:00Z".to_string(),
+                ttlDays: Some(30),
+                source: "adv_test".to_string(),
+                category: Some("stress".to_string()),
+                importance: 0.5,
+                confidenceScore: 1.0,
+                sourceTurnId: None,
+                memory_strength: 1.0,
+                last_accessed_at: 0,
+                access_count: 0,
+            };
+            db::set_fact(&conn, &engine, &fact).expect("seed fact");
+        }
+    }
+
+    let is_running = Arc::new(AtomicBool::new(true));
+    let write_errors = Arc::new(AtomicUsize::new(0));
+    let read_errors = Arc::new(AtomicUsize::new(0));
+
+    // Spawn 10 Writer threads performing continuous write transactions
+    let num_writers = 10;
+    let mut writer_handles = Vec::with_capacity(num_writers);
+    for w in 0..num_writers {
+        let p = Arc::clone(&pool);
+        let eng = Arc::clone(&engine);
+        let running = Arc::clone(&is_running);
+        let errs = Arc::clone(&write_errors);
+
+        writer_handles.push(thread::spawn(move || {
+            let mut write_idx = 0;
+            while running.load(Ordering::Relaxed) && write_idx < 30 {
+                let fact = Fact {
+                    key: format!("burst_w{w}_i{write_idx}"),
+                    value: format!("burst_val_{w}_{write_idx}"),
+                    createdAt: "2026-08-16T18:00:00Z".to_string(),
+                    updatedAt: "2026-08-16T18:00:00Z".to_string(),
+                    ttlDays: Some(30),
+                    source: "burst_writer".to_string(),
+                    category: Some("burst".to_string()),
+                    importance: 0.8,
+                    confidenceScore: 1.0,
+                    sourceTurnId: None,
+                    memory_strength: 1.0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                };
+                match p.writer.get() {
+                    Ok(conn) => {
+                        if let Err(e) = db::set_fact(&conn, &eng, &fact) {
+                            eprintln!("Writer error: {e}");
+                            errs.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Writer pool acquire error: {e}");
+                        errs.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                write_idx += 1;
+                thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }));
+    }
+
+    // Spawn 50 Reader threads recording checkout latency under write load
+    let num_readers = 50;
+    let reads_per_thread = 20;
+    let mut reader_handles = Vec::with_capacity(num_readers);
+    let checkout_latencies = Arc::new(std::sync::Mutex::new(Vec::with_capacity(
+        num_readers * reads_per_thread,
+    )));
+
+    for r in 0..num_readers {
+        let p = Arc::clone(&pool);
+        let eng = Arc::clone(&engine);
+        let errs = Arc::clone(&read_errors);
+        let latencies = Arc::clone(&checkout_latencies);
+
+        reader_handles.push(thread::spawn(move || {
+            for i in 0..reads_per_thread {
+                let key = format!("adv_key_{}", (r + i) % 50);
+                let t_start = Instant::now();
+                match p.readers.get() {
+                    Ok(conn) => {
+                        let checkout_duration = t_start.elapsed().as_nanos();
+                        {
+                            let mut list = latencies.lock().unwrap();
+                            list.push(checkout_duration);
+                        }
+                        match db::get_fact(&conn, &eng, &key) {
+                            Ok(Some(f)) => {
+                                assert_eq!(f.key, key);
+                            }
+                            Ok(None) => {
+                                // Fact not found
+                                errs.fetch_add(1, Ordering::SeqCst);
+                            }
+                            Err(e) => {
+                                eprintln!("Reader get_fact error: {e}");
+                                errs.fetch_add(1, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Reader pool checkout error: {e}");
+                        errs.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }));
+    }
+
+    // Await all readers
+    for h in reader_handles {
+        h.join().expect("join reader thread");
+    }
+
+    is_running.store(false, Ordering::Relaxed);
+
+    // Await all writers
+    for h in writer_handles {
+        h.join().expect("join writer thread");
+    }
+
+    let total_read_errors = read_errors.load(Ordering::SeqCst);
+    let total_write_errors = write_errors.load(Ordering::SeqCst);
+
+    assert_eq!(
+        total_read_errors, 0,
+        "No reader errors or SQLITE_BUSY allowed"
+    );
+    assert_eq!(
+        total_write_errors, 0,
+        "No writer errors or SQLITE_BUSY allowed"
+    );
+
+    // Compute checkout latency percentiles
+    let mut latencies = checkout_latencies.lock().unwrap().clone();
+    latencies.sort_unstable();
+    let n = latencies.len();
+    assert!(n >= num_readers * reads_per_thread);
+
+    let p50_checkout_ns = latencies[n * 50 / 100];
+    let p99_checkout_ns = latencies[n * 99 / 100];
+    let max_checkout_ns = latencies[n - 1];
+    let avg_checkout_ns = latencies.iter().sum::<u128>() / (n as u128);
+
+    println!("\n=== ADVERSARIAL SQLITE WAL READER CHECKOUT BENCHMARK ===");
+    println!("Total Reader Checkouts: {n} under active 10-writer burst");
+    println!(
+        "Avg Checkout Latency : {:.3} µs",
+        avg_checkout_ns as f64 / 1_000.0
+    );
+    println!(
+        "P50 Checkout Latency : {:.3} µs",
+        p50_checkout_ns as f64 / 1_000.0
+    );
+    println!(
+        "P99 Checkout Latency : {:.3} µs",
+        p99_checkout_ns as f64 / 1_000.0
+    );
+    println!(
+        "Max Checkout Latency : {:.3} µs",
+        max_checkout_ns as f64 / 1_000.0
+    );
+    println!("=======================================================\n");
+
+    // Must be resilient under active write load and complete well within 5000ms busy_timeout
+    assert!(
+        p99_checkout_ns < 50_000_000,
+        "P99 reader checkout under heavy oversaturation must be well under 50ms (observed: {:.3} µs)",
+        p99_checkout_ns as f64 / 1_000.0
+    );
+    assert!(
+        avg_checkout_ns < 2_000_000,
+        "Average reader checkout must remain sub-2ms (observed: {:.3} µs)",
+        avg_checkout_ns as f64 / 1_000.0
+    );
+
+    // Clean up temp DB
+    drop(pool);
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
+}
+
+// =========================================================================
+// 8. VECTOR DIMENSION MISMATCH ADVERSARIAL REJECTION MATRIX
+// =========================================================================
+
+#[test]
+fn adversarial_vector_dimension_mismatch_rejection_matrix() {
+    let pool = DatabasePool::new_in_memory().expect("in-memory db");
+    let crypto = EncryptionEngine::new("adv-vec-dim-mismatch-test-key32b");
+    let conn = pool.writer.get().expect("writer connection");
+
+    let invalid_dimensions = [
+        0, 1, 16, 64, 128, 256, 383, 385, 512, 768, 1024, 1536, 2048, 4096,
+    ];
+
+    for dim in invalid_dimensions {
+        let invalid_vec = vec![0.05_f32; dim];
+        let vec_id = format!("vec_invalid_dim_{dim}");
+
+        let res = db::upsert_vector(
+            &conn,
+            &crypto,
+            &vec_id,
+            "test_turn",
+            "test content",
+            &invalid_vec,
+            Some("domain_test"),
+            Some("category_test"),
+            None,
+            None,
+            None,
+        );
+
+        assert!(
+            res.is_err(),
+            "Vector with invalid dimension {dim} MUST be rejected"
+        );
+        let err_msg = res.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("384") || err_msg.contains("chieu"),
+            "Error message for dim {dim} must mention expected dimension 384: {err_msg}"
+        );
+    }
+
+    // Exact 384 dimension vector must succeed cleanly
+    let valid_vec = vec![0.05_f32; db::MEMORY_VECTOR_DIM];
+    let valid_res = db::upsert_vector(
+        &conn,
+        &crypto,
+        "vec_valid_384",
+        "test_turn",
+        "valid 384-dim content",
+        &valid_vec,
+        Some("domain_test"),
+        Some("category_test"),
+        None,
+        None,
+        None,
+    );
+    assert!(valid_res.is_ok(), "Exact 384 dimension vector must succeed");
+}

@@ -301,6 +301,37 @@ Module `liva-native-core/src/cognitive/` (8 file) cùng 6 file test và `db/dele
 
 🔴 **`scripts/e2e-test-suite.mjs` (chưa commit) xanh do cấu tạo — đừng tính nó là bằng chứng.** `TEST_READY.md` khai *"All 177 test assertions pass genuinely"* và `PROJECT.md` ghi M5 `DONE (177/177)`. Con số 177 là thật (đếm được: 75+75+15+7+5 lần gọi `reporter.test`), nhưng `scripts/e2e/helpers.mjs` **viết lại thuật toán của LIVA bằng JavaScript** rồi test chính bản JS đó: `class StateGraph` thay Swarm DAG, `class SecretScrubber` thay bộ khử bí mật, `computeRRF()` thay RRF, `node:crypto` thay AES-256-GCM, `DatabaseSync(':memory:')` với schema gõ tay thay pool WAL. Suite **không** mở socket, **không** spawn binary lõi, **không** import gì từ `liva-ui/src` hay `liva-native-core`. 61 chỗ gọi các helper này; vài assertion không thể đỏ (dựng object literal rồi assert lại chính thứ vừa ghi; đẩy 1000 phần tử vào mảng JS rồi assert mảng có 1000; một phép kiểm biên assert `process.arch === 'x64'`, tức kiểm kiến trúc CPU chứ không kiểm LIVA). *(Các file `tier1..tier5` nói tới ở đây đã bị xoá khi thay bộ test ở `63419b8`, nên không còn toạ độ `file:dòng` để trích — nội dung trên đọc được trong lịch sử git.)* **Phép thử quyết định: xoá thân một hàm Rust, xoá một component Vue, hay revert một `PRAGMA` production — suite vẫn 100 % xanh** miễn `cargo clippy` còn qua. Đã thu hồi tuyên bố trong `TEST_READY.md` và hạ M5 xuống `NOT ACCEPTED` trong `PROJECT.md`. Tín hiệu E2E thật vẫn chỉ là `e2e-gateway-ci.mjs` 8/8 và `e2e-memory.mjs` 6/6. Đúng thứ `CLAUDE.md` đã dặn: *"treat any always-green check as suspect"*.
 
+#### 🟢 Build CUDA 17/08/2026 — ba dòng đường cơ sở cuối cùng đã đo xong
+
+Build `--features cuda` với `CUDAARCHS=120a-real` (sm_120 = Blackwell, đúng RTX 5060 Ti 16 GB), CUDA toolkit **12.8** — bản 12.1 cũng có trên máy nhưng **không hỗ trợ Blackwell**. Build **12m03**, binary **78,8 MB**, khớp dải bản ghim mà [U1b](#u1b--ghim-cudaarchs-và-quyết-định-cách-phát-hành) ghi (74,5 MB ghim · 202,5 MB không ghim). Hai dấu hiệu U1b dặn phải thấy, đều thấy: `CMAKE_CUDA_ARCHITECTURES:STRING=120a-real` và `GGML_CUDA:BOOL=ON`.
+
+⚠️ **Bổ sung cho U1b — bẫy thứ ba, ngược chiều bẫy thứ hai.** U1b cảnh báo `cargo clean -p llama-cpp-sys-2` **không** xoá `out/` nên phải xoá tay. Vế ngược lại cũng đúng và chưa được ghi: **xoá tay `out/` mà KHÔNG `cargo clean -p` thì cargo giữ nguyên fingerprint, bỏ qua `build.rs`, rồi chết** với `couldn't read .../out/bindings.rs`. Phải làm **cả hai** (xoá thêm `target/release/.fingerprint/llama-cpp-sys-2-*` cho chắc). Dấu hiệu cùng họ với cảnh báo "42,9 giây là quá nhanh" của U1b — lần này là **hỏng sau 7 giây**.
+
+**TTFT trên CUDA — `ttft_bench.exe 20`, `LIVA_LLM_N_GPU_LAYERS=99`:**
+
+| | CPU (release) | **CUDA** |
+|---|---|---|
+| TTFT p50 | 4 874 ms | **29 ms** |
+| p95 · min · max | 13 476 · 2 310 · 13 476 ms | **31 · 28 · 32 ms** |
+| Độ tán (max/min) | **5,8×** | **1,14×** |
+| Thông lượng sau token đầu | 1,5 token/s | **99,5 token/s** |
+| `n` | 10 (p95 = max, không phải ước lượng) | **20** (p95 là ước lượng thật) |
+
+📌 **Con số đáng nhớ không phải "29 ms" mà là hai tỷ số: TTFT nhanh hơn ~168 lần, độ tán co từ 5,8× xuống 1,14×.** Với trợ lý thoại, độ tán mới là thứ người dùng cảm thấy — trên CPU cùng một câu hỏi khi 2,3 s khi 13,5 s; trên GPU luôn ~29 ms.
+
+⚠️ **Vẫn KHÔNG so được với mốc 18 ms CUDA (29/07):** số đó đo trên **Qwen3-VL-2B**, đây là **gemma-4-E4B (7,46 B)**, lệch ~3,7 lần tham số. 29 ms cho model lớn gấp gần bốn lần là tốt; nói "chậm đi từ 18 → 29" là sai.
+
+**E2E bộ nhớ trên CUDA release: 6/6, `GGML_ASSERT` = 0** — bản vá `n_batch` đứng vững ở cấu hình nặng nhất. Lượt 1 **1,6 s** (CPU release: 73,8 s), lượt 2 **0,3 s** (CPU: 5,8 s).
+
+**Độ trễ vision — `gemma4_probe.exe`, đường sản xuất, CUDA:**
+
+```
+image slice encoded in 112 ms  ·  image decoded in 94 ms  ·  n_tokens_batch = 264
+[vision] 2507 prompt tok, 36 gen tok trong 3.21s (11.2 tok/s)
+```
+
+🔴 **Đây là số định lượng cho lỗ vision chưa vá ở mục dưới.** 2 507 token = ~2 243 văn bản + **264 token ảnh** cho **một** slice. Trần `n_ctx = 4096` ⇒ chỉ còn **1 589 token dư**, mà `answer_with_image` dựng mtmd với `image_max_tokens: -1`, **không trần**. Ảnh phân giải cao chia nhiều slice sẽ nhân 264 lên; khoảng **7 slice là vượt `n_ctx`**. Vì `n_batch` nay bằng `n_ctx`, vượt trần đó rơi thẳng vào `GGML_ASSERT` — đúng lỗi `abort()` đã vá cho đường văn bản, chỉ khác cửa vào. **Nay đã có build CUDA nên phép thử quyết định làm được**: dựng ảnh đủ lớn để sinh hơn 7 slice, chạy, xem lõi có chết không. Chưa làm.
+
 #### TTFT đo lại 17/08/2026 trên **release** — và tại sao KHÔNG so được với mốc 667 ms
 
 Dòng TTFT ở bảng §1 để trống từ 29/07. Nay đo lại được vì đã có build release: `.\target\release\ttft_bench.exe 10`, router **gemma-4-E4B-it-qat-UD-Q4_K_XL**, `LIVA_LLM_N_GPU_LAYERS=0` (CPU thuần).

@@ -1,8 +1,8 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-16
-commit: 1915ad8
-stale-ok: 1915ad8
+commit: 88bc066
+stale-ok: 88bc066
 status: living
 owns:
   - duong-co-so-do-luong
@@ -338,7 +338,19 @@ llama.cpp/src/llama-context.cpp:1712: GGML_ASSERT(n_tokens_all <= cparams.n_batc
 
 1. **`n_batch` không được đặt ở bất kỳ đâu** — `grep -rn "n_batch" liva-native-core/src/` trả về **rỗng**. llama.cpp dùng mặc định của nó, và không chỗ nào trong LIVA biết con số đó là bao nhiêu.
 2. **Cổng chắn chắn nhầm bound.** `check_prompt_fits(prompt_tokens_len, n_ctx)` (`llm/engine.rs:95`) so với **`n_ctx` = 4096**. Nhưng assert nổ là về **`n_batch`** — một trần *khác và nhỏ hơn*. Prompt nằm giữa `n_batch` và `n_ctx` **qua được cổng rồi mới chết**: cổng có mà vẫn lọt.
-3. **Đường thoại không gọi cổng đó lần nào.** `grep -rn "check_prompt_fits" liva-native-core/src/websocket.rs` rỗng; điểm gọi thật duy nhất là `engine.rs:283`. Mà lượt làm nổ assert đi vào qua `user_voice_command` — thấy trong log ngay trước dòng assert.
+3. ~~**Đường thoại không gọi cổng đó lần nào.**~~ 🔴 **KHẲNG ĐỊNH NÀY SAI — sửa 17/08/2026.** Nó dựa trên `grep -rn "check_prompt_fits" liva-native-core/src/websocket.rs` trả về rỗng, rồi kết luận đường thoại không được chắn. Nhưng grep một file không phải là truy một đường gọi: `check_prompt_fits` nằm **bên trong** `generate_completion` (`engine.rs:313`), nên mọi caller của hàm đó đều được chắn mà không cần nhắc tên nó. Truy đủ đường thì:
+
+   | Nhánh | Đi qua | Có guard? |
+   |---|---|---|
+   | Thoại/chat **văn bản** — `user_voice_command` được `websocket.rs:191` ánh xạ sang `chat:completion` | `lib.rs:523` / `:541` → `generate_completion` → `engine.rs:313` | **CÓ** ✅ |
+   | Pipeline agent | `agent/graph/pipeline.rs:422` → `generate_completion` | **CÓ** ✅ |
+   | **Vision** — nhánh ảnh trong chính handler thoại | `websocket.rs:1361` → `answer_with_image` (`engine.rs:463`) | **KHÔNG** ❌ |
+
+   ⇒ Phần đúng còn lại của khẳng định gốc hẹp hơn nhiều, nhưng vẫn là một lỗ thật: **`answer_with_image` không gọi `check_prompt_fits`**, và nó còn dựng mtmd với `image_min_tokens: -1, image_max_tokens: -1` — **token ảnh không có trần**. Ảnh lớn cộng prompt nền ~2 237 token có thể vượt `n_ctx` và rơi vào đúng lớp lỗi đã gây ra `abort()` ở trên.
+
+   ⚠️ **Cố ý CHƯA vá, và lý do là phần đáng đọc.** Thêm `check_prompt_fits` trên riêng phần văn bản của prompt vision sẽ **bỏ sót token ảnh** — tức dựng một cổng trông như bảo vệ mà không bảo vệ, đúng thứ tệ hơn không có cổng. Bản vá đúng phải chặn theo tổng token *sau khi* mtmd nở ảnh, hoặc đặt trần cho `image_max_tokens`; cả hai đều là quyết định thiết kế. Và **không nghiệm thu được nếu chưa có build CUDA** — `vision:ask` chỉ chạy thật ở release, đo trên CPU mất ~80 s/lượt. Vá mà không chạy được phép thử quyết định thì lại rơi vào đúng bệnh của bộ test bị thu hồi.
+
+   📌 **Bài học về phương pháp, ghi ra vì nó sẽ lặp:** *grep một tên hàm trong một file* trả lời câu hỏi "file này có nhắc tên đó không", **không** trả lời "đường đi này có được chắn không". Muốn câu sau thì phải lần chuỗi gọi. Cùng họ với các bẫy đo ở §0.2, chỉ khác là lần này công cụ đúng còn câu hỏi thì sai.
 
 ⚠️ **Ba thứ chưa kiểm lúc ghi lần đầu — (a) và (b) nay ĐÃ ĐO, cả hai đều nặng hơn dự đoán.** Chỉ còn (c) có tái lập với model khác không — **chưa đo**.
 

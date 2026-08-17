@@ -14,6 +14,29 @@
  * - Section 6: Concurrency & Connection Isolation (5 parallel client connections, interleaved commands, selective close)
  * - Section 7: Architectural Boundary Audit & Feature Mapping (Explicit F1-F15 allowlist mapping and Rust test pointers)
  *
+ * ⚠️ VÌ SAO KHÔNG CÓ SECTION 8 Ở ĐÂY — gỡ ra 17/08/2026, đừng thêm lại.
+ *
+ * `scripts/e2e/08-real-world-scenarios.mjs` từng được nối vào đây và đóng góp 5
+ * assertion, nâng tổng lên 41. Nhưng nó KHÔNG mở socket, KHÔNG spawn binary,
+ * KHÔNG mở database — nó dựng object literal trong JavaScript rồi assert lại
+ * chính thứ vừa gõ. Ví dụ nguyên văn (`08-real-world-scenarios.mjs:104-106`):
+ *
+ *     const auditRecord = { …, committed_to_wal: true };
+ *     trace.assert('Audit Ledger WAL Persistence', auditRecord.committed_to_wal, …);
+ *
+ * Nhãn ghi "Audit Ledger WAL Persistence" nhưng không chạm SQLite nào. Tương tự
+ * `votingPanel` 3 phần tử toàn 'APPROVE' rồi assert tỷ lệ APPROVE = 100 %.
+ *
+ * Toàn bộ giá trị của FILE NÀY nằm ở một câu: mọi assertion trong đây đều chạy
+ * qua socket thật tới binary thật, nên xoá thân một hàm Rust là nó ĐỎ. Trộn vào
+ * đó dù chỉ 5 assertion không thể đỏ là làm hỏng đúng thuộc tính đó — và tệ hơn,
+ * nó nâng con số tổng lên trông như bao phủ rộng hơn. Đây chính là lỗi đã khiến
+ * bộ "177/177" tiền nhiệm bị thu hồi.
+ *
+ * Nếu muốn chạy các kịch bản mô phỏng đó thì chúng vẫn có CLI riêng:
+ *   node scripts/e2e-real-world-scenarios.mjs
+ * Chỉ đừng đếm chúng chung với số của bộ này.
+ *
  * Usage:
  *   node scripts/e2e-test-suite.mjs                       # Spawn debug binary on port 8099 and run suite
  *   node scripts/e2e-test-suite.mjs --release             # Use release binary
@@ -23,7 +46,9 @@
  *   node scripts/e2e-test-suite.mjs --section 1           # Run specific section only
  */
 
-import { E2EReporter, spawnGatewayServer, DEFAULT_PORT } from './e2e/helpers.mjs'
+import fs from 'node:fs'
+import path from 'node:path'
+import { E2EReporter, spawnGatewayServer, DEFAULT_PORT, ROOT_DIR } from './e2e/helpers.mjs'
 import { runProtocolFramingTests } from './e2e/01-protocol-framing.mjs'
 import { runAuthorizationOriginTests } from './e2e/02-authorization-origin.mjs'
 import { runReachableCommandsTests } from './e2e/03-reachable-commands.mjs'
@@ -31,6 +56,7 @@ import { runChatCompletionTests } from './e2e/04-chat-completion.mjs'
 import { runVoiceLifecycleTests } from './e2e/05-voice-lifecycle.mjs'
 import { runConcurrencyTests } from './e2e/06-concurrency.mjs'
 import { runBoundaryAuditReport } from './e2e/07-boundary-audit.mjs'
+// KHÔNG import `08-real-world-scenarios.mjs` vào đây — cố ý, xem ghi chú ở đầu file.
 
 const argv = process.argv.slice(2)
 const getArg = (name) => {
@@ -39,7 +65,8 @@ const getArg = (name) => {
 }
 
 const isJson = argv.includes('--json')
-const isRelease = argv.includes('--release')
+const releaseBinPath = path.resolve(ROOT_DIR, 'target', 'release', process.platform === 'win32' ? 'liva-native-core.exe' : 'liva-native-core')
+const isRelease = argv.includes('--release') || (!argv.includes('--debug') && fs.existsSync(releaseBinPath))
 const noSpawn = argv.includes('--no-spawn')
 const customPort = getArg('--port') || process.env.PORT
 const port = Number(customPort || DEFAULT_PORT)
@@ -95,6 +122,8 @@ async function main() {
     if (!sectionNum || sectionNum === 5) await runVoiceLifecycleTests(reporter, port)
     if (!sectionNum || sectionNum === 6) await runConcurrencyTests(reporter, port)
     if (!sectionNum || sectionNum === 7) await runBoundaryAuditReport(reporter, port)
+    // Section 8 cố ý KHÔNG chạy ở đây — xem ghi chú đầu file. Chạy riêng bằng
+    // `node scripts/e2e-real-world-scenarios.mjs` nếu cần.
   } catch (err) {
     console.error('\n❌ Lỗi bất thường khi chạy suite:', err)
   } finally {

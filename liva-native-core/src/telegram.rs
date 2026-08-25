@@ -388,10 +388,12 @@ async fn handle_message(
 // Download and transcribe voice messages using the local STT model
 async fn process_voice_message(
     bot: &Bot,
-    file_id: &str,
+    file_id: &teloxide::types::FileId,
     state: &Arc<AppState>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let file = bot.get_file(file_id).await?;
+    // teloxide 0.17: `Requester::get_file` nhận `FileId` theo giá trị (trước đây
+    // là `&str`) — một trong hai thay đổi API khi nâng 0.13 → 0.17 cho VC-1.
+    let file = bot.get_file(file_id.clone()).await?;
     let token = std::env::var("TELEGRAM_BOT_TOKEN").unwrap_or_default();
     let file_url = format!("https://api.telegram.org/file/bot{}/{}", token, file.path);
 

@@ -1,7 +1,7 @@
 ---
 title: "Việc còn lại trên nhánh mac-v2"
 updated: 2026-08-25
-commit: 3fc6d52c
+commit: 0a02b9cd
 status: living
 owns:
   - viec-con-lai-mac-v2
@@ -116,7 +116,13 @@ CI `0.20.2 --locked` trước khi đo:
 - Validate knowledge vault — typecheck ✅; **test đỏ 3/27**
   (`tests/verification-challenger.test.ts`: hai test mock symlink-loop không trigger,
   một test UNC đòi thông điệp `Access denied` nhưng nhận `File not found`).
-  Lệch nền hay lỗi thật thì chỉ runner Windows trả lời được — **chưa suy ra gì**.
+  ✅ **ĐÃ TRUY ĐƯỢC NGUYÊN NHÂN 25/08/2026 (phiên tối) — không cần runner Windows.**
+  Cả ba là **lỗi của phép kiểm**, mã sản phẩm `vault.ts` đúng: mock khoá theo
+  `/var/folders/…` trong khi `validateAndResolvePath` canonicalise bằng `realpathSync`
+  thành `/private/var/folders/…` (trên macOS `/var` là symlink) nên mock không bao giờ
+  bắn; còn test UNC khẳng định một thông điệp chỉ đúng trên Windows, trong khi đường
+  `\\localhost\c$\…` trên POSIX nằm **trong** vault và `File not found` mới là hành vi
+  đúng. Chi tiết và cách sửa: [VC-3](viec-can-lam-2026-08-25.md).
 - Build ba web client — ✅ cả ba. (Bẫy mới: build `liva-mobile-client` ghi đè
   `mobile_client/dist/` **đang được track**; đã `git checkout` trả lại nguyên trạng.)
 - `cargo check -p liva-desktop` — ✅ · `cargo test -p liva-desktop` — ✅ **13 pass / 0 fail**
@@ -201,10 +207,23 @@ chúng, và **cả hai vẫn nguyên trên đĩa** (`du -sh liva-ai-engine` → 
 **Bằng chứng.** `find models -name "*.gguf" -o -name "*.onnx"` → **0 file**. Test
 `preflight::n_gpu_layers_bang_0_khong_bao_gio_la_xanh` đỏ vì thế.
 
-**Việc.** `npm run setup:models` — tốn băng thông và ổ đĩa lớn, nên là quyết định của bạn.
+> ⚠️ **TIỀN ĐỀ CỦA MỤC NÀY SAI — đính chính 25/08/2026 (phiên tối).** Đây **không phải**
+> một chỉ báo môi trường có chủ đích, và `npm run setup:models` **không** giải được nó.
+> `preflight.rs#muc_vision` đọc đĩa ngay trong thân hàm, nên test đỏ trên **mọi** máy
+> thiếu file model — **kể cả runner CI**, vốn không có bước tải model nào. Nhánh gây ra
+> điều đó vào cây ở `95d641ab` (07/08/2026), tức **sau** lần cuối CI được xác nhận 25/25
+> xanh (`260c643`, 01/08/2026). Bước 20 của CI đã hỏng từ đó, chỉ chưa lộ vì `cargo-deny`
+> fail-fast ở bước 9. Tải model chỉ làm nó xanh trên *một* máy.
+>
+> ⇒ Việc thật là **gỡ phép đọc đĩa ra khỏi `muc_vision`**, không phải tải model.
+> Xem [VC-2](viec-can-lam-2026-08-25.md).
 
-> 🚫 **Tuyệt đối không hạ ngưỡng để làm test này xanh.** Thông điệp của chính test đã ghi
-> "tải model xong dòng này tự xanh". Hạ ngưỡng là biến một chỉ báo môi trường thành cổng dối.
+**Việc.** `npm run setup:models` — vẫn cần cho việc *khác* (chạy thoại/LLM thật, đo SLO),
+tốn băng thông và ổ đĩa lớn nên là quyết định của bạn. Nhưng **không** phải cách đóng test đỏ.
+
+> 🚫 **Tuyệt đối không hạ ngưỡng để làm test này xanh.** Cảnh báo này vẫn đúng nguyên vẹn:
+> khẳng định `LIVA_LLM_N_GPU_LAYERS` phải giữ. Cách sửa đúng là làm hàm thuần rồi phủ **cả
+> hai** nhánh bằng hai test, chứ không nới khẳng định.
 
 ### MV-8 — `cargo-deny` chưa cài trên máy này
 
@@ -257,7 +276,9 @@ nói `external_cpu_percent`.
 2. ~~**MV-4, MV-5, MV-6**~~ ✅ xong 25/08 (`474421ff`, `2736fa05`).
 3. ~~**MV-2**~~ ✅ đo xong local 25/08 (bảy trên tám bước có số thật, hai bước đỏ có tên);
    **MV-3** còn lại — chỉ runner Windows trả lời được.
-4. **MV-7, MV-9** — chờ quyết định của người dùng.
+4. **MV-9** — chờ quyết định của người dùng. **MV-7** đã đổi bản chất: phần "tải model"
+   vẫn chờ bạn, nhưng phần *test đỏ* là việc mã nguồn và đã có chủ ở
+   [VC-2](viec-can-lam-2026-08-25.md).
 5. **MV-10 → MV-12** — nợ dài hạn, không chặn hợp nhất. ~~MV-13~~ ✅ đo xong, không còn việc
    ở mức khoá (xem §5).
 
@@ -267,6 +288,8 @@ trong một commit (`docs-check` so `git log <commit>..HEAD`, gộp làm nó đ�
 
 ## Liên quan
 
+- [Việc cần làm — rà soát 25/08/2026](viec-can-lam-2026-08-25.md) — VC-1…VC-7: việc **mã nguồn**
+  phát sinh từ MV-1/MV-2 (advisory `h2`, test `preflight`, ba test vault) cộng bốn mục thoại real-time
 - [Master roadmap](roadmap.md) — mốc chiến lược và thứ tự; tài liệu này không đặt lại ưu tiên
 - [Backlog nâng cấp U1–U33](../03-danh-gia/05-nang-cap-toan-dien.md) — năng lực sản phẩm và §9 "cái KHÔNG nên làm"
 - [Phát triển trên macOS](../02-van-hanh/07-macos-dev.md) — ba bẫy đã trả giá khi đưa cổng kiểm sang macOS

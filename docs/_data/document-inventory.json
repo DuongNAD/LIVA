@@ -541,6 +541,13 @@
       "rationale": "Punch list phạm vi nhánh mac-v2: hạ tầng, cổng kiểm, vệ sinh repo và xác thực. Không sở hữu backlog sản phẩm."
     },
     {
+      "path": "docs/06-ke-hoach/viec-can-lam-2026-08-25.md",
+      "disposition": "KEEP",
+      "wave": "C-roadmap",
+      "targets": [],
+      "rationale": "Bảy việc từ lượt rà soát 25/08/2026: ba cổng kiểm (h2, test preflight phụ thuộc đĩa, test vault macOS) và bốn thoại real-time (đo lượt, AEC/barge-in, mẩu TTS đầu, kết lượt). Không sở hữu backlog sản phẩm."
+    },
+    {
       "path": "docs/06-ke-hoach/roadmap.md",
       "disposition": "KEEP",
       "wave": "A",

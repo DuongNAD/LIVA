@@ -46,6 +46,7 @@ làm trọng tài.
 4. [Kiến trúc đích Cognitive Runtime](01-kien-truc/cognitive-runtime.md) — vòng perception → policy → action → memory.
 5. [Master roadmap](06-ke-hoach/roadmap.md) — nguồn duy nhất cho việc còn làm và thứ tự.
 5b. [Việc còn lại trên nhánh `mac-v2`](06-ke-hoach/viec-con-lai-mac-v2.md) — punch list MV-1…MV-13 phạm vi nhánh: CI chưa từng chạy, hai cổng không bao giờ xanh được, 3 GB rác chưa gitignore.
+5c. [Việc cần làm — rà soát 25/08/2026](06-ke-hoach/viec-can-lam-2026-08-25.md) — VC-1…VC-7: ba cổng kiểm đang đỏ (advisory `h2`, test `preflight` phụ thuộc đĩa, ba test vault trên macOS) và bốn mục thoại real-time, mở đầu bằng việc đo lượt thoại vốn chưa từng có.
 6. [Kiểm kê disposition tài liệu](_generated/kiem-ke-tai-lieu.md) — toàn bộ file được gắn KEEP/SPLIT/GENERATE/FREEZE/MERGE.
 7. [Quy hoạch tài liệu v2](07-dong-gop/quy-hoach-tai-lieu.md) — mapping và gate di trú.
 8. [Voice runtime](03-he-thong-con/voice.md) + [Voice SLO](05-chat-luong/voice-slo.md) — as-built và cổng chất lượng thoại.

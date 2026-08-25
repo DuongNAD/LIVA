@@ -1,7 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
 updated: 2026-08-25
-commit: 3a8d5001
+commit: c7635409
 status: living
 owns:
   - duong-co-so-do-luong
@@ -211,7 +211,7 @@ Dòng "Trích dẫn tài liệu" ở bảng trên **phải đọc kèm phạm vi
 
 ⇒ Kết luận không phải "có hồi quy" mà là **có một lỗ đo**: cổng nào cũng xanh trên Windows và sẽ tiếp tục xanh cho tới khi tồn tại một runner macOS/Linux. Đừng đọc bảng CI 25/25 như bằng chứng đa nền tảng. Chi tiết đường dev macOS: [07 — Phát triển trên macOS](../02-van-hanh/07-macos-dev.md).
 
-**Còn đỏ, cố ý không vá:** `preflight::n_gpu_layers_bang_0_khong_bao_gio_la_xanh` (`preflight.rs`) — máy này có **0 file `.gguf`/`.onnx`** trong `models/`. Chính thông điệp test ghi *"tải model xong dòng này tự xanh"*. **Không hạ ngưỡng** để làm nó xanh; chạy `npm run setup:models` là quyết định của người có máy.
+**~~Còn đỏ, cố ý không vá~~ → ✅ ĐÃ VÁ (VC-2, 25/08/2026):** `preflight::n_gpu_layers_bang_0_khong_bao_gio_la_xanh` từng đỏ vĩnh viễn vì `muc_vision` đọc đĩa trong thân hàm — máy này có **0 file `.gguf`/`.onnx`** trong `models/`. Nay "có model hay không" là **tham số thuần**, điểm gọi thật tự tra đĩa; test tách thành hai (có model khẳng định `LIVA_LLM_N_GPU_LAYERS`, thiếu model khẳng định `CHƯA CÓ MODEL`), mutation-tested. `cargo test --workspace` **686+ pass / 0 fail** trên máy không có model. **Không hạ ngưỡng khẳng định**, và `npm run setup:models` vẫn không phải cách sửa.
 
 **Chưa đo lần này:** `cargo deny` (chưa cài local — CI tự cài bản ghim `0.20.2`), E2E bộ nhớ, TTFT.
 

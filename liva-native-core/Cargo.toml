@@ -64,7 +64,7 @@ base64 = "0.22.1"
 
 # Safe llama.cpp bindings. `mtmd` enables multimodal (vision) — the Qwen3-VL
 # unified-core PoC; the bundled llama.cpp already has the QWEN3VL arch + clip.
-llama-cpp-2 = { version = "0.1.151", default-features = false, features = ["mtmd"] }
+llama-cpp-2 = { version = "0.1.154", default-features = false, features = ["mtmd"] }
 encoding_rs = "0.8"
 # `image` đã nằm sẵn trong cây phụ thuộc qua `xcap` (và kéo theo codec `png`),
 # nên khai báo trực tiếp ở đây KHÔNG thêm crate nào phải biên dịch. Dùng cho

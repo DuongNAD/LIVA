@@ -167,7 +167,15 @@ pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
 
         let exe_dir = std::env::current_exe().ok();
         let candidates = vec0_trust_candidates(exe_dir.as_deref().and_then(|p| p.parent()));
-        let expected_hash = crate::embedded_runtime_artifact_hash("vec0").map_err(|error| {
+        // Nợ cross-platform (mac-v2): binary vec0 KHÁC NHAU mỗi nền, nên hash
+        // ghim phải chọn theo nền hiện tại — trước đây manifest chỉ có một
+        // hash của DLL Windows, khiến macOS luôn rơi vào "no such module: vec0"
+        // dù dylib đã nằm đúng chỗ.
+        let expected_hash = crate::embedded_runtime_artifact_hash_for_platform(
+            "vec0",
+            crate::runtime_artifact_platform_key(),
+        )
+        .map_err(|error| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error)))
         })?;
 
@@ -1380,7 +1388,13 @@ pub fn search_similar_vectors(
 
     while let Some(row) = rows.next()? {
         let rowid: i64 = row.get(0)?;
-        let distance: f64 = row.get(1)?;
+        // Nợ cross-platform (mac-v2): build vec0 darwin-arm64 trả `distance`
+        // NULL cho các vector ĐỐI CỰC (overflow nội bộ khi tính khoảng cách
+        // cực trị — tái hiện được bằng probe 384 chiều ±1.0). Dòng đó là kết
+        // quả THẬT, chỉ là ở xa nhất: gán +∞ thay vì bỏ qua (mất kết quả) hay
+        // panic (InvalidColumnType). Trên Windows distance luôn có giá trị,
+        // nhánh này không chạy.
+        let distance: f64 = row.get::<_, Option<f64>>(1)?.unwrap_or(f64::INFINITY);
         let vec_id: String = row.get(2)?;
         let stored_content: String = row.get(3)?;
         let r#type: String = row.get(4)?;

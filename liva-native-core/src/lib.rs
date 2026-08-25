@@ -36,8 +36,9 @@ pub mod webrtc;
 pub mod websocket;
 
 pub use artifact_trust::{
-    embedded_file_hash, embedded_model_hash, embedded_runtime_artifact_hash, verify_model_artifact,
-    verify_trusted_file,
+    embedded_file_hash, embedded_model_hash, embedded_runtime_artifact_hash,
+    embedded_runtime_artifact_hash_for_platform, runtime_artifact_platform_key,
+    verify_model_artifact, verify_trusted_file,
 };
 pub use authorization::{CommandPrincipal, authorize_command};
 pub use crypto::EncryptionEngine;

@@ -38,6 +38,11 @@ quan trọng nhất trong tài liệu: xanh ở đây **không** chứng minh xa
 
 > Đo lại toàn bộ bảng dưới tại `3fc6d52c` cùng ngày (phiên chiều 25/08): **y nguyên**,
 > cộng hai hàng mới đo lần đầu — Rust deny và knowledge vault, xem ngay dưới bảng.
+>
+> **Kết quả CI thật (run [`32824625512`](https://github.com/DuongNAD/LIVA/actions/runs/32824625512),
+> Windows runner, cùng ngày):** 13 bước đầu xanh · **FAILURE tại cargo-deny**
+> (`h2 v0.3.27`) · các bước sau không chạy vì fail-fast — gồm validate knowledge vault
+> và e2e gateway, tức hai nghi vấn lệch nền ở bảng dưới **vẫn chưa được Windows trả lời**.
 
 | Cổng | Lệnh | Kết quả |
 |---|---|---|
@@ -50,8 +55,8 @@ quan trọng nhất trong tài liệu: xanh ở đây **không** chứng minh xa
 | Lỗ hổng npm | `npm audit --audit-level=high` | ✅ 0 vulnerabilities |
 | Test Rust | `cargo test` | ⚠️ 571 pass · **1 fail** — xem [MV-7](#mv-7--models-trống-nên-một-test-đỏ) |
 | Coverage UI | `npm run test:coverage -w liva-ui` | ✅ 80,86 % line |
-| Rust deny | `cargo deny check -W unmaintained -W unsound advisories licenses sources` | ❌ **advisories FAILED** — chi tiết ở [MV-2](#mv-2--tám-bước-ci-chưa-có-bằng-chứng-nào) |
-| Knowledge vault | `npm run typecheck -w obsidian-llm-wiki && npm test -w obsidian-llm-wiki` | ⚠️ typecheck ✅ · test **3/27 đỏ trên macOS** — chi tiết ở [MV-2](#mv-2--tám-bước-ci-chưa-có-bằng-chứng-nào) |
+| Rust deny | `cargo deny check -W unmaintained -W unsound advisories licenses sources` | ❌ **advisories FAILED** — chi tiết ở [MV-2](#mv-2---tám-bước-ci-chưa-có-bằng-chứng-nào) |
+| Knowledge vault | `npm run typecheck -w obsidian-llm-wiki && npm test -w obsidian-llm-wiki` | ⚠️ typecheck ✅ · test **3/27 đỏ trên macOS** — chi tiết ở [MV-2](#mv-2---tám-bước-ci-chưa-có-bằng-chứng-nào) |
 
 **Tám bước CI từng chưa có bằng chứng nào — đo lại 25/08/2026 tại `3fc6d52c`:**
 
@@ -64,13 +69,13 @@ quan trọng nhất trong tài liệu: xanh ở đây **không** chứng minh xa
 | `cargo test -p liva-desktop` | ✅ 13 pass / 0 fail (một test argon2 chạy ~146 s — chậm, không phải treo) |
 | `cargo check --all-targets --features experimental` | ✅ exit 0 |
 | `cargo deny` (bản ghim `0.20.2`) | ❌ **advisories FAILED** — 1 vulnerability thật, chi tiết ở MV-2 |
-| e2e gateway trên Windows | ❓ **vẫn chưa chạy** — chỉ runner Windows trả lời được, tức [MV-1](#mv-1--ci-chưa-từng-chạy-trên-nhánh-này) trả lời thay |
+| e2e gateway trên Windows | ❓ **vẫn chưa chạy** — chỉ runner Windows trả lời được, tức [MV-1](#mv-1---ci-chưa-từng-chạy-trên-nhánh-này) trả lời thay |
 
 ---
 
 ## 2. Nhóm A — chặn hợp nhất
 
-### MV-1 — CI chưa từng chạy trên nhánh này
+### ~~MV-1~~ ✅ — CI chưa từng chạy trên nhánh này
 
 **Bằng chứng.** `.github/workflows/test.yml` khai trigger `push: branches: [main, master]`
 và `pull_request: branches: [main, master]`. Push `mac-v2` **không kích hoạt gì**.
@@ -84,11 +89,19 @@ số thật vào [§1 của tài liệu này](#1-trạng-thái-đã-đo--2508202
 
 **Trạng thái 25/08/2026 (chiều).** Người dùng đã đồng ý; PR draft
 [#1](https://github.com/DuongNAD/LIVA/pull/1) (`mac-v2` → `main`) đã mở qua `gh`.
-Run đầu tiên **`32824625512`** kích hoạt lúc 08:03 UTC — kết quả cuối chờ run xong,
-ghi vào [§1](#1-trạng-thái-đã-đo--25082026-tại-f3d418a2-trên-macos) khi có.
-Dự đoán có căn cứ từ đo local: bước cargo-deny đỏ (h2), còn lại chưa biết trước.
 
-### MV-2 — Tám bước CI chưa có bằng chứng nào
+✅ **ĐÓNG 25/08/2026 — đã có một lần chạy workflow với kết luận rõ ràng.**
+Run **`32824625512`**: **FAILURE**, bước đỏ duy nhất là
+**Audit Rust Dependencies (cargo-deny)** — đúng như đo local ở
+[MV-2](#mv-2---tám-bước-ci-chưa-có-bằng-chứng-nào) dự báo (`h2 v0.3.27`).
+13 bước trước nó đều xanh: checkout, node setup, **docs-check**, **docs-citations**,
+npm ci, script-adjacent node tests, env-doc sync, actionlint cache, devkit:lint,
+npm audit, cargo fmt, cargo cache, cargo-deny install. Các bước sau cargo-deny
+**không chạy** (fail-fast) — kể cả validate knowledge vault và e2e gateway trên Windows,
+nghĩa là hai câu hỏi lệch nền đó **vẫn chưa có lời đáp từ runner Windows thật**;
+chúng sẽ được trả lời ở lần chạy kế tiếp sau khi xử lý `h2`.
+
+### ~~MV-2~~ ✅ — Tám bước CI chưa có bằng chứng nào
 
 **Việc.** Hoặc chạy local, hoặc chấp nhận MV-1 trả lời thay. Cái rẻ nhất chạy trước:
 `npm run devkit:lint`, validate knowledge vault, `cargo check -p liva-desktop`.
@@ -113,7 +126,7 @@ CI `0.20.2 --locked` trước khi đo:
   ❌ **advisories FAILED**: **1 vulnerability thật** — `h2 v0.3.27`, "unbounded empty DATA
   frames" — cộng các cảnh báo unmaintained đã được `-W` cho phép (bincode, paste,
   proc-macro-error, rustls-pemfile, unic-*). Bước CI tương ứng sẽ **đỏ** khi PR #1 chạy;
-  không vá trong mục này, số thật của run thuộc về [MV-1](#mv-1--ci-chưa-từng-chạy-trên-nhánh-này).
+  không vá trong mục này, số thật của run thuộc về [MV-1](#mv-1---ci-chưa-từng-chạy-trên-nhánh-này).
 - e2e gateway trên Windows — **vẫn chưa chạy**, máy này không có Windows.
 
 ### MV-3 — Nhánh Windows của `e2e-gateway-ci.mjs` chưa chạy lại
@@ -198,7 +211,7 @@ chúng, và **cả hai vẫn nguyên trên đĩa** (`du -sh liva-ai-engine` → 
 CI tự cài bản ghim `0.20.2`. Cài local chỉ cần khi muốn biết trước MV-1.
 
 **Đã cài 25/08/2026** (`cargo install cargo-deny --version 0.20.2 --locked`) đúng để
-đo trước MV-2 — kết quả đo thấy ở [MV-2](#mv-2--tám-bước-ci-chưa-có-bằng-chứng-nào).
+đo trước MV-2 — kết quả đo thấy ở [MV-2](#mv-2---tám-bước-ci-chưa-có-bằng-chứng-nào).
 
 ### MV-9 — `mac-v2` track nhầm `origin/main`
 
@@ -237,8 +250,10 @@ nói `external_cpu_percent`.
 
 ## 6. Thứ tự thi hành
 
-1. ~~**MV-1** trước tất cả~~ ✅ **PR draft [#1](https://github.com/DuongNAD/LIVA/pull/1)
-   đã mở 25/08/2026 sau khi người dùng đồng ý**; nghiệm thu cuối vẫn chờ một run có kết luận.
+1. ~~**MV-1** trước tất cả~~ ✅ xong 25/08 — PR draft [#1](https://github.com/DuongNAD/LIVA/pull/1)
+   mở sau khi người dùng đồng ý; run `32824625512` có kết luận: **đỏ tại cargo-deny (`h2`)**.
+   Việc kế tiếp phát sinh: xử lý advisory `h2` rồi chạy lại để các bước sau được trả lời.
+   ⚠️ Việc sửa `h2` **không thuộc tài liệu này** — đó là việc mã nguồn của backlog.
 2. ~~**MV-4, MV-5, MV-6**~~ ✅ xong 25/08 (`474421ff`, `2736fa05`).
 3. ~~**MV-2**~~ ✅ đo xong local 25/08 (bảy trên tám bước có số thật, hai bước đỏ có tên);
    **MV-3** còn lại — chỉ runner Windows trả lời được.

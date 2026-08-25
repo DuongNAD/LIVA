@@ -10,7 +10,7 @@
   },
   "app": {
     "macOSPrivateApi": true,
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "widget",

@@ -1,7 +1,7 @@
 ---
 title: "Ma trận năng lực LIVA → JARVIS"
 updated: 2026-07-31
-commit: 3a8d5001
+commit: 7493f091
 status: index
 owns:
   - ma-tran-nang-luc-jarvis

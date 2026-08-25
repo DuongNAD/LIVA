@@ -2,6 +2,7 @@
 title: "Quy hoạch và di trú tài liệu LIVA v2"
 updated: 2026-08-25
 commit: ac693be8
+stale-ok: 4ae8bfb6
 status: living
 owns:
   - quy-hoach-tai-lieu-v2

@@ -534,6 +534,13 @@
       "rationale": "Prompt dọn dẹp cũ được thay bằng quy trình debt triage có acceptance test."
     },
     {
+      "path": "docs/06-ke-hoach/viec-con-lai-mac-v2.md",
+      "disposition": "KEEP",
+      "wave": "C-roadmap",
+      "targets": [],
+      "rationale": "Punch list phạm vi nhánh mac-v2: hạ tầng, cổng kiểm, vệ sinh repo và xác thực. Không sở hữu backlog sản phẩm."
+    },
+    {
       "path": "docs/06-ke-hoach/roadmap.md",
       "disposition": "KEEP",
       "wave": "A",

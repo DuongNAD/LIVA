@@ -14,12 +14,13 @@ covers: []
 Tra ngược: sửa file mã nguồn nào thì phải xem lại tài liệu nào. Dữ liệu lấy từ trường `covers`
 trong front-matter của từng tài liệu.
 
-Tổng: **268** mục mã nguồn được tài liệu hoá bởi **62** tài liệu.
+Tổng: **269** mục mã nguồn được tài liệu hoá bởi **63** tài liệu.
 
 | Mã nguồn | Tài liệu mô tả nó |
 |---|---|
 | `.github/workflows/release.yml` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
-| `.github/workflows/test.yml` | [00-tong-quan-he-thong.md](../01-ban-ve/00-tong-quan-he-thong.md) · [01-cau-hinh-va-bien-moi-truong.md](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) · [02-mo-hinh-ai-va-tai-nguyen.md](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) · [03-lo-trinh-sua-loi-va-nang-cap.md](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
+| `.github/workflows/test.yml` | [00-tong-quan-he-thong.md](../01-ban-ve/00-tong-quan-he-thong.md) · [01-cau-hinh-va-bien-moi-truong.md](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) · [02-mo-hinh-ai-va-tai-nguyen.md](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) · [03-lo-trinh-sua-loi-va-nang-cap.md](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) · [viec-con-lai-mac-v2.md](../06-ke-hoach/viec-con-lai-mac-v2.md) |
+| `.gitignore` | [viec-con-lai-mac-v2.md](../06-ke-hoach/viec-con-lai-mac-v2.md) |
 | `AGENTS.md` | [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
 | `Cargo.lock` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
 | `Cargo.toml` | [00-tong-quan-he-thong.md](../01-ban-ve/00-tong-quan-he-thong.md) · [02-giao-thuc-ipc-va-websocket.md](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) · [03-duong-ong-thoai.md](../01-ban-ve/03-duong-ong-thoai.md) · [04-he-llm-va-prompt.md](../01-ban-ve/04-he-llm-va-prompt.md) · [06-thi-giac-passive-va-governor.md](../01-ban-ve/06-thi-giac-passive-va-governor.md) · [08-frontend-va-vo-tauri.md](../01-ban-ve/08-frontend-va-vo-tauri.md) · [01-cau-hinh-va-bien-moi-truong.md](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) · [02-mo-hinh-ai-va-tai-nguyen.md](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [01-doi-chieu-tuyen-bo-vs-thuc-te.md](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
@@ -56,7 +57,7 @@ Tổng: **268** mục mã nguồn được tài liệu hoá bởi **62** tài li
 | `docs/06-ke-hoach/roadmap.md` | [README.md](../README.md) · [nguon-su-that.md](../_meta/nguon-su-that.md) |
 | `docs/07-dong-gop/quy-hoach-tai-lieu.md` | [README.md](../README.md) · [nguon-su-that.md](../_meta/nguon-su-that.md) |
 | `docs/README.md` | [quy-hoach-tai-lieu.md](../07-dong-gop/quy-hoach-tai-lieu.md) |
-| `eslint.config.js` | [00-tong-quan-he-thong.md](../01-ban-ve/00-tong-quan-he-thong.md) · [09-tich-hop-ngoai.md](../01-ban-ve/09-tich-hop-ngoai.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) |
+| `eslint.config.js` | [00-tong-quan-he-thong.md](../01-ban-ve/00-tong-quan-he-thong.md) · [09-tich-hop-ngoai.md](../01-ban-ve/09-tich-hop-ngoai.md) · [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [00-bao-cao-khao-sat-goc-2026-07.md](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) · [viec-con-lai-mac-v2.md](../06-ke-hoach/viec-con-lai-mac-v2.md) |
 | `liva-desktop/src-tauri` | [inventory-he-thong.md](../01-kien-truc/inventory-he-thong.md) |
 | `liva-desktop/src-tauri/capabilities/dashboard.json` | [05-cai-dat-cho-nguoi-dung.md](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) · [desktop-tauri.md](../03-he-thong-con/desktop-tauri.md) · [threat-model.md](../05-chat-luong/threat-model.md) |
 | `liva-desktop/src-tauri/capabilities/setup.json` | [05-cai-dat-cho-nguoi-dung.md](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) · [desktop-tauri.md](../03-he-thong-con/desktop-tauri.md) · [threat-model.md](../05-chat-luong/threat-model.md) |
@@ -258,11 +259,11 @@ Tổng: **268** mục mã nguồn được tài liệu hoá bởi **62** tài li
 | `scripts/ai-pre-commit.cjs` | [01-cau-hinh-va-bien-moi-truong.md](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md) · [02-mo-hinh-ai-va-tai-nguyen.md](../02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) · [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) |
 | `scripts/check-installer-config.mjs` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [05-cai-dat-cho-nguoi-dung.md](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) · [release-v1.0.0-smoke-test.md](../02-van-hanh/release-v1.0.0-smoke-test.md) |
 | `scripts/check-installer-config.test.mjs` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) |
-| `scripts/docs-capabilities.mjs` | [quy-hoach-tai-lieu.md](../07-dong-gop/quy-hoach-tai-lieu.md) · [ma-tran-nang-luc.md](../_generated/ma-tran-nang-luc.md) |
+| `scripts/docs-capabilities.mjs` | [viec-con-lai-mac-v2.md](../06-ke-hoach/viec-con-lai-mac-v2.md) · [quy-hoach-tai-lieu.md](../07-dong-gop/quy-hoach-tai-lieu.md) · [ma-tran-nang-luc.md](../_generated/ma-tran-nang-luc.md) |
 | `scripts/docs-check.mjs` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) · [quy-hoach-tai-lieu.md](../07-dong-gop/quy-hoach-tai-lieu.md) |
 | `scripts/docs-citations.mjs` | [quy-hoach-tai-lieu.md](../07-dong-gop/quy-hoach-tai-lieu.md) |
-| `scripts/docs-inventory.mjs` | [quy-hoach-tai-lieu.md](../07-dong-gop/quy-hoach-tai-lieu.md) · [kiem-ke-tai-lieu.md](../_generated/kiem-ke-tai-lieu.md) |
-| `scripts/e2e-gateway-ci.mjs` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [07-macos-dev.md](../02-van-hanh/07-macos-dev.md) |
+| `scripts/docs-inventory.mjs` | [viec-con-lai-mac-v2.md](../06-ke-hoach/viec-con-lai-mac-v2.md) · [quy-hoach-tai-lieu.md](../07-dong-gop/quy-hoach-tai-lieu.md) · [kiem-ke-tai-lieu.md](../_generated/kiem-ke-tai-lieu.md) |
+| `scripts/e2e-gateway-ci.mjs` | [04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) · [07-macos-dev.md](../02-van-hanh/07-macos-dev.md) · [viec-con-lai-mac-v2.md](../06-ke-hoach/viec-con-lai-mac-v2.md) |
 | `scripts/e2e-gateway.mjs` | [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) |
 | `scripts/e2e-mcp-server.mjs` | [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) |
 | `scripts/e2e-memory.mjs` | [05-nang-cap-toan-dien.md](../03-danh-gia/05-nang-cap-toan-dien.md) · [memory.md](../03-he-thong-con/memory.md) |

@@ -1,8 +1,7 @@
 ---
 title: "Tích hợp ngoài"
-updated: 2026-08-07
-commit: dec1c14
-stale-ok: a0153135
+updated: 2026-08-25
+commit: 4ae8bfb6
 status: living
 owns:
   - bang-tich-hop-ngoai
@@ -172,7 +171,16 @@ impl NativeMcpServer {
 
 `input_schema: schemars::schema::RootSchema` sinh bằng `schema_for!(...)`, serde `rename_all = "camelCase"` → serialize thành `inputSchema` (đúng MCP spec).
 
-**Chống path traversal** (`resolve_path`, `server.rs:67-77`): chặn `is_absolute()`, `has_root()`, mọi `Component::ParentDir`, rồi double-check `full.starts_with(vault_path)`. Áp dụng cho `read_markdown`/`write_markdown`; `search_vault` không cần vì chỉ walk từ root. **Không canonicalize ⇒ symlink có thể lách** (xem chương nợ kỹ thuật).
+**Chống path traversal** (`resolve_path` trong `liva-native-core/src/mcp/server.rs`): chặn `is_absolute()`, `has_root()`, mọi `Component::ParentDir`, rồi double-check `full.starts_with(vault_path)`. Áp dụng cho `read_markdown`/`write_markdown`; `search_vault` không cần vì chỉ walk từ root. **Không canonicalize ⇒ symlink có thể lách** (xem chương nợ kỹ thuật).
+
+**Bổ sung `ff8e960b` (25/08/2026) — hai lối thoát chỉ hở khi chạy ngoài Windows:**
+
+| Lối thoát | Vì sao lọt | Nay chặn thế nào |
+|---|---|---|
+| Drive prefix `C:`, `C:\…`, `C:file` | Trên Windows `join` **thay thế toàn bộ** path khi vế phải mang prefix ổ đĩa; trên Unix chuỗi đó chỉ trông như một tên file bình thường nên mọi kiểm tra bên dưới đều qua | Từ chối khi byte thứ hai là `:` và byte đầu là chữ cái ASCII — chặn ở **cả hai** nền |
+| Phân cách `\` (`..\env`) | `\` là phân cách trên Windows nhưng là **ký tự tên file hợp lệ** trên Unix, nên `Component::ParentDir` không nhận ra | Từ chối thẳng mọi `rel_path` chứa `\` — vault không có lý do chính đáng dùng ký tự này |
+
+⚠️ Đây là cùng một họ với [ba bẫy chỉ-Windows](../02-van-hanh/07-macos-dev.md): logic đường dẫn viết đúng cho một nền, và **CI chạy `windows-latest` nên không bao giờ thấy phía kia**.
 
 **Nối dây:**
 

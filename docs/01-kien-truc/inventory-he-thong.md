@@ -2,7 +2,7 @@
 title: "Kiểm kê implementation LIVA theo capability"
 updated: 2026-08-07
 commit: bd11c84
-stale-ok: a0153135
+stale-ok: 4ae8bfb6
 status: living
 owns:
   - inventory-capability-module

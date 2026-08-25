@@ -29,6 +29,8 @@ covers:
 
 ## 1. Vai trò của tài liệu này
 
+📌 Việc phát sinh từ nhánh `mac-v2` (CI, cổng kiểm, vệ sinh repo) **không** nằm ở đây mà ở [Việc còn lại trên mac-v2](viec-con-lai-mac-v2.md).
+
 Đây là nguồn chuẩn duy nhất cho **việc còn phải làm và thứ tự thực hiện**. Các roadmap
 cũ vẫn được giữ để bảo toàn bằng chứng và lịch sử, nhưng không được thêm hạng mục mới.
 

@@ -77,6 +77,7 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `kien-truc-dich-cognitive-runtime` | [Cognitive Runtime](../01-kien-truc/cognitive-runtime.md) | Kiến trúc đích perception → context → policy → tool → observation → memory | roadmap |
 | `phan-cap-rui-ro-hanh-dong` | [Cognitive Runtime](../01-kien-truc/cognitive-runtime.md) | Bốn risk tier và chính sách mặc định cho hành động | roadmap |
 | `master-roadmap-jarvis` | [Master roadmap](../06-ke-hoach/roadmap.md) | Nguồn duy nhất cho milestone, dependency và acceptance gate còn mở | README |
+| `viec-con-lai-mac-v2` | [Việc còn lại trên mac-v2](../06-ke-hoach/viec-con-lai-mac-v2.md) | Punch list MV-1…MV-13 phạm vi NHÁNH: CI chưa chạy, cổng hỏng cấu trúc, vệ sinh repo. Cố ý **không** sở hữu mục U nào — mục MV-10…MV-13 chỉ là con trỏ | roadmap |
 | `quy-hoach-tai-lieu-v2` | [Quy hoạch tài liệu](../07-dong-gop/quy-hoach-tai-lieu.md) | Cấu trúc đích, mapping, chiến lược di trú và docs gates | README, roadmap |
 | `vision-runtime-as-built` | [Vision runtime](../03-he-thong-con/vision.md) | Chụp màn hình, diff vùng và đường hỏi đáp đa phương thức đang chạy thật | README, context broker, roadmap |
 | `vision-command-contract` | [Vision runtime](../03-he-thong-con/vision.md) | Hợp đồng lệnh vision và ranh giới quyền riêng tư/quyền lệnh | desktop Tauri, frontend |

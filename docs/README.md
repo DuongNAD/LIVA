@@ -45,6 +45,7 @@ làm trọng tài.
 3. [Inventory capability → module](01-kien-truc/inventory-he-thong.md) — entry point, luồng, test và khoảng trống as-built.
 4. [Kiến trúc đích Cognitive Runtime](01-kien-truc/cognitive-runtime.md) — vòng perception → policy → action → memory.
 5. [Master roadmap](06-ke-hoach/roadmap.md) — nguồn duy nhất cho việc còn làm và thứ tự.
+5b. [Việc còn lại trên nhánh `mac-v2`](06-ke-hoach/viec-con-lai-mac-v2.md) — punch list MV-1…MV-13 phạm vi nhánh: CI chưa từng chạy, hai cổng không bao giờ xanh được, 3 GB rác chưa gitignore.
 6. [Kiểm kê disposition tài liệu](_generated/kiem-ke-tai-lieu.md) — toàn bộ file được gắn KEEP/SPLIT/GENERATE/FREEZE/MERGE.
 7. [Quy hoạch tài liệu v2](07-dong-gop/quy-hoach-tai-lieu.md) — mapping và gate di trú.
 8. [Voice runtime](03-he-thong-con/voice.md) + [Voice SLO](05-chat-luong/voice-slo.md) — as-built và cổng chất lượng thoại.

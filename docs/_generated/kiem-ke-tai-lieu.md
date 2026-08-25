@@ -1,7 +1,7 @@
 ---
 title: "Kiểm kê và disposition tài liệu LIVA"
 updated: 2026-08-25
-commit: a0153135
+commit: ac693be8
 status: index
 owns:
   - inventory-disposition-tai-lieu
@@ -23,9 +23,9 @@ covers:
 | KEEP | 33 |
 | SPLIT | 7 |
 | GENERATE | 5 |
-| FREEZE | 39 |
+| FREEZE | 40 |
 | MERGE | 16 |
-| **Tổng** | **100** |
+| **Tổng** | **101** |
 
 ## Quy ước
 
@@ -67,7 +67,7 @@ covers:
 | `docs/02-van-hanh/04-kiem-thu-va-ci.md` | **KEEP** | C-quality | 18 | `docs/05-chat-luong/kiem-thu-va-ci.md` | Runbook còn dùng; di chuyển sau khi CI links được cập nhật. |
 | `docs/02-van-hanh/05-cai-dat-cho-nguoi-dung.md` | **KEEP** | C-operations | 5 | `docs/04-van-hanh/cai-dat.md` | Hướng dẫn beta cần còn truy cập được trong toàn bộ đợt di trú. |
 | `docs/02-van-hanh/06-backup-restore-sqlite.md` | **KEEP** | C-operations | 4 | — | Runbook canonical cho online backup, offline restore và rollback SQLite. |
-| `docs/02-van-hanh/07-macos-dev.md` | **KEEP** | C-operations | 5 | — | Runbook canonical cho đường phát triển trên macOS (nhánh mac-v2); bản Windows nằm trong 03-trien-khai-va-runtime. |
+| `docs/02-van-hanh/07-macos-dev.md` | **KEEP** | C-operations | 7 | — | Runbook canonical cho đường phát triển trên macOS (nhánh mac-v2); bản Windows nằm trong 03-trien-khai-va-runtime. |
 | `docs/02-van-hanh/release-v1.0.0-smoke-test.md` | **KEEP** | C-operations | 4 | — | Bằng chứng dựng installer v1.0.0 và checklist nghiệm thu trên Windows sạch. |
 | `docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md` | **FREEZE** | B | 12 | — | Snapshot khảo sát đã ghi rõ ngày và trạng thái đóng băng. |
 | `docs/03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md` | **FREEZE** | B | 22 | — | Đối chiếu tại một thời điểm; capability registry đã thay vai trò trạng thái sống. |
@@ -134,6 +134,7 @@ covers:
 | `docs/99-luu-tru/kien-truc-nodejs-v29/TEST_READY.md` | **FREEZE** | archive | 0 | — | Checklist test của stack cũ. |
 | `docs/99-luu-tru/README.md` | **KEEP** | archive | 3 | — | Mục lục và cảnh báo cho khu vực lịch sử. |
 | `docs/99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.md` | **FREEZE** | archive | 1 | — | Thiết kế client/server gốc. |
+| `docs/99-luu-tru/thiet-ke-goc/ORIGINAL_REQUEST_MACOS_2026-06-05.md` | **FREEZE** | archive | 0 | — | Yêu cầu gốc của đợt macOS/Apple Silicon (05-06/06/2026) — nguồn của nhánh mac-v2. Nằm untracked ở gốc repo tới 25/08/2026. |
 | `docs/99-luu-tru/thiet-ke-goc/ORIGINAL_REQUEST.md` | **FREEZE** | archive | 0 | — | Yêu cầu gốc được bảo toàn nguyên trạng. |
 | `docs/ai/design/README.md` | **MERGE** | A | 0 | `docs/01-kien-truc/cognitive-runtime.md` | Pointer tương thích cho ai-devkit; nội dung thiết kế vẫn do tài liệu kiến trúc chuẩn sở hữu. |
 | `docs/ai/implementation/README.md` | **MERGE** | A | 0 | `docs/_generated/ma-tran-nang-luc.md` | Pointer tương thích, không phải tài liệu triển khai song song. |

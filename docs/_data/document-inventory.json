@@ -796,6 +796,13 @@
       "wave": "archive",
       "targets": [],
       "rationale": "Yêu cầu gốc được bảo toàn nguyên trạng."
+    },
+    {
+      "path": "docs/99-luu-tru/thiet-ke-goc/ORIGINAL_REQUEST_MACOS_2026-06-05.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Yêu cầu gốc của đợt macOS/Apple Silicon (05-06/06/2026) — nguồn của nhánh mac-v2. Nằm untracked ở gốc repo tới 25/08/2026."
     }
   ]
 }

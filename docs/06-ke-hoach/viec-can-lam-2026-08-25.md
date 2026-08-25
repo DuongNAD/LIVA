@@ -496,8 +496,14 @@ LLM sinh xong cả câu** rồi mới bắt đầu tổng hợp. Persona chốt 
 phổ biến chứ không phải ca hiếm.
 
 **Việc.** Cho `TtsChunker` biết mẩu nào là mẩu **đầu** của lượt, và chỉ với mẩu đó thì hạ
-ngưỡng (ví dụ: dấu phẩy cắt từ ≥3 từ, trần ~8–10 từ). Từ mẩu thứ hai trở đi giữ nguyên luật
-hiện tại để ngữ điệu không vỡ. `TtsChunker::reset` đã tồn tại — dùng nó làm ranh giới lượt.
+ngưỡng (dấu phẩy cắt từ **≥2 từ**, trần **9 từ** — xem đính chính dưới đây). Từ mẩu thứ hai trở
+đi giữ nguyên luật hiện tại để ngữ điệu không vỡ. `TtsChunker::reset` đã tồn tại — dùng nó làm
+ranh giới lượt.
+
+> ✏️ **Đính chính 25/08/2026 (phiên thi công):** bản đầu viết "dấu phẩy cắt từ ≥3 từ". Sai so
+> với chính nghiệm thu bên dưới: câu ví dụ "Chào bạn, mình…" có dấu phẩy sau từ **thứ hai**, nên
+> ngưỡng 3 làm điều kiện "mẫu đầu ra đời sớm hơn" tự mâu thuẫn — đã triển khai ngưỡng **≥2**,
+> trần mẫu-đầu **9 từ**.
 
 **Nghiệm thu.**
 - Test: chuỗi `"Chào bạn, mình có thể giúp gì cho bạn?"` đẩy vào theo từng token cho ra mẩu
@@ -505,6 +511,18 @@ hiện tại để ngữ điệu không vỡ. `TtsChunker::reset` đã tồn t�
 - Mẩu thứ hai trở đi cho kết quả **giống hệt** luật cũ — có test khẳng định điều đó.
 - Với VC-4 đã xong: **TTFA p50 giảm**, đo trên cùng máy, cùng model, cùng prompt.
   Không có số này thì mục chỉ đóng ở mức "đúng theo test", ghi rõ như vậy.
+
+> **Trạng thái 25/08/2026 (phiên thi công) — VC-6 ĐÃ CODE XONG, đóng ở mức "đúng theo test".**
+>
+> - `TtsChunker` có cờ `dang_la_mau_dau` (bật ở `new()`/`reset()`, tắt khi mẫu đầu ra đời);
+>   ngưỡng mẫu-đầu: dấu phẩy ≥2 từ · trần 9 từ; từ mẩu thứ hai: đúng luật cũ ≥6/25.
+> - Nghiệm thu từng dòng: câu ví dụ đẩy theo token ⇒ mẩu đầu ra đời tại token dấu phẩy
+>   (index 2) thay vì "?" — ✅ test; tổng văn bản ghép lại nguyên văn — ✅ test; mẩu thứ hai
+>   trở đi giống luật cũ — ✅ test; không hồi quy `AvatarSpeechFilter` — ✅ test cũ vẫn xanh;
+>   cargo test/clippy/fmt — ✅. **TTFA p50 giảm — CHƯA ĐO ĐƯỢC** (`models/` trống), chờ VC-4b.
+> - **Kiểm bằng đột biến**: xoá đặc quyền mẫu-đầu (ngưỡng = luật cũ) ⇒ test "mẩu đầu ra đời
+>   sớm" đỏ; bỏ cờ flip sau mẫu đầu ⇒ test "mẫu thứ hai giữ luật cũ" đỏ. Hoàn nguyên ⇒
+>   tts:: 87/87 xanh.
 - Không hồi quy `AvatarSpeechFilter`: tag điều khiển bị cắt đôi giữa hai token vẫn phải ghép
   đúng (đã có test `avatar_control_bi_loc_truoc_khi_chia_clause_tts`).
 

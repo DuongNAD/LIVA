@@ -80,6 +80,11 @@ export function resetVisemes(): void {
   anchored = null;
 }
 
+/** Đọc-thôi: timeline đang chờ neo (dùng để kiểm thử nối dây UI — VC-8). */
+export function pendingVisemeCues(): readonly VisemeCue[] {
+  return pendingCues ?? [];
+}
+
 // ── Đồng hồ ─────────────────────────────────────────────────────
 // Registry không tự biết AudioContext; nơi sở hữu useSpeakerPlayback cắm một
 // clock provider MỘT lần (trả giây theo cùng đồng hồ ctx.currentTime).

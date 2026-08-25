@@ -89,7 +89,20 @@ vi.mock('../../src/composables/useVoicePipeline', () => ({
   useVoicePipeline: () => voiceMock,
 }));
 
-const speakerMock = {
+const speakerMock: {
+  stop: ReturnType<typeof vi.fn>;
+  flush: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  unblock: ReturnType<typeof vi.fn>;
+  isBlocked: ReturnType<typeof vi.fn>;
+  isPlaying: ReturnType<typeof vi.fn>;
+  hasActiveSources: ReturnType<typeof vi.fn>;
+  setMasterVolume: ReturnType<typeof vi.fn>;
+  enqueueSpeakerPayload: ReturnType<typeof vi.fn>;
+  enqueueEncodedAudio: ReturnType<typeof vi.fn>;
+  /** VC-8: options WidgetApp truyền vào — để test kích được callback viseme. */
+  __options: Record<string, any> | null;
+} = {
   stop: vi.fn(),
   flush: vi.fn(),
   close: vi.fn(),
@@ -100,6 +113,7 @@ const speakerMock = {
   setMasterVolume: vi.fn(),
   enqueueSpeakerPayload: vi.fn(),
   enqueueEncodedAudio: vi.fn().mockResolvedValue(undefined),
+  __options: null,
 };
 
 const avatarEngineMock = {
@@ -125,7 +139,12 @@ const AvatarEngineStub = defineComponent({
 });
 
 vi.mock('../../src/composables/useSpeakerPlayback', () => ({
-  useSpeakerPlayback: () => speakerMock,
+  // VC-8: ghi lại options WidgetApp truyền vào để test kích được callback
+  // viseme (onChunkScheduled) mà không cần AudioContext thật.
+  useSpeakerPlayback: (options?: Record<string, any>) => {
+    speakerMock.__options = options ?? null;
+    return speakerMock;
+  },
 }));
 
 // Mock use3DModel
@@ -155,6 +174,58 @@ vi.mock('../../src/composables/useFaceTracking', () => ({
 }));
 
 import WidgetApp from '../../src/WidgetApp.vue';
+import { OP_VISME } from '../../src/utils/speakerFrame';
+import {
+  currentVisemeFromClock,
+  pendingVisemeCues,
+  resetVisemes,
+  setVisemeClock,
+  setVisemeTimeline,
+} from '../../src/utils/phonemeLipSync';
+
+/** Dựng một VoiceFrame OP_VISME đúng header 9 byte để bắn qua socket giả. */
+function makeVisemeFrame(turnEpoch = 5, seqId = 3): ArrayBuffer {
+  const payload = new TextEncoder().encode(
+    JSON.stringify({
+      turn_epoch: turnEpoch,
+      base_seq_id: seqId,
+      visemes: [
+        { v: 'nil', t_ms: 0 },
+        { v: 'aa', t_ms: 120 },
+      ],
+    }),
+  );
+  const frame = new Uint8Array(9 + payload.byteLength);
+  const view = new DataView(frame.buffer);
+  view.setUint8(0, OP_VISME);
+  view.setUint32(1, seqId, true);
+  view.setUint32(5, payload.byteLength, true);
+  frame.set(payload, 9);
+  return frame.buffer;
+}
+
+/** VoiceFrame OP_FLUSH (barge-in) với epoch tuỳ ý. */
+function makeFlushFrame(epoch = 9): ArrayBuffer {
+  const frame = new Uint8Array(9);
+  const view = new DataView(frame.buffer);
+  view.setUint8(0, 0x03);
+  view.setUint32(1, epoch, true);
+  return frame.buffer;
+}
+
+const STANDARD_STUBS = {
+  global: {
+    provide: {
+      platform: { platformName: 'web', invokeBackend: vi.fn().mockResolvedValue(null) },
+    },
+    stubs: {
+      Live2DEngine: true,
+      VRMEngine: true,
+      VisionSensor: true,
+      ResourceMeter: true,
+    },
+  } as any,
+};
 
 const mockSockets: MockWebSocket[] = [];
 
@@ -1090,5 +1161,69 @@ describe('WidgetApp.vue', () => {
       await wrapper.setData({ show: false });
       wrapper.unmount();
     });
+  });
+
+  // ════════ VC-8 — nối dây timeline viseme trong WidgetApp ═══════════════════
+
+  it('đăng ký timeline viseme từ OP_VISME và xoá khi FLUSH (VC-8)', async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(WidgetApp, STANDARD_STUBS);
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = mockSockets[0];
+    socket.readyState = MockWebSocket.OPEN;
+    socket.onopen?.(new Event('open'));
+
+    // WidgetApp phải truyền callback viseme vào transport khi dựng nó.
+    expect(typeof speakerMock.__options?.onChunkScheduled).toBe('function');
+
+    // OP_VISME tới trước audio của cùng mẩu ⇒ timeline vào registry.
+    socket.onmessage?.({ data: makeVisemeFrame(5, 3) } as MessageEvent);
+    expect(pendingVisemeCues().map((c) => c.v)).toEqual(['nil', 'aa']);
+
+    // Barge-in FLUSH xoá timeline đang treo — không để khẩu hình cũ dính sang
+    // lượt mới.
+    socket.onmessage?.({ data: makeFlushFrame(9) } as MessageEvent);
+    expect(pendingVisemeCues()).toHaveLength(0);
+
+    wrapper.unmount();
+  });
+
+  it('onChunkScheduled neo timeline vào đồng hồ audio của widget (VC-8)', () => {
+    resetVisemes();
+    setVisemeClock(null);
+    let nowSec: number | null = 10;
+    setVisemeClock(() => nowSec);
+    setVisemeTimeline([
+      { v: 'nil', tMs: 0 },
+      { v: 'aa', tMs: 200 },
+    ]);
+
+    // Kích đúng callback mà WidgetApp truyền cho useSpeakerPlayback.
+    expect(typeof speakerMock.__options?.onChunkScheduled).toBe('function');
+    speakerMock.__options!.onChunkScheduled!({ startTimeSec: 10, durationSec: 0.4 });
+
+    expect(currentVisemeFromClock()).toBe('nil'); // 0 ms
+    nowSec = 10.25;
+    expect(currentVisemeFromClock()).toBe('aa'); // 250 ms
+    nowSec = 10.5;
+    expect(currentVisemeFromClock()).toBeNull(); // quá cuối mẩu ⇒ rơi về RMS
+
+    resetVisemes();
+    setVisemeClock(null);
+  });
+
+  it('nút thu gọn / mở rộng capsule chuyển đổi trạng thái', async () => {
+    const wrapper = mount(WidgetApp, STANDARD_STUBS);
+
+    // Ban đầu thu gọn: capsule có nút mở rộng (dòng 1769-1772).
+    expect(wrapper.find('.collapsed-capsule').exists()).toBe(true);
+    await wrapper.find('[title="wg_collapse"]').trigger('click');
+    expect(wrapper.find('.collapsed-capsule').exists()).toBe(false);
+
+    // Trạng thái mở rộng: nút thu gọn ở header chat (dòng 1545).
+    const collapseButtons = wrapper.findAll('[title="wg_collapse"]');
+    expect(collapseButtons.length).toBeGreaterThan(0);
+    await collapseButtons[0].trigger('click');
+    expect(wrapper.find('.collapsed-capsule').exists()).toBe(true);
   });
 });

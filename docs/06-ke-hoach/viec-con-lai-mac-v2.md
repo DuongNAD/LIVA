@@ -1,7 +1,7 @@
 ---
 title: "Việc còn lại trên nhánh mac-v2"
 updated: 2026-08-25
-commit: 4ae8bfb6
+commit: 3fc6d52c
 status: living
 owns:
   - viec-con-lai-mac-v2
@@ -36,6 +36,9 @@ tài liệu chủ; sửa ở đây mà không sửa ở đó là tạo ra hai s�
 ⚠️ **Mọi số dưới đây đo trên macOS. Runner CI là `windows-latest`.** Đây là điều
 quan trọng nhất trong tài liệu: xanh ở đây **không** chứng minh xanh ở CI.
 
+> Đo lại toàn bộ bảng dưới tại `3fc6d52c` cùng ngày (phiên chiều 25/08): **y nguyên**,
+> cộng hai hàng mới đo lần đầu — Rust deny và knowledge vault, xem ngay dưới bảng.
+
 | Cổng | Lệnh | Kết quả |
 |---|---|---|
 | Tài liệu | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` | ✅ exit 0, 0 lỗi thời |
@@ -47,11 +50,21 @@ quan trọng nhất trong tài liệu: xanh ở đây **không** chứng minh xa
 | Lỗ hổng npm | `npm audit --audit-level=high` | ✅ 0 vulnerabilities |
 | Test Rust | `cargo test` | ⚠️ 571 pass · **1 fail** — xem [MV-7](#mv-7--models-trống-nên-một-test-đỏ) |
 | Coverage UI | `npm run test:coverage -w liva-ui` | ✅ 80,86 % line |
+| Rust deny | `cargo deny check -W unmaintained -W unsound advisories licenses sources` | ❌ **advisories FAILED** — chi tiết ở [MV-2](#mv-2--tám-bước-ci-chưa-có-bằng-chứng-nào) |
+| Knowledge vault | `npm run typecheck -w obsidian-llm-wiki && npm test -w obsidian-llm-wiki` | ⚠️ typecheck ✅ · test **3/27 đỏ trên macOS** — chi tiết ở [MV-2](#mv-2--tám-bước-ci-chưa-có-bằng-chứng-nào) |
 
-**Tám bước CI chưa chạy ở bất kỳ đâu:** `cargo deny` · `cargo test -p liva-desktop` ·
-`cargo check -p liva-desktop` · `cargo check --all-targets --features experimental` ·
-build ba web client · validate knowledge vault · `npm run devkit:lint` ·
-**e2e gateway trên Windows**.
+**Tám bước CI từng chưa có bằng chứng nào — đo lại 25/08/2026 tại `3fc6d52c`:**
+
+| Bước CI | Kết quả local (macOS) |
+|---|---|
+| `npm run devkit:lint` | ✅ exit 0 |
+| Validate knowledge vault | ⚠️ typecheck ✅ · test 3/27 đỏ trên macOS (chi tiết ở MV-2) |
+| Build ba web client | ✅ cả ba (`liva-ui`, `liva-desktop`, `liva-mobile-client`) |
+| `cargo check -p liva-desktop` | ✅ exit 0 |
+| `cargo test -p liva-desktop` | ✅ 13 pass / 0 fail (một test argon2 chạy ~146 s — chậm, không phải treo) |
+| `cargo check --all-targets --features experimental` | ✅ exit 0 |
+| `cargo deny` (bản ghim `0.20.2`) | ❌ **advisories FAILED** — 1 vulnerability thật, chi tiết ở MV-2 |
+| e2e gateway trên Windows | ❓ **vẫn chưa chạy** — chỉ runner Windows trả lời được, tức [MV-1](#mv-1--ci-chưa-từng-chạy-trên-nhánh-này) trả lời thay |
 
 ---
 
@@ -69,6 +82,12 @@ Toàn bộ commit trên nhánh chưa qua một bước CI nào.
 số thật vào [§1 của tài liệu này](#1-trạng-thái-đã-đo--25082026-tại-f3d418a2-trên-macos),
 **đừng vá vội** — biết mình đỏ ở đâu có giá trị hơn một PR xanh giả.
 
+**Trạng thái 25/08/2026 (chiều).** Người dùng đã đồng ý; PR draft
+[#1](https://github.com/DuongNAD/LIVA/pull/1) (`mac-v2` → `main`) đã mở qua `gh`.
+Run đầu tiên **`32824625512`** kích hoạt lúc 08:03 UTC — kết quả cuối chờ run xong,
+ghi vào [§1](#1-trạng-thái-đã-đo--25082026-tại-f3d418a2-trên-macos) khi có.
+Dự đoán có căn cứ từ đo local: bước cargo-deny đỏ (h2), còn lại chưa biết trước.
+
 ### MV-2 — Tám bước CI chưa có bằng chứng nào
 
 **Việc.** Hoặc chạy local, hoặc chấp nhận MV-1 trả lời thay. Cái rẻ nhất chạy trước:
@@ -77,6 +96,26 @@ số thật vào [§1 của tài liệu này](#1-trạng-thái-đã-đo--2508202
 **Nghiệm thu.** Mỗi bước có một con số thật hoặc một dòng ghi rõ "chưa chạy".
 **Không suy ra "chắc xanh".**
 
+**Đã đo 25/08/2026 tại `3fc6d52c`, trên macOS.** `cargo-deny` cài local đúng bản ghim
+CI `0.20.2 --locked` trước khi đo:
+
+- `npm run devkit:lint` — ✅ exit 0.
+- Validate knowledge vault — typecheck ✅; **test đỏ 3/27**
+  (`tests/verification-challenger.test.ts`: hai test mock symlink-loop không trigger,
+  một test UNC đòi thông điệp `Access denied` nhưng nhận `File not found`).
+  Lệch nền hay lỗi thật thì chỉ runner Windows trả lời được — **chưa suy ra gì**.
+- Build ba web client — ✅ cả ba. (Bẫy mới: build `liva-mobile-client` ghi đè
+  `mobile_client/dist/` **đang được track**; đã `git checkout` trả lại nguyên trạng.)
+- `cargo check -p liva-desktop` — ✅ · `cargo test -p liva-desktop` — ✅ **13 pass / 0 fail**
+  (một test argon2 chạy ~146 s, chậm có lý do chứ không treo).
+- `cargo check --all-targets --features experimental` — ✅.
+- `cargo deny check -W unmaintained -W unsound advisories licenses sources` —
+  ❌ **advisories FAILED**: **1 vulnerability thật** — `h2 v0.3.27`, "unbounded empty DATA
+  frames" — cộng các cảnh báo unmaintained đã được `-W` cho phép (bincode, paste,
+  proc-macro-error, rustls-pemfile, unic-*). Bước CI tương ứng sẽ **đỏ** khi PR #1 chạy;
+  không vá trong mục này, số thật của run thuộc về [MV-1](#mv-1--ci-chưa-từng-chạy-trên-nhánh-này).
+- e2e gateway trên Windows — **vẫn chưa chạy**, máy này không có Windows.
+
 ### MV-3 — Nhánh Windows của `e2e-gateway-ci.mjs` chưa chạy lại
 
 **Bằng chứng.** `scripts/e2e-gateway-ci.mjs` nay chọn tên binary theo `process.platform`.
@@ -84,6 +123,11 @@ Nhánh macOS đã kiểm (8/8 đạt); **nhánh Windows của chính đoạn cod
 sau khi sửa.
 
 **Nghiệm thu.** e2e gateway xanh trên runner Windows — tức là MV-1 trả lời.
+
+**Rà code 25/08/2026.** Nhánh Windows của chỗ chọn binary chỉ là một ternary một dòng
+(`scripts/e2e-gateway-ci.mjs:40`: `process.platform === 'win32' ? 'liva-native-core.exe'
+: 'liva-native-core'`) — đọc rồi, không thấy gì đáng nghi, nhưng **đọc không thay được
+chạy**: nghiệm thu của mục này vẫn là runner Windows.
 
 ---
 
@@ -153,6 +197,9 @@ chúng, và **cả hai vẫn nguyên trên đĩa** (`du -sh liva-ai-engine` → 
 
 CI tự cài bản ghim `0.20.2`. Cài local chỉ cần khi muốn biết trước MV-1.
 
+**Đã cài 25/08/2026** (`cargo install cargo-deny --version 0.20.2 --locked`) đúng để
+đo trước MV-2 — kết quả đo thấy ở [MV-2](#mv-2--tám-bước-ci-chưa-có-bằng-chứng-nào).
+
 ### MV-9 — `mac-v2` track nhầm `origin/main`
 
 **Bằng chứng.** `git config branch.mac-v2.merge` → `refs/heads/main`.
@@ -170,7 +217,16 @@ Một `git pull` trên nhánh này sẽ kéo `main` vào. Push phải luôn tư�
 | **MV-10** | 187 trích dẫn mơ hồ / trần 207 — còn 20 slot. `--suggest` cho 552 ứng viên nhưng công cụ **cố ý không có `--fix`** | [roadmap D0.5](roadmap.md) |
 | **MV-11** | Di trú tài liệu v2 còn 16 MERGE + 7 SPLIT chưa làm | [Quy hoạch tài liệu](../07-dong-gop/quy-hoach-tai-lieu.md) |
 | **MV-12** | 7 "sự thật chưa có chủ" — `AppState`, vòng đời khởi động, bảng cổng mạng… | [Sổ nguồn sự thật §5](../_meta/nguon-su-that.md) |
-| **MV-13** | Hai khoá `owns` đã nghỉ hưu (`lo-trinh-5-giai-doan`, `huong-dan-sua-F1-F5`) vẫn còn tài liệu trỏ tới | [Sổ nguồn sự thật](../_meta/nguon-su-that.md) |
+| ~~**MV-13**~~ ✅ **ĐO XONG 25/08/2026** | Hai khoá `owns` đã nghỉ hưu (`lo-trinh-5-giai-doan`, `huong-dan-sua-F1-F5`) — đo lại thấy **không còn việc ở mức khoá**, xem dưới | [Sổ nguồn sự thật](../_meta/nguon-su-that.md) |
+
+**Bằng chứng đóng MV-13.** `grep` toàn repo (`*.md`, loại trừ `.gitnexus`): tên hai khoá
+chỉ còn xuất hiện ở **đúng hai file**, cả hai đều chủ ý — chính
+[sổ nguồn sự thật](../_meta/nguon-su-that.md) (giữ dòng để tra ngược, đã cập nhật ghi chú)
+và dòng con trỏ của tài liệu này. Tài liệu `03-lo-trinh-sua-loi-va-nang-cap.md` tuy vẫn
+được ~22 file link nhưng nó đã khai `status: frozen` + `superseded_by: roadmap.md` —
+liên kết lịch sử vào một tài liệu có bản đồ dẫn đường là hợp lệ, viết lại 22 chỗ là đúng
+kiểu việc "trông hợp lý nhưng vô ích" mà [§9 backlog](../03-danh-gia/05-nang-cap-toan-dien.md)
+chặn. Ghi chú "5 tài liệu còn trỏ tới" trong sổ đã được sửa theo số đo này.
 
 ⚠️ **MV-10 là chỗ dễ làm hỏng nhất.** Đổi hàng loạt toạ độ sang neo ký hiệu mà không đọc
 văn cảnh từng chỗ là đúng loại việc [§9 backlog](../03-danh-gia/05-nang-cap-toan-dien.md)
@@ -181,11 +237,14 @@ nói `external_cpu_percent`.
 
 ## 6. Thứ tự thi hành
 
-1. **MV-1** trước tất cả. Mọi việc khác đều rẻ hơn sau khi biết CI nói gì.
+1. ~~**MV-1** trước tất cả~~ ✅ **PR draft [#1](https://github.com/DuongNAD/LIVA/pull/1)
+   đã mở 25/08/2026 sau khi người dùng đồng ý**; nghiệm thu cuối vẫn chờ một run có kết luận.
 2. ~~**MV-4, MV-5, MV-6**~~ ✅ xong 25/08 (`474421ff`, `2736fa05`).
-3. **MV-2, MV-3** — do MV-1 trả lời phần lớn.
+3. ~~**MV-2**~~ ✅ đo xong local 25/08 (bảy trên tám bước có số thật, hai bước đỏ có tên);
+   **MV-3** còn lại — chỉ runner Windows trả lời được.
 4. **MV-7, MV-9** — chờ quyết định của người dùng.
-5. **MV-10 → MV-13** — nợ dài hạn, không chặn hợp nhất. Làm theo lát nhỏ.
+5. **MV-10 → MV-12** — nợ dài hạn, không chặn hợp nhất. ~~MV-13~~ ✅ đo xong, không còn việc
+   ở mức khoá (xem §5).
 
 **Quy tắc chung cho mọi mục:** một commit một chủ đề; **không trộn mã nguồn với tài liệu**
 trong một commit (`docs-check` so `git log <commit>..HEAD`, gộp làm nó đỏ — đã xảy ra ở

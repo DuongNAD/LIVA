@@ -1,7 +1,7 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
-updated: 2026-08-07
-commit: bd11c84
+updated: 2026-08-25
+commit: f35961cf
 status: index
 owns: []
 covers:
@@ -123,7 +123,10 @@ Mô tả **cách làm cho hệ thống chạy được trên một máy thật**
 | [02-mo-hinh-ai-va-tai-nguyen.md](02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) | Nguồn sự thật của đường dẫn model, bảng model trong `models/`, LLM GGUF ngoài repo, ánh xạ model → module → thiết bị (CPU/GPU), bảng tài nguyên RAM/VRAM, điều kiện build, ba feature flag `cuda`/`vulkan`/`openblas` thật sự làm gì, checklist trước khi chạy trên máy mới | 1 mermaid |
 | [03-trien-khai-va-runtime.md](02-van-hanh/03-trien-khai-va-runtime.md) | Sơ đồ triển khai; bảng tiến trình · cổng · phụ thuộc; bảng bộ nhớ model; **cách chạy đúng** để có đủ cả hai profile (`npm run dev` không khởi động binary lõi); sự cố thường gặp khi khởi động; đóng gói bản build | 1 mermaid |
 | [04-kiem-thu-va-ci.md](02-van-hanh/04-kiem-thu-va-ci.md) | Bản đồ bề mặt kiểm thử; bảng test Rust (cái nào thật sự chạy trong CI); **bảng 17 binary kiểm chứng trong `src/bin/`**; CI pipeline làm và không làm gì; pre-commit hook + ba cách bypass; khoảng trống độ phủ; script/asset mồ côi; công thức chạy nhanh | 4 mermaid |
+| [05-cai-dat-cho-nguoi-dung.md](02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Hướng dẫn cho **người dùng cuối** trên Windows: yêu cầu máy, cài đặt, lần chạy đầu tải model, dữ liệu nằm ở đâu, nâng cấp/gỡ, khắc phục sự cố, và mục 8 nói thẳng bản cài này **không** làm gì | — |
 | [06-backup-restore-sqlite.md](02-van-hanh/06-backup-restore-sqlite.md) | Runbook online backup, manifest SHA-256, restore offline, rollback và release drill | — |
+| [07-macos-dev.md](02-van-hanh/07-macos-dev.md) | Đường phát triển trên **macOS** (nhánh `mac-v2`): `scripts/start_all.sh`, Metal bật tự động không cần feature flag, số đo CPU thật cho Governor, hash `vec0` theo nền trong trust manifest, và khác biệt đã biết so với bản Windows | — |
+| [release-v1.0.0-smoke-test.md](02-van-hanh/release-v1.0.0-smoke-test.md) | **Snapshot frozen** — báo cáo dựng installer v1.0.0: artifact cục bộ, smoke test home trống trên máy phát triển, phần nghiệm thu còn lại trên Windows sạch | — |
 
 ---
 

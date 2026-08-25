@@ -2,7 +2,7 @@
 title: "Frontend runtime — widget, dashboard và transport Vue"
 updated: 2026-08-07
 commit: bd11c84
-stale-ok: eeed694
+stale-ok: 3a8d5001
 status: living
 owns:
   - bang-man-hinh-dashboard

@@ -1,8 +1,7 @@
 ---
 title: "Kiểm thử và CI"
-updated: 2026-08-07
-commit: bd11c84
-stale-ok: eeed694
+updated: 2026-08-25
+commit: 3a8d5001
 status: living
 owns:
   - bang-test
@@ -92,12 +91,29 @@ kết luận `success`.** Hai điều rút ra khi đọc kết quả:
   chứ không theo mã LIVA — đừng biến nó thành hạn ngạch.
 - **`cargo fmt --all -- --check` là gate cứng từ `98efc55`.** Trước đó không có, và
   `CLAUDE.md` từng ghi "No fmt gate" — câu đó đúng cho tới commit ấy.
+- **⚠️ Toàn bộ pipeline chạy `windows-latest`, nên ba gate dưới đây là gate
+  *chỉ-Windows* chứ không phải gate đa nền tảng** (phát hiện 25/08/2026 khi đưa
+  chúng sang macOS): bước e2e gateway hardcode đuôi `.exe` trong đường dẫn binary;
+  `tests/artifact_trust.rs` dọn dẹp bằng `fs::remove_dir` chỉ đúng với junction
+  Windows; và provider coverage tồn tại nhờ cây phụ thuộc sẵn có chứ không do khai
+  báo. Cả ba **xanh trên CI và vẫn sẽ xanh** — 25/25 không phải bằng chứng đa nền
+  tảng. 📌 Chi tiết từng bẫy: [07 — Phát triển trên macOS](07-macos-dev.md)
 
 ## 3. Coverage UI
 
 CI phải gọi `test:coverage`, không gọi `vitest run` trần. Threshold toàn cục
 trong `liva-ui/vitest.config.ts` là chốt chống thụt lùi; các hotspot có ngưỡng
-per-file riêng. Khi một file dưới ngưỡng:
+per-file riêng.
+
+⚠️ **Provider coverage phải được khai báo tường minh, đừng dựa vào cây phụ thuộc.**
+`@vitest/coverage-istanbul` là *optional peer* của vitest: nó có mặt trên máy đã cài
+sẵn từ trước, nên gate chạy được ở đó — nhưng sau một `npm ci` sạch thì `test:coverage`
+gãy vì thiếu provider, tức **cổng không tái lập được**. Từ 25/08/2026 nó nằm trong
+`devDependencies` của `liva-ui` ghim `4.1.5` (khớp đúng version vitest). Đo lại sau khi
+khai báo: **78,52 % stmt · 61,94 % branch · 69,95 % func · 80,86 % line**, không hạ
+ngưỡng nào.
+
+Khi một file dưới ngưỡng:
 
 1. đọc report mới;
 2. thêm test hành vi ở nhánh chưa phủ;
@@ -143,7 +159,7 @@ tay và theo lịch tuần. Release chỉ được coi là sẵn sàng khi:
 npm ci
 npm run devkit:lint
 npm audit --audit-level=high
-cargo audit
+cargo deny check -W unmaintained -W unsound advisories licenses sources
 cargo fmt --all -- --check
 cargo test -p liva-native-core
 cargo test -p liva-desktop
@@ -152,7 +168,13 @@ npm run test:coverage -w liva-ui
 npm run build -w liva-ui
 npm run test:installer
 npm run docs:check
+npm run docs:cite
 ```
+
+⚠️ **`docs:check` KHÔNG bao gồm `docs:cite`.** Hai script là hai bước CI riêng
+(`docs-check.mjs` rồi `docs-citations.mjs`), nên chạy mỗi `docs:check` sẽ bỏ lọt
+đúng loại lỗi mà bước 2 bắt: một toạ độ `file:dòng` trỏ vào file vừa bị di chuyển
+hoặc xoá.
 
 Chỉ báo hoàn tất bằng output mới của các lệnh liên quan tới slice. Không suy ra
 “đã chạy được” từ build thành công, test cũ hoặc trạng thái CI của commit khác.

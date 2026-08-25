@@ -1,8 +1,8 @@
 ---
 title: "Đối chiếu tuyên bố và thực tế"
-updated: 2026-08-07
-commit: dce30da
-stale-ok: eeed694
+updated: 2026-08-25
+commit: f35961cf
+stale-ok: 3a8d5001
 
 status: living
 owns:

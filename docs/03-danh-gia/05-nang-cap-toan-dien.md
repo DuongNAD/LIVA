@@ -1,8 +1,7 @@
 ---
 title: "Nâng cấp toàn diện — việc cần làm, theo thứ tự"
-updated: 2026-08-07
-commit: eeed694
-stale-ok: eeed694
+updated: 2026-08-25
+commit: 3a8d5001
 status: living
 owns:
   - duong-co-so-do-luong
@@ -191,6 +190,32 @@ Dòng "Trích dẫn tài liệu" ở bảng trên **phải đọc kèm phạm vi
 
 **Ba dòng vẫn chưa đo lại, nói rõ thay vì bỏ lửng:** E2E bộ nhớ (cần model embedding + DB trên đĩa), TTFT và độ trễ vision (cần build release + CUDA).
 
+#### Đo lại 25/08/2026 trên nhánh `mac-v2` (macOS) — **bốn cổng ĐỎ**, đã vá
+
+⚠️ **Đọc kèm cảnh báo về chất lượng bằng chứng.** Khác mọi bảng ở trên, lần này đo trên **cây làm việc của một nhánh, không phải một SHA**: `mac-v2` tách từ `f35961cf` và đang mang khoảng 35 file chưa commit. Con số dưới đây vì thế **yếu hơn** bảng `260c643` — nó nói "cây này chạy được", không nói "commit này chạy được". Giữ lại vì cái đáng giá không phải con số mà là **lý do bốn cổng đỏ**.
+
+| Cổng | Trước | Sau khi vá | Nguyên nhân |
+|---|---|---|---|
+| `cargo fmt --all -- --check` | ❌ đỏ | ✅ 0 | Hai file đang sửa dở của nhánh (`authorization.rs`, `self_correction_stress.rs`) chưa format. Vá bằng hunk **thuần định dạng**, không đụng logic |
+| `npm audit --audit-level=high` | ❌ **1 high** | ✅ 0 | `nanoid 3.3.16` (GHSA-2v37-7h3g-55p8) qua `liva-desktop → vite → postcss`. Vá bằng **một entry lockfile** → `3.3.18` |
+| `cargo test` | ❌ 2 fail | ✅ 1 fail còn lại (môi trường) | `tests/artifact_trust.rs` panic `ENOTDIR` ở **teardown** |
+| `node scripts/e2e-gateway-ci.mjs` | ❌ không chạy được | ✅ **8/8 đạt** | Đường dẫn binary hardcode `.exe` |
+| `npm run test:coverage -w liva-ui` | ❌ thiếu provider | ✅ exit 0 — **78,52 % stmt · 61,94 % branch · 69,95 % func · 80,86 % line** | `@vitest/coverage-istanbul` là *optional peer*, không workspace nào khai báo |
+
+**🔴 Điều đáng ghi nhất: ba trong năm cổng đó đỏ vì lý do CHỈ xuất hiện ngoài Windows.** CI chạy `windows-latest`, nên nó **chưa bao giờ nhìn thấy** cả ba:
+
+1. **`e2e-gateway-ci.mjs` hardcode `liva-native-core.exe`** — trên macOS/Linux binary không có hậu tố, script dừng ở "Không thấy binary". Gate e2e ở bước 20/25 vì thế là gate **chỉ-Windows**, không phải gate đa nền tảng như tên nó gợi ý.
+2. **`tests/artifact_trust.rs` xoá symlink bằng `fs::remove_dir`.** Trên Windows `link` là *junction* (thư mục thật) nên đúng; trên unix nó là symlink và `remove_dir` trả `ENOTDIR`. ⚠️ **Assertion bảo mật — chặn symlink-escape khỏi trust root — ĐÃ PASS**; chỉ phần dọn dẹp sai. Đây là chỗ dễ đọc nhầm thành "lỗ hổng trust root trên macOS", nó không phải.
+3. **Provider coverage không được khai báo.** Nó tồn tại trên máy Windows nhờ cây phụ thuộc cũ, nên gate vẫn xanh ở đó; trên `npm ci` sạch của một nền khác thì không.
+
+⇒ Kết luận không phải "có hồi quy" mà là **có một lỗ đo**: cổng nào cũng xanh trên Windows và sẽ tiếp tục xanh cho tới khi tồn tại một runner macOS/Linux. Đừng đọc bảng CI 25/25 như bằng chứng đa nền tảng. Chi tiết đường dev macOS: [07 — Phát triển trên macOS](../02-van-hanh/07-macos-dev.md).
+
+**Còn đỏ, cố ý không vá:** `preflight::n_gpu_layers_bang_0_khong_bao_gio_la_xanh` (`preflight.rs`) — máy này có **0 file `.gguf`/`.onnx`** trong `models/`. Chính thông điệp test ghi *"tải model xong dòng này tự xanh"*. **Không hạ ngưỡng** để làm nó xanh; chạy `npm run setup:models` là quyết định của người có máy.
+
+**Chưa đo lần này:** `cargo deny` (chưa cài local — CI tự cài bản ghim `0.20.2`), E2E bộ nhớ, TTFT.
+
+⚠️ **Một lệnh trong báo cáo phiên đó ghi sai cờ:** `docs-citations.mjs --max-unchecked=508`, trong khi CI dùng **207** (`test.yml`). Chạy lại đúng cờ: vẫn exit 0 (**187** không kiểm được). Không có hậu quả lần này, nhưng đúng là cái bẫy "phải truyền đúng cờ CI" mà `CLAUDE.md` cảnh báo — cờ rộng hơn thì gate không còn đo cái nó hứa đo.
+
 ---
 
 ### 🔄 ĐỔI ROUTER 02/08/2026 — một phần bảng trên đã hết hiệu lực
@@ -199,7 +224,7 @@ Router đổi từ **Qwen3-VL-2B** sang **gemma-4-E4B-it-qat-UD-Q4_K_XL** (`6723
 
 | Dòng | Còn dùng được? |
 |---|---|
-| Test Rust · Clippy · Format · Typecheck · ESLint · Coverage · npm/cargo audit · docs | ✅ không phụ thuộc model |
+| Test Rust · Clippy · Format · Typecheck · ESLint · Coverage · `npm audit` + cổng advisory Rust · docs | ✅ không phụ thuộc model |
 | **TTFT** | ✅ **đã đo lại trên gemma 02/08**: p50 **30 ms** · p95 32 ms · min 29 · max 33 (CUDA, 20 lượt). Qwen 29/07 là 18 ms ⇒ chậm hơn **12 ms**, cả hai đều dưới ngưỡng cảm nhận |
 | **E2E WebSocket** | ✅ vẫn 8/8 — bộ này chỉ kiểm giao thức và phân quyền, không chạm model |
 
@@ -222,7 +247,7 @@ Router đổi từ **Qwen3-VL-2B** sang **gemma-4-E4B-it-qat-UD-Q4_K_XL** (`6723
 
 ⚠️ **Đừng so thẳng 1 086 trích dẫn với 2 149 của bảng 29/07.** Cây tài liệu v2 vào ở `e6391eb` thay nhiều tài liệu cũ bằng tài liệu mới có ít toạ độ `file:dòng` hơn (dùng neo ký hiệu nhiều hơn), và 11 snapshot FREEZE bị bỏ qua theo `document-inventory.json`. Con số nhỏ đi **không** có nghĩa là mất trích dẫn; điều đáng theo dõi là **0 neo hỏng**, không phải tổng.
 
-⚠️ **`cargo audit` chỉ đỏ vì *vulnerability*.** 22 warning `unmaintained`/`unsound` đến từ cây Tauri/GTK và **trôi theo RustSec chứ không theo mã LIVA** — con số này đổi *không* tự động là hồi quy. [A31-01](02-no-ky-thuat-va-rui-ro.md) ghi 21 khi đo ngày 31/07; chênh 1 là advisory mới công bố. Đừng đọc nó như hạn ngạch phải hạ.
+⚠️ **Cổng advisory Rust chỉ đỏ vì *vulnerability*.** (Cổng là `cargo deny check -W unmaintained -W unsound advisories licenses sources` từ 08/08/2026 tại `f35961cf`; trước đó là `cargo audit` — hai flag `-W` giữ nguyên hành vi cũ, nên mọi số đo dưới đây vẫn đọc được.) 22 warning `unmaintained`/`unsound` đến từ cây Tauri/GTK và **trôi theo RustSec chứ không theo mã LIVA** — con số này đổi *không* tự động là hồi quy. [A31-01](02-no-ky-thuat-va-rui-ro.md) ghi 21 khi đo ngày 31/07; chênh 1 là advisory mới công bố. Đừng đọc nó như hạn ngạch phải hạ.
 
 **Hồi quy đã tìm ra và nguyên nhân.** `docs-check` đỏ ở 6 tài liệu tầng `03-danh-gia`, do `241e8f9` — **67 file, +5 280 dòng, gộp CẢ mã nguồn lẫn tài liệu trong một commit**. Đúng cái bẫy §0.2 mục 1 viết ngày 27/07, vi phạm hai commit sau đó. `docs-check` đọc `git log base..HEAD` nên đây là **đỏ ở commit**, không phải đỏ ở cây làm việc: CI trên `main` fail ở bước 3/19.
 
@@ -1865,6 +1890,11 @@ Cách sửa là **cho `route_intent` biết từ vựng âm lượng/nhạc**, �
 3. Mô tả tool phải nêu **ranh giới**, không chỉ chức năng. *"nhỏ nhạc lại"* bị `control_media` hút mất cho tới khi mô tả nói rõ ĐỘ TO (volume) ≠ ĐANG PHÁT GÌ (media).
 
 **⚠️ Thay đổi hành vi mà U19 mang lại:** catalog từ 4 → **6 tool**, trong khi `DEFAULT_TOP_K` vẫn là 4. Từ nay **truy hồi loại bớt tool khỏi prompt mỗi lượt** — trước đây 4 tool ≤ 4 chỗ nên thứ hạng không ảnh hưởng gì. Thêm tool thứ 7 trở đi phải đo lại tầng 1, không được cho là hiển nhiên.
+
+> ✅ **Đã khép 25/08/2026 (nhánh `mac-v2`):** rà lại thấy catalog thực tế đã là **7 tool** (có
+> `get_weather`). `DEFAULT_TOP_K` nâng lên 7, và test cưỡng chế
+> `catalog_noi_bo_khong_duoc_dai_hon_top_k` (`llm/tool_calling.rs`) giờ đỏ CI nếu catalog vượt
+> top-k mà không có quyết định tường minh — điều kiện "phải đo lại tầng 1" ở trên đã bị máy ép.
 
 ---
 

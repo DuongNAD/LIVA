@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-07-31",
+  "updated": "2026-08-25",
   "canonical_document": "docs/_generated/kiem-ke-tai-lieu.md",
   "disposition_definitions": {
     "KEEP": "Giữ nguyên trong giai đoạn chuyển tiếp; nội dung vẫn có một vai trò rõ ràng.",
@@ -353,6 +353,13 @@
       "wave": "C-operations",
       "targets": [],
       "rationale": "Runbook canonical cho online backup, offline restore và rollback SQLite."
+    },
+    {
+      "path": "docs/02-van-hanh/07-macos-dev.md",
+      "disposition": "KEEP",
+      "wave": "C-operations",
+      "targets": [],
+      "rationale": "Runbook canonical cho đường phát triển trên macOS (nhánh mac-v2); bản Windows nằm trong 03-trien-khai-va-runtime."
     },
     {
       "path": "docs/02-van-hanh/release-v1.0.0-smoke-test.md",

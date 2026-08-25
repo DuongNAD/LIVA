@@ -1,7 +1,7 @@
 ---
 title: "Hướng dẫn bảo trì bộ tài liệu"
-updated: 2026-08-07
-commit: bd11c84
+updated: 2026-08-25
+commit: f35961cf
 status: index
 owns:
   - luoc-do-front-matter
@@ -528,16 +528,32 @@ lẫn nhau và tự tạo cảnh báo mới.
 
 ## 9. Tra cứu nhanh lệnh
 
-```powershell
-node scripts/docs-check.mjs           # kiểm tra, thoát 1 nếu có lỗi
-node scripts/docs-check.mjs --map     # kiểm tra + sinh lại _meta/ban-do-code-tai-lieu.md
-node scripts/docs-check.mjs --quiet   # chỉ in lỗi (dùng trong CI/hook)
-git rev-parse --short HEAD            # lấy hash điền vào trường `commit`
+```bash
+# Hai cổng CI — chạy ĐÚNG cờ này, không thì không tái lập được kết quả CI
+node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
+node scripts/docs-citations.mjs --max-unchecked=207
+
+# Sinh lại các file _generated/ và _meta/ (bắt buộc sau khi thêm/xoá tài liệu hoặc sửa liên kết)
+node scripts/docs-check.mjs --map     # sinh lại _meta/ban-do-code-tai-lieu.md
+node scripts/docs-inventory.mjs       # sinh lại _generated/kiem-ke-tai-lieu.md
+node scripts/docs-capabilities.mjs    # sinh lại _generated/ma-tran-nang-luc.md
+
+node scripts/docs-check.mjs --quiet   # chỉ in lỗi (dùng trong hook)
+git rev-parse --short HEAD            # lấy hash điền vào `commit` / `stale-ok`
 ```
 
-Checker kiểm 7 thứ: front-matter hợp lệ · tài liệu lỗi thời theo `covers` · liên kết tương đối
-không hỏng · `covers` trỏ tới đường dẫn có thật · `owns` không trùng · con trỏ `📌 Nguồn đầy đủ` hợp
-lệ · fence ``` cân bằng. Cộng thêm một cảnh báo liệt kê file mã nguồn chưa tài liệu nào mô tả.
+⚠️ **`npm run docs:check` KHÔNG chạy `docs-citations.mjs`.** Hai cổng là hai bước CI riêng biệt,
+nên một toạ độ `file:dòng` trỏ vào file vừa bị **di chuyển hoặc xoá** đi qua được `docs:check` xanh
+và chỉ đỏ ở bước sau. Chạy `npm run docs:cite` mỗi khi bạn đụng vào đường dẫn file.
+
+⚠️ **`kiem-ke-tai-lieu.md` chứa số liên kết đến (inbound-link count), nên nó drift khi bạn thêm
+*bất kỳ* liên kết nào ở *bất kỳ* tài liệu nào** — kể cả một dòng mục lục. Sinh lại nó ở bước cuối,
+sau khi đã sửa xong nội dung, chứ không phải ở giữa.
+
+Checker kiểm 8 thứ: front-matter hợp lệ · tài liệu lỗi thời theo `covers` · liên kết tương đối
+không hỏng · **neo `#anchor` nội bộ có thật** (thêm ở `98efc55`, 01/08/2026) · `covers` trỏ tới
+đường dẫn có thật · `owns` không trùng · con trỏ `📌 Nguồn đầy đủ` hợp lệ · fence ``` cân bằng.
+Cộng thêm một cảnh báo liệt kê file mã nguồn chưa tài liệu nào mô tả.
 
 ---
 

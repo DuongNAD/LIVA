@@ -1,7 +1,8 @@
 ---
 title: "Tổng quan hệ thống"
-updated: 2026-08-07
-commit: bd11c84
+updated: 2026-08-25
+commit: f35961cf
+stale-ok: 3a8d5001
 status: living
 owns:
   - bang-chi-so-du-an
@@ -173,8 +174,8 @@ nền kiểm projection theo batch, checkpoint và xử lý DLQ.
 | Workspace Cargo | 2 crate: `liva-native-core` + `liva-desktop/src-tauri` | `Cargo.toml` gốc, `resolver = "2"` |
 | Workspace npm | 5 workspace | [root package.json](../../package.json) |
 | Lệnh IPC | **77 lệnh có tên / 11 miền**; dispatcher đã tách khỏi `lib.rs` | [Catalog IPC hiện hành](02-giao-thuc-ipc-va-websocket.md#7-handle_command--catalog-lệnh-theo-miền) |
-| Tài liệu sống được checker đọc | **61** | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` tại `bd11c84` |
-| CI bắt buộc | docs + citation, npm audit, fmt, cargo audit, typecheck, ESLint, UI coverage, build web, vault, Rust test/e2e, Tauri, experimental và Clippy | `.github/workflows/test.yml` |
+| Tài liệu sống được checker đọc | **61** trên cây đã commit tại `f35961cf`; **62** trên nhánh `mac-v2` (thêm `02-van-hanh/07-macos-dev.md` chưa commit) | `node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia` |
+| CI bắt buộc | docs + citation, npm audit, fmt, **`cargo deny`** (thay `cargo audit` từ 08/08/2026 tại `f35961cf` — thêm license + source compliance), typecheck, ESLint, UI coverage, build web, vault, Rust test/e2e, Tauri, experimental và Clippy | `.github/workflows/test.yml` |
 | Mốc đo chất lượng | Không sao chép số test/coverage vào đây; mốc có ngày, SHA và lệnh tái lập nằm ở backlog đánh giá | [Đường cơ sở 14 cổng](../03-danh-gia/05-nang-cap-toan-dien.md#1-đường-cơ-sở-đã-đo--02082026-tại-260c643-thay-bảng-2907) |
 
 **Cách đọc bảng này:** chỉ giữ các contract cấu trúc ổn định. Số test, coverage, LOC và kích thước index đổi theo từng commit nên nguồn sở hữu của chúng là đường cơ sở có ngày/SHA; chép lại ở tổng quan chính là cách tạo thêm một bản lỗi thời.

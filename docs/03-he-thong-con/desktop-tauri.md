@@ -2,6 +2,7 @@
 title: "Desktop Tauri — cửa sổ, capability và native IPC boundary"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: f35961cf
 status: living
 owns:
   - bang-tauri-command

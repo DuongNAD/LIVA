@@ -186,7 +186,15 @@ describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
         });
         const readResult = rawResult as unknown as CallToolSuccessResult;
         expect(readResult.isError).toBe(true);
-        expect(readResult.content[0].text).toContain('Access denied');
+        // VC-3b: trên POSIX, `\` là ký tự tên file HỢP LỆ nên chuỗi UNC được giữ
+        // nguyên BÊN TRONG vault ⇒ đi qua kiểm bao hàm rồi dừng ở "file not
+        // found" — hành vi ĐÚNG của macOS/Linux, chỉ khác thông điệp Windows.
+        // Khẳng định phải biết nền thay vì đòi thông điệp của nền kia.
+        if (process.platform === 'win32') {
+          expect(readResult.content[0].text).toContain('Access denied');
+        } else {
+          expect(readResult.content[0].text).toMatch(/Access denied|File not found/);
+        }
       }
     });
 
@@ -213,7 +221,12 @@ describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
     test('Circular symlinks are detected and rejected to prevent infinite loops', () => {
       (globalThis as any).symlinkMockState = {
         enabled: true,
-        selfLoopPath: path.resolve(tempVaultPath, 'Skills/self_loop.md'),
+        // ⚠️ Khoá mock bằng canonicalised root: trên macOS `/var` LÀ một symlink
+        // tới `/private/var`, còn `validateAndResolvePath` canonicalise vault
+        // root bằng `fs.realpathSync` trước khi ghép path. Khoá theo
+        // `tempVaultPath` thô thì hai chuỗi không bao giờ khớp ⇒ mock không bắn
+        // ⇒ test đỏ trên macOS (VC-3a).
+        selfLoopPath: path.resolve(fs.realpathSync(tempVaultPath), 'Skills/self_loop.md'),
       };
 
       try {
@@ -228,8 +241,9 @@ describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
     test('Double symlink loops are detected and rejected', () => {
       (globalThis as any).symlinkMockState = {
         enabled: true,
-        loopAPath: path.resolve(tempVaultPath, 'Skills/loop_a.md'),
-        loopBPath: path.resolve(tempVaultPath, 'Skills/loop_b.md'),
+        // Cùng lý do canonicalised root với test phía trên (VC-3a).
+        loopAPath: path.resolve(fs.realpathSync(tempVaultPath), 'Skills/loop_a.md'),
+        loopBPath: path.resolve(fs.realpathSync(tempVaultPath), 'Skills/loop_b.md'),
       };
 
       try {

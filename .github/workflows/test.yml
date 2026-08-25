@@ -78,6 +78,11 @@ jobs:
         npm run test:installer
         npm run test:skills
 
+    # Nợ L11: .env.example là hợp đồng với người beta — gate này bắt biến chết
+    # trong example và biến code đọc mà tài liệu thiếu, ngay tại chỗ sửa code.
+    - name: Check Env Doc Sync
+      run: npm run check:env-doc
+
     # `devkit:lint` invokes the pinned actionlint wrapper. Cache the verified
     # binary after `npm ci` (which recreates node_modules) so GitHub Releases is
     # not a runtime dependency of every CI run. The key intentionally contains

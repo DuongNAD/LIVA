@@ -23,6 +23,7 @@
     "build:ui": "npm run build -w liva-ui",
     "build:desktop": "npm run build:ui && npm run build -w liva-desktop",
     "check:installer": "node scripts/check-installer-config.mjs",
+    "check:env-doc": "node scripts/check-env-doc.mjs",
     "test:installer": "node --test scripts/check-installer-config.test.mjs",
     "installer:windows": "npm run check:installer && npm run build:ui && cd liva-desktop && npx tauri build",
     "installer:windows:cuda": "npm run check:installer && node scripts/stage-cuda-redist.mjs && npm run build:ui && cd liva-desktop && npx tauri build -- --features cuda",

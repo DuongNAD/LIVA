@@ -282,9 +282,20 @@ impl NativeMcpServer {
     /// *phán quyết*, không dùng để *trả về*.
     pub fn resolve_path(&self, rel_path: &str) -> Result<PathBuf, String> {
         let p = Path::new(rel_path);
+        // Windows drive prefix ("C:", "C:\...", "C:file"): trên Windows `join`
+        // sẽ THAY THẾ cả path vì mang prefix ổ đĩa; trên Unix nó trông như tên
+        // file bình thường nhưng là ý định thoát vault rõ ràng — chặn ở cả hai.
+        let b = rel_path.as_bytes();
+        let la_drive_prefix = b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic();
         if p.is_absolute()
             || p.has_root()
             || p.components().any(|c| c == std::path::Component::ParentDir)
+            || la_drive_prefix
+            // Nợ cross-platform: `\` là phân cách trên Windows nhưng là ký tự
+            // thường trên Unix, nên `..\env` lọt qua các kiểm tra bên dưới khi
+            // chạy trên macOS/Linux. Vault không có lý do chính đáng chứa tên
+            // file mang `\` — từ chối thẳng để hành vi nhất quán mọi nền.
+            || rel_path.contains('\\')
         {
             return Err("Invalid path (traversal detected)".to_string());
         }

@@ -76,14 +76,31 @@ vì lý do đó.
 
 | Thứ tự | ID | Việc | Nhóm | Vì sao ở vị trí này |
 |---|---|---|---|---|
-| 1 | [VC-4](#vc-4--đo-lượt-thoại-bốn-mốc-tracing) | Đo lượt thoại — bốn mốc `tracing` | Thoại | Sáu SLO thoại **không thể nghiệm thu** khi thiếu nó; VC-5…VC-7 đều không chứng minh được kết quả |
-| 2 | [VC-1](#vc-1--h2-0327-rustsec-2026-0258) | Vá advisory `h2` | Cổng | Đang chặn CI ở bước 9/25; 16 bước sau **chưa từng chạy** trên nhánh này |
-| 3 | [VC-2](#vc-2--cargo-test-đỏ-ngầm-từ-07082026) | Gỡ phụ thuộc đĩa của test `preflight` | Cổng | CI sẽ đỏ **ngay tại đây** sau khi VC-1 xong — đừng để phát hiện điều đó bằng một run CI nữa |
-| 4 | [VC-3](#vc-3--ba-test-vault-đỏ-trên-macos--đã-truy-được-nguyên-nhân) | Sửa 3 test vault + thêm job macOS vào CI | Cổng | Chẩn đoán đã xong, phần còn lại là cơ học |
-| 5 | [VC-6](#vc-6--mẩu-tts-đầu-tiên-của-mỗi-lượt-quá-dài) | Mẩu TTS đầu tiên ngắn lại | Thoại | Ăn thẳng vào cảm nhận người dùng, phạm vi một hàm, đã có test bao quanh |
-| 6 | [VC-5](#vc-5--barge-in-tự-cắn-và-aec-nhiều-khả-năng-không-hội-tụ) | Tham chiếu far-end liên tục + test AEC có răng | Thoại | Bật AEC trước khi sửa cái này là bật một thứ chưa chắc chạy |
+| ~~1~~ ✅ **4a XONG** · 4b mở | [VC-4](#vc-4--đo-lượt-thoại-bốn-mốc-tracing) | Đo lượt thoại — bốn mốc `tracing` | Thoại | Sáu SLO thoại **không thể nghiệm thu** khi thiếu nó; VC-5…VC-7 đều không chứng minh được kết quả |
+| ~~2~~ ✅ **XONG** `89454ea5` | [VC-1](#vc-1--h2-0327-rustsec-2026-0258) | Vá advisory `h2` | Cổng | Đang chặn CI ở bước 9/25; 16 bước sau **chưa từng chạy** trên nhánh này |
+| ~~3~~ ✅ **XONG** `e461216e` | [VC-2](#vc-2--cargo-test-đỏ-ngầm-từ-07082026) | Gỡ phụ thuộc đĩa của test `preflight` | Cổng | CI sẽ đỏ **ngay tại đây** sau khi VC-1 xong — đừng để phát hiện điều đó bằng một run CI nữa |
+| ~~4~~ ✅ **XONG** `e3dd5133`+`a71edb10` | [VC-3](#vc-3--ba-test-vault-đỏ-trên-macos--đã-truy-được-nguyên-nhân) | Sửa 3 test vault + thêm job macOS vào CI | Cổng | Chẩn đoán đã xong, phần còn lại là cơ học |
+| ~~5~~ ✅ **XONG** `613e7512` | [VC-6](#vc-6--mẩu-tts-đầu-tiên-của-mỗi-lượt-quá-dài) | Mẩu TTS đầu tiên ngắn lại | Thoại | Ăn thẳng vào cảm nhận người dùng, phạm vi một hàm, đã có test bao quanh |
+| **6 — KẾ TIẾP** | [VC-5](#vc-5--barge-in-tự-cắn-và-aec-nhiều-khả-năng-không-hội-tụ) | Tham chiếu far-end liên tục + test AEC có răng | Thoại | Bật AEC trước khi sửa cái này là bật một thứ chưa chắc chạy |
 | 7 | [VC-7](#vc-7--kết-lượt-là-704-ms-im-lặng-cố-định) | Smart Turn **chỉ được rút ngắn** | Thoại | Cần VC-4 để chứng minh nó thật sự rút, và cần log shadow để hiệu chỉnh ngưỡng |
-| 8 | [VC-8](#vc-8--lip-sync-theo-phoneme-thay-vì-theo-biên-độ) | Lip-sync theo phoneme thay vì biên độ | Avatar | Không thêm phụ thuộc, không cần đo trước; độc lập với các cổng đỏ nên chạy song song được — nhưng đừng bắt đầu khi CI còn đỏ |
+| ~~8~~ ✅ **XONG** `c3a78a80` | [VC-8](#vc-8--lip-sync-theo-phoneme-thay-vì-theo-biên-độ) | Lip-sync theo phoneme thay vì biên độ | Avatar | Không thêm phụ thuộc, không cần đo trước; độc lập với các cổng đỏ nên chạy song song được — nhưng đừng bắt đầu khi CI còn đỏ |
+
+> **Trạng thái 25/08/2026 tối, đã push tới `dd857505`.** Sáu mục đóng; còn **VC-5**
+> (khả thi ngay), **VC-7** (chặn bởi VC-4b), **VC-4b** (chờ `models/`).
+>
+> ⚠️ **Bài học sổ sách trả giá trong chính lượt này.** Chín commit mã nguồn được tạo
+> trước khi dọn front-matter, nên `docs-check` **đỏ hai lần liên tiếp** ở
+> `docs/03-danh-gia/` — nơi lỗi thời **chặn build**. Lần thứ hai còn bị push lên trong
+> trạng thái đỏ. Nguyên nhân cả hai lần giống nhau: **ghim sha rồi mới commit thêm mã
+> nguồn**. Trình tự đúng chỉ có một: commit hết mã nguồn trước, **rồi** một commit
+> chỉ-tài-liệu ghim vào sha của commit mã nguồn cuối cùng.
+>
+> Và một hệ quả tinh vi hơn: VC-6 chèn ~106 dòng vào đầu `tts/mod.rs`, làm **tám toạ
+> độ** trong [02-no-ky-thuat-va-rui-ro.md](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md)
+> trỏ sai chỗ — mà `docs-citations` **không bắt được**, vì nó chỉ kiểm toạ độ có nằm
+> trong độ dài file hay không, không kiểm nó trỏ đúng thứ gì. Đã thay cả tám bằng neo
+> ký hiệu. **Bất cứ khi nào chèn dòng vào đầu một file đang bị tài liệu trích, hãy đổi
+> sang neo ký hiệu thay vì sửa lại số.**
 
 **Quy tắc chung.** Một commit một chủ đề. **Không trộn mã nguồn với tài liệu trong một
 commit** — `docs-check` so `git log <commit>..HEAD` nên commit gộp làm nó đỏ. Hook

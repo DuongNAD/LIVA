@@ -283,10 +283,30 @@ impl VoiceSessionAudio {
                 .lock()
                 .map_err(|_| "WebSocket VAD mutex poisoned".to_string())?;
             match guard.as_mut() {
-                Some(vad) => vad.process_audio(&working)?,
+                Some(vad) => {
+                    let events = vad.process_audio(&working)?;
+                    // Nợ M8: trạng thái hồi quy của VAD (h-state ONNX, bộ đếm
+                    // debounce) phải được dọn ĐÚNG ở ranh giới lượt nói. Không
+                    // reset thì state của lượt trước và client trước rỉ sang
+                    // lượt/client sau. `VadEngine::reset` vốn sinh ra cho mục
+                    // đích này nhưng chưa bao giờ được gọi trên đường chạy.
+                    if events.iter().any(|(e, _)| *e == VadEvent::SpeechEnd) {
+                        vad.reset();
+                    }
+                    events
+                }
                 None => Vec::new(),
             }
         };
+
+        // Cùng ranh giới đó với denoiser: GRU/recurrent cache của GTCRN mang
+        // âm thanh của lượt vừa phát xong sang lượt kế tiếp nếu không dọn.
+        if events.iter().any(|(e, _)| *e == VadEvent::SpeechEnd)
+            && let Ok(mut guard) = self.denoiser.lock()
+            && let Some(denoiser) = guard.as_mut()
+        {
+            denoiser.reset();
+        }
 
         Ok((events, working))
     }

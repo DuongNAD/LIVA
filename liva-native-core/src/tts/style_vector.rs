@@ -74,3 +74,53 @@ pub fn extract_style_vector(audio_data: &[f32]) -> Vec<f32> {
 
     final_profile
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hợp đồng kích thước: đầu vào bất kỳ (kể cả rỗng) → đúng 511×256 phần tử
+    /// cho lớp style của model TTS.
+    #[test]
+    fn kich_thuoc_output_dung_511x256() {
+        for input in [
+            vec![],
+            vec![0.0f32; 10],
+            vec![0.5f32; 512],
+            vec![0.3f32; 4096],
+        ] {
+            assert_eq!(
+                extract_style_vector(&input).len(),
+                511 * 256,
+                "đầu vào {} mẫu sai kích thước",
+                input.len()
+            );
+        }
+    }
+
+    /// Im lặng tuyệt đối phải ra vector HỮU HẠN (fallback 0.1 chuẩn hoá →
+    /// -0.005), không được NaN/Infinity — NaN trong style vector sẽ nhiễm vào
+    /// mọi frame giọng nói sinh sau đó.
+    #[test]
+    fn im_lang_khong_sinh_nan() {
+        let out = extract_style_vector(&[0.0f32; 2048]);
+        assert!(out.iter().all(|x| x.is_finite()), "phải hữu hạn");
+        assert!(
+            out.iter().all(|&x| (x - (-0.005)).abs() < 1e-6),
+            "im lặng phải ra fallback đều -0.005"
+        );
+    }
+
+    /// Âm thanh thật (sine) phải ra giá trị hữu hạn và XÁC ĐỊNH — cùng đầu vào
+    /// gọi hai lần phải ra từng byte giống nhau (model nhạy với style vector).
+    #[test]
+    fn xac_dinh_va_huu_han_voi_am_thanh_that() {
+        let audio: Vec<f32> = (0..8192)
+            .map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / 24000.0).sin() * 0.3)
+            .collect();
+        let a = extract_style_vector(&audio);
+        let b = extract_style_vector(&audio);
+        assert!(a.iter().all(|x| x.is_finite()));
+        assert_eq!(a, b, "cùng đầu vào phải ra cùng style vector");
+    }
+}

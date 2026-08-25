@@ -169,6 +169,45 @@ test = false
 [[bin]]
 name = "wer_bench"
 path = "src/bin/wer_bench.rs"
+test = false
+
+# Nợ L7: các binary dưới đây trước đây bị auto-discover — `cargo test` biên
+# dịch và chạy chúng như test target rỗng, tốn thời gian CI mà kiểm được 0 thứ.
+# Khai báo tường minh với `test = false` để ra khỏi đường test.
+[[bin]]
+name = "debug_audio"
+path = "src/bin/debug_audio.rs"
+test = false
+
+[[bin]]
+name = "gemma4_probe"
+path = "src/bin/gemma4_probe.rs"
+test = false
+
+[[bin]]
+name = "model_compare"
+path = "src/bin/model_compare.rs"
+test = false
+
+[[bin]]
+name = "ttft_bench"
+path = "src/bin/ttft_bench.rs"
+test = false
+
+[[bin]]
+name = "verify_integrations"
+path = "src/bin/verify_integrations.rs"
+test = false
+
+[[bin]]
+name = "verify_voice"
+path = "src/bin/verify_voice.rs"
+test = false
+
+[[bin]]
+name = "wakeword_benchmark"
+path = "src/bin/wakeword_benchmark.rs"
+test = false
 
 [[bin]]
 name = "vieneu_probe"

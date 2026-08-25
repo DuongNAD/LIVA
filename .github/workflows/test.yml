@@ -69,6 +69,15 @@ jobs:
     - name: Install Dependencies
       run: npm ci
 
+    # Nợ M2 (khoảng hổng còn lại, tìm ra 29/07/2026): hai bộ test node thuần
+    # này tồn tại từ 26/07 nhưng KHÔNG bước CI nào gọi chúng — 548 dòng test ở
+    # trạng thái "có, nhưng không ai chạy", tức bảo vệ đúng bằng 0. Cả hai chỉ
+    # dùng thư viện chuẩn Node, không cần model hay mạng.
+    - name: Run Script-Adjacent Node Tests
+      run: |
+        npm run test:installer
+        npm run test:skills
+
     # `devkit:lint` invokes the pinned actionlint wrapper. Cache the verified
     # binary after `npm ci` (which recreates node_modules) so GitHub Releases is
     # not a runtime dependency of every CI run. The key intentionally contains

@@ -167,4 +167,88 @@ mod tests {
             authorize_command(CommandPrincipal::WebSocketRemote, "get_preflight_status").is_err()
         );
     }
+
+    /// M3 — MA TRẬN fail-closed: các lệnh điều hành hệ thống KHÔNG được tới tay
+    /// principal không tin cậy. Bất kỳ ai thêm lệnh nhạy cảm vào
+    /// `WIDGET_COMMANDS`/`REMOTE_COMMANDS`/`TELEGRAM_COMMANDS`/`SETUP_COMMANDS`
+    /// đều làm test này đỏ ngay tại đây, kèm tên lệnh vi phạm.
+    #[test]
+    fn dieu_hanh_he_thong_khong_cho_principal_yeu() {
+        const DIEU_HANH: &[&str] = &[
+            "update_config",
+            "reset_memory",
+            "consent:grant",
+            "consent:revoke",
+            "delete_memory_fact",
+            "memory:sweep_retention",
+            "skills:list",
+            "mcp:list_tools",
+            "vision:set_config",
+            "task_plan_chat",
+            "echo",
+            "get_preflight_status",
+        ];
+        const YEU: &[CommandPrincipal] = &[
+            CommandPrincipal::TauriWidget,
+            CommandPrincipal::TauriSetup,
+            CommandPrincipal::WebSocketWidget,
+            CommandPrincipal::WebSocketRemote,
+            CommandPrincipal::Telegram,
+        ];
+        for principal in YEU {
+            for cmd in DIEU_HANH {
+                assert!(
+                    authorize_command(*principal, cmd).is_err(),
+                    "{principal:?} KHÔNG được phép gọi '{cmd}'"
+                );
+            }
+        }
+    }
+
+    /// Cửa sổ setup chỉ phục vụ cài đặt artifact: đúng các lệnh `setup:*` —
+    /// mọi thứ khác (kể cả `ping`) phải bị từ chối để cửa sổ này không thành
+    /// đường vào phụ có đặc quyền dashboard.
+    #[test]
+    fn setup_chi_co_cac_lenh_setup() {
+        for cmd in SETUP_COMMANDS {
+            assert!(authorize_command(CommandPrincipal::TauriSetup, cmd).is_ok());
+        }
+        for cmd in ["ping", "status", "get_config", "chat:completion", "echo"] {
+            assert!(
+                authorize_command(CommandPrincipal::TauriSetup, cmd).is_err(),
+                "setup không được phép gọi '{cmd}'"
+            );
+        }
+    }
+
+    /// LocalCli/Test là kênh chẩn đoán đáng tin cậy — chấp nhận mọi lệnh kể cả
+    /// lệnh lạ. Đây là HỢP ĐỒNG; nếu đổi phải sửa threat-model trước.
+    #[test]
+    fn local_cli_va_test_la_tin_cay_day_du() {
+        for cmd in ["lenh-la-ky", "update_config", "reset_memory"] {
+            assert!(authorize_command(CommandPrincipal::LocalCli, cmd).is_ok());
+            assert!(authorize_command(CommandPrincipal::Test, cmd).is_ok());
+        }
+    }
+
+    /// Trùng lắp trong một allow-list không mở quyền thêm nhưng là dấu hiệu drift
+    /// giữa các danh sách — bắt lúc chạy test thay vì khi audit bảo mật.
+    #[test]
+    fn khong_trung_lap_trong_moi_danh_sach() {
+        for (ten, ds) in [
+            ("SETUP", SETUP_COMMANDS),
+            ("WIDGET", WIDGET_COMMANDS),
+            ("DASHBOARD", DASHBOARD_COMMANDS),
+            ("REMOTE", REMOTE_COMMANDS),
+            ("TELEGRAM", TELEGRAM_COMMANDS),
+        ] {
+            let mut da_xem = std::collections::HashSet::new();
+            for cmd in ds {
+                assert!(
+                    da_xem.insert(*cmd),
+                    "danh sách {ten} chứa lệnh trùng '{cmd}'"
+                );
+            }
+        }
+    }
 }

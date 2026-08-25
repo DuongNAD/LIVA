@@ -46,9 +46,15 @@ const PARAM_PREFIX: &str = "   tham số (* = bắt buộc): ";
 
 /// Số tool tối đa chèn vào prompt. Xem ràng buộc 1 ở đầu file.
 ///
-/// 4 là con số có lý do: với `n_ctx` 4096, sau persona + RAG + lịch sử hội thoại
-/// thì phần còn lại cho danh sách tool chỉ còn vài trăm token.
-pub const DEFAULT_TOP_K: usize = 4;
+/// Lịch sử con số này chính là nợ M10: catalog nội bộ lớn dần (4 → 6 ở U19,
+/// nay là **7** kể cả `get_weather`) trong khi `top_k` đứng yên, và từ lúc
+/// catalog > top_k thì **thứ hạng embedder quyết định tool nào LLM được thấy**
+/// — tool xếp sau bị loại khỏi prompt ở mọi lượt, triệu chứng là "LIVA không
+/// hiểu lệnh" chứ không phải một lỗi (hỏng im lặng). Nay nâng lên 7 để mọi
+/// tool nội bộ luôn vào prompt, và test
+/// [`catalog_noi_bo_khong_duoc_dai_hon_top_k`] ở dưới **cưỡng chế** điều đó:
+/// thêm tool mới mà không chủ động reconsider `DEFAULT_TOP_K` thì CI đỏ.
+pub const DEFAULT_TOP_K: usize = 7;
 
 /// Một tool ứng viên, đã phẳng hoá từ mọi nguồn (nội bộ + MCP server ngoài).
 #[derive(Debug, Clone, PartialEq)]
@@ -1048,6 +1054,27 @@ impl ResolvedCall {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Nợ M10 — CỐ CHẾ truy hồi: catalog nội bộ không được dài hơn `DEFAULT_TOP_K`.
+    ///
+    /// Từ lúc số tool vượt top-k, thứ hạng embedder âm thầm loại tool khỏi prompt
+    /// ở mọi lượt — "LIVA không hiểu lệnh" mà không có lỗi nào để nhìn. Test này
+    /// biến điều kiện cam kết trong U19 ("thêm tool phải đo lại tầng 1") thành
+    /// gate cứng: thêm tool mới mà không nâng `DEFAULT_TOP_K` (hoặc bớt tool) thì
+    /// đỏ ngay tại đây, kèm chỉ dẫn cách xử.
+    #[test]
+    fn catalog_noi_bo_khong_duoc_dai_hon_top_k() {
+        let server = crate::mcp::server::NativeMcpServer::new("/tmp/liva-m10-guard");
+        let so_tool = server.list_tools().tools.len();
+        assert!(
+            so_tool <= DEFAULT_TOP_K,
+            "Catalog nội bộ có {so_tool} tool nhưng DEFAULT_TOP_K = {DEFAULT_TOP_K}: \
+             {} tool xếp cuối sẽ bị loại khỏi prompt ở MỌI lượt (nợ M10 — hỏng im \
+             lặng). Chọn một cách CÓ Ý THỨC: nâng DEFAULT_TOP_K và chấp nhận thêm \
+             token prompt, hoặc đo lại tầng truy hồi theo cam kết của U19.",
+            so_tool.saturating_sub(DEFAULT_TOP_K)
+        );
+    }
 
     #[test]
     fn tool_start_event_dung_khuon_websocket_hien_co() {

@@ -2,6 +2,7 @@
 title: "Việc cần làm — rà soát 25/08/2026: cổng kiểm và thoại real-time"
 updated: 2026-08-25
 commit: 0a02b9cd
+stale-ok: ba7ed40
 status: living
 owns:
   - viec-can-lam-2026-08-25

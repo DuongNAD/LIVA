@@ -172,7 +172,11 @@ impl PiperVoice {
     }
 
     /// Synthesize UTF-8 text to mono f32 samples at [`Self::sample_rate`].
-    pub fn synthesize(&mut self, text: &str) -> Result<Vec<f32>, String> {
+    ///
+    /// Trả kèm chuỗi phoneme IPA đã dùng để tổng hợp — nguyên liệu cho timeline
+    /// viseme (VC-8); Piper là backend duy nhất nắm chính xác chuỗi này vì nó tự
+    /// phonemize qua espeak voice của mình.
+    pub fn synthesize(&mut self, text: &str) -> Result<(Vec<f32>, String), String> {
         let ipa = espeak_ipa(&self.espeak_voice, text)?;
         let cleaned = lang_switch_re().replace_all(&ipa, " ");
         let flat = cleaned.replace(['\r', '\n'], " ");
@@ -206,7 +210,7 @@ impl PiperVoice {
             .try_extract_tensor::<f32>()
             .map_err(|e| e.to_string())?;
 
-        Ok(samples.to_vec())
+        Ok((samples.to_vec(), flat))
     }
 }
 

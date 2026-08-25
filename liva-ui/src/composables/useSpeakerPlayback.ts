@@ -34,6 +34,11 @@ export interface UseSpeakerPlaybackOptions {
   onPlaybackFinished?: () => void;
   /** A chunk source was scheduled — drive lip-sync / avatar motion. */
   onSourceStarted?: (ctx: AudioContext, source: AudioBufferSourceNode) => void;
+  /**
+   * Một chunk PCM đã được xếp lịch phát (VC-8): thời điểm bắt đầu và độ dài
+   * theo đồng hồ AudioContext — để neo timeline viseme với audio thật.
+   */
+  onChunkScheduled?: (info: { startTimeSec: number; durationSec: number }) => void;
   /** Queue emptied naturally or playback stopped — stop lip-sync, release voice state. */
   onQueueDrained?: () => void;
 }
@@ -147,7 +152,11 @@ export function useSpeakerPlayback(
     }
   }
 
-  function scheduleBuffer(ctx: AudioContext, audioBuffer: AudioBuffer, overlap: number): void {
+  function scheduleBuffer(
+    ctx: AudioContext,
+    audioBuffer: AudioBuffer,
+    overlap: number,
+  ): { startTimeSec: number; durationSec: number } {
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(outputNode(ctx));
@@ -163,10 +172,12 @@ export function useSpeakerPlayback(
       if (options.onPlaybackStarted) options.onPlaybackStarted();
     }
 
-    source.start(nextStartTime);
+    const startTimeSec = nextStartTime;
+    source.start(startTimeSec);
     nextStartTime += audioBuffer.duration - overlap;
 
     if (options.onSourceStarted) options.onSourceStarted(ctx, source);
+    return { startTimeSec, durationSec: audioBuffer.duration };
   }
 
   async function enqueueSpeakerPayload(payload: Uint8Array): Promise<void> {
@@ -188,7 +199,15 @@ export function useSpeakerPlayback(
 
       const audioBuffer = ctx.createBuffer(1, chunk.samples.length, chunk.sampleRate);
       audioBuffer.copyToChannel(chunk.samples, 0);
-      scheduleBuffer(ctx, audioBuffer, 0);
+      // VC-8: chỉ chunk PCM mới neo timeline viseme (MP3 legacy không có cặp
+      // timeline đi kèm).
+      const scheduled = scheduleBuffer(ctx, audioBuffer, 0);
+      if (options.onChunkScheduled) {
+        options.onChunkScheduled({
+          startTimeSec: scheduled.startTimeSec,
+          durationSec: scheduled.durationSec,
+        });
+      }
     } catch (err: unknown) {
       logger.warn(channel, "Speaker PCM playback error:", err instanceof Error ? err.message : String(err));
     }

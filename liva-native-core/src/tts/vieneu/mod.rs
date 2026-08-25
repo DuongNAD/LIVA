@@ -329,7 +329,9 @@ impl VieNeuVoice {
 
     /// Synthesize UTF-8 text (already number/date-normalized upstream) to mono
     /// f32 samples at [`Self::sample_rate`] (48 kHz).
-    pub fn synthesize(&mut self, text: &str) -> Result<Vec<f32>, String> {
+    ///
+    /// Trả kèm chuỗi phoneme từ sea-g2p — nguyên liệu cho timeline viseme (VC-8).
+    pub fn synthesize(&mut self, text: &str) -> Result<(Vec<f32>, String), String> {
         let phonemes = self.g2p.phonemize(&punc::apply_punc_norm(text));
         if phonemes.trim().is_empty() {
             return Err(format!("no phonemes produced for text: {:?}", text));
@@ -457,9 +459,10 @@ impl VieNeuVoice {
         }
 
         if frames.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), phonemes));
         }
         self.decode_codes(&frames)
+            .map(|samples| (samples, phonemes))
     }
 
     /// rows: each is `[text_or_slot_id, code_0..code_{n_vq-1}]`. Returns a

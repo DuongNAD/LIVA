@@ -7,6 +7,7 @@ pub mod normalizer;
 pub mod piper;
 pub mod tokenizer;
 pub mod vieneu;
+pub mod viseme;
 
 use audio::TtsAudioPlayer;
 use engine::TtsEngine;
@@ -136,9 +137,13 @@ pub(crate) struct TtsSynthesisOutcome {
     pub(crate) sample_rate: u32,
     pub(crate) backend: TtsBackend,
     pub(crate) fallback_count: usize,
+    /// Chuỗi phoneme của backend THẮNG cuộc — nguyên liệu cho timeline viseme
+    /// (VC-8). `None` với Kokoro fallback: không có phoneme tin cậy thì không
+    /// phát timeline, client giữ đường RMS cũ.
+    pub(crate) phonemes: Option<String>,
 }
 
-type TtsSynthesisResult = Result<(Vec<f32>, u32), String>;
+type TtsSynthesisResult = Result<(Vec<f32>, u32, Option<String>), String>;
 type TtsSynthesisFn<'a> = dyn FnMut() -> TtsSynthesisResult + 'a;
 
 struct TtsSynthesisAttempt<'a> {
@@ -171,12 +176,13 @@ where
             return Err("TTS synthesis cancelled".to_string());
         }
         match (attempt.synthesize)() {
-            Ok((samples, sample_rate)) => {
+            Ok((samples, sample_rate, phonemes)) => {
                 return Ok(TtsSynthesisOutcome {
                     samples,
                     sample_rate,
                     backend: attempt.backend,
                     fallback_count,
+                    phonemes,
                 });
             }
             Err(error) => {
@@ -216,7 +222,7 @@ impl TtsSynthesisPlan {
                 let sample_rate = engine.sample_rate();
                 engine
                     .synthesize(&text)
-                    .map(|samples| (samples, sample_rate))
+                    .map(|(samples, phonemes)| (samples, sample_rate, Some(phonemes)))
             }));
         }
 
@@ -229,7 +235,7 @@ impl TtsSynthesisPlan {
                 let sample_rate = voice.sample_rate();
                 voice
                     .synthesize(&text)
-                    .map(|samples| (samples, sample_rate))
+                    .map(|(samples, phonemes)| (samples, sample_rate, Some(phonemes)))
             }));
         }
 
@@ -247,8 +253,9 @@ impl TtsSynthesisPlan {
             let mut session = session
                 .lock()
                 .map_err(|_| "Kokoro ONNX session mutex poisoned".to_string())?;
+            // Kokoro fallback: `phonemes = None` — xem `TtsSynthesisOutcome`.
             TtsEngine::generate_from_session(&mut session, &voice_data, &token_ids, 1.0)
-                .map(|samples| (samples, 24_000))
+                .map(|samples| (samples, 24_000, None))
         }));
 
         run_synthesis_fallback(&mut attempts, is_cancelled)
@@ -682,7 +689,7 @@ mod tests {
             }),
             TtsSynthesisAttempt::new(TtsBackend::Piper, || {
                 secondary_calls.set(secondary_calls.get() + 1);
-                Ok((vec![0.25, -0.25], 22_050))
+                Ok((vec![0.25, -0.25], 22_050, Some("ab".to_string())))
             }),
         ];
 
@@ -693,6 +700,7 @@ mod tests {
         assert_eq!(outcome.fallback_count, 1);
         assert_eq!(outcome.sample_rate, 22_050);
         assert_eq!(outcome.samples, vec![0.25, -0.25]);
+        assert_eq!(outcome.phonemes.as_deref(), Some("ab"));
         assert_eq!(primary_calls.get(), 1);
         assert_eq!(secondary_calls.get(), 1);
     }
@@ -707,7 +715,7 @@ mod tests {
             }),
             TtsSynthesisAttempt::new(TtsBackend::Piper, || {
                 secondary_calls.set(secondary_calls.get() + 1);
-                Ok((vec![0.5], 22_050))
+                Ok((vec![0.5], 22_050, None))
             }),
         ];
 

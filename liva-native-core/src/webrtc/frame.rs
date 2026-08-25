@@ -18,6 +18,12 @@ pub const OP_ACK_PLAYING: u8 = 0x04;
 /// `Off` (`is_awake()` luôn true) nên mọi tiếng động trong phòng sẽ thành một
 /// lượt hội thoại thật. Probe là đường cụt: không chạm pipeline, chỉ trả lời.
 pub const OP_WAKE_PROBE: u8 = 0x05;
+/// VC-8: timeline phoneme→viseme đi KÈM các frame loa của cùng mẩu. Payload là
+/// JSON `{"turn_epoch":u64,"base_seq_id":u32,"visemes":[{"v":"aa","t_ms":0}…]}`
+/// trong đó `t_ms` tính từ mẫu PCM đầu tiên của chunk `base_seq_id`. Gửi qua
+/// CÙNG kênh speaker để bảo đảm thứ tự trước audio của mẩu đó; client không nhận
+/// diện opcode này sẽ bỏ qua an toàn (giữ đường lip-sync RMS cũ).
+pub const OP_VISME: u8 = 0x06;
 
 const MAX_PAYLOAD_BYTES: usize = 1024 * 1024;
 const SPEAKER_PAYLOAD_HEADER_BYTES: usize = 8;

@@ -18,6 +18,13 @@ export const VOICE_FRAME_HEADER_SIZE = 9;
 export const OP_SPEAKER_OUT = 0x02;
 /** Opcode: barge-in — immediately clear audio queues and stop playback. */
 export const OP_FLUSH = 0x03;
+/**
+ * Opcode: phoneme→viseme timeline đi kèm các frame loa của cùng mẩu (VC-8).
+ * Payload là JSON `{turnEpoch, baseSeqId, cues:[{v,tMs}…]}` trong đó `tMs`
+ * tính từ mẫu PCM đầu tiên của chunk `base_seq_id`. Client cũ không nhận diện
+ * opcode này sẽ bỏ qua an toàn (giữ đường lip-sync RMS).
+ */
+export const OP_VISME = 0x06;
 
 const TURN_EPOCH_BYTES = 4;
 const SAMPLE_RATE_BYTES = 4;
@@ -78,4 +85,64 @@ export class SpeakerEpochGate {
   accepts(epoch: number): boolean {
     return (epoch >>> 0) >= this.minimumEpoch;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OP_VISME — phoneme→viseme timeline (VC-8)
+// ═══════════════════════════════════════════════════════════════
+
+/** Tập viseme trung gian mà core phát ra — trùng preset biểu cảm VRM chuẩn. */
+export type VisemeCode = "aa" | "ee" | "ih" | "oh" | "ou" | "nil";
+const VISEME_CODES: readonly string[] = ["aa", "ee", "ih", "oh", "ou", "nil"];
+
+export interface VisemeCue {
+  v: VisemeCode;
+  tMs: number;
+}
+
+export interface VisemeTimelinePayload {
+  turnEpoch: number;
+  baseSeqId: number;
+  cues: VisemeCue[];
+}
+
+/**
+ * Parse an OP_VISME payload (UTF-8 JSON). Fail-closed: bất kỳ trường nào sai
+ * kiểu, viseme ngoài whitelist hay `tMs` không tăng ngặt đều làm CẢ timeline
+ * bị loại (`null`) thay vì bỏ từng cue — một timeline lệch nửa chừng còn tệ
+ * hơn hẳn không có (client sẽ rơi về RMS).
+ */
+export function parseVisemePayload(payload: ArrayBuffer | Uint8Array): VisemeTimelinePayload | null {
+  const bytes = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+
+  const turnEpoch = obj.turnEpoch ?? obj.turn_epoch;
+  const baseSeqId = obj.baseSeqId ?? obj.base_seq_id;
+  if (typeof turnEpoch !== "number" || !Number.isInteger(turnEpoch) || turnEpoch < 0) return null;
+  if (typeof baseSeqId !== "number" || !Number.isInteger(baseSeqId) || baseSeqId < 0) return null;
+  // Core phát trường `visemes` (serde_json::json! trong pipeline.rs).
+  const rawCues = obj.visemes ?? obj.cues;
+  if (!Array.isArray(rawCues) || rawCues.length === 0) return null;
+
+  const cues: VisemeCue[] = [];
+  let prevTMs = -1;
+  for (const item of rawCues) {
+    if (typeof item !== "object" || item === null) return null;
+    const cue = item as Record<string, unknown>;
+    const v = cue.v;
+    const tMs = cue.tMs ?? cue.t_ms;
+    if (typeof v !== "string" || !VISEME_CODES.includes(v)) return null;
+    if (typeof tMs !== "number" || !Number.isInteger(tMs) || tMs < 0 || tMs <= prevTMs) return null;
+    prevTMs = tMs;
+    cues.push({ v: v as VisemeCode, tMs });
+  }
+
+  return { turnEpoch, baseSeqId, cues };
 }

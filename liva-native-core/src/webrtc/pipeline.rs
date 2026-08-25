@@ -90,6 +90,10 @@ impl TurnMilestone {
     }
 }
 
+fn lipsync_phoneme_enabled() -> bool {
+    crate::tts::viseme::lipsync_enabled_from(std::env::var("LIVA_LIPSYNC").ok().as_deref())
+}
+
 #[derive(Clone)]
 pub struct VoiceOutbound {
     speaker_tx: mpsc::Sender<VoiceFrame>,
@@ -535,6 +539,9 @@ impl WebRTCActor {
             let mut avatar_speech_filter = crate::tts::AvatarSpeechFilter::default();
             let mut seq_id = 0u32;
             let mut is_speaking = false;
+            // Công tắc VC-8 đọc MỖI KHI spawn tác vụ TTS — đổi env giữa chừng
+            // có hiệu lực từ lượt nói kế tiếp mà không cần khởi động lại.
+            let lipsync_phonemes = lipsync_phoneme_enabled();
             // Hai mốc phát muộn của lượt. Mỗi cái MỘT biến riêng: chúng bị hai
             // closure khác nhau mượn `&mut` (`run_tts` dùng first_token,
             // `process_and_send_chunk` dùng first_speaker_frame) — gộp chung thì
@@ -560,6 +567,38 @@ impl WebRTCActor {
 
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("Session cancelled post-inference".to_string());
+                }
+
+                // VC-8: phát timeline phoneme→viseme TRƯỚC các frame loa của
+                // cùng mẩu (cùng kênh FIFO ⇒ client nhận timeline trước khi có
+                // audio để áp). Kokoro fallback không có phoneme tin cậy → không
+                // phát, client tự rơi về đường RMS cũ.
+                if lipsync_phonemes && let Some(ref phonemes) = outcome.phonemes {
+                    let duration_ms = (outcome.samples.len() as f64
+                        / f64::from(outcome.sample_rate)
+                        * 1000.0) as u64;
+                    let cues = crate::tts::viseme::build_viseme_timeline(phonemes, duration_ms);
+                    if !cues.is_empty() {
+                        let payload = serde_json::json!({
+                            "turn_epoch": session_id,
+                            "base_seq_id": seq_id,
+                            "visemes": cues.iter()
+                                .map(|c| serde_json::json!({
+                                    "v": c.viseme.as_str(),
+                                    "t_ms": c.t_ms,
+                                }))
+                                .collect::<Vec<_>>(),
+                        });
+                        outgoing.blocking_send_speaker_if_current(
+                            &active_session_id_tts,
+                            session_id,
+                            VoiceFrame {
+                                op_code: crate::webrtc::frame::OP_VISME,
+                                seq_id,
+                                payload: bytes::Bytes::from(payload.to_string()),
+                            },
+                        )?;
+                    }
                 }
 
                 let audio_samples = outcome.samples;

@@ -35,7 +35,14 @@ import {
 } from './utils/avatarControlTags';
 import {
   SpeakerEpochGate,
+  parseVisemePayload,
 } from './utils/speakerFrame';
+import {
+  noteChunkScheduled,
+  resetVisemes,
+  setVisemeClock,
+  setVisemeTimeline,
+} from './utils/phonemeLipSync';
 import { useWidgetAvatarControl, type AvatarEngineApi } from './composables/useWidgetAvatarControl';
 import { useWidgetTransport } from './composables/useWidgetTransport';
 import type {
@@ -340,11 +347,19 @@ const speaker = useSpeakerPlayback({
   channel: '[Widget]',
   useMasterGain: true, // required for audio_ducking volume control
   enableAnalyser: true, // analyser nằm TRONG chuỗi ra, để dẫn khẩu hình
+  // VC-8: mỗi chunk PCM được xếp lịch là mốc neo timeline viseme vào đồng hồ
+  // AudioContext — đúng thời điểm audio thật bắt đầu, không phải lúc nhận frame.
+  onChunkScheduled: ({ startTimeSec, durationSec }) => {
+    noteChunkScheduled(startTimeSec, durationSec);
+  },
   onPlaybackStarted: () => {
     // Mic đang mở nghe wake-word; giọng TTS vọng vào nó là nguồn dương-tính-giả
     // số một (xem khối "Chống tự nghe" trong useVoicePipeline.ts).
     voice.muteWakeWord();
     sendMsg('audio_play_started');
+    // VC-8: cắm đồng hồ AudioContext cho registry viseme (một lần đủ — context
+    // sống suốt phiên).
+    setVisemeClock(() => speaker.getContext()?.currentTime ?? null);
     // Bám vào analyser MỘT lần cho cả lượt nói. Trước đây việc này nằm ở
     // onSourceStarted, tức chạy lại mỗi chunk — mà chunk được xếp lịch trước
     // khi kêu, nên analyser đọc nhầm nguồn còn im và miệng đóng giữa câu.
@@ -724,8 +739,15 @@ const {
       speaker.enqueueSpeakerPayload(payload);
     }
   },
+  onVisemeBinary: (payload) => {
+    const tl = parseVisemePayload(payload);
+    if (tl && speakerEpochGate.accepts(tl.turnEpoch)) {
+      setVisemeTimeline(tl.cues);
+    }
+  },
   onFlushBinary: (turnEpoch) => {
     speakerEpochGate.observeFlush(turnEpoch);
+    resetVisemes(); // VC-8: barge-in xoá cả timeline viseme đang treo
     speaker.flush();
   },
   onJsonMessage: (data) => {

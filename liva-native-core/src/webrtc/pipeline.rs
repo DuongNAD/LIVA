@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::webrtc::frame::{OP_FLUSH, VoiceFrame, speaker_frames};
 use crate::webrtc::session::SessionAec;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
@@ -16,6 +17,76 @@ fn push_tts_token(
         Vec::new()
     } else {
         chunker.push(&spoken)
+    }
+}
+
+/// Một mốc thời gian của lượt thoại (VC-4), phát đúng **MỘT lần** mỗi lượt dưới
+/// dạng sự kiện `tracing` có cấu trúc:
+///
+/// ```text
+/// Voice turn milestone turn_epoch=7 milestone="first_token" elapsed_ms=412
+/// ```
+///
+/// Chỉ `tracing`, không bảng DB — sổ `turn_telemetry` là U21, tầng trên của cái
+/// này. Không log transcript hay audio (Voice SLO §6 cấm). Chi phí chỉ là
+/// `Instant::elapsed()` — không khoá, không cấp phát.
+///
+/// Cố ý KHÔNG `Clone`/`Copy`: bất biến "phát đúng một lần" sống trên **một**
+/// giá trị. Cho phép sao chép là tự mở đường cho một bản sao phát lại mốc.
+pub(crate) struct TurnMilestone {
+    /// `(turn_epoch, Instant)` — gốc thời gian của lượt, lấy lúc vào
+    /// `handle_vad_end`. `None` trên đường **không có gốc lượt**
+    /// (`handle_speak_text`) — khi đó `fire` không phát gì.
+    origin: Option<(u64, Instant)>,
+    fired: bool,
+}
+
+impl TurnMilestone {
+    /// Cho đường không đo theo gốc lượt — `fire` sẽ không bao giờ phát.
+    pub(crate) fn none() -> Self {
+        Self {
+            origin: None,
+            fired: false,
+        }
+    }
+
+    /// Cho một lượt thật: epoch phải là giá trị **SAU** `cancel_active_operations()`
+    /// (hàm đó `session_id += 1`; ghép sai epoch thì bộ gom số loại sạch cả lượt
+    /// mà không báo lỗi).
+    pub(crate) fn at_turn(epoch: u64, t0: Instant) -> Self {
+        Self {
+            origin: Some((epoch, t0)),
+            fired: false,
+        }
+    }
+
+    /// Từ gốc lượt đã lọc theo epoch (`None` = đường không đo).
+    pub(crate) fn from_origin(origin: Option<(u64, Instant)>) -> Self {
+        Self {
+            origin,
+            fired: false,
+        }
+    }
+
+    /// Phát mốc nếu chưa phát và có gốc lượt. Trả `true` nếu lần này phát —
+    /// để unit test khẳng định hành vi "đúng một lần" mà không cần bắt log.
+    pub(crate) fn fire(&mut self, name: &'static str) -> bool {
+        if self.fired {
+            return false;
+        }
+        self.fired = true;
+        match self.origin {
+            Some((epoch, t0)) => {
+                info!(
+                    turn_epoch = epoch,
+                    milestone = name,
+                    elapsed_ms = t0.elapsed().as_millis() as u64,
+                    "Voice turn milestone"
+                );
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -167,6 +238,12 @@ pub struct WebRTCActor {
     state_shared: Arc<AppState>,
     outgoing: VoiceOutbound,
     session_aec: SessionAec,
+
+    /// Gốc thời gian của lượt đang đo: `(turn_epoch, Instant)` lúc vào
+    /// `handle_vad_end`. `None` khi chưa có lượt nào kể từ mở kết nối.
+    turn_origin: Option<(u64, Instant)>,
+    /// Mốc `stt_done` của lượt đang đo — phát đúng một lần.
+    ms_stt_done: TurnMilestone,
 }
 
 impl WebRTCActor {
@@ -201,6 +278,8 @@ impl WebRTCActor {
             state_shared,
             outgoing,
             session_aec,
+            turn_origin: None,
+            ms_stt_done: TurnMilestone::none(),
         };
 
         (handle, actor)
@@ -253,12 +332,24 @@ impl WebRTCActor {
     }
 
     async fn handle_vad_end(&mut self, audio_data: Vec<f32>) {
+        // t0 của lượt là lúc VAD báo hết nói — lấy TRƯỚC khi huỷ. Còn epoch thì
+        // PHẢI đọc SAU `cancel_active_operations()` vì hàm đó `session_id += 1`;
+        // ghép t0 với epoch đọc trước khi huỷ thì mọi mốc sau lệch epoch và bị
+        // bộ gom số loại sạch cả lượt — không lỗi, không cảnh báo (bẫy 1 VC-4).
+        let turn_t0 = Instant::now();
         info!("🎙️ [VAD] Speech END detected. Processing audio...");
-        self.cancel_active_operations().await;
+        let session_id = self.cancel_active_operations().await;
+        self.turn_origin = Some((session_id, turn_t0));
+        self.ms_stt_done = TurnMilestone::at_turn(session_id, turn_t0);
+        info!(
+            turn_epoch = session_id,
+            milestone = "vad_end",
+            elapsed_ms = turn_t0.elapsed().as_millis() as u64,
+            "Voice turn milestone"
+        );
         self.transition_to(PipelineState::VadEnd);
         self.transition_to(PipelineState::SttProcessing);
 
-        let session_id = self.session_id;
         let state_shared = Arc::clone(&self.state_shared);
         let event_tx = self.event_tx.clone();
         let active_session_id_stt = Arc::clone(&self.active_session_id);
@@ -304,7 +395,10 @@ impl WebRTCActor {
             return;
         }
         drop(text_tx);
-        self.spawn_tts_receiver(session_id, text_rx);
+        // Đường "nói thẳng một câu" KHÔNG có vad_end đứng trước → truyền
+        // `None`: không phát mốc theo gốc lượt. Truyền gốc của một lượt cũ thì
+        // đo được một con số vô nghĩa nhưng trông hợp lệ (bẫy 2 VC-4).
+        self.spawn_tts_receiver(session_id, text_rx, None);
     }
 
     async fn handle_stt_completed(
@@ -319,6 +413,10 @@ impl WebRTCActor {
             );
             return;
         }
+
+        // Mốc `stt_done` — thời gian giải mã STT tính từ gốc lượt. Chỉ phát nếu
+        // STT này thuộc đúng lượt đang đo.
+        self.ms_stt_done.fire("stt_done");
 
         match result {
             Ok(Some(text)) if !text.trim().is_empty() => {
@@ -415,10 +513,17 @@ impl WebRTCActor {
         });
         self.llm_handle = Some(llm_handle);
 
-        self.spawn_tts_receiver(session_id, llm_chunk_rx);
+        // Đường thoại thật: chỉ đo khi gốc lượt khớp epoch hiện tại.
+        let turn_origin = self.turn_origin.filter(|(epoch, _)| *epoch == session_id);
+        self.spawn_tts_receiver(session_id, llm_chunk_rx, turn_origin);
     }
 
-    fn spawn_tts_receiver(&mut self, session_id: u64, mut text_rx: mpsc::Receiver<String>) {
+    fn spawn_tts_receiver(
+        &mut self,
+        session_id: u64,
+        mut text_rx: mpsc::Receiver<String>,
+        turn_origin: Option<(u64, Instant)>,
+    ) {
         // Spawn TTS Task
         let state_tts = Arc::clone(&self.state_shared);
         let event_tx_tts = self.event_tx.clone();
@@ -430,6 +535,12 @@ impl WebRTCActor {
             let mut avatar_speech_filter = crate::tts::AvatarSpeechFilter::default();
             let mut seq_id = 0u32;
             let mut is_speaking = false;
+            // Hai mốc phát muộn của lượt. Mỗi cái MỘT biến riêng: chúng bị hai
+            // closure khác nhau mượn `&mut` (`run_tts` dùng first_token,
+            // `process_and_send_chunk` dùng first_speaker_frame) — gộp chung thì
+            // vấp E0499.
+            let mut ms_first_token = TurnMilestone::from_origin(turn_origin);
+            let mut ms_first_frame = TurnMilestone::from_origin(turn_origin);
 
             let mut process_and_send_chunk = |chunk: &str| -> Result<(), String> {
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
@@ -446,12 +557,14 @@ impl WebRTCActor {
                 let outcome = plan.synthesize(|| {
                     active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id
                 })?;
-                let audio_samples = outcome.samples;
-                let sample_rate = outcome.sample_rate;
 
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("Session cancelled post-inference".to_string());
                 }
+
+                let audio_samples = outcome.samples;
+                let sample_rate = outcome.sample_rate;
+
                 info!(
                     turn_epoch = session_id,
                     backend = outcome.backend.as_str(),
@@ -484,6 +597,8 @@ impl WebRTCActor {
                         session_id,
                         frame,
                     )?;
+                    // TTFA — con số người dùng cảm nhận (frame đầu tiên ra loa).
+                    ms_first_frame.fire("first_speaker_frame");
                 }
                 Ok(())
             };
@@ -493,6 +608,16 @@ impl WebRTCActor {
                     if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id
                     {
                         return Err("Session cancelled".to_string());
+                    }
+                    // Mốc `first_token`: đo tại token đầu tiên NHẬN TỪ text_rx —
+                    // đúng định nghĩa "TTFT nhìn thấy" của ttft_bench. Đo sau
+                    // AvatarSpeechFilter là sai: bộ lọc đệm tag điều khiển qua
+                    // nhiều token thì quãng sinh tag bị cộng nhầm vào thời gian
+                    // LLM. Nhịp tim chuỗi rỗng không bao giờ tới được đây
+                    // (`agent/graph/pipeline.rs#send_llm_chunk_if_current` trả
+                    // sớm với chunk rỗng) — phép kiểm dưới chỉ là lá chắn rẻ.
+                    if !token.is_empty() {
+                        ms_first_token.fire("first_token");
                     }
                     let chunks = push_tts_token(&mut avatar_speech_filter, &mut chunker, &token);
                     for chunk in chunks {
@@ -542,7 +667,10 @@ impl WebRTCActor {
         self.transition_to(PipelineState::Idle);
     }
 
-    async fn cancel_active_operations(&mut self) {
+    /// Huỷ mọi tác vụ đang chạy của lượt cũ và **tăng `session_id`** — giá trị
+    /// trả về là epoch mới, gọi ngay sau lời gọi này thì chắc chắn ghép đúng
+    /// epoch sau khi huỷ (bẫy 1 VC-4: đọc epoch trước khi huỷ = lệch epoch).
+    async fn cancel_active_operations(&mut self) -> u64 {
         self.session_id += 1;
         self.active_session_id
             .store(self.session_id, std::sync::atomic::Ordering::SeqCst);
@@ -565,6 +693,7 @@ impl WebRTCActor {
             payload: bytes::Bytes::new(),
         };
         let _ = self.outgoing.send_control(flush_frame).await;
+        self.session_id
     }
 }
 
@@ -589,6 +718,33 @@ mod outbound_tests {
     use bytes::Bytes;
     use std::sync::atomic::AtomicU64;
     use std::time::Duration;
+
+    #[test]
+    fn milestone_chi_phat_dung_mot_lan_moi_luot() {
+        let mut ms = TurnMilestone::at_turn(7, Instant::now());
+        assert!(ms.fire("first_token"), "lan dau tien phai phat");
+        assert!(!ms.fire("first_token"), "lan thu hai khong duoc phat nua");
+        assert!(!ms.fire("stt_done"), "doi ten moc cung khong phat lai");
+    }
+
+    /// Đường `handle_speak_text` (nói thẳng, không có vad_end đứng trước) truyền
+    /// gốc lượt `None` — mốc không bao giờ được phát, kẻo đo từ gốc của một lượt
+    /// cũ ra con số vô nghĩa nhưng trông hợp lệ.
+    #[test]
+    fn milestone_khong_co_goc_luot_thi_khong_phat() {
+        let mut ms = TurnMilestone::none();
+        assert!(!ms.fire("first_token"));
+        assert!(!ms.fire("first_speaker_frame"));
+    }
+
+    /// Gốc đã lọc theo epoch (`from_origin`) hành xử như gốc thật khi có giá trị,
+    /// và im lặng khi `None`.
+    #[test]
+    fn milestone_tu_goc_da_loc_theo_epoch() {
+        let mut ms = TurnMilestone::from_origin(Some((9, Instant::now())));
+        assert!(ms.fire("first_speaker_frame"));
+        assert!(!TurnMilestone::none().fire("first_speaker_frame"));
+    }
 
     fn frame(op_code: u8) -> VoiceFrame {
         VoiceFrame {

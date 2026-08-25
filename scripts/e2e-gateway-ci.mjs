@@ -36,9 +36,11 @@ const lay = (ten) => {
 }
 
 const profile = argv.includes('--release') ? 'release' : 'debug'
+// Tên binary theo nền tảng: `.exe` chỉ có trên Windows; macOS/Linux không hậu tố.
+const BIN_NAME = process.platform === 'win32' ? 'liva-native-core.exe' : 'liva-native-core'
 const BIN = path.resolve(
   ROOT,
-  lay('--bin') || path.join('target', profile, 'liva-native-core.exe'),
+  lay('--bin') || path.join('target', profile, BIN_NAME),
 )
 // Cổng riêng, KHÔNG phải 8002: nếu lỡ có một LIVA khác đang chạy trên máy dev
 // thì bộ kiểm sẽ lặng lẽ kiểm nhầm tiến trình đó và báo xanh cho mã chưa build.

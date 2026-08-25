@@ -120,7 +120,13 @@ fn canonicalization_chan_symlink_hoac_junction_escape() {
         "canonical target thoát root phải bị từ chối"
     );
 
+    // Windows: `link` là junction (thư mục thật) → xoá bằng `remove_dir`.
+    // Unix: `link` là symlink tới thư mục → phải xoá bằng `remove_file`,
+    // `remove_dir` trên symlink trả lỗi ENOTDIR (không phải thư mục).
+    #[cfg(windows)]
     fs::remove_dir(&link).unwrap();
+    #[cfg(unix)]
+    fs::remove_file(&link).unwrap();
     fs::remove_dir_all(root).unwrap();
     fs::remove_dir_all(outside).unwrap();
 }

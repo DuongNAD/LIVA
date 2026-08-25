@@ -1,0 +1,8 @@
+{
+  "$schema": "./gen/schemas/desktop-schema.json",
+  "bundle": {
+    "resources": {
+      "../../node_modules/sqlite-vec-darwin-arm64/vec0.dylib": "vec0.dylib"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "./gen/schemas/desktop-schema.json",
+  "bundle": {
+    "resources": {
+      "../../node_modules/sqlite-vec-windows-x64/vec0.dll": "vec0.dll",
+      "cuda-redist": "./"
+    }
+  }
+}

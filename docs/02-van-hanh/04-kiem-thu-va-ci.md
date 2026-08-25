@@ -99,6 +99,16 @@ kết luận `success`.** Hai điều rút ra khi đọc kết quả:
   Windows; và provider coverage tồn tại nhờ cây phụ thuộc sẵn có chứ không do khai
   báo. Cả ba **xanh trên CI và vẫn sẽ xanh** — 25/25 không phải bằng chứng đa nền
   tảng. 📌 Chi tiết từng bẫy: [07 — Phát triển trên macOS](07-macos-dev.md)
+- **✅ Job `test-macos` (`macos-latest`) có từ 25/08/2026 (VC-3)** — bộ GỐN, chạy
+  song song job Windows: docs-check · docs-citations · npm ci · ESLint · vue-tsc ·
+  UI coverage · knowledge vault (`typecheck` + `test`) · `cargo test`. **Không** nhân
+  bản 25 bước: llama.cpp CUDA/LLVM và build Tauri là mục hạ tầng riêng. Lý do tồn
+  tại: ba lỗi chỉ runner macOS bắt được (2 mock symlink khoá nhầm root chưa
+  canonicalise `/var` → `/private/var`; 1 khẳng định UNC đòi thông điệp Windows) —
+  đã sửa trong `verification-challenger.test.ts`, vault 27/27 xanh trên macOS.
+  Phân bổ nền hiện hành: **Windows** = toàn bộ 25 bước; **macOS** = 9 bước gọn ở
+  trên; e2e gateway và Tauri desktop **chỉ-Windows** cho tới khi được port có chủ
+  đích.
 
 ## 3. Coverage UI
 

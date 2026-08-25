@@ -437,7 +437,7 @@ Quy tắc mã hoá / giải mã (`frame.rs:20-56`):
 
 **Framing kiểu stream:** server đọc trong vòng `while bytes_mut.len() >= 9 { VoiceFrame::decode(...) }` (`liva-native-core/src/websocket.rs:555-567`) ⇒ **nhiều `VoiceFrame` có thể nằm trong một WebSocket binary message**, và một khung dở dang sẽ bị bỏ (`Ok(None)` → `break`) chứ **không** được nối sang message kế tiếp. ⇒ **Client PHẢI gửi trọn vẹn từng khung trong một WS message** (hoặc gửi nhiều khung nguyên vẹn trong một message), không được cắt khung ngang giữa hai message.
 
-### 5.3 Bảng 6 opcode — đầy đủ
+### 5.3 Bảng 7 opcode — đầy đủ
 
 | Op | Hex | Hướng | Payload | Server xử lý | Client xử lý | Trạng thái |
 |---|---|---|---|---|---|---|
@@ -447,6 +447,7 @@ Quy tắc mã hoá / giải mã (`frame.rs:20-56`):
 | `OP_FLUSH` | `0x03` | S→C | rỗng; `seq_id = generation_epoch` | Gửi qua control queue riêng trong `cancel_active_operations()` sau khi tăng epoch | Nâng epoch watermark, dừng queue đang phát; frame có epoch thấp hơn bị bỏ | **[OK]** |
 | `OP_ACK_PLAYING` | `0x04` | C→S (thiết kế) | — | **Không nơi nào trong Rust đọc/ghi**; rơi vào `_ => {}` (`liva-native-core/src/websocket.rs:825`) | Chỉ có hằng số trong TS (`WebSocketClient.ts:8`) và doc-comment giữ chỗ (`frame.rs:7-10`) | **[THIẾU]** code chết hai đầu |
 | `OP_WAKE_PROBE` | `0x05` | C→S | PCM **f32 LE mono 16 kHz** — MỘT câu ứng viên đã cắt sẵn (không phải luồng) | Từ chối ngoài khoảng 0,3–4,0 s trước khi tốn STT. Rồi `wake_gate.score_clip` (classifier) HOẶC `stt.transcribe_for_wake` + `wake_gate.matches_phrase`. **Không chạm pipeline**: không AEC/GTCRN/VAD, không `TurnAudioBuffer`, không `on_vad_end` | `useVoicePipeline.ts` gửi khi `LivaWakeWorker` cắt được một cụm; nghe sự kiện text trả về | **[OK]** — thêm 27/07/2026, xem [Đường ống thoại §9](03-duong-ong-thoai.md) |
+| `OP_VISME` | `0x06` | S→C | JSON UTF-8 `{"turn_epoch":u64,"base_seq_id":u32,"visemes":[{"v":"aa\|ee\|ih\|oh\|ou\|nil","t_ms":u32}…]}` — `t_ms` tính từ mẫu PCM đầu tiên của chunk `base_seq_id` | Phát trong `spawn_tts_receiver` NGAY TRƯỚC các frame loa của cùng mẩu, qua CÙNG kênh speaker (FIFO ⇒ timeline tới trước audio). Chỉ bật khi `LIVA_LIPSYNC=phoneme`; chỉ VieNeu/Piper có phoneme — **Kokoro fallback không phát**, client rơi về RMS (`use3DModel.ts`, vòng render lip-sync) | Parse bằng `parseVisemePayload` (`speakerFrame.ts`, fail-closed cả timeline), neo qua registry `phonemeLipSync.ts` tại `onChunkScheduled`, bẻ khẩu hình trong vòng render | **[OK]** — thêm 25/08/2026 (VC-8); client cũ bỏ qua opcode lạ an toàn |
 
 **Vì sao `OP_WAKE_PROBE` phải là opcode riêng chứ không tái dùng `OP_MIC_IN`:** khung `OP_MIC_IN`
 chạy thẳng vào `TurnAudioBuffer` → pipeline → LLM, mà `WakeGate` mặc định là `Off` (`is_awake()`

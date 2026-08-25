@@ -26,10 +26,14 @@ covers:
 
 ## 0. Phạm vi — đọc trước, kẻo làm trùng
 
-Tài liệu này sở hữu **bảy việc phát sinh từ một lượt rà soát toàn dự án ngày
-25/08/2026 (phiên tối)**, chia hai nhóm: ba việc cổng kiểm (VC-1…VC-3) và bốn việc
-thoại real-time (VC-4…VC-7). Bảy việc này **chưa có chủ ở bất kỳ tài liệu nào** trước
-lượt rà soát — đó là lý do có tài liệu mới thay vì chèn vào tài liệu cũ.
+Tài liệu này sở hữu **tám việc phát sinh từ rà soát ngày 25/08/2026**: ba việc cổng
+kiểm (VC-1…VC-3), bốn việc thoại real-time (VC-4…VC-7), và [VC-8](#vc-8--lip-sync-theo-phoneme-thay-vì-theo-biên-độ)
+(lip-sync theo phoneme) thăng lên từ lượt rà nguồn mở. Những việc này **chưa có chủ ở bất kỳ
+tài liệu nào** trước lượt rà soát — đó là lý do có tài liệu mới thay vì chèn vào tài liệu cũ.
+
+[§6](#6-kho-ứng-viên-đã-sàng--rà-nguồn-mở-25082026) ghi **kết quả sàng** của lượt rà nguồn mở:
+mười một ứng viên bị loại kèm lý do đo được. Đó là tri thức phủ định — đọc trước khi đề xuất
+thư viện mới, kẻo đề xuất lại thứ repo đã có.
 
 | Loại việc | Chủ sở hữu | Ranh giới |
 |---|---|---|
@@ -68,7 +72,7 @@ vì lý do đó.
 
 ---
 
-## 2. Bảy việc và thứ tự thi hành
+## 2. Tám việc và thứ tự thi hành
 
 | Thứ tự | ID | Việc | Nhóm | Vì sao ở vị trí này |
 |---|---|---|---|---|
@@ -79,6 +83,7 @@ vì lý do đó.
 | 5 | [VC-6](#vc-6--mẩu-tts-đầu-tiên-của-mỗi-lượt-quá-dài) | Mẩu TTS đầu tiên ngắn lại | Thoại | Ăn thẳng vào cảm nhận người dùng, phạm vi một hàm, đã có test bao quanh |
 | 6 | [VC-5](#vc-5--barge-in-tự-cắn-và-aec-nhiều-khả-năng-không-hội-tụ) | Tham chiếu far-end liên tục + test AEC có răng | Thoại | Bật AEC trước khi sửa cái này là bật một thứ chưa chắc chạy |
 | 7 | [VC-7](#vc-7--kết-lượt-là-704-ms-im-lặng-cố-định) | Smart Turn **chỉ được rút ngắn** | Thoại | Cần VC-4 để chứng minh nó thật sự rút, và cần log shadow để hiệu chỉnh ngưỡng |
+| 8 | [VC-8](#vc-8--lip-sync-theo-phoneme-thay-vì-theo-biên-độ) | Lip-sync theo phoneme thay vì biên độ | Avatar | Không thêm phụ thuộc, không cần đo trước; độc lập với các cổng đỏ nên chạy song song được — nhưng đừng bắt đầu khi CI còn đỏ |
 
 **Quy tắc chung.** Một commit một chủ đề. **Không trộn mã nguồn với tài liệu trong một
 commit** — `docs-check` so `git log <commit>..HEAD` nên commit gộp làm nó đỏ. Hook
@@ -92,6 +97,15 @@ pre-commit cần `SKIP_AI_HOOK=1` khi máy không có `.env`. Theo `CLAUDE.md`: 
 
 ### VC-1 — `h2 0.3.27`, RUSTSEC-2026-0258
 
+> **✅ Trạng thái 25/08/2026 (phiên thi công) — VC-1 ĐÃ ĐÓNG.** Làm đúng đường vá ghi ở
+> đây: `reqwest` 0.11 → **0.12.28**, `teloxide` 0.13 → **0.17.0**, giữ nguyên hyper 0.14
+> cho server OpenAI. Đổi mã duy nhất: `Requester::get_file` ở teloxide 0.17 nhận
+> `FileId` theo giá trị (`telegram.rs#process_voice_message`). Bằng chứng đo cùng ngày:
+> `Cargo.lock` giờ là **h2 0.4.19** (≥ 0.4.16 đã vá); `cargo tree -i h2@0.3.27` → *did not
+> match any packages*; `cargo deny check …` → **exit 0** (`advisories ok, licenses ok,
+> sources ok`); `cargo test --workspace` **587 pass · 1 fail** (đúng 1 fail đỏ sẵn của
+> VC-2); clippy exit 0 · 0 warning; fmt xanh. Bot Telegram build và qua được unit test,
+> **chưa chạy thật** (máy không có `TELEGRAM_BOT_TOKEN`).
 **Bằng chứng.** `cargo deny check -W unmaintained -W unsound advisories` → đúng **một**
 `error[vulnerability]`, chín mục còn lại là `warning[unmaintained]` đã được `-W` cho qua
 (bincode, paste, proc-macro-error, rustls-pemfile, năm crate `unic-*`). Advisory
@@ -184,6 +198,14 @@ CI **không tải model** — đã grep toàn bộ `.github/workflows/test.yml`,
 > clone sạch. Cảnh báo gốc ở [MV-7](viec-con-lai-mac-v2.md) đúng về tinh thần —
 > tiền đề "đây là chỉ báo môi trường có chủ đích" mới là chỗ sai.
 
+> **✅ Trạng thái 25/08/2026 (phiên thi công) — VC-2 ĐÃ ĐÓNG.** Làm đúng hướng: `muc_vision`
+> nhận thêm tham số thuần `co_model` (không đọc đĩa trong thân hàm); điểm gọi thật (`run`)
+> tra `configured_router_model_path().is_some_and(is_file)` rồi truyền vào. Test cũ tách thành
+> **hai**: `…co_model_thi_khuyen_ep_gpu_layers` (khẳng định `LIVA_LLM_N_GPU_LAYERS`) và
+> `…thieu_model_thi_do_model_chat` (khẳng định `CHƯA CÓ MODEL`). **Đột biến** đảo điều kiện
+> nhánh ⇒ đúng 2 test đó đỏ; hoàn nguyên ⇒ preflight **10/10** xanh trên máy không có file
+> model nào. Hành vi chạy thật không đổi: cùng một phép tra đĩa, chỉ chuyển chỗ gọi.
+
 ### VC-3 — Ba test vault đỏ trên macOS — đã truy được nguyên nhân
 
 **Bằng chứng.** `npm test -w obsidian-llm-wiki` → 24 pass, **3 fail**, tất cả trong
@@ -240,6 +262,22 @@ mục đích là port macOS, đó là khoảng trống lớn nhất trong hạ t
 > canonicalise root, chặn traversal, phát hiện vòng symlink qua tập `visited`, và kiểm bao hàm
 > **hai lần** (trước và sau khi giải symlink). Sửa mã sản phẩm để chiều một cái mock hỏng là
 > đổi một test đỏ lấy một lỗ hổng thật.
+
+> **✅ Trạng thái 25/08/2026 (phiên thi công) — VC-3 ĐÃ ĐÓNG trên macOS; Windows chưa tự kiểm.**
+>
+> - **(a)** Hai test symlink-loop: mock khoá bằng `fs.realpathSync(tempVaultPath)` thay vì root
+>   thô — đúng một dòng mỗi test, chỉ đụng file test.
+> - **(b)** Test UNC: khẳng định biết nền — `win32` đòi `Access denied`, nền khác nhận
+>   `/Access denied|File not found/`. Chỉ đụng file test.
+> - Kết quả máy này: `npm test -w obsidian-llm-wiki` → **27/27** (trước: 24 pass · 3 fail).
+> - **(c)** Job `test-macos` (`macos-latest`) đã thêm vào `.github/workflows/test.yml` với đúng
+>   9 bước gọn (docs-check · docs-citations · npm ci · ESLint · vue-tsc · UI coverage · vault
+>   typecheck+test · cargo test); phân bổ nền ghi ở
+>   [04-kiem-thu-va-ci.md §2](../02-van-hanh/04-kiem-thu-va-ci.md).
+> - **Chưa tự kiểm trên Windows**: job macOS mới sẽ trả lời qua run CI đầu tiên của nhánh này;
+>   chưa có runner Windows cục bộ để đối chiếu — ghi rõ thay vì suy ra.
+> - **Kiểm bằng đột biến**: hỏng lại neo realpath của test vòng-lặp đơn ⇒ đúng test đó đỏ
+>   (1 failed / 10), hoàn nguyên ⇒ 27/27.
 
 ---
 
@@ -342,6 +380,51 @@ tích cú pháp có cổng giữ.
 > Chi phí thêm phải **< 5 ms ở p50** — đo bằng cách so `cargo test` trước/sau, hoặc bằng
 > `ttft_bench` nếu có model. Chưa đo được thì lập luận từ mã nguồn (chỉ `Instant::elapsed()`,
 > không khoá, không cấp phát) và **ghi rõ là lập luận, không phải phép đo**.
+
+> **✅ Trạng thái 25/08/2026 (phiên thi công) — VC-4a ĐÃ XONG, VC-4b còn mở.**
+>
+> - Bốn mốc đã có trên đường chạy thật: `TurnMilestone` trong
+>   `liva-native-core/src/webrtc/pipeline.rs` — `vad_end` lúc vào `handle_vad_end`
+>   (epoch ghép **sau** `cancel_active_operations()`; hàm nay *trả* epoch đã tăng,
+>   sai thứ tự là vô lý về mặt cấu trúc), `stt_done` ở `handle_stt_completed`,
+>   `first_token` tại token đầu tiên **nhận từ `text_rx`** (đúng đính chính; đường
+>   `handle_speak_text` truyền gốc `None` — không phát mốc), `first_speaker_frame`
+>   ngay sau `blocking_send_speaker_if_current`. Chi phí: chỉ `Instant::elapsed()`,
+>   không khoá, không cấp phát — **lập luận từ mã nguồn, chưa phải phép đo**.
+> - Bộ gom số: [scripts/voice-turn-latency.mjs](../../scripts/voice-turn-latency.mjs)
+>   kèm test fixture
+>   [scripts/voice-turn-latency.test.mjs](../../scripts/voice-turn-latency.test.mjs)
+>   (log mẫu cố định, p50/p95 tính tay trước): `node --test` **6/6 xanh**. Đã cắm
+>   vào CI bước "Run Script-Adjacent Node Tests" qua `npm run test:voice-turn` —
+>   lưu ý bước này **không glob** `scripts/*.test.mjs`, nó gọi tên từng script npm;
+>   thêm file mà quên thêm dòng là cổng không tồn tại (đúng kiểu `voice_stress`).
+> - Cổng đo 25/08/2026, cùng cây làm việc sau thay đổi: `cargo fmt --all -- --check`
+>   ✅; `cargo clippy --all-targets --message-format=short` exit 0 · **0 warning**;
+>   `cargo test --workspace` **574 pass · 1 fail** — đúng 1 fail đã biết của VC-2
+>   (`preflight::tests::n_gpu_layers_bang_0_khong_bao_gio_la_xanh`), không hồi quy
+>   mới (571 cũ + 3 test mốc mới = 574 pass).
+> - **VC-4b chưa đóng**: chưa đo được — `models/` trống trên máy này, chưa có lượt
+>   thoại thật in đủ bốn mốc. Hai hàng Voice SLO §3 vẫn giữ "chưa đo"; đừng điền số
+>   bằng suy luận.
+>
+> **Bổ sung 25/08/2026 (sau kiểm lại):** log thật có ANSI — tracing-subscriber
+> 0.3.23, khối tô trường trong `fmt/format/mod.rs` (dòng 1332–1338) bọc tên trường
+> italic và dấu '=' dimmed,
+> hai lần paint riêng, nên chuỗi `turn_epoch=` không bao giờ nguyên vẹn trong log,
+> kể cả đổ ra file (không ai gọi `.with_ansi(false)`). Bộ gom số giờ **lột ANSI
+> trước khi khớp**; fixture có hẳn một lượt dựng theo đúng khuôn đó (tiền tố chép
+> từ log thật của binary debug đo cùng ngày; dòng mốc dựng tay vì không có model),
+> kèm test hồi quy "dòng log THẬT có ANSI vẫn parse đúng" — test này ĐỎ trên bản
+> parser chưa lột ANSI. Thêm hàng phân rã "Huỷ lượt cũ + flush" (elapsed_ms của
+> `vad_end`) để bốn hàng cộng đúng bằng turn latency. `TurnMilestone` bỏ
+> `Clone/Copy` — bản sao vô tình không được phép phát lại mốc. Fixture có **hai
+> lượt `vad_end` khác 0** (12 và 35 — đúng hình log thật, vì elapsed_ms của
+> `vad_end` chính là chi phí huỷ/flush) và test khẳng định `decompose(turn)` bằng
+> số tính tay từng lượt; vòng kiểm "bốn hàng cộng = turn latency" kiểu hằng đẳng
+> thức đã bỏ. **Kiểm bằng đột biến**: bỏ trừ `vad_end` ở `summarize` → 1 test đỏ;
+> bỏ trừ ở `decompose` → 2 test đỏ; hoàn nguyên → 8/8 xanh. Cổng chạy lại:
+> fmt ✅ · clippy exit 0 · 0 warning · `cargo test --workspace` **587 pass · 1 fail**
+> (đúng 1 fail VC-2 cũ, lần này chạy trọn cả các bin integration) · node --test **8/8**.
 
 ### VC-5 — Barge-in tự cắn, và AEC nhiều khả năng không hội tụ
 
@@ -471,6 +554,130 @@ chọn ngưỡng — đường log đã sẵn sàng, chỉ cần bật `LIVA_TUR
    **làm đỏ build**.
 5. **Đừng gộp VC-1 với VC-2 trong một commit.** Chúng đỏ ở hai bước CI khác nhau; gộp lại là
    mất khả năng biết cái nào sửa được cái gì.
+
+---
+
+## 6. Kho ứng viên đã sàng — rà nguồn mở 25/08/2026
+
+Một lượt rà mã nguồn mở/bài báo đề xuất 12 ứng viên nâng cấp. Ghi lại **kết quả sàng**,
+không phải danh sách việc: phần lớn bị loại, và **lý do loại mới là thứ có giá trị** — nó
+ngăn lượt sau đề xuất lại y hệt. Đúng tinh thần [§9 backlog](../03-danh-gia/05-nang-cap-toan-dien.md).
+
+Mọi dòng dưới đây đo tại `0a02b9cd` trên máy này, không trích từ báo cáo.
+
+### 6.1. Ba ứng viên bị loại vì **đã có sẵn trong repo**
+
+| Đề xuất | Thực tế đo được |
+|---|---|
+| "Thêm `sqlite-vec` để thay cosine brute-force" | **Đã có và đang gánh tải.** `sqlite-vec@0.1.9` nằm ở `package.json`; `liva-native-core/src/db.rs` dựng `CREATE VIRTUAL TABLE vec_idx USING vec0(embedding int8[…])`, ghi bằng `vec_quantize_int8(?, 'unit')` và truy hồi KNN bằng `MATCH`. `scripts/check-installer-config.mjs` còn bắt buộc `vec0.dylib`/`vec0.dll` có trong bundle với SHA-256 trong manifest — thiếu nó là **không mở được DB, chặn khởi động**. Không có việc gì ở đây |
+| "Lượng tử hoá int8/binary cho vector" | **Đã có** — chính `vec_quantize_int8` ở trên |
+| "Kiến trúc truy hồi đa tín hiệu BM25 + vector" | Nguyên liệu **đã có cả hai**: cạnh vector như trên, cạnh từ khoá là FTS `MATCH` trên `content` trong cùng `db.rs`. Việc còn lại (nếu có) là **hợp nhất thứ hạng**, và đó là một mục cần số recall thật trước — không phải một dependency mới |
+
+⇒ **Bài học ghi lại:** trước khi đề xuất một thư viện, `grep` tên nó trong `package.json`
+và `Cargo.toml`. Ba trong mười hai ứng viên chết ở bước này.
+
+### 6.2. Hai ứng viên có thật nhưng **lý do đưa ra sai**
+
+**`llama-cpp-2` 0.1.151 → 0.1.154** — bản mới có thật (đã kiểm: `cargo info llama-cpp-2`
+báo `latest 0.1.154`). Nhưng lý do "speculative decoding là đòn bẩy lớn nhất cho quãng
+`first_token → first_speaker_frame`" **sai hai lần**:
+
+1. **Sai quãng.** Speculative decoding tăng tốc *sinh token*, trong khi TTFT bị chi phối bởi
+   *prefill*. Còn quãng `first_token → first_speaker_frame` phần lớn là **tổng hợp TTS + chờ
+   đủ một mẩu** — thứ mà [VC-6](#vc-6--mẩu-tts-đầu-tiên-của-mỗi-lượt-quá-dài) đánh thẳng vào,
+   rẻ hơn nhiều.
+2. **Sai kiến trúc.** Speculative decoding cần một **draft model thứ hai** nạp song song. Giới
+   hạn cốt lõi của tầng LLM hiện tại là *một engine / một context / một Mutex dùng chung*
+   ([04-he-llm-va-prompt.md](../01-ban-ve/04-he-llm-va-prompt.md)). Đó không phải "patch bump".
+
+⇒ Nâng phiên bản thì **được**, rẻ và nên làm khi CI xanh. Nhưng ghi đúng lý do: *bắt kịp
+bản vá ngược dòng*, không phải *giảm TTFA*. Nhận nhầm công là cách một mục vô hại biến thành
+một lời hứa không giữ được.
+
+**`ort` → rc.13** — bản mới có thật, nhưng **điểm xuất phát bị ghi sai**: `Cargo.toml` khai
+`2.0.0-rc.9` còn `Cargo.lock` đã ở **rc.11**, nên bước nhảy thật là rc.11 → rc.13. Vẫn là
+breaking (kéo theo `ndarray` 0.15 → 0.17, chạm **mọi** điểm gọi ONNX: Parakeet, GTCRN, Silero,
+Kokoro, VieNeu, smart-turn, wake model). Phần thưởng nêu ra là `ModelCompiler` giảm thời gian
+khởi động — mà **thời gian khởi động chưa ai đo**. Tối ưu một thứ chưa đo là đúng loại việc
+[§5](#5-cái-không-nên-làm-trong-phạm-vi-tài-liệu-này) chặn. **Hoãn tới khi có số.**
+
+### 6.3. Ba ứng viên bị loại đúng — giữ lại làm tri thức phủ định
+
+| Đề xuất | Vì sao loại |
+|---|---|
+| `parakeet-tdt-0.6b-v3` để "streaming hoá" STT tiếng Việt | Bảng WER của model **không có tiếng Việt**. Ràng buộc CTC không nhân quả ở `liva-native-core/src/stt/mod.rs` vẫn đứng nguyên |
+| Moonshine cho tiếng Việt | Model ngoài tiếng Anh mang **giấy phép phi thương mại**; hỗ trợ tiếng Việt chưa rõ |
+| Framework voice agent kiểu Pipecat / LiveKit Agents | Python, cloud-first orchestration. Lõi LIVA đã là Rust thuần chạy cục bộ — nhét vào là đi lùi kiến trúc |
+
+### 6.4. Ứng viên tham chiếu, không phải phụ thuộc
+
+- **sherpa-onnx** — đọc cách họ tổ chức streaming ASR + keyword spotting. ⚠️ Khẳng định "có
+  model zipformer tiếng Việt" **chưa xác minh**; đừng lên kế hoạch dựa vào nó.
+- **VieNeu-TTS ngược dòng** — LIVA đang vendor VieNeu tại `liva-native-core/src/tts/vieneu/`.
+  Đối chiếu xem có bản vá nào chưa port ngược. Rẻ, và là việc *đọc*, không phải việc *sửa*.
+- **`@pixiv/three-vrm`** `^3.5.2` → 3.5.5 — patch bảo trì. Đừng kỳ vọng hiệu năng; tối ưu
+  avatar nằm ở render pipeline (U31 của backlog).
+- **PGO + BOLT** cho binary release, **tokio-console** cho dev. Cả hai hợp lý, cả hai **cần
+  baseline trước** — tức sau [VC-4b](#vc-4--đo-lượt-thoại-bốn-mốc-tracing).
+
+### VC-8 — Lip-sync theo phoneme thay vì theo biên độ
+
+**Đây là ứng viên duy nhất trong mười hai mục vừa qua được thăng lên thành việc.** Nó không
+thêm phụ thuộc nào, không cần phép đo nào trước, và dùng thứ đã nằm sẵn trong repo.
+
+**Bằng chứng.** Lip-sync hiện tại là **audio-driven**: `liva-ui/src/composables/use3DModel.ts`
+tự ghi trong khối của nó là "Audio-Driven Lip-Sync (RMS Viseme Mapping)" — miệng mở theo
+**năng lượng** của khung âm thanh. RMS không phân biệt được `a` với `m`: mọi âm to đều há
+miệng, mọi âm nhỏ đều khép, nên khẩu hình không bao giờ khớp phụ âm môi.
+
+Trong khi đó **phoneme đã được sinh ra rồi** ở phía lõi: mọi backend TTS đều đi qua G2P —
+`liva-native-core/src/tts/g2p.rs` và `liva-native-core/src/tts/vieneu/g2p.rs`. Chuỗi phoneme
+là đầu vào của chính bộ tổng hợp; nó đang bị vứt đi sau khi dùng.
+
+**Việc.** Đưa chuỗi phoneme (kèm mốc thời gian tương đối trong mẩu) ra cùng đường với PCM
+loa, rồi ánh xạ phoneme → viseme VRM ở `use3DModel.ts` thay cho RMS. Khung `OP_SPEAKER_OUT`
+đã mang `turn_epoch` + `sample_rate`; cần quyết định tường minh là mở rộng khung đó hay dùng
+một op-code điều khiển riêng — **đây là hợp đồng giao thức, phải chốt trước khi code**
+([02-giao-thuc-ipc-va-websocket.md](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md)).
+
+**Rủi ro thật cần lường.** Piper và VieNeu **không cùng bộ phoneme**, và đường Kokoro fallback
+lại khác nữa. Ánh xạ cứng theo một backend sẽ vỡ khi fallback đổi backend giữa lượt — mà
+`synthesis_plan` có đúng cơ chế fallback đó. Hoặc ánh xạ qua một tập viseme trung gian, hoặc
+giới hạn phạm vi vào một backend và **nói rõ backend nào**.
+
+**Nghiệm thu.**
+- Khẩu hình phân biệt được ít nhất nhóm môi (`m`/`b`/`p`) với nguyên âm mở (`a`) — kiểm bằng
+  mắt trên một câu tiếng Việt có cả hai, kèm ảnh chụp hai khung hình.
+- Backend đổi giữa lượt (ép fallback) **không** làm khẩu hình đứng hình hay nhảy loạn.
+- Không thêm phụ thuộc npm hay crate nào.
+- Đường RMS cũ còn nguyên làm dự phòng khi không có chuỗi phoneme (ví dụ audio phát lại từ
+  nguồn khác), và có công tắc chọn.
+- `vue-tsc`, ESLint, `npm run test:coverage -w liva-ui` không hồi quy.
+
+> **Thứ tự:** VC-8 **xếp sau** VC-1…VC-3. Nó độc lập với các cổng đang đỏ nên *chạy song song
+> được*, nhưng đừng bắt đầu khi CI còn đỏ ở advisory — lúc đó không phân biệt được lỗi mới với
+> lỗi sẵn có.
+
+> **Trạng thái 25/08/2026 (phiên thi công) — VC-8 ĐÃ CODE, một dòng nghiệm thu CHƯA ĐO ĐƯỢC.**
+>
+> - **Hợp đồng đã chốt: op-code riêng `OP_VISME = 0x06`** (`webrtc/frame.rs`), KHÔNG mở rộng
+>   khung `OP_SPEAKER_OUT`. Payload JSON `{"turn_epoch","base_seq_id","visemes":[{"v","t_ms"}]}`
+>   gửi qua CÙNG kênh speaker ngay trước audio của mẩu (FIFO bảo đảm thứ tự); client cũ bỏ qua
+>   opcode lạ an toàn (đã đọc router: nhánh `else { return; }`). Bảng opcode ghi đủ ở
+>   [02-giao-thuc-ipc-va-websocket.md §5.3](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md).
+> - **Tập viseme trung gian**: `aa/ee/ih/oh/ou + nil`, MỘT bảng IPA chung cho Piper lẫn VieNeu —
+>   ký tự lạ về `nil` (miệng đóng) thay vì đoán sai, nên fallback đổi backend không vỡ bảng.
+>   **Kokoro fallback không phát timeline** ⇒ client tự rơi về RMS. Phạm vi phoneme: VieNeu
+>   (sea-g2p) và Piper (espeak IPA); `t_ms` là **phân bố đều** theo độ dài mẩu (VITS/codec không
+>   nhả căn chỉnh per-phoneme — xấp xỉ có chủ đích, đủ phân biệt môi/nguyên âm).
+> - Công tắc: `LIVA_LIPSYNC=phoneme` (mặc định `rms` = hành vi cũ). Không thêm crate/npm nào.
+> - **Kiểm bằng đột biến** (bắt buộc theo luật test): Rust `'m'→Aa` ⇒ 2 đỏ; bỏ chia `/n`
+>   timeline ⇒ 1 đỏ; client `currentViseme` trả cứng `"aa"` ⇒ 2 đỏ; bỏ whitelist viseme ⇒ 1 đỏ.
+>   Hoàn nguyên ⇒ Rust viseme 4/4 xanh, UI phonemeLipSync 6/6 xanh.
+> - **Nghiệm thu "kiểm bằng mắt trên câu tiếng Việt có m/b/p và a" — CHƯA ĐO ĐƯỢC**: máy này
+>   `models/` trống, không chạy được lượt thoại thật. Đã bảo đảm bằng unit test mapping +
+>   timeline + registry; cần xác nhận bằng mắt khi có model.
+
 
 ---
 

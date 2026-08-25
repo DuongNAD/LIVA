@@ -110,7 +110,19 @@ fn gon(p: &Path) -> String {
 /// binary chỉ tồn tại ở MỘT tổ hợp cfg, nên nếu đọc `cfg!` trong thân hàm thì
 /// hầu hết các nhánh không thể chạm tới bằng test — mà chính mấy nhánh đó là
 /// nơi chứa lời khuyên khắc phục dễ viết sai nhất.
-fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) -> Muc {
+///
+/// Tương tự, `co_model` ("file model router có nằm trên đĩa không") là THAM SỐ,
+/// không phải phép đọc đĩa trong thân hàm (VC-2): đọc đĩa ở đây biến unit test
+/// thành phụ thuộc môi trường — trên máy thiếu model, test khẳng định thông điệp
+/// GPU sẽ đỏ vĩnh viễn và không cấu hình nào cứu được. Điểm gọi thật (`run`)
+/// tự tra đĩa rồi truyền vào; test quyết định được CẢ HAI nhánh lời khuyên.
+fn muc_vision(
+    la_debug: bool,
+    co_cuda: bool,
+    co_gpu: bool,
+    n_gpu_layers: u32,
+    co_model: bool,
+) -> Muc {
     const TEN: &str = "Nhìn màn hình (vision:ask)";
 
     if la_debug {
@@ -142,7 +154,7 @@ fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) ->
             // `gpu_layers_theo_vram` trả 0 ngay khi `can == 0`, tức khi không đo
             // được kích thước model — trên máy mới cài thì đó là lý do DUY NHẤT,
             // và VRAM hoàn toàn không liên quan.
-            if crate::configured_router_model_path().is_none_or(|p| !p.is_file()) {
+            if !co_model {
                 "CHƯA CÓ MODEL nên chưa tính được — đây là hệ quả của dòng \
                  `Model chat` bên dưới, không phải vấn đề GPU. Phép tự chọn cần \
                  kích thước model + projector để biết nhét được bao nhiêu lớp; \
@@ -225,11 +237,15 @@ pub fn thu_thap() -> Vec<Muc> {
         .ok()
         .and_then(|v| v.trim().parse::<u32>().ok())
         .unwrap_or_else(crate::boot::gpu_layers_mac_dinh);
+    // VC-2: "có model hay không" do điểm gọi tra đĩa rồi truyền vào — hàm
+    // `muc_vision` phải thuần để test chạm được cả hai nhánh lời khuyên.
+    let co_model = crate::configured_router_model_path().is_some_and(|p| p.is_file());
     muc.push(muc_vision(
         cfg!(debug_assertions),
         cfg!(feature = "cuda"),
         co_gpu,
         n_gpu_layers,
+        co_model,
     ));
 
     // ── Nhị phân ngoài: hai thứ `doctor` không kiểm ─────────────────────
@@ -518,7 +534,10 @@ mod tests {
             for co_cuda in [true, false] {
                 for co_gpu in [true, false] {
                     for n in [0u32, 999] {
-                        let m = muc_vision(la_debug, co_cuda, co_gpu, n);
+                        // `co_model` chỉ đổi LỜI KHUYÊN trong nhánh layers=0,
+                        // không đổi kết luận ok/✗ — duyệt một giá trị là đủ cho
+                        // bảng chân lý này (nhánh kia có test riêng bên dưới).
+                        let m = muc_vision(la_debug, co_cuda, co_gpu, n, true);
                         let mong_doi = !la_debug && co_cuda && co_gpu && n > 0;
                         assert_eq!(
                             m.ok,
@@ -547,16 +566,29 @@ mod tests {
     fn nhanh_debug_khong_bao_gio_khuyen_sai_viec() {
         // Ở build debug, lời khuyên đúng là "build release" — KHÔNG phải "cài
         // driver" hay "bật cuda", vì đổi hai thứ đó ở debug vẫn không chạy được.
-        let m = muc_vision(true, false, false, 0);
+        let m = muc_vision(true, false, false, 0, true);
         assert!(m.he_qua.contains("--release"), "{}", m.he_qua);
     }
 
     #[test]
-    fn n_gpu_layers_bang_0_khong_bao_gio_la_xanh() {
+    fn n_gpu_layers_bang_0_co_model_thi_khuyen_ep_gpu_layers() {
         // Chốt riêng cái bẫy đã suýt lọt: đủ release+CUDA+GPU mà layers=0 thì
-        // vision vẫn ~80 s. Nếu ai đó "đơn giản hoá" điều kiện này đi, test đỏ.
-        let m = muc_vision(false, true, true, 0);
+        // vision vẫn ~80 s. Có model trên đĩa ⇒ lời khuyên đúng là về VRAM/biến
+        // môi trường `LIVA_LLM_N_GPU_LAYERS`, KHÔNG phải "tải model".
+        let m = muc_vision(false, true, true, 0, true);
         assert_eq!(m.ok, Some(false));
         assert!(m.he_qua.contains("LIVA_LLM_N_GPU_LAYERS"), "{}", m.he_qua);
+        assert!(!m.he_qua.contains("CHƯA CÓ MODEL"), "{}", m.he_qua);
+    }
+
+    /// Nhánh thiếu model phải nói đúng nguyên nhân ("CHƯA CÓ MODEL") thay vì
+    /// đẩy người dùng đi săn VRAM. Trước VC-2, nhánh này chỉ chạm được khi máy
+    /// CÓ đĩa model — tức test trước đó đỏ vĩnh viễn trên mọi clone sạch.
+    #[test]
+    fn n_gpu_layers_bang_0_thieu_model_thi_do_model_chat() {
+        let m = muc_vision(false, true, true, 0, false);
+        assert_eq!(m.ok, Some(false));
+        assert!(m.he_qua.contains("CHƯA CÓ MODEL"), "{}", m.he_qua);
+        assert!(!m.he_qua.contains("LIVA_LLM_N_GPU_LAYERS"), "{}", m.he_qua);
     }
 }

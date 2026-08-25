@@ -42,9 +42,10 @@ All notable changes to LIVA are documented in this file. The format follows
 
 ### Security
 
-- npm advisories cleared twice on lockfile-only bumps: five findings on
-  2026-08-04 and js-yaml CVE-2026-59870 on 2026-08-07. Neither involved a change
-  to LIVA's own code; they are advisory-database drift against an unchanged
+- npm advisories cleared three times on lockfile-only bumps: five findings on
+  2026-08-04, js-yaml CVE-2026-59870 on 2026-08-07, and nanoid
+  GHSA-2v37-7h3g-55p8 (high) on 2026-08-25. None of these involved a change to
+  LIVA's own code; they are advisory-database drift against an unchanged
   lockfile.
 
 ## [1.0.0] - 2026-08-03

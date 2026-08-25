@@ -40,6 +40,7 @@ covers:
   - scripts/e2e-gateway.mjs
   - scripts/e2e-memory.mjs
   - scripts/start_all.ps1
+stale-ok: a0153135
 ---
 # Nâng cấp toàn diện — việc cần làm, theo thứ tự
 

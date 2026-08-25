@@ -2,7 +2,7 @@
 title: "Giao thức IPC và WebSocket"
 updated: 2026-08-07
 commit: dec1c14
-stale-ok: eeed694
+stale-ok: a0153135
 status: living
 owns:
   - catalog-lenh-handle-command

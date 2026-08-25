@@ -2,7 +2,7 @@
 title: "Memory runtime — kiến trúc as-built và kế hoạch nâng cấp"
 updated: 2026-07-31
 commit: 3688b5f
-stale-ok: bd11c84
+stale-ok: a0153135
 status: living
 owns:
   - memory-runtime-as-built

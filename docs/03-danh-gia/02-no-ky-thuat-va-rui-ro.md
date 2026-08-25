@@ -1,7 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
 updated: 2026-08-25
-commit: 3a8d5001
+commit: a0153135
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -129,7 +129,7 @@ không được đọc dòng “CRITICAL 3/3 đã khép” ở bảng trên thà
 |---|---|---|---|
 | 04/08/2026 | 5 lỗ hổng (3 high): fast-uri, ip-address, undici, hono, postcss | `npm audit fix` — 5 bump semver, chỉ lockfile (`30349c5`) | **Không** |
 | 07/08/2026 | js-yaml CVE-2026-59870 | nâng lockfile (`643e9f97`) | **Không** |
-| 25/08/2026 | `nanoid 3.3.16` GHSA-2v37-7h3g-55p8 (HIGH), qua `liva-desktop → vite → postcss` | một entry lockfile → `3.3.18` — ⚠️ **mới ở cây làm việc `mac-v2`, CHƯA commit** (nằm chung `package-lock.json` với 26 bump khác của nhánh, không tách ra được) | **Không** |
+| 25/08/2026 | `nanoid 3.3.16` GHSA-2v37-7h3g-55p8 (HIGH), qua `liva-desktop → vite → postcss` | một entry lockfile → `3.3.18` — đã vào lịch sử ở `8a891ef1` trên nhánh `mac-v2` (nằm chung `package-lock.json` với các bump khác của nhánh, không tách ra được) | **Không** |
 
 Ba lần, cùng một hình dạng: **lockfile không đổi, advisory database đổi**, CI đỏ ở bước 8/25 và 17 bước sau không chạy. Cách xác nhận là drift chứ không phải hồi quy vẫn như cũ — stash toàn bộ cây rồi chạy lại trên HEAD sạch; nếu cũng đỏ thì nguyên nhân nằm ngoài repo.
 

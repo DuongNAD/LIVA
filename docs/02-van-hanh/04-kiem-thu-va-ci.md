@@ -27,6 +27,7 @@ covers:
   - scripts/check-installer-config.mjs
   - scripts/check-installer-config.test.mjs
   - scripts/docs-check.mjs
+stale-ok: a0153135
 ---
 # Kiểm thử và CI
 

@@ -2,7 +2,7 @@
 title: "Tích hợp ngoài"
 updated: 2026-08-07
 commit: dec1c14
-stale-ok: f35961cf
+stale-ok: a0153135
 status: living
 owns:
   - bang-tich-hop-ngoai

@@ -24,6 +24,7 @@ covers:
   - liva-native-core/src/tts/vieneu/mod.rs
   - liva-native-core/tests/integration_tests.rs
   - scripts/ai-pre-commit.cjs
+stale-ok: a0153135
 ---
 # Mô hình AI và tài nguyên
 

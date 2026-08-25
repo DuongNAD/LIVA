@@ -1,8 +1,7 @@
 ---
 title: "Threat model — ranh giới tin cậy, mã hóa và kế hoạch hardening"
-updated: 2026-08-07
-commit: bd11c84
-stale-ok: dec1c14
+updated: 2026-08-25
+commit: a0153135
 status: living
 owns:
   - so-do-ma-hoa
@@ -262,9 +261,11 @@ hash và native loader.
 
 ### 6.3 MCP vault và external MCP
 
-`liva-native-core/src/mcp/server.rs#NativeMcpServer::resolve_path` có ba lớp:
+`liva-native-core/src/mcp/server.rs#NativeMcpServer::resolve_path` có các lớp:
 
-1. chặn absolute/root/`..`;
+1. chặn absolute/root/`..`, cộng drive-prefix Windows (`C:`) và mọi phân cách `\` —
+   hai vế sau thêm tại `ff8e960b` (25/08/2026): trên Unix `\` là ký tự thường nên
+   `..\env` từng lọt qua các kiểm tra lexical khi chạy macOS/Linux;
 2. lexical containment;
 3. canonicalize tổ tiên gần nhất để chặn symlink/junction escape kể cả file chưa tồn tại.
 

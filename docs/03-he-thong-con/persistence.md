@@ -2,7 +2,7 @@
 title: "Persistence runtime — dữ liệu bền, schema và kế hoạch nâng cấp"
 updated: 2026-07-31
 commit: 3688b5f
-stale-ok: dec1c14
+stale-ok: a0153135
 status: living
 owns:
   - erd-sqlite

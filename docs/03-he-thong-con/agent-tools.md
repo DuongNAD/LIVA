@@ -1,8 +1,7 @@
 ---
 title: "Agent và tool runtime — kiến trúc as-built"
-updated: 2026-08-07
-commit: bd11c84
-stale-ok: dec1c14
+updated: 2026-08-25
+commit: a0153135
 status: living
 owns:
   - may-trang-thai-agent
@@ -125,7 +124,9 @@ Luồng trong `liva-native-core/src/llm/tool_calling.rs#select_tool`:
 7. kiểm tham số bằng `validate_arguments`;
 8. gắn `ExecPolicy` nhưng chưa chạy.
 
-`DEFAULT_TOP_K` là 4 để giới hạn prompt trên model 2–4B. Có embedder thì ranking dùng cosine;
+`DEFAULT_TOP_K` là **7** (nâng từ 4 tại `b8192480`, 25/08/2026 — khép nợ M10: catalog nội bộ đã là
+7 tool kể cả `get_weather`, giữ top_k = 4 là để thứ hạng embedder âm thầm loại tool khỏi prompt ở
+mọi lượt; test `catalog_noi_bo_khong_duoc_dai_hon_top_k` giờ chặn catalog vượt top_k). Có embedder thì ranking dùng cosine;
 thiếu hoặc lỗi embedder thì fallback về token overlap. Hai thang điểm khác nhau, nên roadmap
 chưa được phép đặt một retrieval threshold chung khi chưa có corpus đo thật.
 

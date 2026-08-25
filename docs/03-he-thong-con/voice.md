@@ -18,6 +18,7 @@ covers:
   - liva-ui/src/utils/voiceFrame.ts
   - liva-native-core/tests/voice_runtime_components.rs
   - liva-native-core/tests/websocket_transport.rs
+stale-ok: a0153135
 ---
 # Voice runtime — kiến trúc as-built
 

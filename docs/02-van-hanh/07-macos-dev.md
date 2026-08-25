@@ -11,6 +11,7 @@ covers:
   - liva-native-core/src/governor.rs
   - liva-native-core/tests/artifact_trust.rs
   - liva-ui/package.json
+stale-ok: a0153135
 ---
 
 # 07 — Phát triển LIVA trên macOS

@@ -1,8 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
-updated: 2026-08-25
-commit: dd857505
-stale-ok: 7749e290
+updated: 2026-08-27
+commit: 112d5efd
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -480,7 +479,7 @@ Chỗ **từng chưa gộp được** là `LIVA_TTS_VIENEU` trong `tts/mod.rs`: 
 | ~~**L4**~~ ✅ **ĐÃ SỬA (rà lại 25/08)** | `PRAGMA page_size=32768` đặt sau khi DB đã tồn tại | Pragma nay nằm trong khối init/schema của `db.rs` (dòng 52–56) chạy trước mọi thao tác ghi; WAL mode cũng được đặt có điều kiện | — |
 | ~~**L5**~~ ✅ **ĐÃ CHỐT BẰNG QUYẾT ĐỊNH THIẾT KẾ (rà lại 25/08)** | Code chết cần dọn | Khoản cuối `OP_ACK_PLAYING` được **giữ lại có chủ đích**: `webrtc/frame.rs` chú thích rõ đây là "đặt chỗ trong giao thức" — client có thể gửi, server chưa đọc, và giá trị 0x04 không được tái sử dụng. Không còn lơ lửng gây hiểu lầm | — |
 | ~~**L6**~~ ✅ **ĐÃ SỬA 25/08** | Thư mục/file rác | `liva-computer-use/` không còn tồn tại; `tests/` ở gốc (`audit_profiler.ts`, `e2e-stress.js`, `websocket_stress_test.py`, `e2e/`) **không có script nào trỏ tới** — đã chuyển nguyên trạng vào `scripts/legacy/tests-stress/` (cùng quy ước với `scripts/legacy/start.ps1`) | — | — |
-| ~~**L7**~~ ✅ **ĐÃ SỬA 25/08** | Binary thiếu `test = false` | Rà lại 25/08 trên darwin: ngoài 3 binary gốc còn **4 binary mới** tự-discover (`debug_audio`, `gemma4_probe`, `model_compare`, `ttft_bench`, `verify_integrations`, `verify_voice`, `wakeword_benchmark`) và `wer_bench` khai thiếu flag. Đã khai báo đủ 24 `[[bin]]` với `test = false` trong `Cargo.toml` | — |
+| ~~**L7**~~ ✅ **ĐÃ SỬA 25/08** | Binary thiếu `test = false` | Rà lại 25/08 trên darwin: ngoài 3 binary gốc còn **4 binary mới** tự-discover (`debug_audio`, `gemma4_probe`, `model_compare`, `ttft_bench`, `verify_integrations`, `verify_voice`, `wakeword_benchmark`) và `wer_bench` khai thiếu flag. Đã khai báo đủ 24 `[[bin]]` với `test = false` trong `Cargo.toml`. **Còn 23 từ 27/08/2026** — `verify_integrations` bị xoá (bản sao trùng của `tests/verify_commands.rs`; xem L10). Đếm lại cùng ngày: 23 khai báo `[[bin]]` / 23 file trong `src/bin/` — khớp | — |
 | ~~**L8**~~ ✅ **ĐÃ SỬA** | Binary verify nhúng lại module bằng `#[path]` | Kiểm lại 22/07/2026: `grep -rn '#\[path' liva-native-core/src/bin/*.rs` → **0 hit**. Ví dụ `src/bin/verify_round2.rs:8-10` nay là ba dòng `use liva_native_core::stt::SttManager;` / `use liva_native_core::tts::TtsManager;` / `use liva_native_core::tts::audio::TtsAudioPlayer;` | Không còn bản sao thứ hai của `crypto/db/stt/tts` ⇒ số đo của các binary verify khớp với bản trong lib | — (đã chuyển sang `use liva_native_core::...`) |
 | ~~**L9**~~ ✅ **ĐÃ SỬA 25/08** | Test có assertion vô nghĩa + gọi mạng thật trong CI | `verify_commands.rs` — đã bỏ nhánh "token giả → assert success" (handler fire-and-forget luôn trả success, không kiểm chứng được gì, đồng thời phát request thật ra `api.telegram.org`). Giữ nhánh thiếu token — xác thực được và offline. Đường "token có mặt" chờ điểm inject client giả | — |
 | ~~**L10**~~ ✅ **ĐÃ SỬA 25/08** | `self_correction_stress.rs` phụ thuộc `tasklist` (Windows-only) | Helper đếm tiến trình nay tách theo nền: Windows giữ `tasklist`, macOS/Linux dùng `pgrep -f` — experimental tests chạy được ngoài Windows | — |
@@ -725,7 +724,7 @@ Hai phát hiện thuộc về tài liệu này (không phải mô tả cấu hì
 
 ### 5.9 Ghi chú phụ về binary
 
-`src/bin/debug_audio.rs`, `src/bin/verify_integrations.rs`, `src/bin/verify_voice.rs` **không có `[[bin]]` khai báo** trong `Cargo.toml` (14 bin được khai báo tường minh, 17 file tồn tại) — vẫn build nhờ autobins mặc định, nhưng khác cấu hình (`test = true`) so với 14 bin còn lại (`test = false`). Đây chính là L7.
+*(Mô tả trạng thái LÚC phát hiện L7. `src/bin/verify_integrations.rs` đã bị xoá 27/08/2026 — xem L10.)* `src/bin/debug_audio.rs`, `src/bin/verify_integrations.rs`, `src/bin/verify_voice.rs` **không có `[[bin]]` khai báo** trong `Cargo.toml` (14 bin được khai báo tường minh, 17 file tồn tại) — vẫn build nhờ autobins mặc định, nhưng khác cấu hình (`test = true`) so với 14 bin còn lại (`test = false`). Đây chính là L7.
 
 ---
 

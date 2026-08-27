@@ -1,5 +1,4 @@
 use liva_native_core::stt::engine::SttEngine;
-use liva_native_core::tts::TtsChunker;
 use liva_native_core::tts::engine::TtsEngine;
 use liva_native_core::tts::g2p::G2p;
 use std::time::Instant;
@@ -85,65 +84,6 @@ fn test_g2p_speed() {
     println!("- Total time for {} iterations: {:?}", iterations, duration);
     println!("- Time per iteration: {:?}", per_iter);
     println!("- Characters processed per second: {:.2}", chars_per_sec);
-}
-
-fn test_chunking_bounds() {
-    println!("\n--- Running Sub-Sentence Chunking Verification ---");
-
-    // 1. Sentence splitting bounds
-    let mut chunker = TtsChunker::new();
-    let chunks = chunker.push("Hello world. How are you today? Perfect.");
-    println!("Sentence split test: {:?}", chunks);
-    assert_eq!(
-        chunks,
-        vec!["Hello world.", "How are you today?", "Perfect."]
-    );
-
-    // 2. Comma boundary split: 6-word limit
-    let mut chunker_comma = TtsChunker::new();
-    // 5 words before comma -> should NOT split on comma.
-    let chunks_5w = chunker_comma.push("This has five words here, but we don't split");
-    println!("5-word comma test: {:?}", chunks_5w);
-    assert_eq!(
-        chunks_5w,
-        Vec::<String>::new(),
-        "Should not return chunks yet, since no terminal punctuation and comma words < 6"
-    );
-    let rem_5w = chunker_comma.flush();
-    assert_eq!(
-        rem_5w,
-        Some("This has five words here, but we don't split".to_string())
-    );
-
-    let mut chunker_comma6 = TtsChunker::new();
-    // 6 words before comma -> SHOULD split.
-    let chunks_6w = chunker_comma6.push("One two three four five six, seven eight.");
-    println!("6-word comma test: {:?}", chunks_6w);
-    assert_eq!(
-        chunks_6w,
-        vec!["One two three four five six,", "seven eight."]
-    );
-
-    // 3. 25-word maximum limit
-    let mut chunker_max = TtsChunker::new();
-    let long_sentence = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty";
-    let chunks_max = chunker_max.push(long_sentence);
-    println!("Max 25-word split test: {:?}", chunks_max);
-    assert_eq!(chunks_max.len(), 1);
-    let words: Vec<&str> = chunks_max[0].split_whitespace().collect();
-    assert_eq!(words.len(), 25, "Chunk should contain exactly 25 words");
-
-    let rem_max = chunker_max.flush();
-    assert!(rem_max.is_some());
-    let rem_str = rem_max.unwrap();
-    let rem_words: Vec<&str> = rem_str.split_whitespace().collect();
-    assert_eq!(
-        rem_words.len(),
-        5,
-        "Remaining chunk should contain the leftover 5 words"
-    );
-
-    println!("Sub-sentence chunking checks passed successfully!");
 }
 
 fn test_continuous_execution() {
@@ -330,7 +270,9 @@ fn main() {
     println!("=== LIVA Voice Modules Performance & Stress Verification ===");
     test_g2p_accuracy();
     test_g2p_speed();
-    test_chunking_bounds();
+    // Chunking là pure logic không phụ thuộc model/môi trường, các phép kiểm
+    // nằm ở `tts/mod.rs` dưới `#[cfg(test)]` và được CI gate qua `cargo test`.
+    // Không duplicate tại đây vì đã rữa nát 2 lần (U7 29/07/2026, VC-6 25/08/2026).
     test_continuous_execution();
     println!("\n=== Verification Completed ===");
 }

@@ -29,7 +29,7 @@
 //!
 //! Chữ ký của `handle_command` **không đổi** — đây là điều kiện để việc tách
 //! không lan ra ngoài: mọi caller (`main.rs`, `websocket.rs`, vỏ Tauri,
-//! `telegram.rs`, `verify_integrations`, cùng 34 điểm gọi trong 4 file test)
+//! `telegram.rs`, cùng 34 điểm gọi trong 4 file test)
 //! vẫn gọi y như cũ.
 //!
 //! ## Tách dần, không một cú

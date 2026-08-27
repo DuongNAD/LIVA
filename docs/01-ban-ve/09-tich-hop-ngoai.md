@@ -1,6 +1,6 @@
 ---
 title: "Tích hợp ngoài"
-updated: 2026-08-25
+updated: 2026-08-27
 commit: 4ae8bfb6
 status: living
 owns:
@@ -13,7 +13,6 @@ covers:
   - liva-native-core/src/main.rs
   - liva-native-core/src/telegram.rs
   - liva-native-core/src/agent/graph.rs
-  - liva-native-core/src/bin/verify_integrations.rs
   - liva-native-core/src/integrations/smart_home.rs
   - liva-native-core/src/mcp/*
   - liva-native-core/src/tts/*
@@ -420,7 +419,9 @@ if let Some(token) = telegram_token {
 
 ### 9.2.6 Lệnh IPC liên quan Telegram
 
-`"telegram:send_text"` (`liva-native-core/src/commands/integrations.rs:53-74`): đọc `payload["chatId"]` (parse `i64`), `payload["text"]`, `std::env::var("TELEGRAM_BOT_TOKEN")`, **tạo `Bot::new(token)` mới mỗi lần gọi**, `tokio::spawn` gửi, trả `{"success": true}` **ngay lập tức** — fire-and-forget, **không báo lỗi gửi**. Được test ở `src/bin/verify_integrations.rs:80-86`.
+`"telegram:send_text"` (`liva-native-core/src/commands/integrations.rs:53-74`): đọc `payload["chatId"]` (parse `i64`), `payload["text"]`, `std::env::var("TELEGRAM_BOT_TOKEN")`, **tạo `Bot::new(token)` mới mỗi lần gọi**, `tokio::spawn` gửi, trả `{"success": true}` **ngay lập tức** — fire-and-forget, **không báo lỗi gửi**. Được test ở `liva-native-core/src/commands/integrations.rs:97-107` (thiếu tham số → `Err`, không panic) và `liva-native-core/tests/verify_commands.rs:110-125` (thiếu token → `Err "Bot token missing"`).
+
+> ⚠️ **Nhánh "token có mặt" cố tình KHÔNG có test.** Vì handler fire-and-forget luôn trả `{"success": true}`, một assert `success == true` không chứng minh được gì về việc Telegram có nhận tin hay không — trong khi nó phát một request THẬT ra `api.telegram.org`. Nợ L9 đã gỡ assert đó khỏi `verify_commands.rs` ngày 25/08/2026; bản sao cuối cùng của nó sống trong `src/bin/verify_integrations.rs` và đã bị xoá cùng file đó ngày 27/08/2026. Muốn kiểm nhánh này thì phải inject client giả trước.
 
 > 📌 Nguồn đầy đủ (bảng 44 lệnh `handle_command`): [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
@@ -487,7 +488,7 @@ Thiết bị hỗ trợ: **light / ac / fan**; hành động: **on / off**. Meta
 
 > 📌 Nguồn đầy đủ về StateGraph sáu node và cách router chọn nhánh: [Agent và tool runtime](../03-he-thong-con/agent-tools.md) · về 3 lệnh IPC ở trên: [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
-Test: `smart_home.rs:69-106` (4 unit test) + `src/bin/verify_integrations.rs:51-73`.
+Test: `liva-native-core/src/integrations/smart_home.rs:90-133` (4 unit test) + `liva-native-core/tests/verify_commands.rs:49-108` (qua `handle_command`, assert JSON chính xác).
 
 **Mâu thuẫn schema cần biết:** `NativeMcpServer::control_smarthome` dùng `{device, command}` (String tự do) và **không** gọi `integrations::smart_home::execute`, trong khi `integrations::smart_home` dùng `{device, action}` với enum nghiêm ngặt. **Hai stub riêng biệt, schema lệch nhau.**
 

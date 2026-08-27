@@ -1,6 +1,6 @@
 ---
 title: "Thị giác, quan sát thụ động và governor"
-updated: 2026-08-05
+updated: 2026-08-27
 commit: 3688b5f
 status: frozen
 owns: []
@@ -112,7 +112,7 @@ pub trait ScreenCapturer: Send + Sync { ... }                     // capture.rs:
 - Monitor được cache **thread_local**: `CACHED_MONITOR: RefCell<HashMap<u32, xcap::Monitor>>` (`capture.rs:156-158`). Khi `capture_image()` lỗi thì `invalidate_cache()` rồi thử lại **đúng 1 lần** (`capture.rs:208-218`) — đây là cơ chế xử lý đổi độ phân giải / rút cáp màn hình giữa chừng.
 - `Frame` luôn trả **`PixelFormat::Rgba`** (`capture.rs:205`), `data = image.into_raw()`.
 - Khởi tạo runtime: `NativeScreenCapturer::new(0)` — **hard-code display 0** (`main.rs:170`); nếu không khớp `m.id()` thì fallback `monitors.get(display_id as usize)` (`capture.rs:181-182`).
-- `MockScreenCapturer` (`capture.rs:245`) chỉ dùng trong test và trong `bin/verify_duplex.rs:79`, `bin/verify_integrations.rs:22`.
+- `MockScreenCapturer` (`capture.rs:245`) chỉ dùng trong test và trong `bin/verify_duplex.rs:79`. *(`bin/verify_integrations.rs` cũng từng dựng nó; file đã xoá 27/08/2026.)*
 
 ### 1.2 Tần suất chụp
 

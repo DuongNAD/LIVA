@@ -195,11 +195,6 @@ path = "src/bin/ttft_bench.rs"
 test = false
 
 [[bin]]
-name = "verify_integrations"
-path = "src/bin/verify_integrations.rs"
-test = false
-
-[[bin]]
 name = "verify_voice"
 path = "src/bin/verify_voice.rs"
 test = false

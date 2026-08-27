@@ -87,7 +87,6 @@ Tổng: **269** mục mã nguồn được tài liệu hoá bởi **63** tài li
 | `liva-native-core/src/bin/tool_calling_probe.rs` | [04-de-xuat-tich-hop-openspace.md](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) · [agent-tools.md](../03-he-thong-con/agent-tools.md) |
 | `liva-native-core/src/bin/ttft_bench.rs` | [voice-slo.md](../05-chat-luong/voice-slo.md) |
 | `liva-native-core/src/bin/verify_duplex.rs` | [02-giao-thuc-ipc-va-websocket.md](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) · [07-tang-du-lieu-va-bao-mat.md](../01-ban-ve/07-tang-du-lieu-va-bao-mat.md) · [01-doi-chieu-tuyen-bo-vs-thuc-te.md](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) |
-| `liva-native-core/src/bin/verify_integrations.rs` | [09-tich-hop-ngoai.md](../01-ban-ve/09-tich-hop-ngoai.md) |
 | `liva-native-core/src/bin/voice_stress.rs` | [voice-slo.md](../05-chat-luong/voice-slo.md) |
 | `liva-native-core/src/bin/wakeword_benchmark.rs` | [wake-word.md](../03-he-thong-con/wake-word.md) · [wake-benchmark.md](../05-chat-luong/wake-benchmark.md) |
 | `liva-native-core/src/bin/wer_bench.rs` | [wer-fleurs-vi.md](../05-chat-luong/wer-fleurs-vi.md) |

@@ -106,9 +106,6 @@ This project is indexed by GitNexus as **LIVA**. Use the GitNexus MCP tools to u
   # WebRTC streaming duplex pipeline (VAD, preemption latency, session IDs)
   .\target\debug\verify_duplex.exe
 
-  # Functional correctness of handle_command, db, crypto, stt, llm, tts
-  .\target\debug\verify_integrations.exe
-
   # Vision change-detection benchmark (find_changes on 1920x1080)
   .\target\debug\screen_vision_bench.exe
   ```

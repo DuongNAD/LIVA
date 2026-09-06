@@ -30,15 +30,30 @@ const uploadError = ref('');
 const selectFolderError = ref('');
 // const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
-const mapGatewayModels = (raw: Record<string, unknown>[], type: '2d' | '3d'): AvatarModelInfo[] =>
-  raw.map((m) => ({
-    name: String(m.name ?? m.filename ?? 'Model'),
-    filename: String(m.filename ?? ''),
-    size: String(m.size ?? ''),
-    isActive: Boolean(m.isActive),
-    type,
-    format: (m.format as AvatarModelInfo['format']) ?? (type === '2d' ? 'live2d' : 'fbx'),
-  }));
+const mapGatewayModels = (raw: (string | Record<string, unknown>)[], type: '2d' | '3d'): AvatarModelInfo[] =>
+  raw.map((m) => {
+    if (typeof m === 'string') {
+      const filename = m;
+      const format = type === '2d' ? 'live2d' : (filename.endsWith('.fbx') ? 'fbx' : 'vrm');
+      const name = filename.replace(/\.[^/.]+$/, '');
+      return {
+        name: name || 'Model',
+        filename,
+        size: 'Local',
+        isActive: false,
+        type,
+        format,
+      };
+    }
+    return {
+      name: String(m.name ?? m.filename ?? 'Model'),
+      filename: String(m.filename ?? ''),
+      size: String(m.size ?? ''),
+      isActive: Boolean(m.isActive),
+      type,
+      format: (m.format as AvatarModelInfo['format']) ?? (type === '2d' ? 'live2d' : 'fbx'),
+    };
+  });
 
 const resolveModelLabel = (model: AvatarModelInfo) => {
   const parts = model.filename.split('/').filter(Boolean);

@@ -237,6 +237,20 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
     let ram = sysinfo::ram_bytes();
     let proc_mem = sysinfo::process_memory_bytes();
 
+    // Record real-time hardware telemetry sample
+    let telemetry_prof = crate::telemetry::global_telemetry();
+    telemetry_prof.record_resource_sample(
+        cpu.map(|c| c as f32),
+        liva_cpu.map(|c| c as f32),
+        gpu_pct,
+        proc_mem.map(|(rss, _)| rss),
+        proc_mem.map(|(_, commit)| commit),
+    );
+
+    let latest_ai_lat = telemetry_prof.latest_ttft_ms();
+    let latest_voice_lat = telemetry_prof.latest_audio_latency_ms();
+    let recent_telemetry_events = telemetry_prof.get_recent_events(Some(20));
+
     Ok(json!({
         "healthChecks": {
             "gateway": {
@@ -247,10 +261,9 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
             },
             "aiEngine": {
                 "status": ai_status,
-                // Đo độ trễ sinh chữ đòi phải CHẠY một lượt suy luận. Một bảng
-                // trạng thái không được phép tự ý làm việc đó (tốn GPU/CPU và
-                // làm nhiễu chính thứ nó đang đo) ⇒ không có số thì để trống.
-                "latencyMs": serde_json::Value::Null,
+                // Đo độ trễ sinh chữ đòi phải CHẠY một lượt suy luận.
+                // Trả về độ trễ đo được gần nhất từ telemetry nếu có, hoặc null nếu chưa chạy.
+                "latencyMs": latest_ai_lat,
                 "detail": ai_detail,
             },
             // Không có "orchestrator" nào trong lõi Rust; thứ có thật là tầng
@@ -259,7 +272,7 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
             "orchestrator": { "status": "online", "detail": "dispatch in-process" },
             "voiceEngine": {
                 "status": voice_status,
-                "latencyMs": serde_json::Value::Null,
+                "latencyMs": latest_voice_lat,
                 "detail": voice_detail,
             },
             "memory": { "status": mem_status, "detail": mem_detail },
@@ -298,7 +311,7 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
             "totalMemory": ram.map(|(t, _)| t),
             "freeMemory": ram.map(|(_, f)| f),
         },
-        "telemetry": [],
+        "telemetry": recent_telemetry_events,
         "uptime": sysinfo::process_uptime_secs(),
         // `memoryUsage` = commit charge. Rust không có heap do runtime quản lý
         // nên không có gì báo cáo dưới cái tên "heap" — xem `sysinfo`.

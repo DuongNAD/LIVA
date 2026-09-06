@@ -1,4 +1,5 @@
 use crate::{AppState, CommandPrincipal, authorize_command, handle_command_as, wake};
+pub use crate::webrtc::frame::{BufferPool, PooledBuffer};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -10,6 +11,32 @@ use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
 mod dialogue;
+
+#[derive(Serialize)]
+struct AiStreamChunkPayload<'a> {
+    #[serde(rename = "textChunk")]
+    text_chunk: &'a str,
+    #[serde(rename = "isThought")]
+    is_thought: bool,
+}
+
+#[derive(Serialize)]
+struct AiStreamChunkEvent<'a> {
+    event: &'static str,
+    payload: AiStreamChunkPayload<'a>,
+}
+
+/// Zero-copy compact serializer for streaming AI token chunks to WebSocket/IPC clients.
+#[inline]
+pub fn format_ai_stream_chunk(text_chunk: &str, is_thought: bool) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&AiStreamChunkEvent {
+        event: "ai_stream_chunk",
+        payload: AiStreamChunkPayload {
+            text_chunk,
+            is_thought,
+        },
+    })
+}
 
 const MAX_WS_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_WS_MESSAGE_BYTES: usize = MAX_WS_TEXT_BYTES + 9;
@@ -566,6 +593,9 @@ async fn handle_ws_connection(
                         if !epoch_gate.accepts(&frame) {
                             continue;
                         }
+                        let op = frame.op_code;
+                        let payload_len = frame.payload.len();
+                        let send_start = std::time::Instant::now();
                         match frame.encode() {
                             Ok(bytes) => {
                                 if let Err(e) = ws_sender.send(tokio_tungstenite::tungstenite::Message::Binary(bytes.to_vec())).await {
@@ -576,6 +606,8 @@ async fn handle_ws_connection(
                                     }
                                     break;
                                 }
+                                let transit_ms = send_start.elapsed().as_secs_f64() * 1000.0;
+                                crate::telemetry::global_telemetry().record_ws_transit(op, transit_ms, payload_len);
                             }
                             Err(e) => error!("Failed to encode frame: {}", e),
                         }
@@ -1202,11 +1234,7 @@ async fn handle_ws_connection(
                                                             if token.is_empty() {
                                                                 return true;
                                                             }
-                                                            let chunk = serde_json::json!({
-                                                                "event": "ai_stream_chunk",
-                                                                "payload": { "textChunk": token, "isThought": false }
-                                                            });
-                                                            if let Ok(s) = serde_json::to_string(&chunk) {
+                                                            if let Ok(s) = format_ai_stream_chunk(token, false) {
                                                                 let _ = text_tx_inner.blocking_send(s);
                                                             }
                                                             true

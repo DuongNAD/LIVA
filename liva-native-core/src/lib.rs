@@ -1,7 +1,10 @@
 pub mod agent;
+pub mod ast_repair;
+pub mod automation;
 mod artifact_trust;
 mod authorization;
 pub mod boot;
+pub mod channels;
 pub mod commands;
 pub mod consent;
 pub mod crypto;
@@ -9,10 +12,13 @@ pub mod db;
 #[cfg(feature = "experimental")]
 pub mod evolution;
 pub mod governor;
+pub mod gateway;
 pub mod integrations;
+pub mod ipc;
 pub mod keystore;
 pub mod llm;
 pub mod mcp;
+pub mod memory;
 pub mod memory_consolidation;
 pub mod memory_retention;
 pub mod messaging;
@@ -24,10 +30,13 @@ pub mod persistence_backup;
 pub mod preflight;
 pub mod setup;
 pub mod skills;
+pub mod sandbox;
 pub mod stt;
 pub mod sysinfo;
+pub mod system_diagnostic_probe;
 mod system_status;
 pub mod telegram;
+pub mod telemetry;
 pub mod tts;
 pub mod vision;
 pub mod wake;
@@ -54,7 +63,16 @@ pub use paths::{
 };
 use std::sync::Arc;
 pub use stt::SttManager;
+pub use system_diagnostic_probe::{
+    SubsystemReport, SubsystemStatus, SystemDiagnosticReport, probe_audio_io,
+    probe_browser_binary, probe_llm_runtime, probe_network_adapters, probe_sqlite_pool,
+    run_system_diagnostic,
+};
 pub use system_status::system_status;
+pub use telemetry::{
+    LatencyMetricsSummary, LatencyRecord, ResourceSample, TelemetryEntry, TelemetryProfiler,
+    global_telemetry,
+};
 pub use tts::TtsManager;
 pub use tts::audio::TtsAudioPlayer;
 pub use vision::{
@@ -62,6 +80,13 @@ pub use vision::{
     capture::{Frame, PixelFormat, ScreenCapturer},
     diff::{DiffEngine, RegionDiffResult, ScreenRegion},
 };
+pub use automation::{
+    BrowserConfig, BrowserDriver, BrowserError, CdpBrowserController, DomExtractMode,
+    MockBrowserDriver, MockSystemAutomationDriver, NativeSystemDriver, PageMetadata,
+    SandboxGuard, SandboxPolicy, SandboxViolation, SemanticDomExtractor,
+    SystemAutomationDriver, SystemAutomationError, WindowInfo,
+};
+pub use ast_repair::*;
 
 pub struct AppState {
     pub db: DatabasePool,
@@ -198,7 +223,7 @@ pub struct BootKey {
 /// Thứ tự khoá:
 /// 1. `LIVA_ENCRYPTION_KEY` nếu set và **≠ mặc định** → dùng nguyên
 ///    (power-user/CI/khôi phục); không đụng keystore, không escrow.
-/// 2. ngược lại (chưa set, HOẶC == mặc định) → **khoá thiết bị DPAPI**
+/// 2. ngược lại (chưa set, HOẶC == mặc định) → **khoá thiết bị (device key)**
 ///    ([`keystore::load_or_create_device_key`]); sinh mới nếu chưa có (→ escrow).
 ///
 /// Khoá MẶC ĐỊNH `"0"×32` KHÔNG bao giờ là khoá GHI: `== mặc định` bị coi như
@@ -207,7 +232,7 @@ pub struct BootKey {
 /// khoá mặc định nâng cấp lên là facts tự chuyển sang khoá thật, không mất.
 ///
 /// `in_memory=true` (test/CI, `LIVA_DB_IN_MEMORY=1`): không có dữ liệu-at-rest
-/// nên KHÔNG sinh khoá thiết bị/DPAPI — dùng thẳng env (cho phép cả mặc định).
+/// nên KHÔNG sinh khoá thiết bị/keystore — dùng thẳng env (cho phép cả mặc định).
 pub fn resolve_and_rekey(
     db: &DatabasePool,
     db_path: &std::path::Path,
@@ -223,7 +248,7 @@ pub fn resolve_and_rekey(
     let (passphrase, escrow_hex, source) = if let Some(k) = real_env {
         (k, None, "env")
     } else if in_memory {
-        // Không có dữ liệu-at-rest → cho phép env (kể cả mặc định), không DPAPI.
+        // Không có dữ liệu-at-rest → cho phép env (kể cả mặc định), không keystore.
         (
             env_key.unwrap_or_else(|| crypto::DEFAULT_ENCRYPTION_KEY.to_string()),
             None,
@@ -289,8 +314,8 @@ pub fn escrow_message(hex_key: &str) -> String {
         "\n╔══════════════════════════════════════════════════════════════════╗\n\
          ║  LIVA vừa SINH khoá mã hoá thiết bị mới cho dữ liệu của bạn.        ║\n\
          ║  HÃY SAO LƯU khoá này ở nơi an toàn (trình quản lý mật khẩu…).      ║\n\
-         ║  Nếu Windows bị cài lại / reset mật khẩu, đây là cách DUY NHẤT để   ║\n\
-         ║  đọc lại ký ức: đặt biến môi trường LIVA_ENCRYPTION_KEY = khoá này. ║\n\
+         ║  Nếu OS bị cài lại / đổi máy / reset mật khẩu, đây là cách DUY NHẤT ║\n\
+         ║  để đọc lại ký ức: đặt biến môi trường LIVA_ENCRYPTION_KEY = khoá.  ║\n\
          ╚══════════════════════════════════════════════════════════════════╝\n\
          LIVA_ENCRYPTION_KEY={hex_key}\n"
     )
@@ -509,8 +534,16 @@ pub async fn handle_chat_completion_scoped(
     let compiled_prompt = llm::compile_prompt(&messages)?;
 
     let state_clone = state.clone();
+    let start_instant = std::time::Instant::now();
+    let first_token_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let first_token_flag_inner = first_token_flag.clone();
     let completion_output = tokio::task::spawn_blocking(move || {
         let mut llm_manager = state_clone.llm.blocking_lock();
+        let model_name = llm_manager
+            .current_model_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "router".to_string());
         if stream {
             let tx_inner =
                 tx.ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
@@ -519,6 +552,11 @@ pub async fn handle_chat_completion_scoped(
             llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
                 if piece.is_empty() {
                     return true;
+                }
+                if !first_token_flag_inner.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    let ttft_ms = start_instant.elapsed().as_secs_f64() * 1000.0;
+                    global_telemetry().record_ttft(&model_name, ttft_ms, 0);
+                    global_telemetry().record_receive_to_stream("chat:completion_stream", ttft_ms);
                 }
                 let chunk_response = IpcResponse {
                     id: req_id_inner.clone(),
@@ -532,7 +570,13 @@ pub async fn handle_chat_completion_scoped(
                 true
             })
         } else {
-            llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |_| true)
+            let res = llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |_| true);
+            if let Ok(ref output) = res {
+                let latency_ms = start_instant.elapsed().as_secs_f64() * 1000.0;
+                global_telemetry().record_ttft(&model_name, latency_ms, output.prompt_tokens);
+                global_telemetry().record_receive_to_stream("chat:completion_sync", latency_ms);
+            }
+            res
         }
     })
     .await
@@ -648,6 +692,21 @@ pub async fn handle_command(
     }
     if commands::skill_store::owns(command) {
         return commands::skill_store::handle(state, command, payload).await;
+    }
+    if commands::channels::owns(command) {
+        return commands::channels::handle(state, command, payload).await;
+    }
+    if commands::pairing::owns(command) {
+        return commands::pairing::handle(state, command, payload).await;
+    }
+    if commands::browser::owns(command) {
+        return commands::browser::handle(state, command, payload).await;
+    }
+    if commands::diff::owns(command) {
+        return commands::diff::handle(state, command, payload).await;
+    }
+    if commands::canvas::owns(command) {
+        return commands::canvas::handle(state, command, payload, tx, req_id).await;
     }
 
     match command {

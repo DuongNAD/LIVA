@@ -11,6 +11,7 @@
     "allow-update-interactive-zones",
     "allow-open-dashboard",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "core:window:allow-hide"
   ]
 }

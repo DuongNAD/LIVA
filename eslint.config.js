@@ -42,7 +42,13 @@ export default tseslint.config(
       // chúng chỉ sinh lỗi giả cho ai chạy `eslint .` từ gốc repo.
       "liva-ai-engine/**/*",
       "mvc-simulation/**/*",
-      "target/**/*"
+      "target*",
+      "target*/**/*",
+      "target_m4",
+      "target_m4/**/*",
+      "target/**",
+      "**/target/**",
+      "**/target_*/**"
     ]
   },
   eslint.configs.recommended,

@@ -197,6 +197,13 @@
       "rationale": "Canonical as-built cho StateGraph, reflex lane, tool selector, MCP executor và skill runtime."
     },
     {
+      "path": "docs/03-he-thong-con/automation-va-sandbox.md",
+      "disposition": "KEEP",
+      "wave": "C-agent-tools-complete",
+      "targets": [],
+      "rationale": "Kiến trúc tự động hoá trình duyệt qua CDP, OS automation và sandbox bảo mật đa tầng."
+    },
+    {
       "path": "docs/03-he-thong-con/context-broker.md",
       "disposition": "KEEP",
       "wave": "C-vision-complete",
@@ -216,6 +223,13 @@
       "wave": "C-desktop-complete",
       "targets": [],
       "rationale": "Canonical as-built cho Vue entries, widget/dashboard và dual transport."
+    },
+    {
+      "path": "docs/03-he-thong-con/gateway-va-skills.md",
+      "disposition": "KEEP",
+      "wave": "C-desktop-complete",
+      "targets": [],
+      "rationale": "Kiến trúc Gateway Control Plane, message normalization, đa kênh và ClawHub skills runtime."
     },
     {
       "path": "docs/03-he-thong-con/memory.md",

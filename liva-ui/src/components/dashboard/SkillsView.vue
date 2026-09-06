@@ -9,6 +9,10 @@
 import { computed, ref, onActivated, onDeactivated } from "vue";
 import { useGateway } from "../../composables/useGateway";
 import { useI18n } from "../../composables/useI18n";
+import SkillManifestDrawer from "./skills/SkillManifestDrawer.vue";
+import SkillConfigModal from "./skills/SkillConfigModal.vue";
+import SkillLogsPanel from "./skills/SkillLogsPanel.vue";
+import ClawHubMarketplaceModal from "./skills/ClawHubMarketplaceModal.vue";
 
 interface Skill {
   name: string;
@@ -36,6 +40,12 @@ const gateway = useGateway();
 const { t, currentLang } = useI18n();
 const searchQuery = ref("");
 const filterMode = ref<"all" | "enabled" | "disabled">("all");
+
+// Modals and Drawers state
+const activeDrawerSkill = ref<string | null>(null);
+const activeConfigSkill = ref<string | null>(null);
+const activeLogsSkill = ref<string | null>(null);
+const showClawHubModal = ref(false);
 
 const skills = computed<Skill[]>(() => {
   if (!gateway.isConnected.value) return [];
@@ -134,6 +144,22 @@ const checkSkill = (name: string) => {
   checkingSkills.value.add(name);
   delete checkResults.value[name];
   gateway.sendMsg("test_skill", { name });
+
+  // Safety fallback: auto-clear spinner after 5 seconds if no response
+  setTimeout(() => {
+    if (checkingSkills.value.has(name)) {
+      checkingSkills.value.delete(name);
+      if (checkingSkill.value === name) checkingSkill.value = null;
+      if (!checkResults.value[name]) {
+        checkResults.value[name] = {
+          success: false,
+          message: "Kiểm tra skill quá thời gian (Timeout)",
+          details: "Không nhận được phản hồi từ backend sau 5s",
+          time: Date.now(),
+        };
+      }
+    }
+  }, 5000);
 };
 
 const checkAllSkills = () => {
@@ -148,6 +174,15 @@ const checkAllSkills = () => {
   });
   
   gateway.sendMsg("test_all_skills");
+
+  // Safety fallback: auto-clear spinners after 8 seconds if no response
+  setTimeout(() => {
+    if (isCheckingAll.value) {
+      isCheckingAll.value = false;
+      checkingSkills.value.clear();
+      if (checkingSkill.value) checkingSkill.value = null;
+    }
+  }, 8000);
 };
 
 // Toggle skill
@@ -207,6 +242,9 @@ const categoryLabel = (cat: string): string => {
           <p class="page-desc">{{ t('sk_desc').replace('{total}', totalSkills.toString()) }}</p>
         </div>
         <div class="header-actions">
+          <button class="btn btn-emerald btn-sm" @click="showClawHubModal = true">
+            🦞 ClawHub Marketplace
+          </button>
           <button class="btn btn-secondary btn-sm" @click="checkAllSkills" :disabled="isCheckingAll">
             <span v-if="isCheckingAll" class="spinner"></span>
             <span v-else>🔍 {{ currentLang === 'vi-VN' ? 'Kiểm tra tất cả' : 'Check All' }}</span>
@@ -263,7 +301,10 @@ const categoryLabel = (cat: string): string => {
             <div class="skill-main">
               <div class="skill-status">{{ statusIcon(skill) }}</div>
               <div class="skill-info">
-                <h3 class="skill-name">{{ skill.name }}</h3>
+                <div class="skill-title-line">
+                  <h3 class="skill-name">{{ skill.name }}</h3>
+                  <span v-if="skill.isCoreSkill" class="core-pill">CORE</span>
+                </div>
                 <p class="skill-desc">{{ skill.description }}</p>
                 <p v-if="skill.errorMsg" class="skill-error-msg">⚠️ {{ skill.errorMsg }}</p>
                 
@@ -278,15 +319,41 @@ const categoryLabel = (cat: string): string => {
               </div>
             </div>
             <div class="skill-actions">
+              <!-- Manifest Drawer Button -->
+              <button
+                class="btn-icon-action"
+                @click.stop="activeDrawerSkill = skill.name"
+                title="View SKILL.md Manifest & Markdown"
+              >
+                📜
+              </button>
+              <!-- Parameters Config Button -->
+              <button
+                class="btn-icon-action"
+                @click.stop="activeConfigSkill = skill.name"
+                title="Configure Execution Parameters"
+              >
+                ⚙️
+              </button>
+              <!-- Execution Logs Button -->
+              <button
+                class="btn-icon-action"
+                @click.stop="activeLogsSkill = skill.name"
+                title="View Execution Logs & Traces"
+              >
+                📊
+              </button>
+              <!-- Test Probe Button -->
               <button 
                 class="btn-check-skill" 
                 @click.stop="checkSkill(skill.name)" 
                 :disabled="!skill.enabled || checkingSkill === skill.name || checkingSkills.has(skill.name)"
-                title="Kiểm tra chi tiết kĩ năng"
+                title="Test Skill Readiness"
               >
                 <span v-if="checkingSkill === skill.name || checkingSkills.has(skill.name)" class="check-spinner"></span>
                 <span v-else>🔍</span>
               </button>
+              <!-- Toggle Button -->
               <div
                 class="toggle"
                 :class="{ active: skill.enabled }"
@@ -304,6 +371,31 @@ const categoryLabel = (cat: string): string => {
         <p>{{ t('sk_empty') }}</p>
       </div>
     </div>
+
+    <!-- Modals and Drawers -->
+    <SkillManifestDrawer
+      v-if="activeDrawerSkill"
+      :skill-id="activeDrawerSkill"
+      @close="activeDrawerSkill = null"
+    />
+
+    <SkillConfigModal
+      v-if="activeConfigSkill"
+      :skill-id="activeConfigSkill"
+      @close="activeConfigSkill = null"
+    />
+
+    <SkillLogsPanel
+      v-if="activeLogsSkill"
+      :skill-id="activeLogsSkill"
+      @close="activeLogsSkill = null"
+    />
+
+    <ClawHubMarketplaceModal
+      v-if="showClawHubModal"
+      @close="showClawHubModal = false"
+      @installed="() => { gateway.sendMsg('get_skills_list'); }"
+    />
   </div>
 </template>
 
@@ -471,6 +563,55 @@ const categoryLabel = (cat: string): string => {
   gap: var(--space-sm);
   flex-shrink: 0;
   margin-left: var(--space-md);
+}
+
+.skill-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.core-pill {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(129, 140, 248, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(129, 140, 248, 0.3);
+}
+
+.btn-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  outline: none;
+}
+.btn-icon-action:hover {
+  background: var(--bg-hover);
+  border-color: #818cf8;
+  color: #ffffff;
+  transform: scale(1.08);
+}
+
+.btn-emerald {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.btn-emerald:hover {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: #34d399;
 }
 
 .btn-check-skill {

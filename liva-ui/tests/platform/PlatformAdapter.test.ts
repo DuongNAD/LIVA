@@ -178,19 +178,50 @@ describe("Platform Adapters", () => {
       });
     });
 
-    it("should call invokeBackend via invoke", async () => {
+    it("should call direct invoke for desktop internal commands", async () => {
       const adapter = new TauriAdapter();
       mockInvoke.mockResolvedValue("res");
-      const res = await adapter.invokeBackend("cmd", { a: 1 });
-      expect(mockInvoke).toHaveBeenCalledWith("cmd", { a: 1 });
+      const res = await adapter.invokeBackend("open_dashboard");
+      expect(mockInvoke).toHaveBeenCalledWith("open_dashboard", undefined);
       expect(res).toBe("res");
+
+      mockInvoke.mockClear();
+      mockInvoke.mockResolvedValue("res2");
+      const res2 = await adapter.invokeBackend("update_interactive_zones", { zones: [] });
+      expect(mockInvoke).toHaveBeenCalledWith("update_interactive_zones", { zones: [] });
+      expect(res2).toBe("res2");
+    });
+
+    it("should wrap non-desktop commands via native_ipc_call", async () => {
+      const adapter = new TauriAdapter();
+      mockInvoke.mockResolvedValue("res");
+      const res = await adapter.invokeBackend("diff:get_pending_hunks", { session_id: "s1" });
+      expect(mockInvoke).toHaveBeenCalledWith("native_ipc_call", {
+        command: "diff:get_pending_hunks",
+        payload: { session_id: "s1" },
+      });
+      expect(res).toBe("res");
+
+      mockInvoke.mockClear();
+      mockInvoke.mockResolvedValue({ state: "active" });
+      const res2 = await adapter.invokeBackend("canvas:get_canvas_state");
+      expect(mockInvoke).toHaveBeenCalledWith("native_ipc_call", {
+        command: "canvas:get_canvas_state",
+        payload: {},
+      });
+      expect(res2).toEqual({ state: "active" });
     });
 
     it("should handle error in invokeBackend gracefully", async () => {
       const adapter = new TauriAdapter();
       mockInvoke.mockRejectedValueOnce(new Error("Invoke backend error"));
-      const res = await adapter.invokeBackend("cmd", { a: 1 });
+      const res = await adapter.invokeBackend("diff:get_pending_hunks", { session_id: "s1" });
       expect(res).toBeNull();
+
+      mockInvoke.mockClear();
+      mockInvoke.mockRejectedValueOnce(new Error("Direct invoke error"));
+      const res2 = await adapter.invokeBackend("open_dashboard");
+      expect(res2).toBeNull();
     });
 
     it("should subscribe to event onGatewayReady", async () => {

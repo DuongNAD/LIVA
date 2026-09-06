@@ -54,6 +54,10 @@ const CHO_PHEP_THIEU_TRONG_DOC = new Set([
   // trông giống tên env mà thôi.
   'LIVA_STRONGHOLD_PERSISTENT_SALT_KEY',
   'LIVA_DEFAULT_SECURE_PASSWORD',
+  // KHÔNG phải biến môi trường — magic seal header trong keystore.rs (LIVA_KEY_V1)
+  // và tiền tố mã pairing WhatsApp trong channels.rs (LIVA_PAIR_).
+  'LIVA_KEY_V1',
+  'LIVA_PAIR_',
 ])
 
 /**

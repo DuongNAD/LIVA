@@ -35,12 +35,18 @@ import VoiceManagementView from "./components/dashboard/VoiceManagementView.vue"
 import OnboardingForm from "./components/dashboard/OnboardingForm.vue";
 import MemoryViewer from "./components/dashboard/MemoryViewer.vue";
 import VisionView from "./components/dashboard/VisionView.vue";
+import ChannelsManagementView from "./components/dashboard/ChannelsManagementView.vue";
+import NodePairingView from "./components/dashboard/NodePairingView.vue";
+import BrowserPreviewView from "./components/dashboard/BrowserPreviewView.vue";
 
 // Page mapping
 const pageMap: Record<string, Component> = {
   avatar: markRaw(AvatarGallery),
   ai: markRaw(AISettings),
   api: markRaw(ApiManagementView),
+  channels: markRaw(ChannelsManagementView),
+  pairing: markRaw(NodePairingView),
+  browser: markRaw(BrowserPreviewView),
   voice: markRaw(VoiceManagementView),
   tasks: markRaw(TaskManager),
   memory: markRaw(MemoryViewer),

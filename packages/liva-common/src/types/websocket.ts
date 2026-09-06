@@ -26,6 +26,8 @@ export type WSClientEvent =
     | 'delete_avatar_model'
     // Skills
     | 'get_skills_list'
+    | 'test_skill'
+    | 'test_all_skills'
     | 'toggle_skill'
     | 'toggle_all_skills'
     // System
@@ -56,6 +58,37 @@ export type WSClientEvent =
     | 'reset_memory'
     | 'memory:search_hybrid'
     | 'memory:upsert_vector'
+    // Channels (Milestone 2)
+    | 'channels:list'
+    | 'channels:status'
+    | 'channels:get_status'
+    | 'channels:configure'
+    | 'channels:whatsapp_qr'
+    | 'channels:start'
+    | 'channels:stop'
+    | 'channels:restart'
+    | 'channels:test'
+    // Node Pairing (Milestone 2)
+    | 'pairing:list'
+    | 'pairing:list_nodes'
+    | 'pairing:list_pending'
+    | 'pairing:approve'
+    | 'pairing:reject'
+    | 'pairing:revoke'
+    | 'pairing:create_challenge'
+    // Browser Automation (Milestone 2)
+    | 'browser:status'
+    | 'browser:screenshot'
+    | 'browser:navigate'
+    | 'browser:extract'
+    | 'browser:action_log'
+    | 'browser:control'
+    // Skills Extended (Milestone 2)
+    | 'skills:get_manifest'
+    | 'skills:get_config'
+    | 'skills:save_config'
+    | 'skills:logs'
+    | 'skills:install_from_hub'
     // File Explorer
     | 'explorer_ls'
     | 'explorer_cat'
@@ -77,6 +110,8 @@ export type WSServerEvent =
     | 'avatar_models_list'
     // Skills
     | 'skills_list'
+    | 'skill_check_result'
+    | 'all_skills_check_complete'
     // System
     | 'system_status'
     | 'gpu_setup_progress'

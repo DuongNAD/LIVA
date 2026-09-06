@@ -22,6 +22,15 @@ export type {
     TaskItem,
     EngineMode,
     AvatarFormat,
+    ChannelCapabilities,
+    ChannelConnectionStatus,
+    ChannelItem,
+    PairedNodeInfo,
+    PendingPairingChallenge,
+    BrowserStatus,
+    BrowserActionRecord,
+    SkillManifestInfo,
+    SkillLogEntry,
 } from './types/config.js';
 
 // WebSocket event contract

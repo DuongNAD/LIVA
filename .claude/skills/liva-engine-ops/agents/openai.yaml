@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Engine Operations"
+  short_description: "Manage Native Engine Daemon, diagnose IPC, and inspect SQLite WAL database"
+  default_prompt: "Use $liva-engine-ops to check Native Engine Daemon health, inspect SQLite WAL state, or diagnose IPC channels."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search and read LIVA architecture rules and operation runbooks."
+policy:
+  allow_implicit_invocation: true

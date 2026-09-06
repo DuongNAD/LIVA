@@ -230,6 +230,7 @@ pub struct WebRTCActor {
     /// mất sạch trí nhớ đa lượt.
     conversation_id: String,
     active_session_id: Arc<std::sync::atomic::AtomicU64>,
+    active_cancel_token: Arc<std::sync::Mutex<Option<crate::llm::CancellationToken>>>,
     event_rx: mpsc::Receiver<PipelineEvent>,
     event_tx: mpsc::Sender<PipelineEvent>,
     state_tx: watch::Sender<PipelineState>,
@@ -273,6 +274,7 @@ impl WebRTCActor {
             session_id: 0,
             conversation_id,
             active_session_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            active_cancel_token: Arc::new(std::sync::Mutex::new(None)),
             event_rx,
             event_tx,
             state_tx,
@@ -452,6 +454,13 @@ impl WebRTCActor {
 
         let (llm_chunk_tx, llm_chunk_rx) = mpsc::channel::<String>(100);
 
+        let cancel_token = crate::llm::CancellationToken::new();
+        {
+            let mut guard = self.active_cancel_token.lock().unwrap();
+            *guard = Some(cancel_token.clone());
+        }
+        let cancel_token_graph = cancel_token.clone();
+
         // Spawn LLM Task
         let state_llm = Arc::clone(&state_clone);
         let event_tx_llm = event_tx.clone();
@@ -482,6 +491,7 @@ impl WebRTCActor {
                     ],
                     current_node: "router".to_string(),
                     context: std::collections::HashMap::new(),
+                    ..Default::default()
                 },
             };
 
@@ -493,6 +503,7 @@ impl WebRTCActor {
                 tool_event_tx,
                 session_id,
                 Arc::clone(&active_session_id_llm_task),
+                cancel_token_graph,
             );
 
             let run_res = graph.run(state).await;
@@ -714,6 +725,11 @@ impl WebRTCActor {
         self.active_session_id
             .store(self.session_id, std::sync::atomic::Ordering::SeqCst);
 
+        // Cancel active LLM token generation immediately (< 1us)
+        if let Some(token) = self.active_cancel_token.lock().unwrap().take() {
+            token.cancel();
+        }
+
         if let Some(h) = self.stt_handle.take() {
             h.abort();
         }
@@ -738,6 +754,9 @@ impl WebRTCActor {
 
 impl Drop for WebRTCActor {
     fn drop(&mut self) {
+        if let Some(token) = self.active_cancel_token.lock().unwrap().take() {
+            token.cancel();
+        }
         if let Some(h) = self.stt_handle.take() {
             h.abort();
         }
@@ -909,5 +928,72 @@ mod outbound_tests {
 
         assert!(result.is_err());
         assert!(speaker_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_active_operations_cancels_active_token_and_emits_flush() {
+        let (speaker_tx, _speaker_rx) = mpsc::channel(10);
+        let (control_tx, mut control_rx) = mpsc::channel(10);
+        let outbound = VoiceOutbound::new(speaker_tx, control_tx);
+        let token = crate::llm::CancellationToken::new();
+        assert!(!token.is_cancelled());
+
+        let active_cancel_token = Arc::new(std::sync::Mutex::new(Some(token.clone())));
+        let active_session_id = Arc::new(AtomicU64::new(1));
+        let (event_tx, event_rx) = mpsc::channel(128);
+        let (state_tx, _state_rx) = watch::channel(PipelineState::Idle);
+
+        let capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
+            64,
+            64,
+            crate::vision::capture::PixelFormat::Rgba,
+        ));
+        let state_shared = Arc::new(AppState {
+            db: crate::db::DatabasePool::new_in_memory().expect("in-memory db"),
+            crypto: crate::crypto::EncryptionEngine::new("00000000000000000000000000000000"),
+            stt: tokio::sync::Mutex::new(crate::stt::SttManager::new("non_existent_dir")),
+            tts: tokio::sync::Mutex::new(None),
+            tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
+            llm: tokio::sync::Mutex::new(
+                crate::llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
+            ),
+            vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
+            mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
+            embedder: tokio::sync::Mutex::new(None),
+            vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
+                capturer,
+                crate::vision::VisionConfig::default(),
+            )),
+        });
+
+        let mut actor = WebRTCActor {
+            state: PipelineState::LlmGenerating,
+            session_id: 1,
+            conversation_id: "test-conv".to_string(),
+            active_session_id,
+            active_cancel_token,
+            event_rx,
+            event_tx,
+            state_tx,
+            stt_handle: None,
+            llm_handle: None,
+            tts_handle: None,
+            state_shared,
+            outgoing: outbound,
+            session_aec: Arc::new(std::sync::Mutex::new(None)),
+            turn_origin: None,
+            ms_stt_done: TurnMilestone::none(),
+        };
+
+        let new_epoch = actor.cancel_active_operations().await;
+        assert_eq!(new_epoch, 2);
+        assert!(token.is_cancelled(), "CancellationToken must be cancelled immediately (<1us)");
+
+        let flush_frame = control_rx.try_recv().expect("must emit OP_FLUSH frame");
+        assert_eq!(flush_frame.op_code, OP_FLUSH);
+        assert_eq!(flush_frame.seq_id, 2);
     }
 }

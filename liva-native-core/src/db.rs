@@ -50,21 +50,27 @@ fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqli
     conn.execute_batch(
         "
         PRAGMA foreign_keys = ON;
-        PRAGMA busy_timeout = 5000;
-        PRAGMA cache_size = -8192;
+        PRAGMA busy_timeout = 10000;
+        PRAGMA cache_size = -32768;
         PRAGMA page_size = 32768;
-        PRAGMA mmap_size = 268435456;
+        PRAGMA mmap_size = 536870912;
+        PRAGMA temp_store = MEMORY;
     ",
     )?;
 
     if read_only {
-        conn.execute("PRAGMA synchronous = NORMAL", [])?;
+        conn.execute_batch(
+            "
+            PRAGMA synchronous = NORMAL;
+            PRAGMA query_only = ON;
+        ",
+        )?;
     } else {
         conn.execute_batch(
             "
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
-            PRAGMA wal_autocheckpoint = 500;
+            PRAGMA wal_autocheckpoint = 1000;
         ",
         )?;
     }
@@ -228,6 +234,25 @@ pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalCheckpointMode {
+    Passive,
+    Full,
+    Restart,
+    Truncate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WalCheckpointResult {
+    pub busy: i32,
+    pub log: i32,
+    pub checkpointed: i32,
+}
+
+pub const SQLITE_READER_POOL_SIZE: u32 = 16;
+pub const SQLITE_WRITER_POOL_SIZE: u32 = 1;
+pub const COOPERATIVE_WRITE_CHUNK_SIZE: usize = 50;
+
 #[derive(Clone)]
 pub struct DatabasePool {
     pub writer: Pool<CustomSqliteManager>,
@@ -241,15 +266,19 @@ impl DatabasePool {
         let read_manager = SqliteConnectionManager::file(path.as_ref())
             .with_flags(OpenFlags::SQLITE_OPEN_READ_ONLY);
 
-        let writer = Pool::builder().max_size(1).build(CustomSqliteManager {
-            inner: Arc::new(write_manager),
-            read_only: false,
-        })?;
+        let writer = Pool::builder()
+            .max_size(SQLITE_WRITER_POOL_SIZE)
+            .build(CustomSqliteManager {
+                inner: Arc::new(write_manager),
+                read_only: false,
+            })?;
 
-        let readers = Pool::builder().max_size(4).build(CustomSqliteManager {
-            inner: Arc::new(read_manager),
-            read_only: true,
-        })?;
+        let readers = Pool::builder()
+            .max_size(SQLITE_READER_POOL_SIZE)
+            .build(CustomSqliteManager {
+                inner: Arc::new(read_manager),
+                read_only: true,
+            })?;
 
         let conn = writer.get()?;
         init_schemas(&conn)?;
@@ -269,20 +298,224 @@ impl DatabasePool {
         let read_manager = SqliteConnectionManager::file(&db_uri)
             .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI);
 
-        let writer = Pool::builder().max_size(1).build(CustomSqliteManager {
-            inner: Arc::new(write_manager),
-            read_only: false,
-        })?;
+        let writer = Pool::builder()
+            .max_size(SQLITE_WRITER_POOL_SIZE)
+            .build(CustomSqliteManager {
+                inner: Arc::new(write_manager),
+                read_only: false,
+            })?;
 
-        let readers = Pool::builder().max_size(4).build(CustomSqliteManager {
-            inner: Arc::new(read_manager),
-            read_only: true,
-        })?;
+        let readers = Pool::builder()
+            .max_size(SQLITE_READER_POOL_SIZE)
+            .build(CustomSqliteManager {
+                inner: Arc::new(read_manager),
+                read_only: true,
+            })?;
 
         let conn = writer.get()?;
         init_schemas(&conn)?;
 
         Ok(DatabasePool { writer, readers })
+    }
+
+    /// Execute read query within an isolated, short-lived reader lease
+    pub fn with_read_conn<F, T>(&self, f: F) -> Result<T, rusqlite::Error>
+    where
+        F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
+    {
+        let conn = self.readers.get().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        f(&conn)
+    }
+
+    /// Execute write transaction within dedicated writer lease
+    pub fn with_write_conn<F, T>(&self, f: F) -> Result<T, rusqlite::Error>
+    where
+        F: FnOnce(&mut Connection) -> Result<T, rusqlite::Error>,
+    {
+        let mut conn = self.writer.get().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        f(&mut conn)
+    }
+
+    /// Executes write operations in cooperative chunks (bounded by `chunk_size`, default 50),
+    /// yielding between chunks via `tokio::task::yield_now().await` to prevent writer lock starvation.
+    pub async fn execute_cooperative_chunked_write<I, T, F, R>(
+        &self,
+        items: I,
+        chunk_size: usize,
+        mut chunk_processor: F,
+    ) -> Result<Vec<R>, rusqlite::Error>
+    where
+        I: IntoIterator<Item = T>,
+        F: FnMut(&Connection, Vec<T>) -> Result<Vec<R>, rusqlite::Error>,
+    {
+        let batch_size = if chunk_size == 0 {
+            COOPERATIVE_WRITE_CHUNK_SIZE
+        } else {
+            chunk_size
+        };
+
+        let mut results = Vec::new();
+        let mut batch = Vec::with_capacity(batch_size);
+        let mut iterator = items.into_iter().peekable();
+
+        while let Some(item) = iterator.next() {
+            batch.push(item);
+            if batch.len() >= batch_size || iterator.peek().is_none() {
+                let current_batch = std::mem::replace(&mut batch, Vec::with_capacity(batch_size));
+                let pool = self.clone();
+                let batch_results = pool.with_write_conn(|conn| {
+                    let tx = conn.transaction()?;
+                    let res = chunk_processor(&tx, current_batch)?;
+                    tx.commit()?;
+                    Ok(res)
+                })?;
+                results.extend(batch_results);
+
+                if iterator.peek().is_some() {
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Executes a bounded write chunk within a single transaction lease.
+    pub fn with_write_chunk<T, F, R>(
+        &self,
+        chunk: &[T],
+        f: F,
+    ) -> Result<R, rusqlite::Error>
+    where
+        F: FnOnce(&Connection, &[T]) -> Result<R, rusqlite::Error>,
+    {
+        self.with_write_conn(|conn| {
+            let tx = conn.transaction()?;
+            let result = f(&tx, chunk)?;
+            tx.commit()?;
+            Ok(result)
+        })
+    }
+
+    /// Executes `PRAGMA shrink_memory;` to release unneeded heap and cache memory back to the OS.
+    pub fn shrink_memory(&self) -> Result<(), rusqlite::Error> {
+        self.with_write_conn(|conn| {
+            conn.execute_batch("PRAGMA shrink_memory;")?;
+            Ok(())
+        })
+    }
+
+    /// Performs idle maintenance: executes a TRUNCATE WAL checkpoint followed by memory trimming.
+    pub fn idle_maintenance(&self) -> Result<WalCheckpointResult, rusqlite::Error> {
+        let result = self.wal_checkpoint(WalCheckpointMode::Truncate)?;
+        self.shrink_memory()?;
+        Ok(result)
+    }
+
+    /// Executes a WAL checkpoint on the writer connection with the specified mode.
+    pub fn wal_checkpoint(
+        &self,
+        mode: WalCheckpointMode,
+    ) -> Result<WalCheckpointResult, rusqlite::Error> {
+        let conn = self.writer.get().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let pragma_sql = match mode {
+            WalCheckpointMode::Passive => "PRAGMA wal_checkpoint(PASSIVE);",
+            WalCheckpointMode::Full => "PRAGMA wal_checkpoint(FULL);",
+            WalCheckpointMode::Restart => "PRAGMA wal_checkpoint(RESTART);",
+            WalCheckpointMode::Truncate => "PRAGMA wal_checkpoint(TRUNCATE);",
+        };
+        let mut stmt = conn.prepare(pragma_sql)?;
+        let result = stmt.query_row([], |row| {
+            Ok(WalCheckpointResult {
+                busy: row.get(0)?,
+                log: row.get(1)?,
+                checkpointed: row.get(2)?,
+            })
+        })?;
+        Ok(result)
+    }
+
+    /// Convenience wrapper to perform a passive WAL checkpoint.
+    pub fn checkpoint(&self) -> Result<WalCheckpointResult, rusqlite::Error> {
+        self.wal_checkpoint(WalCheckpointMode::Passive)
+    }
+
+    /// Spawns a background worker that periodically triggers a passive WAL checkpoint at the specified interval.
+    pub fn spawn_idle_checkpoint_worker(
+        &self,
+        interval: std::time::Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        let pool = self.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            loop {
+                ticker.tick().await;
+                let pool_clone = pool.clone();
+                let res = tokio::task::spawn_blocking(move || pool_clone.checkpoint()).await;
+                match res {
+                    Ok(Ok(stats)) => {
+                        tracing::trace!(
+                            busy = stats.busy,
+                            log = stats.log,
+                            checkpointed = stats.checkpointed,
+                            "Background SQLite WAL auto-checkpoint completed"
+                        );
+                    }
+                    Ok(Err(e)) => {
+                        tracing::debug!("Background SQLite WAL auto-checkpoint skipped: {}", e);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Background SQLite WAL checkpoint worker stopped: {}", e);
+                        break;
+                    }
+                }
+            }
+        })
+    }
+
+    /// Spawns a background coordinator that periodically performs passive checkpoints
+    /// and triggers idle truncate checkpoints + memory shrink.
+    pub fn spawn_maintenance_coordinator(
+        &self,
+        checkpoint_interval: std::time::Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        let pool = self.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(checkpoint_interval);
+            loop {
+                ticker.tick().await;
+                let pool_clone = pool.clone();
+                let res = tokio::task::spawn_blocking(move || {
+                    let cp_res = pool_clone.wal_checkpoint(WalCheckpointMode::Passive)?;
+                    let _ = pool_clone.shrink_memory();
+                    Ok::<_, rusqlite::Error>(cp_res)
+                })
+                .await;
+                match res {
+                    Ok(Ok(stats)) => {
+                        tracing::trace!(
+                            busy = stats.busy,
+                            log = stats.log,
+                            checkpointed = stats.checkpointed,
+                            "Background SQLite WAL maintenance completed"
+                        );
+                    }
+                    Ok(Err(e)) => {
+                        tracing::debug!("Background SQLite WAL maintenance skipped: {}", e);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Background SQLite WAL maintenance worker stopped: {}", e);
+                        break;
+                    }
+                }
+            }
+        })
     }
 }
 
@@ -305,9 +538,19 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
 
         CREATE TABLE IF NOT EXISTS agent_checkpoints (
-            thread_id TEXT PRIMARY KEY,
-            state_json TEXT NOT NULL
+            thread_id       TEXT NOT NULL,
+            step            INTEGER NOT NULL DEFAULT 0,
+            state_data      TEXT NOT NULL DEFAULT '',
+            state_json      TEXT NOT NULL DEFAULT '',
+            diff_data       TEXT,
+            tool_outputs    TEXT,
+            checkpoint_node TEXT NOT NULL DEFAULT 'START',
+            status          TEXT NOT NULL DEFAULT 'ACTIVE',
+            created_at      INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (thread_id, step)
         );
+        CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_thread 
+            ON agent_checkpoints (thread_id, step DESC);
 
         -- Sao lưu bản ghi facts KHÔNG giải mã được (locked) TRƯỚC khi set_fact
         -- ghi đè. Chống mất vĩnh viễn khi đổi khoá: một fact đang locked (đọc ra
@@ -424,6 +667,8 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             source_event_ids TEXT DEFAULT '[]'
         );
         CREATE INDEX IF NOT EXISTS idx_vectors_meta_type_domain_category ON vectors_meta (type, domain, category);
+        CREATE INDEX IF NOT EXISTS idx_vectors_meta_domain_category_type ON vectors_meta (domain, category, type);
+        CREATE INDEX IF NOT EXISTS idx_vectors_meta_type_domain ON vectors_meta (type, domain);
         CREATE INDEX IF NOT EXISTS idx_vectors_meta_created_at ON vectors_meta (created_at);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS vectors_fts USING fts5(
@@ -446,6 +691,30 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             PRIMARY KEY (source, target, relation),
             FOREIGN KEY(source) REFERENCES l3_nodes(id),
             FOREIGN KEY(target) REFERENCES l3_nodes(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS episodes (
+            episode_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            turn_count INTEGER NOT NULL,
+            domain TEXT DEFAULT 'General',
+            category TEXT DEFAULT 'Uncategorized',
+            tags TEXT DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_episodes_session ON episodes(session_id);
+        CREATE INDEX IF NOT EXISTS idx_episodes_domain_category ON episodes(domain, category);
+        CREATE INDEX IF NOT EXISTS idx_episodes_created_at ON episodes(created_at);
+
+        CREATE TABLE IF NOT EXISTS episode_turns (
+            episode_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            turn_order INTEGER NOT NULL,
+            PRIMARY KEY (episode_id, turn_id),
+            FOREIGN KEY(episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE
         );
     ")?;
 
@@ -493,7 +762,7 @@ fn ensure_foreign_key_integrity(conn: &Connection) -> Result<(), rusqlite::Error
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -634,6 +903,28 @@ const MIGRATIONS: &[(i64, &str)] = &[
          CREATE INDEX IF NOT EXISTS idx_deletion_audit_created
              ON deletion_audit(created_at);",
     ),
+    // Migration 8: Pregel DAG composite checkpointing (thread_id, step)
+    (
+        8,
+        "CREATE TABLE IF NOT EXISTS agent_checkpoints_v8 (
+             thread_id       TEXT NOT NULL,
+             step            INTEGER NOT NULL DEFAULT 0,
+             state_data      TEXT NOT NULL DEFAULT '',
+             state_json      TEXT NOT NULL DEFAULT '',
+             diff_data       TEXT,
+             tool_outputs    TEXT,
+             checkpoint_node TEXT NOT NULL DEFAULT 'START',
+             status          TEXT NOT NULL DEFAULT 'ACTIVE',
+             created_at      INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (thread_id, step)
+         );
+         INSERT OR IGNORE INTO agent_checkpoints_v8 (thread_id, step, state_data, state_json, checkpoint_node, status, created_at)
+             SELECT thread_id, 0, COALESCE(state_json, ''), COALESCE(state_json, ''), 'START', 'ACTIVE', 0 FROM agent_checkpoints;
+         DROP TABLE agent_checkpoints;
+         ALTER TABLE agent_checkpoints_v8 RENAME TO agent_checkpoints;
+         CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_thread 
+             ON agent_checkpoints (thread_id, step DESC);",
+    ),
 ];
 
 /// Đưa schema từ phiên bản hiện tại của DB lên [`SCHEMA_VERSION`].
@@ -702,7 +993,7 @@ pub struct Fact {
     pub access_count: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MetadataFilter {
     pub r#type: Option<String>,
     pub domain: Option<String>,
@@ -737,6 +1028,27 @@ pub struct FtsSearchResult {
     pub trace_keywords: Vec<String>,
     pub source_event_ids: Vec<String>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct Episode {
+    pub episode_id: String,
+    pub session_id: String,
+    pub title: String,
+    pub summary: String,
+    pub turn_count: usize,
+    pub domain: String,
+    pub category: String,
+    pub tags: Vec<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EpisodeSearchResult {
+    pub episode: Episode,
+    pub score: f64,
+    pub distance: f64,
 }
 
 // Logic implementations
@@ -775,7 +1087,7 @@ fn build_metadata_conditions(filter: &MetadataFilter) -> (String, Vec<Value>) {
     (where_clause, params)
 }
 
-pub fn set_fact(
+pub fn set_fact_in_tx(
     conn: &Connection,
     engine: &EncryptionEngine,
     fact: &Fact,
@@ -791,72 +1103,72 @@ pub fn set_fact(
         }
     };
 
-    // BACKUP-BEFORE-OVERWRITE (fail-closed): nếu value ĐANG lưu KHÔNG giải mã
-    // được bằng khoá hiện tại (locked — vd đổi khoá, hoặc rekey chưa kịp chạy),
-    // đè nó đi sẽ MẤT bản gốc mã hoá VĨNH VIỄN. Đây chính là kịch bản
-    // "consolidation/LLM học lại rồi set_fact đè bản gốc" mà UI-disable không
-    // với tới (caller tự động). Sao lưu ciphertext cũ vào facts_locked_backup
-    // TRƯỚC khi ghi, atomic trong 1 transaction. Chỉ đụng ca locked — ghi đè
-    // value đọc-được là hành vi bình thường, không sao lưu.
-    let tx = conn.unchecked_transaction()?;
+    let existing: Option<String> = conn
+        .query_row("SELECT value FROM facts WHERE key = ?1", [&fact.key], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    if let Some(old) = existing
+        && engine.read_fact(&old).is_locked()
     {
-        let existing: Option<String> = tx
-            .query_row("SELECT value FROM facts WHERE key = ?1", [&fact.key], |r| {
-                r.get(0)
-            })
-            .optional()?;
-        if let Some(old) = existing
-            && engine.read_fact(&old).is_locked()
-        {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            tx.execute(
-                "INSERT INTO facts_locked_backup (key, value, backed_up_at) VALUES (?1, ?2, ?3)",
-                (&fact.key, &old, now),
-            )?;
-            tracing::warn!(
-                "set_fact: value cũ của '{}' KHÔNG giải mã được bằng khoá hiện tại — \
-                 đã sao lưu ciphertext vào facts_locked_backup trước khi ghi đè (không mất bản gốc)",
-                fact.key
-            );
-        }
-
-        tx.execute(
-            "INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-             ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updatedAt = excluded.updatedAt,
-                ttlDays = excluded.ttlDays,
-                source = excluded.source,
-                category = excluded.category,
-                importance = excluded.importance,
-                confidenceScore = excluded.confidenceScore,
-                sourceTurnId = excluded.sourceTurnId,
-                memory_strength = excluded.memory_strength,
-                last_accessed_at = excluded.last_accessed_at,
-                access_count = excluded.access_count",
-            (
-                &fact.key,
-                &encrypted_val,
-                &fact.createdAt,
-                &fact.updatedAt,
-                &fact.ttlDays,
-                &fact.source,
-                &fact.category,
-                fact.importance,
-                fact.confidenceScore,
-                &fact.sourceTurnId,
-                fact.memory_strength,
-                fact.last_accessed_at,
-                fact.access_count,
-            ),
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        conn.execute(
+            "INSERT INTO facts_locked_backup (key, value, backed_up_at) VALUES (?1, ?2, ?3)",
+            (&fact.key, &old, now),
         )?;
+        tracing::warn!(
+            "set_fact: value cũ của '{}' KHÔNG giải mã được bằng khoá hiện tại — \
+             đã sao lưu ciphertext vào facts_locked_backup trước khi ghi đè (không mất bản gốc)",
+            fact.key
+        );
     }
-    tx.commit()?;
 
+    conn.execute(
+        "INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updatedAt = excluded.updatedAt,
+            ttlDays = excluded.ttlDays,
+            source = excluded.source,
+            category = excluded.category,
+            importance = excluded.importance,
+            confidenceScore = excluded.confidenceScore,
+            sourceTurnId = excluded.sourceTurnId,
+            memory_strength = excluded.memory_strength,
+            last_accessed_at = excluded.last_accessed_at,
+            access_count = excluded.access_count",
+        (
+            &fact.key,
+            &encrypted_val,
+            &fact.createdAt,
+            &fact.updatedAt,
+            &fact.ttlDays,
+            &fact.source,
+            &fact.category,
+            fact.importance,
+            fact.confidenceScore,
+            &fact.sourceTurnId,
+            fact.memory_strength,
+            fact.last_accessed_at,
+            fact.access_count,
+        ),
+    )?;
+
+    Ok(())
+}
+
+pub fn set_fact(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    fact: &Fact,
+) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+    set_fact_in_tx(&tx, engine, fact)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -1018,27 +1330,33 @@ pub fn rekey_personal_data_encryption(
             "không mã hóa được dữ liệu cá nhân trong migration",
         )))
     };
-    let mut checkpoint_updates = Vec::<(String, String, String)>::new();
+    let mut checkpoint_updates = Vec::<(String, i64, String, String)>::new();
     let mut conversation_updates = Vec::<(i64, String, String)>::new();
     let mut report = PersonalDataRekeyReport::default();
 
     {
-        let mut stmt =
-            conn.prepare("SELECT thread_id, state_json FROM agent_checkpoints ORDER BY thread_id")?;
+        let mut stmt = conn.prepare(
+            "SELECT thread_id, step, COALESCE(NULLIF(state_data, ''), state_json) \
+             FROM agent_checkpoints ORDER BY thread_id, step",
+        )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         for row in rows {
-            let (thread_id, original) = row?;
+            let (thread_id, step, original) = row?;
             match replacement(&original, live, extra_decryptors) {
                 Ok(Some(encrypted)) => {
-                    checkpoint_updates.push((thread_id, original, encrypted));
+                    checkpoint_updates.push((thread_id, step, original, encrypted));
                 }
                 Ok(None) => {}
                 Err(true) => {
                     report.locked += 1;
                     tracing::warn!(
-                        "rekey_personal_data_encryption: checkpoint '{thread_id}' bị khóa; giữ nguyên"
+                        "rekey_personal_data_encryption: checkpoint '{thread_id}' step {step} bị khóa; giữ nguyên"
                     );
                 }
                 Err(false) => return Err(encryption_error()),
@@ -1074,11 +1392,12 @@ pub fn rekey_personal_data_encryption(
     let tx = conn.unchecked_transaction()?;
     {
         let mut update_checkpoint = tx.prepare(
-            "UPDATE agent_checkpoints SET state_json = ?1 \
-             WHERE thread_id = ?2 AND state_json = ?3",
+            "UPDATE agent_checkpoints SET state_data = ?1, state_json = ?1 \
+             WHERE thread_id = ?2 AND step = ?3 AND (state_data = ?4 OR state_json = ?4)",
         )?;
-        for (thread_id, original, encrypted) in &checkpoint_updates {
-            report.rekeyed += update_checkpoint.execute((encrypted, thread_id, original))?;
+        for (thread_id, step, original, encrypted) in &checkpoint_updates {
+            report.rekeyed +=
+                update_checkpoint.execute((encrypted, thread_id, step, original))?;
         }
     }
     {
@@ -1309,7 +1628,7 @@ pub fn upsert_vector(
 /// `event_id == vec_id` là khóa lineage cố định cho consolidation. Event chỉ giữ metadata
 /// điều phối; nội dung plaintext đã nằm trong `vectors_meta` nên không nhân bản vào
 /// `rawUserMsg`/`rawAiReply`.
-pub(crate) fn persist_conversation_event_vector(
+pub fn persist_conversation_event_vector(
     conn: &Connection,
     engine: &EncryptionEngine,
     event_id: &str,
@@ -1365,23 +1684,31 @@ pub fn search_similar_vectors(
         filter.r#type.is_some() || filter.domain.is_some() || filter.category.is_some();
     let fetch_k = if has_filter { top_k * 3 } else { top_k };
 
-    let (meta_conditions, meta_params) = build_metadata_conditions(filter);
-
-    let sql = format!(
-        "SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight, m.created_at \
-         FROM vec_idx v \
-         INNER JOIN vectors_meta m ON m.id = v.rowid \
-         WHERE v.embedding MATCH vec_quantize_int8(?, 'unit') \
-           AND v.k = ? \
-           AND v.rowid IN (SELECT id FROM vectors_meta m WHERE {})",
-        meta_conditions
-    );
+    let (sql, params): (String, Vec<Value>) = if has_filter {
+        let (meta_conditions, meta_params) = build_metadata_conditions(filter);
+        let query = format!(
+            "SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight, m.created_at \
+             FROM vec_idx v \
+             INNER JOIN vectors_meta m ON m.id = v.rowid \
+             WHERE v.embedding MATCH vec_quantize_int8(?, 'unit') \
+               AND v.k = ? \
+               AND v.rowid IN (SELECT id FROM vectors_meta WHERE {})",
+            meta_conditions
+        );
+        let mut p = vec![Value::Blob(blob.to_vec()), Value::Integer(fetch_k as i64)];
+        p.extend(meta_params);
+        (query, p)
+    } else {
+        let query = "SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight, m.created_at \
+             FROM vec_idx v \
+             INNER JOIN vectors_meta m ON m.id = v.rowid \
+             WHERE v.embedding MATCH vec_quantize_int8(?, 'unit') \
+               AND v.k = ?".to_string();
+        let p = vec![Value::Blob(blob.to_vec()), Value::Integer(fetch_k as i64)];
+        (query, p)
+    };
 
     let mut stmt = conn.prepare(&sql)?;
-
-    let mut params: Vec<Value> = vec![Value::Blob(blob.to_vec()), Value::Integer(fetch_k as i64)];
-    params.extend(meta_params);
-
     let params_refs: Vec<&dyn ToSql> = params.iter().map(|p| p as &dyn ToSql).collect();
     let mut rows = stmt.query(&params_refs[..])?;
     let mut results = Vec::new();
@@ -1646,6 +1973,186 @@ pub fn search_hybrid_vectors(
     Ok(results)
 }
 
+/// Persist a structured episode and optionally its vector projection into sqlite-vec/FTS.
+pub fn persist_episode(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    episode: &Episode,
+    vector: Option<&[f32]>,
+    turn_ids: &[String],
+) -> Result<(), rusqlite::Error> {
+    let transaction = conn.unchecked_transaction()?;
+    let tags_json = serde_json::to_string(&episode.tags).unwrap_or_else(|_| "[]".to_string());
+
+    transaction.execute(
+        "INSERT INTO episodes (
+            episode_id, session_id, title, summary, turn_count,
+            domain, category, tags, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(episode_id) DO UPDATE SET
+            title = excluded.title,
+            summary = excluded.summary,
+            turn_count = excluded.turn_count,
+            domain = excluded.domain,
+            category = excluded.category,
+            tags = excluded.tags,
+            updated_at = excluded.updated_at",
+        rusqlite::params![
+            episode.episode_id,
+            episode.session_id,
+            episode.title,
+            episode.summary,
+            episode.turn_count as i64,
+            episode.domain,
+            episode.category,
+            tags_json,
+            episode.created_at,
+            episode.updated_at,
+        ],
+    )?;
+
+    for (order, turn_id) in turn_ids.iter().enumerate() {
+        transaction.execute(
+            "INSERT OR REPLACE INTO episode_turns (episode_id, turn_id, turn_order) VALUES (?1, ?2, ?3)",
+            rusqlite::params![episode.episode_id, turn_id, order as i64],
+        )?;
+    }
+
+    if let Some(v) = vector {
+        let content = format!("{}: {}", episode.title, episode.summary);
+        upsert_vector(
+            &transaction,
+            engine,
+            &episode.episode_id,
+            "episode",
+            &content,
+            v,
+            Some(&episode.domain),
+            Some(&episode.category),
+            Some(&episode.tags),
+            None,
+            Some(turn_ids),
+        )?;
+    }
+
+    transaction.commit()
+}
+
+pub fn get_episode(conn: &Connection, episode_id: &str) -> Result<Option<Episode>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT episode_id, session_id, title, summary, turn_count, domain, category, tags, created_at, updated_at
+         FROM episodes WHERE episode_id = ?1",
+    )?;
+    let mut rows = stmt.query([episode_id])?;
+    if let Some(row) = rows.next()? {
+        let tags_raw: String = row.get(7)?;
+        let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
+        Ok(Some(Episode {
+            episode_id: row.get(0)?,
+            session_id: row.get(1)?,
+            title: row.get(2)?,
+            summary: row.get(3)?,
+            turn_count: row.get::<_, i64>(4)? as usize,
+            domain: row.get(5)?,
+            category: row.get(6)?,
+            tags,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn list_episodes(
+    conn: &Connection,
+    session_id: Option<&str>,
+    domain: Option<&str>,
+    limit: usize,
+) -> Result<Vec<Episode>, rusqlite::Error> {
+    let mut sql = "SELECT episode_id, session_id, title, summary, turn_count, domain, category, tags, created_at, updated_at FROM episodes WHERE 1=1".to_string();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(sid) = session_id {
+        sql.push_str(" AND session_id = ?");
+        params.push(Box::new(sid.to_string()));
+    }
+    if let Some(d) = domain {
+        sql.push_str(" AND domain = ?");
+        params.push(Box::new(d.to_string()));
+    }
+    sql.push_str(" ORDER BY created_at DESC LIMIT ?");
+    params.push(Box::new(limit as i64));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut rows = stmt.query(&params_refs[..])?;
+    let mut results = Vec::new();
+
+    while let Some(row) = rows.next()? {
+        let tags_raw: String = row.get(7)?;
+        let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
+        results.push(Episode {
+            episode_id: row.get(0)?,
+            session_id: row.get(1)?,
+            title: row.get(2)?,
+            summary: row.get(3)?,
+            turn_count: row.get::<_, i64>(4)? as usize,
+            domain: row.get(5)?,
+            category: row.get(6)?,
+            tags,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        });
+    }
+
+    Ok(results)
+}
+
+pub fn search_hybrid_episodes(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    query_text: &str,
+    query_vector: &[f32],
+    top_k: usize,
+    domain: Option<&str>,
+    category: Option<&str>,
+    dense_weight: f64,
+    sparse_weight: f64,
+) -> Result<Vec<EpisodeSearchResult>, rusqlite::Error> {
+    let filter = MetadataFilter {
+        r#type: Some("episode".to_string()),
+        domain: domain.map(str::to_string),
+        category: category.map(str::to_string),
+        created_after: None,
+        created_before: None,
+    };
+
+    let vector_results = search_hybrid_vectors(
+        conn,
+        engine,
+        query_text,
+        query_vector,
+        top_k,
+        &filter,
+        dense_weight,
+        sparse_weight,
+    )?;
+
+    let mut results = Vec::new();
+    for vr in vector_results {
+        if let Some(ep) = get_episode(conn, &vr.vec_id)? {
+            results.push(EpisodeSearchResult {
+                episode: ep,
+                score: vr.score,
+                distance: vr.distance,
+            });
+        }
+    }
+
+    Ok(results)
+}
+
 #[cfg(test)]
 #[path = "db/tests.rs"]
 mod db_tests;
@@ -1653,3 +2160,247 @@ mod db_tests;
 #[cfg(test)]
 #[path = "db/encryption_tests.rs"]
 mod db_encryption_tests;
+
+#[cfg(test)]
+mod m2_wal_engine_tests {
+    use super::*;
+
+    #[test]
+    fn test_pool_size_and_constants() {
+        assert_eq!(SQLITE_READER_POOL_SIZE, 16);
+        assert_eq!(SQLITE_WRITER_POOL_SIZE, 1);
+        assert_eq!(COOPERATIVE_WRITE_CHUNK_SIZE, 50);
+
+        let pool = DatabasePool::new_in_memory().expect("failed to create in-memory pool");
+        assert_eq!(pool.writer.max_size(), 1);
+        assert_eq!(pool.readers.max_size(), 16);
+    }
+
+    #[test]
+    fn test_connection_pragmas_configured_correctly() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("test_pragmas_{}.sqlite", uuid::Uuid::new_v4()));
+        let pool = DatabasePool::new(&db_path).expect("failed to create file-backed pool");
+
+        // Test Writer PRAGMAs
+        pool.with_write_conn(|conn| {
+            let foreign_keys: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
+            assert_eq!(foreign_keys, 1, "foreign keys must be enabled");
+
+            let cache_size: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0))?;
+            assert_eq!(cache_size, -32768, "writer cache_size must be -32768 (32MB)");
+
+            let busy_timeout: i64 = conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0))?;
+            assert_eq!(busy_timeout, 10000, "writer busy_timeout must be 10000ms");
+
+            let mmap_size: i64 = conn.query_row("PRAGMA mmap_size", [], |r| r.get(0))?;
+            assert_eq!(mmap_size, 536870912, "writer mmap_size must be 536870912 (512MB)");
+
+            let journal_mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
+            assert_eq!(journal_mode.to_lowercase(), "wal", "writer journal_mode must be WAL");
+
+            Ok(())
+        })
+        .expect("writer pragma check failed");
+
+        // Test Reader PRAGMAs
+        pool.with_read_conn(|conn| {
+            let foreign_keys: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
+            assert_eq!(foreign_keys, 1, "foreign keys must be enabled");
+
+            let cache_size: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0))?;
+            assert_eq!(cache_size, -32768, "reader cache_size must be -32768 (32MB)");
+
+            let busy_timeout: i64 = conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0))?;
+            assert_eq!(busy_timeout, 10000, "reader busy_timeout must be 10000ms");
+
+            let mmap_size: i64 = conn.query_row("PRAGMA mmap_size", [], |r| r.get(0))?;
+            assert_eq!(mmap_size, 536870912, "reader mmap_size must be 536870912 (512MB)");
+
+            let query_only: i64 = conn.query_row("PRAGMA query_only", [], |r| r.get(0))?;
+            assert_eq!(query_only, 1, "reader query_only must be ON (1)");
+
+            Ok(())
+        })
+        .expect("reader pragma check failed");
+
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
+    }
+
+    #[test]
+    fn test_reader_read_only_enforcement() {
+        let pool = DatabasePool::new_in_memory().expect("failed to create in-memory pool");
+
+        // Attempting to write on reader must fail
+        let write_result = pool.with_read_conn(|conn| {
+            conn.execute(
+                "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('test_key', 'test_val', 'now', 'now', 'test')",
+                [],
+            )
+        });
+
+        assert!(
+            write_result.is_err(),
+            "Writing to a reader connection with query_only=ON must fail"
+        );
+    }
+
+    #[test]
+    fn test_scoped_read_and_write_leases() {
+        let pool = DatabasePool::new_in_memory().expect("failed to create in-memory pool");
+
+        pool.with_write_conn(|conn| {
+            conn.execute(
+                "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES ('lease_key', 'lease_val', 'now', 'now', 'test')",
+                [],
+            )?;
+            Ok(())
+        })
+        .expect("write lease failed");
+
+        let val: String = pool
+            .with_read_conn(|conn| {
+                conn.query_row(
+                    "SELECT value FROM facts WHERE key = 'lease_key'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("read lease failed");
+
+        assert_eq!(val, "lease_val");
+    }
+
+    #[tokio::test]
+    async fn test_cooperative_write_chunking() {
+        let pool = DatabasePool::new_in_memory().expect("failed to create in-memory pool");
+
+        let items: Vec<(String, String)> = (0..120)
+            .map(|i| (format!("chunk_key_{}", i), format!("chunk_val_{}", i)))
+            .collect();
+
+        let inserted = pool
+            .execute_cooperative_chunked_write(items, 50, |conn, batch| {
+                let mut stmt = conn.prepare(
+                    "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES (?1, ?2, 'now', 'now', 'chunk_test')",
+                )?;
+                let mut count = 0;
+                for (k, v) in batch {
+                    stmt.execute(rusqlite::params![k, v])?;
+                    count += 1;
+                }
+                Ok(vec![count])
+            })
+            .await
+            .expect("chunked write failed");
+
+        assert_eq!(inserted, vec![50, 50, 20]);
+
+        let total_count: i64 = pool
+            .with_read_conn(|conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM facts WHERE source = 'chunk_test'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("read count failed");
+
+        assert_eq!(total_count, 120);
+    }
+
+    #[test]
+    fn test_wal_checkpoint_and_shrink_memory() {
+        let pool = DatabasePool::new_in_memory().expect("failed to create in-memory pool");
+
+        let res_passive = pool.wal_checkpoint(WalCheckpointMode::Passive);
+        assert!(res_passive.is_ok());
+
+        let res_truncate = pool.wal_checkpoint(WalCheckpointMode::Truncate);
+        assert!(res_truncate.is_ok());
+
+        let res_shrink = pool.shrink_memory();
+        assert!(res_shrink.is_ok());
+
+        let res_maint = pool.idle_maintenance();
+        assert!(res_maint.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_16_reader_concurrency_stress() {
+        use std::sync::Arc;
+
+        let pool = Arc::new(DatabasePool::new_in_memory().expect("create in-memory pool"));
+
+        // Populate initial facts
+        pool.with_write_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES (?1, ?2, 'now', 'now', 'stress')",
+            )?;
+            for i in 0..100 {
+                stmt.execute(rusqlite::params![
+                    format!("concurrent_key_{}", i),
+                    format!("concurrent_val_{}", i)
+                ])?;
+            }
+            Ok(())
+        })
+        .expect("populate facts");
+
+        let mut handles = Vec::new();
+
+        // Spawn 16 concurrent reader workers
+        for worker_id in 0..16 {
+            let pool_clone = pool.clone();
+            let handle = tokio::spawn(async move {
+                for i in 0..50 {
+                    let key = format!("concurrent_key_{}", (worker_id * 5 + i) % 100);
+                    let val: Result<String, rusqlite::Error> = pool_clone.with_read_conn(|conn| {
+                        conn.query_row(
+                            "SELECT value FROM facts WHERE key = ?1",
+                            [&key],
+                            |r| r.get(0),
+                        )
+                    });
+                    assert!(val.is_ok(), "Worker {} query {} failed: {:?}", worker_id, i, val);
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Concurrently run 1 writer worker
+        let pool_clone = pool.clone();
+        let writer_handle = tokio::spawn(async move {
+            for i in 0..20 {
+                let key = format!("writer_key_{}", i);
+                let val = format!("writer_val_{}", i);
+                let res = pool_clone.with_write_conn(|conn| {
+                    conn.execute(
+                        "INSERT INTO facts (key, value, createdAt, updatedAt, source) VALUES (?1, ?2, 'now', 'now', 'writer_task')",
+                        rusqlite::params![key, val],
+                    )
+                });
+                assert!(res.is_ok());
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            }
+        });
+        handles.push(writer_handle);
+
+        for handle in handles {
+            handle.await.expect("Task panicked");
+        }
+
+        let writer_count: i64 = pool
+            .with_read_conn(|conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM facts WHERE source = 'writer_task'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("read count");
+        assert_eq!(writer_count, 20);
+    }
+}

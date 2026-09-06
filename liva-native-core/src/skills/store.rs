@@ -359,6 +359,69 @@ impl<'a> SkillStore<'a> {
     }
 }
 
+/// In-memory fast cache and index of loaded ClawHub skill packages.
+#[derive(Debug, Default, Clone)]
+pub struct SkillPackageStore {
+    packages: std::collections::HashMap<String, super::manifest::LoadedSkillPackage>,
+}
+
+impl SkillPackageStore {
+    pub fn new() -> Self {
+        Self {
+            packages: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Upsert a skill package. Returns true if added or hash changed.
+    pub fn upsert(&mut self, pkg: super::manifest::LoadedSkillPackage) -> bool {
+        let name = pkg.manifest.name.clone();
+        match self.packages.get(&name) {
+            Some(existing) if existing.content_hash == pkg.content_hash => false,
+            _ => {
+                self.packages.insert(name, pkg);
+                true
+            }
+        }
+    }
+
+    pub fn remove(&mut self, skill_name: &str) -> Option<super::manifest::LoadedSkillPackage> {
+        self.packages.remove(skill_name)
+    }
+
+    pub fn get(&self, skill_name: &str) -> Option<&super::manifest::LoadedSkillPackage> {
+        self.packages.get(skill_name)
+    }
+
+    pub fn list(&self) -> Vec<super::manifest::LoadedSkillPackage> {
+        self.packages.values().cloned().collect()
+    }
+
+    pub fn count(&self) -> usize {
+        self.packages.len()
+    }
+
+    pub fn find_by_trigger(&self, query: &str) -> Vec<super::manifest::LoadedSkillPackage> {
+        let query_lower = query.to_lowercase();
+        self.packages
+            .values()
+            .filter(|pkg| {
+                pkg.manifest.triggers.iter().any(|trig| match trig {
+                    super::manifest::SkillTrigger::Intent(s)
+                    | super::manifest::SkillTrigger::Regex(s)
+                    | super::manifest::SkillTrigger::Event(s)
+                    | super::manifest::SkillTrigger::Cron(s) => {
+                        s.to_lowercase().contains(&query_lower) || query_lower.contains(&s.to_lowercase())
+                    }
+                    super::manifest::SkillTrigger::Keyword(keywords) => {
+                        keywords.iter().any(|k| query_lower.contains(&k.to_lowercase()))
+                    }
+                }) || pkg.manifest.name.to_lowercase().contains(&query_lower)
+            })
+            .cloned()
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

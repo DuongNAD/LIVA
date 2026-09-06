@@ -1,6 +1,20 @@
 import type { IPlatformAdapter } from "./IPlatformAdapter";
 import { logger } from '../utils/logger';
 
+const DESKTOP_INTERNAL_COMMANDS = new Set([
+  'toggle_ghost_mode',
+  'set_eco_mode',
+  'update_interactive_zones',
+  'open_dashboard',
+  'open_setup',
+  'issue_websocket_session',
+  'vault_secret_present',
+  'store_vault_secret',
+  'delete_vault_secret',
+  'native_ipc_call',
+  'native_ipc_call_stream',
+]);
+
 export class TauriAdapter implements IPlatformAdapter {
   platformName = 'tauri' as const;
 
@@ -70,7 +84,10 @@ export class TauriAdapter implements IPlatformAdapter {
   async invokeBackend(command: string, args?: Record<string, unknown>) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke(command, args);
+      if (DESKTOP_INTERNAL_COMMANDS.has(command)) {
+        return await invoke(command, args);
+      }
+      return await invoke('native_ipc_call', { command, payload: args ?? {} });
     } catch (e) {
       logger.warn(`[TauriAdapter] invokeBackend(${command}) not available`, e);
       return null;

@@ -9,6 +9,7 @@ fn disabled_optional_processors_do_not_load_models() {
             denoise_enabled: false,
             turn_shadow_enabled: false,
             aec_enabled: false,
+            agc_enabled: false,
         },
     );
 
@@ -16,4 +17,5 @@ fn disabled_optional_processors_do_not_load_models() {
     assert!(components.denoiser.is_none());
     assert!(components.turn_shadow.is_none());
     assert!(components.aec.is_none());
+    assert!(components.agc.is_none());
 }

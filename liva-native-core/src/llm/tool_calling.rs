@@ -559,19 +559,65 @@ pub fn parse_selection(raw: &str, so_tool: usize) -> Selection {
     // ARGS: tìm khối JSON đầu tiên SAU `args:` nếu có tiền tố, không thì tìm
     // trong cả output. Thiếu hẳn thì coi như không tham số — tool không tham số
     // là ca hợp lệ, và `validate_arguments` sẽ chặn nếu schema đòi trường.
-    let vung = match raw.to_lowercase().find("args:") {
-        Some(p) => &raw[p + 5..],
-        None => raw,
+    let (vung, co_args) = match raw.to_lowercase().find("args:") {
+        Some(p) => (&raw[p + 5..], true),
+        None => (raw, false),
     };
     let arguments = match first_json_object(vung) {
         Some(khoi) => match serde_json::from_str::<Value>(khoi) {
             Ok(v) if v.is_object() => v,
             Ok(_) => return Selection::Unreadable("ARGS không phải object JSON".to_string()),
-            Err(e) => {
-                return Selection::Unreadable(format!("ARGS không phải JSON hợp lệ: {e}"));
-            }
+            Err(_) => match crate::ast_repair::repair_json_ast(khoi) {
+                Ok(v) if v.is_object() => v,
+                Ok(_) => {
+                    return Selection::Unreadable(
+                        "ARGS không phải object JSON sau AST repair".to_string(),
+                    );
+                }
+                Err(_) => match crate::ast_repair::repair_json_ast(vung) {
+                    Ok(v) if v.is_object() => v,
+                    Ok(_) => {
+                        return Selection::Unreadable(
+                            "ARGS không phải object JSON sau AST repair".to_string(),
+                        );
+                    }
+                    Err(e) => {
+                        return Selection::Unreadable(format!(
+                            "ARGS không phải JSON hợp lệ sau AST repair: {e}"
+                        ));
+                    }
+                },
+            },
         },
-        None => json!({}),
+        None => {
+            if !co_args && !raw.contains('{') && !raw.contains('[') {
+                json!({})
+            } else if co_args {
+                if vung.trim().is_empty() {
+                    json!({})
+                } else {
+                    match crate::ast_repair::repair_json_ast(vung) {
+                        Ok(v) if v.is_object() => v,
+                        Ok(_) => {
+                            return Selection::Unreadable(
+                                "ARGS không phải object JSON sau AST repair".to_string(),
+                            );
+                        }
+                        Err(e) => {
+                            return Selection::Unreadable(format!(
+                                "ARGS không phải JSON hợp lệ sau AST repair: {e}"
+                            ));
+                        }
+                    }
+                }
+            } else {
+                let start = raw.find(|c| c == '{' || c == '[').unwrap_or(0);
+                match crate::ast_repair::repair_json_ast(&raw[start..]) {
+                    Ok(v) if v.is_object() => v,
+                    _ => json!({}),
+                }
+            }
+        }
     };
 
     Selection::Tool {
@@ -1493,7 +1539,11 @@ mod tests {
             Selection::Unreadable(_)
         ));
         assert!(matches!(
-            parse_selection("TOOL: 1\nARGS: {device: light}", 3),
+            parse_selection("TOOL: 1\nARGS: [1, 2, 3]", 3),
+            Selection::Unreadable(_)
+        ));
+        assert!(matches!(
+            parse_selection("TOOL: 1\nARGS: {{{", 3),
             Selection::Unreadable(_)
         ));
         assert!(
@@ -1795,5 +1845,45 @@ mod tests {
                 ExecPolicy::ProposeOnly
             );
         });
+    }
+
+    #[test]
+    fn test_parse_selection_ast_repair_malformed_json() {
+        // Trailing commas & single quotes
+        let raw1 = "TOOL: 1\nARGS: {'path': 'config.json', 'dry_run': False,}";
+        let sel1 = parse_selection(raw1, 3);
+        match sel1 {
+            Selection::Tool { index, arguments } => {
+                assert_eq!(index, 0);
+                assert_eq!(arguments["path"], "config.json");
+                assert_eq!(arguments["dry_run"], false);
+            }
+            _ => panic!("Expected successful tool selection with repaired AST, got: {sel1:?}"),
+        }
+
+        // Unquoted keys & pythonic None
+        let raw2 = "TOOL: 2\nARGS: {device_id: \"light_1\", timeout: None, speed: 5,}";
+        let sel2 = parse_selection(raw2, 3);
+        match sel2 {
+            Selection::Tool { index, arguments } => {
+                assert_eq!(index, 1);
+                assert_eq!(arguments["device_id"], "light_1");
+                assert_eq!(arguments["timeout"], Value::Null);
+                assert_eq!(arguments["speed"], 5);
+            }
+            _ => panic!("Expected successful tool selection with repaired AST, got: {sel2:?}"),
+        }
+
+        // Truncated / unclosed brackets
+        let raw3 = "TOOL: 3\nARGS: {\"command\": \"cargo test\", \"flags\": [\"--lib\", \"--release\"";
+        let sel3 = parse_selection(raw3, 3);
+        match sel3 {
+            Selection::Tool { index, arguments } => {
+                assert_eq!(index, 2);
+                assert_eq!(arguments["command"], "cargo test");
+                assert_eq!(arguments["flags"], serde_json::json!(["--lib", "--release"]));
+            }
+            _ => panic!("Expected successful tool selection with repaired AST, got: {sel3:?}"),
+        }
     }
 }

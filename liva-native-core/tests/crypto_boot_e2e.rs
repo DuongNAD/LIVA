@@ -1,10 +1,9 @@
 //! End-to-end: boot `resolve_and_rekey` trên DB ĐĨA THẬT với facts mã bằng khoá
 //! MẶC ĐỊNH — kiểm đường "bỏ khoá mặc định" thực sự chạy trên một vòng boot:
-//! sinh khoá thiết bị DPAPI, rekey facts cũ sang khoá thật (không mất), escrow,
+//! sinh khoá thiết bị DPAPI/Unix, rekey facts cũ sang khoá thật (không mất), escrow,
 //! idempotent khi reboot, và khôi phục qua `LIVA_ENCRYPTION_KEY`.
 //!
-//! Cả file chỉ chạy trên Windows (cần DPAPI). CI là windows-latest nên phủ được.
-#![cfg(windows)]
+//! Chạy trên mọi nền tảng (Windows, macOS, Linux).
 
 use liva_native_core::crypto::{self, EncryptionEngine};
 use liva_native_core::db::{self, DatabasePool, Fact};

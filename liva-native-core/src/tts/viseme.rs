@@ -5,12 +5,11 @@
 //! phân biệt được `m` với `a`. Module này chuyển chuỗi phoneme thành một
 //! timeline viseme trung gian để đẩy kèm PCM ra client (`OP_VISME`).
 //!
-//! Vì sao MỘT bảng IPA chung thay vì bảng riêng theo backend: Piper (espeak-ng)
-//! và VieNeu (sea-g2p) không cùng bộ ký hiệu, nhưng cả hai đều gần IPA; ký tự
+//! Vì sao MỘT bảng IPA chung thay vì bảng riêng theo backend: Piper (espeak-ng),
+//! VieNeu (sea-g2p) và Kokoro (g2p) đều phát ra các ký hiệu IPA; ký tự
 //! nào không nhận diện được rơi về [`Viseme::Nil`] (miệng đóng) — an toàn hơn
 //! đoán sai, và cơ chế fallback đổi backend giữa lượt (`synthesis_plan`) không
-//! làm vỡ bảng. Kokoro không tham gia: lượt fallback sang nó không có chuỗi
-//! phoneme tin cậy nên KHÔNG phát timeline; client giữ nguyên đường RMS cũ.
+//! làm vỡ bảng. Bảng hỗ trợ mở rộng toàn bộ các nguyên âm IPA và âm khép môi.
 
 /// Tập viseme trung gian — tên trùng preset biểu cảm VRM chuẩn; [`Viseme::Nil`]
 /// nghĩa là miệng đóng/không phát biểu cảm nào (âm môi m/b/p/f/v, khoảng lặng,
@@ -40,22 +39,30 @@ impl Viseme {
     /// Phân rã một ký tự phoneme (IPA hoặc ASCII gần IPA) thành viseme.
     pub(crate) fn from_phoneme(ph: char) -> Self {
         match ph {
-            // Nguyên âm mở/há rộng.
-            'a' | 'ɑ' | 'æ' | 'ɐ' | 'ä' | 'ą' | 'ã' => Self::Aa,
+            // Nguyên âm mở/há rộng (bao gồm cả ʌ và ɒ).
+            'a' | 'ɑ' | 'æ' | 'ɐ' | 'ä' | 'ą' | 'ã' | 'ʌ' | 'ɒ' => Self::Aa,
             // Nguyên âm trước cao — môi dàn rộng.
             'i' | 'ɪ' | 'y' | 'ɨ' | 'j' => Self::Ee,
-            // Nguyên âm trước trung — dàn vừa.
-            'e' | 'ɛ' | 'ə' => Self::Ih,
+            // Nguyên âm trước trung / trung tâm (bao gồm cả ɜ và ɚ).
+            'e' | 'ɛ' | 'ə' | 'ɜ' | 'ɚ' => Self::Ih,
             // Nguyên âm sau trung/tròn mở.
             'o' | 'ɔ' | 'ø' => Self::Oh,
-            // Nguyên âm sau cao tròn môi.
-            'u' | 'ʊ' | 'ư' | 'w' => Self::Ou,
-            // Âm môi phải khép miệng — chính là chỗ RMS không phân biệt được.
+            // Nguyên âm sau cao tròn môi (bao gồm cả ʉ và ɯ).
+            'u' | 'ʊ' | 'ư' | 'w' | 'ʉ' | 'ɯ' => Self::Ou,
+            // Âm môi & răng môi phải khép miệng — chính là chỗ RMS không phân biệt được.
             'm' | 'b' | 'p' | 'f' | 'v' | 'ɱ' | 'ʋ' | 'β' => Self::Nil,
             // Mọi âm khác (xát, tắc, hơi, dấu cách…) → miệng về trung tính.
             _ => Self::Nil,
         }
     }
+}
+
+/// Helper kiểm tra ký tự biến âm / dấu nhấn / dấu kéo dài không mang thời lượng phoneme độc lập.
+fn is_ipa_modifier(c: char) -> bool {
+    matches!(
+        c,
+        'ˈ' | 'ˌ' | 'ː' | 'ˑ' | '̆' | '͡' | '͜' | 'ʰ' | 'ʲ' | 'ʷ' | 'ˤ' | '˞' | '̃'
+    )
 }
 
 /// Một mốc khẩu hình: từ `t_ms` (kể từ mẫu PCM đầu tiên của mẩu) miệng giữ
@@ -74,7 +81,10 @@ pub(crate) struct VisemeCue {
 /// VC-8 là phân biệt nhóm môi với nguyên âm mở, không phải nhảy khẩu hình đúng
 /// từng ms. Kết quả luôn bắt đầu ở t=0 và tăng ngặt.
 pub(crate) fn build_viseme_timeline(phonemes: &str, duration_ms: u64) -> Vec<VisemeCue> {
-    let phones: Vec<char> = phonemes.chars().filter(|c| !c.is_whitespace()).collect();
+    let phones: Vec<char> = phonemes
+        .chars()
+        .filter(|c| !c.is_whitespace() && !is_ipa_modifier(*c))
+        .collect();
     if phones.is_empty() || duration_ms == 0 {
         return Vec::new();
     }
@@ -116,6 +126,29 @@ mod tests {
     }
 
     #[test]
+    fn test_extended_ipa_vowels_mapping() {
+        assert_eq!(Viseme::from_phoneme('ʌ'), Viseme::Aa);
+        assert_eq!(Viseme::from_phoneme('ɒ'), Viseme::Aa);
+        assert_eq!(Viseme::from_phoneme('ɜ'), Viseme::Ih);
+        assert_eq!(Viseme::from_phoneme('ɚ'), Viseme::Ih);
+        assert_eq!(Viseme::from_phoneme('ʉ'), Viseme::Ou);
+        assert_eq!(Viseme::from_phoneme('ɯ'), Viseme::Ou);
+    }
+
+    #[test]
+    fn test_bilabials_and_labiodentals_all_nil() {
+        let bilabials = ['m', 'b', 'p', 'f', 'v', 'ɱ', 'ʋ', 'β'];
+        for ph in bilabials {
+            assert_eq!(
+                Viseme::from_phoneme(ph),
+                Viseme::Nil,
+                "Phoneme '{}' phai duoc map ve Nil de khong ho mieng",
+                ph
+            );
+        }
+    }
+
+    #[test]
     fn timeline_chia_deu_va_gop_trung_cung_viseme() {
         // "ma" 400 ms → Nil@0, Aa@200.
         let cues = build_viseme_timeline("ma", 400);
@@ -148,6 +181,46 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn timeline_loc_sach_cac_modifier_va_stress_marks() {
+        // "həlˈoʊ" with duration 400ms:
+        // Phones after modifier filtering: ['h', 'ə', 'l', 'o', 'ʊ'] (5 phones)
+        // h -> Nil@0
+        // ə -> Ih@80
+        // l -> Nil@160
+        // o -> Oh@240
+        // ʊ -> Ou@320
+        let cues = build_viseme_timeline("həlˈoʊ", 400);
+        assert_eq!(
+            cues,
+            vec![
+                VisemeCue {
+                    viseme: Viseme::Nil,
+                    t_ms: 0
+                },
+                VisemeCue {
+                    viseme: Viseme::Ih,
+                    t_ms: 80
+                },
+                VisemeCue {
+                    viseme: Viseme::Nil,
+                    t_ms: 160
+                },
+                VisemeCue {
+                    viseme: Viseme::Oh,
+                    t_ms: 240
+                },
+                VisemeCue {
+                    viseme: Viseme::Ou,
+                    t_ms: 320
+                },
+            ]
+        );
+
+        // String with only modifiers returns empty timeline
+        assert!(build_viseme_timeline("ˈˌːˑ̆", 500).is_empty());
     }
 
     #[test]

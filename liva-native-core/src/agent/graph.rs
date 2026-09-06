@@ -75,16 +75,31 @@ impl StateGraph {
     }
 }
 
+pub mod checkpoint;
+pub mod diff_reviewer;
+pub mod hitl;
 mod intent;
 mod memory_scope;
-mod pipeline;
+pub mod pipeline;
+pub mod pregel;
 
+pub use checkpoint::{
+    CheckpointRecord, Checkpointer, JsonPatchOp, SqliteCheckpointer, apply_json_patch,
+    generate_json_patch,
+};
+pub use diff_reviewer::{
+    DiffHunk, DiffLine, DiffLineType, DiffReviewRegistry, DiffReviewSession, DiffReviewStatus,
+    FileDiff, HunkStatus, create_diff_review_context, evaluate_session_decision,
+    parse_unified_diff, reconstruct_approved_patch,
+};
+pub use hitl::{ApprovalContext, ApprovalDecision, CheckpointStatus};
 pub use intent::{Intent, route_intent};
 pub use memory_scope::{
     ConversationMemoryScope, memory_system_message, persist_turn, persist_turn_scoped,
     recall_context, recall_context_scoped,
 };
 pub use pipeline::build_pipeline_graph;
+pub use pregel::{BranchMergeFn, Edge, FutureNodeFn, LivaAgentRuntime, NodeError, NodeResult};
 
 #[cfg(test)]
 use intent::tach_nhan_tin;

@@ -1,6 +1,10 @@
+use super::plan::TaskPlan;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+
+/// Maximum number of keys allowed in the working memory scratchpad to prevent unbounded growth.
+pub const MAX_SCRATCHPAD_ENTRIES: usize = 64;
 
 /// Số tin nhắn tối đa giữ lại trong lịch sử hội thoại, KHÔNG kể tin `system`.
 /// Đặt qua `LIVA_MAX_HISTORY_MESSAGES` (mặc định 20 ≈ 10 lượt hỏi–đáp).
@@ -17,14 +21,55 @@ pub fn max_history_messages() -> usize {
         .unwrap_or(20)
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct AgentState {
     pub messages: Vec<Value>, // Can hold chat messages or tool calls
     pub current_node: String,
     pub context: HashMap<String, Value>,
+    /// Hierarchical Working Memory: Structured multi-step task plan (M3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_plan: Option<TaskPlan>,
+    /// Active plan step pointer.
+    #[serde(default)]
+    pub active_step_index: usize,
+    /// Intermediate step execution outputs stored by step ID.
+    #[serde(default)]
+    pub step_outputs: HashMap<String, Value>,
+    /// Working memory scratchpad for intermediate observations and reasoning state.
+    #[serde(default)]
+    pub scratchpad: HashMap<String, Value>,
+    /// Execution step counter in the cyclic state graph DAG.
+    #[serde(default)]
+    pub execution_step: usize,
+    /// History of visited nodes in current DAG path.
+    #[serde(default)]
+    pub visited_nodes: Vec<String>,
+    /// Parent checkpoint ID for branch tracking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_checkpoint_id: Option<String>,
+    /// Active execution branch identifier for parallel branching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
 }
 
 impl AgentState {
+    /// Record a visited node in DAG execution history.
+    pub fn record_node_visit(&mut self, node: impl Into<String>) {
+        let n = node.into();
+        self.current_node = n.clone();
+        self.visited_nodes.push(n);
+    }
+
+    /// Advance execution step counter.
+    pub fn increment_step(&mut self) -> usize {
+        self.execution_step += 1;
+        self.execution_step
+    }
+
+    /// Set execution branch identifier.
+    pub fn set_branch(&mut self, branch: impl Into<String>) {
+        self.branch_id = Some(branch.into());
+    }
     /// Cắt bớt lịch sử tại chỗ: luôn giữ tin `system` đầu tiên (persona) và
     /// `max_history_messages()` tin gần nhất.
     ///
@@ -37,6 +82,54 @@ impl AgentState {
     /// theo token nằm ở `LlamaRouterManager::generate_completion`.
     pub fn trim_history(&mut self) {
         trim_messages(&mut self.messages);
+    }
+
+    /// Set an active task plan for working memory execution.
+    pub fn set_plan(&mut self, plan: TaskPlan) {
+        self.active_step_index = plan.current_step;
+        self.active_plan = Some(plan);
+    }
+
+    /// Retrieve active plan reference.
+    pub fn get_plan(&self) -> Option<&TaskPlan> {
+        self.active_plan.as_ref()
+    }
+
+    /// Retrieve mutable active plan reference.
+    pub fn get_plan_mut(&mut self) -> Option<&mut TaskPlan> {
+        self.active_plan.as_mut()
+    }
+
+    /// Record an intermediate step output into working memory.
+    pub fn record_step_output(&mut self, step_id: impl Into<String>, output: Value) {
+        self.step_outputs.insert(step_id.into(), output);
+    }
+
+    /// Store a key-value pair in the bounded working memory scratchpad.
+    /// If capacity is exceeded, trims earliest entries to preserve bounds.
+    pub fn scratchpad_set(&mut self, key: impl Into<String>, value: Value) {
+        let key_str = key.into();
+        if self.scratchpad.len() >= MAX_SCRATCHPAD_ENTRIES && !self.scratchpad.contains_key(&key_str) {
+            if let Some(first_key) = self.scratchpad.keys().min().cloned() {
+                self.scratchpad.remove(&first_key);
+            }
+        }
+        self.scratchpad.insert(key_str, value);
+    }
+
+    /// Read a value from the working memory scratchpad.
+    pub fn scratchpad_get(&self, key: &str) -> Option<&Value> {
+        self.scratchpad.get(key)
+    }
+
+    /// Remove a value from the scratchpad.
+    pub fn scratchpad_remove(&mut self, key: &str) -> Option<Value> {
+        self.scratchpad.remove(key)
+    }
+
+    /// Clear scratchpad for a new goal.
+    pub fn clear_scratchpad(&mut self) {
+        self.scratchpad.clear();
     }
 }
 
@@ -67,6 +160,7 @@ pub fn trim_messages(messages: &mut Vec<Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::plan::PlanStep;
     use serde_json::json;
 
     fn msgs(n: usize, with_system: bool) -> Vec<Value> {
@@ -138,6 +232,11 @@ mod tests {
             messages: msgs(50, true),
             current_node: "router".to_string(),
             context: HashMap::new(),
+            active_plan: None,
+            active_step_index: 0,
+            step_outputs: HashMap::new(),
+            scratchpad: HashMap::new(),
+            ..Default::default()
         };
         st.trim_history();
         assert_eq!(st.messages.len(), 21);
@@ -152,5 +251,35 @@ mod tests {
         let once = v.clone();
         trim_messages(&mut v);
         assert_eq!(v, once, "gọi hai lần phải cho cùng kết quả");
+    }
+
+    #[test]
+    fn test_working_memory_state_plan_and_scratchpad() {
+        let mut state = AgentState::default();
+        let plan = TaskPlan::new(
+            "Configure Smart Home",
+            vec![
+                PlanStep::new("s1", "Check lighting state"),
+                PlanStep::new("s2", "Turn on living room light"),
+            ],
+        );
+
+        state.set_plan(plan);
+        assert!(state.get_plan().is_some());
+        assert_eq!(state.active_step_index, 0);
+
+        state.record_step_output("s1", json!({"light": "off"}));
+        assert_eq!(state.step_outputs.get("s1"), Some(&json!({"light": "off"})));
+
+        state.scratchpad_set("user_intent", json!("evening_relaxation"));
+        assert_eq!(
+            state.scratchpad_get("user_intent"),
+            Some(&json!("evening_relaxation"))
+        );
+
+        // Serialization roundtrip compatibility test
+        let serialized = serde_json::to_string(&state).expect("serialize");
+        let deserialized: AgentState = serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(state, deserialized);
     }
 }

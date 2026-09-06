@@ -1,12 +1,13 @@
 //! Kho khoá thiết bị (device key): khoá 32 byte tự sinh, niêm phong bằng Windows
-//! DPAPI (phạm vi CurrentUser) rồi lưu cạnh DB. Nền của việc BỎ KHOÁ mã hoá MẶC
-//! ĐỊNH mà không bắt người dùng tự quản lý khoá.
+//! DPAPI (trên Windows, phạm vi CurrentUser) hoặc HKDF-SHA256 machine binding +
+//! AES-256-GCM với phân quyền POSIX 0600 (trên macOS/Linux) rồi lưu cạnh DB.
+//! Nền của việc BỎ KHOÁ mã hoá MẶC ĐỊNH mà không bắt người dùng tự quản lý khoá.
 //!
-//! DPAPI cột khoá vào tài khoản Windows hiện tại — mạnh hơn hằng số công khai
-//! `"0"×32`, không cần nhập mật khẩu (offline-first, "just works"). Đổi lại DPAPI
-//! là **điểm hỏng đơn**: reset/cài lại Windows làm mất master key → khoá không
-//! mở lại được. Vì vậy khi SINH khoá mới, boot phải **escrow** (hiện 1 lần cho
-//! người dùng sao lưu), và luôn có đường khôi phục qua `LIVA_ENCRYPTION_KEY`.
+//! Khóa thiết bị được cột vào máy/tài khoản hiện tại — mạnh hơn hằng số công khai
+//! `"0"×32`, không cần nhập mật khẩu (offline-first, "just works"). Đổi lại
+//! việc cột máy là **điểm hỏng đơn**: reset/cài lại OS / đổi máy làm mất master key →
+//! khoá không mở lại được. Vì vậy khi SINH khoá mới, boot phải **escrow** (hiện 1 lần
+//! cho người dùng sao lưu), và luôn có đường khôi phục qua `LIVA_ENCRYPTION_KEY`.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -17,17 +18,33 @@ pub const DEVICE_KEY_LEN: usize = 32;
 /// Tên file keystore, đặt CẠNH file DB (cùng thư mục dữ liệu).
 pub const DEVICE_KEY_FILE: &str = ".device_key";
 
+/// Tên file bí mật vault, đặt CẠNH snapshot `liva_vault.app`.
+pub const VAULT_SECRET_FILE: &str = ".vault_secret";
+/// Độ dài password vault (byte) đưa vào Argon2id.
+pub const VAULT_PASSWORD_LEN: usize = 32;
+/// Độ dài salt vault (byte).
+pub const VAULT_SALT_LEN: usize = 16;
+
+#[cfg(not(windows))]
+pub const UNIX_SEAL_MAGIC: &[u8; 11] = b"LIVA_KEY_V1";
+#[cfg(not(windows))]
+pub const UNIX_SALT_LEN: usize = 16;
+#[cfg(not(windows))]
+pub const UNIX_IV_LEN: usize = 16;
+#[cfg(not(windows))]
+pub const UNIX_TAG_LEN: usize = 16;
+
 #[derive(Debug)]
 pub enum KeyError {
-    /// `.device_key` tồn tại nhưng DPAPI KHÔNG mở được (đổi/tạo lại user Windows,
-    /// reset mật khẩu bởi admin, cài lại OS…). Dữ liệu vẫn còn — cần khôi phục
+    /// `.device_key` tồn tại nhưng DPAPI / Unix unseal KHÔNG mở được (đổi/tạo lại user Windows,
+    /// reset mật khẩu bởi admin, cài lại OS, đổi máy Unix…). Dữ liệu vẫn còn — cần khôi phục
     /// bằng `LIVA_ENCRYPTION_KEY=<khoá đã backup>`.
     Locked(String),
     /// Lỗi I/O đọc/ghi keystore.
     Io(String),
-    /// Lỗi DPAPI khi seal/unseal.
+    /// Lỗi DPAPI khi seal/unseal trên Windows.
     Dpapi(String),
-    /// Nền tảng không hỗ trợ kho khoá tự sinh (non-Windows) — phải cấp
+    /// Nền tảng không hỗ trợ kho khoá tự sinh — phải cấp
     /// `LIVA_ENCRYPTION_KEY` tường minh.
     Unsupported(String),
 }
@@ -129,7 +146,271 @@ pub fn dpapi_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
     Ok(plain)
 }
 
-/// Đọc khoá thiết bị từ `.device_key` (giải bằng DPAPI), hoặc SINH mới nếu
+#[cfg(windows)]
+pub fn platform_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
+    dpapi_seal(plain)
+}
+
+#[cfg(windows)]
+pub fn platform_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
+    dpapi_unseal(sealed)
+}
+
+// ── Multi-Platform Unix Sealing (macOS & Linux) ─────────────────────────────
+
+#[cfg(not(windows))]
+fn read_system_machine_id() -> String {
+    for path in [
+        "/etc/machine-id",
+        "/var/lib/dbus/machine-id",
+        "/etc/hostid",
+        "/etc/hostname",
+    ] {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+#[cfg(not(windows))]
+fn get_or_create_machine_seed() -> [u8; 32] {
+    static CACHED_SEED: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    *CACHED_SEED.get_or_init(|| {
+        let seed_path = crate::data_dir().join(".machine_seed");
+        if let Ok(bytes) = std::fs::read(&seed_path) {
+            if bytes.len() == 32 {
+                #[cfg(unix)]
+                enforce_file_permissions(&seed_path);
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                return arr;
+            }
+        }
+
+        let mut new_seed = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut new_seed);
+        if let Some(parent) = seed_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = std::fs::metadata(parent) {
+                    let mut permissions = metadata.permissions();
+                    if permissions.mode() & 0o077 != 0 {
+                        permissions.set_mode(0o700);
+                        let _ = std::fs::set_permissions(parent, permissions);
+                    }
+                }
+            }
+
+            // Atomic tempfile write to eliminate 0-byte read races across threads and processes
+            let tmp_path = parent.join(format!(".machine_seed.tmp.{}", uuid::Uuid::new_v4()));
+            let write_res = (|| -> std::io::Result<()> {
+                use std::io::Write;
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600);
+                }
+                let mut f = options.open(&tmp_path)?;
+                f.write_all(&new_seed)?;
+                f.sync_all()?;
+                std::fs::rename(&tmp_path, &seed_path)?;
+                Ok(())
+            })();
+
+            if write_res.is_err() {
+                let _ = std::fs::remove_file(&tmp_path);
+            }
+        }
+
+        if let Ok(bytes) = std::fs::read(&seed_path) {
+            if bytes.len() == 32 {
+                #[cfg(unix)]
+                enforce_file_permissions(&seed_path);
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                return arr;
+            }
+        }
+        new_seed
+    })
+}
+
+#[cfg(not(windows))]
+fn collect_machine_entropy() -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"liva-device-keystore-entropy-v1\0");
+
+    // 1. System machine id (Linux / macOS / BSD)
+    let machine_id = read_system_machine_id();
+    hasher.update(machine_id.as_bytes());
+
+    // 2. User identity
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_default();
+    hasher.update(user.as_bytes());
+
+    // 3. User home directory
+    let home = std::env::var("HOME").unwrap_or_default();
+    hasher.update(home.as_bytes());
+
+    // 4. Hostname & OS/Arch
+    let hostname = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("HOST"))
+        .unwrap_or_default();
+    hasher.update(hostname.as_bytes());
+    hasher.update(std::env::consts::OS.as_bytes());
+    hasher.update(std::env::consts::ARCH.as_bytes());
+
+    // 5. Persistent local machine seed
+    let seed = get_or_create_machine_seed();
+    hasher.update(&seed);
+
+    hasher.finalize().into()
+}
+
+#[cfg(not(windows))]
+pub fn unix_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
+    use aes_gcm::aead::consts::U16;
+    use aes_gcm::{
+        AesGcm, Nonce,
+        aead::{Aead, KeyInit},
+    };
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    type Aes256Gcm16 = AesGcm<aes_gcm::aes::Aes256, U16>;
+
+    let mut salt = [0u8; UNIX_SALT_LEN];
+    let mut iv = [0u8; UNIX_IV_LEN];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut salt);
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut iv);
+
+    let entropy = collect_machine_entropy();
+    let hk = Hkdf::<Sha256>::new(Some(&salt), &entropy);
+    let mut kek = [0u8; 32];
+    hk.expand(b"liva-keystore-seal-v1", &mut kek)
+        .map_err(|e| KeyError::Io(format!("HKDF expand failed: {e}")))?;
+
+    let cipher = Aes256Gcm16::new_from_slice(&kek)
+        .map_err(|e| KeyError::Io(format!("AesGcm init failed: {e}")))?;
+    let nonce = Nonce::<U16>::from_slice(&iv);
+
+    let ciphertext_with_tag = cipher
+        .encrypt(nonce, plain)
+        .map_err(|e| KeyError::Io(format!("Encryption failed: {e}")))?;
+
+    if ciphertext_with_tag.len() < UNIX_TAG_LEN {
+        return Err(KeyError::Io("Ciphertext too short".into()));
+    }
+    let split_idx = ciphertext_with_tag.len() - UNIX_TAG_LEN;
+    let ciphertext = &ciphertext_with_tag[..split_idx];
+    let tag = &ciphertext_with_tag[split_idx..];
+
+    let mut out = Vec::with_capacity(
+        UNIX_SEAL_MAGIC.len() + UNIX_SALT_LEN + UNIX_IV_LEN + UNIX_TAG_LEN + ciphertext.len(),
+    );
+    out.extend_from_slice(UNIX_SEAL_MAGIC);
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&iv);
+    out.extend_from_slice(tag);
+    out.extend_from_slice(ciphertext);
+    Ok(out)
+}
+
+#[cfg(not(windows))]
+pub fn unix_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
+    use aes_gcm::aead::consts::U16;
+    use aes_gcm::{
+        AesGcm, Nonce,
+        aead::{Aead, KeyInit},
+    };
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    type Aes256Gcm16 = AesGcm<aes_gcm::aes::Aes256, U16>;
+
+    let min_len = UNIX_SEAL_MAGIC.len() + UNIX_SALT_LEN + UNIX_IV_LEN + UNIX_TAG_LEN;
+    if sealed.len() < min_len || &sealed[..UNIX_SEAL_MAGIC.len()] != UNIX_SEAL_MAGIC {
+        return Err(KeyError::Locked(
+            "Định dạng blob keystore không hợp lệ hoặc dữ liệu hỏng".into(),
+        ));
+    }
+
+    let mut offset = UNIX_SEAL_MAGIC.len();
+    let salt = &sealed[offset..offset + UNIX_SALT_LEN];
+    offset += UNIX_SALT_LEN;
+    let iv = &sealed[offset..offset + UNIX_IV_LEN];
+    offset += UNIX_IV_LEN;
+    let tag = &sealed[offset..offset + UNIX_TAG_LEN];
+    offset += UNIX_TAG_LEN;
+    let ciphertext = &sealed[offset..];
+
+    let entropy = collect_machine_entropy();
+    let hk = Hkdf::<Sha256>::new(Some(salt), &entropy);
+    let mut kek = [0u8; 32];
+    hk.expand(b"liva-keystore-seal-v1", &mut kek)
+        .map_err(|e| KeyError::Locked(format!("HKDF expand failed: {e}")))?;
+
+    let cipher = Aes256Gcm16::new_from_slice(&kek)
+        .map_err(|e| KeyError::Locked(format!("AesGcm init failed: {e}")))?;
+    let nonce = Nonce::<U16>::from_slice(iv);
+
+    let mut payload = Vec::with_capacity(ciphertext.len() + tag.len());
+    payload.extend_from_slice(ciphertext);
+    payload.extend_from_slice(tag);
+
+    let plain = cipher
+        .decrypt(nonce, payload.as_slice())
+        .map_err(|_| {
+            KeyError::Locked(
+                "Xác thực khoá thiết bị thất bại — sai máy/user hoặc dữ liệu đã bị sửa đổi".into(),
+            )
+        })?;
+    Ok(plain)
+}
+
+#[cfg(not(windows))]
+pub fn platform_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
+    unix_seal(plain)
+}
+
+#[cfg(not(windows))]
+pub fn platform_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
+    unix_unseal(sealed)
+}
+
+#[cfg(not(windows))]
+pub fn dpapi_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
+    unix_seal(plain)
+}
+
+#[cfg(not(windows))]
+pub fn dpapi_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
+    unix_unseal(sealed)
+}
+
+#[cfg(unix)]
+pub fn enforce_file_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mut permissions = metadata.permissions();
+        let current_mode = permissions.mode() & 0o777;
+        if current_mode != 0o600 {
+            permissions.set_mode(0o600);
+            let _ = std::fs::set_permissions(path, permissions);
+        }
+    }
+}
+
+/// Đọc khoá thiết bị từ `.device_key` (giải bằng DPAPI hoặc Unix sealing), hoặc SINH mới nếu
 /// chưa có. Trả `(passphrase_hex_64, vừa_sinh_mới)`:
 /// - `passphrase_hex` = 32 byte khoá mã hoá hex (dùng làm passphrase cho
 ///   `EncryptionEngine::new`); cũng chính là chuỗi khôi phục cho
@@ -141,23 +422,16 @@ pub fn dpapi_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
 /// thất bại `AlreadyExists` → ta VỨT khoá vừa sinh và ĐỌC LẠI khoá đã persist,
 /// không bao giờ chạy bằng khoá chưa ghi thành công (tránh split-brain khoá).
 ///
-/// **KHÔNG** ghi đè file đã tồn tại: nếu `.device_key` có nhưng DPAPI không mở
-/// được (đổi user / cài lại OS), trả `Err(Locked)` để boot dừng và chỉ dẫn khôi
+/// **KHÔNG** ghi đè file đã tồn tại: nếu `.device_key` có nhưng DPAPI / Unix unseal không mở
+/// được (đổi user / cài lại OS / đổi máy), trả `Err(Locked)` để boot dừng và chỉ dẫn khôi
 /// phục — TUYỆT ĐỐI không sinh khoá mới đè lên (sẽ khoá chết dữ liệu cũ).
 pub fn load_or_create_device_key(db_path: &Path) -> Result<(String, bool), KeyError> {
     let (raw, generated) = load_or_create_sealed(&device_key_path(db_path), DEVICE_KEY_LEN)?;
     Ok((hex::encode(raw), generated))
 }
 
-/// Tên file bí mật vault, đặt CẠNH snapshot `liva_vault.app`.
-pub const VAULT_SECRET_FILE: &str = ".vault_secret";
-/// Độ dài password vault (byte) đưa vào Argon2id.
-pub const VAULT_PASSWORD_LEN: usize = 32;
-/// Độ dài salt vault (byte).
-pub const VAULT_SALT_LEN: usize = 16;
-
 /// Bí mật cho Stronghold vault: `(password 32B, salt 16B)` per-machine, niêm
-/// phong DPAPI, lưu `.vault_secret` cạnh snapshot. Trả thêm `vừa_sinh_mới` để
+/// phong DPAPI / Unix sealing, lưu `.vault_secret` cạnh snapshot. Trả thêm `vừa_sinh_mới` để
 /// caller biết cần MIGRATE vault cũ (nếu snapshot đã tồn tại).
 ///
 /// Tách khỏi khoá DB (`.device_key`) theo quyết định của người dùng — lộ khoá
@@ -172,7 +446,7 @@ pub fn load_or_create_vault_secret(dir: &Path) -> Result<(Vec<u8>, Vec<u8>, bool
     Ok((password, salt, generated))
 }
 
-/// Đọc + giải niêm (DPAPI) một khối bí mật `len` byte từ `path`, hoặc SINH mới
+/// Đọc + giải niêm (DPAPI hoặc Unix sealing) một khối bí mật `len` byte từ `path`, hoặc SINH mới
 /// (OsRng) + niêm phong + ghi ATOMIC (`create_new`) nếu chưa có. Trả
 /// `(bytes, vừa_sinh_mới)`.
 ///
@@ -180,9 +454,16 @@ pub fn load_or_create_vault_secret(dir: &Path) -> Result<(Vec<u8>, Vec<u8>, bool
 /// mở-không-được: trả `Err(Locked)` để caller quyết (fail-fast cho DB, fail-soft
 /// reset cho vault). Race first-boot: `create_new` thua → đọc lại bản đã persist.
 fn load_or_create_sealed(path: &Path, len: usize) -> Result<(Vec<u8>, bool), KeyError> {
+    static KEYSTORE_INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _lock = KEYSTORE_INIT_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+
     if path.exists() {
+        #[cfg(unix)]
+        enforce_file_permissions(path);
         let sealed = std::fs::read(path).map_err(|e| KeyError::Io(e.to_string()))?;
-        let raw = dpapi_unseal(&sealed)?;
+        let raw = platform_unseal(&sealed)?;
         if raw.len() != len {
             return Err(KeyError::Locked(format!(
                 "bí mật giải ra {} byte, cần {len}",
@@ -194,16 +475,29 @@ fn load_or_create_sealed(path: &Path, len: usize) -> Result<(Vec<u8>, bool), Key
 
     let mut raw = vec![0u8; len];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut raw);
-    let sealed = dpapi_seal(&raw)?;
+    let sealed = platform_seal(&raw)?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| KeyError::Io(e.to_string()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = std::fs::metadata(parent) {
+                let mut permissions = metadata.permissions();
+                if permissions.mode() & 0o077 != 0 {
+                    permissions.set_mode(0o700);
+                    let _ = std::fs::set_permissions(parent, permissions);
+                }
+            }
+        }
     }
     match write_new_exclusive(path, &sealed) {
         Ok(()) => Ok((raw, true)),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            #[cfg(unix)]
+            enforce_file_permissions(path);
             let sealed2 = std::fs::read(path).map_err(|e| KeyError::Io(e.to_string()))?;
-            let raw2 = dpapi_unseal(&sealed2)?;
+            let raw2 = platform_unseal(&sealed2)?;
             if raw2.len() != len {
                 return Err(KeyError::Locked("bí mật (đọc lại) sai độ dài".into()));
             }
@@ -213,15 +507,58 @@ fn load_or_create_sealed(path: &Path, len: usize) -> Result<(Vec<u8>, bool), Key
     }
 }
 
-/// Ghi file CHỈ KHI CHƯA TỒN TẠI (create_new). Trả `AlreadyExists` nếu đã có.
+/// Ghi file CHỈ KHI CHƯA TỒN TẠI (atomic link/create_new) với phân quyền 0600 trên Unix.
+/// Ghi vào file tạm (.tmp.<uuid>) và link nguyên tử để loại trừ hoàn toàn cửa sổ file 0-byte.
+/// Trả `AlreadyExists` nếu file đích đã tồn tại.
 fn write_new_exclusive(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    f.write_all(data)?;
-    f.sync_all()
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let tmp_path = parent.join(format!(".tmp.{}", uuid::Uuid::new_v4()));
+
+    let write_res = (|| -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut f = options.open(&tmp_path)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        drop(f);
+
+        #[cfg(unix)]
+        {
+            std::fs::hard_link(&tmp_path, path)?;
+            let _ = std::fs::remove_file(&tmp_path);
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            match std::fs::hard_link(&tmp_path, path) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    Ok(())
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e),
+                Err(_) => {
+                    let mut options = std::fs::OpenOptions::new();
+                    options.write(true).create_new(true);
+                    let mut f = options.open(path)?;
+                    f.write_all(data)?;
+                    f.sync_all()?;
+                    let _ = std::fs::remove_file(&tmp_path);
+                    Ok(())
+                }
+            }
+        }
+    })();
+
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    write_res
 }
 
 /// Hiện hộp thoại thông báo modal (Win32 MessageBox), chặn tới khi bấm OK.
@@ -246,31 +583,16 @@ pub fn show_message_box(title: &str, text: &str) {
 #[cfg(not(windows))]
 pub fn show_message_box(_title: &str, _text: &str) {}
 
-#[cfg(not(windows))]
-pub fn dpapi_seal(_plain: &[u8]) -> Result<Vec<u8>, KeyError> {
-    Err(KeyError::Unsupported(
-        "DPAPI chỉ có trên Windows; non-Windows phải cấp LIVA_ENCRYPTION_KEY".into(),
-    ))
-}
-
-#[cfg(not(windows))]
-pub fn dpapi_unseal(_sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
-    Err(KeyError::Unsupported(
-        "DPAPI chỉ có trên Windows; non-Windows phải cấp LIVA_ENCRYPTION_KEY".into(),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Round-trip DPAPI: seal rồi unseal phải ra đúng bản gốc, và ciphertext
-    /// KHÁC bản gốc. Chỉ chạy trên Windows (nơi DPAPI tồn tại).
-    #[cfg(windows)]
+    /// Round-trip sealing: seal rồi unseal phải ra đúng bản gốc, và ciphertext
+    /// KHÁC bản gốc.
     #[test]
     fn dpapi_seal_unseal_round_trip() {
         let key = [0x42u8; DEVICE_KEY_LEN];
-        let sealed = dpapi_seal(&key).expect("seal phải thành công trên Windows");
+        let sealed = dpapi_seal(&key).expect("seal phải thành công");
         assert_ne!(sealed.as_slice(), &key[..], "sealed phải khác bản gốc");
         let opened = dpapi_unseal(&sealed).expect("unseal phải mở được");
         assert_eq!(
@@ -281,7 +603,6 @@ mod tests {
     }
 
     /// Dữ liệu rác không phải sealed-blob → unseal trả Locked (không panic).
-    #[cfg(windows)]
     #[test]
     fn dpapi_unseal_rac_tra_locked() {
         let res = dpapi_unseal(b"khong-phai-dpapi-blob-chi-la-rac");
@@ -301,7 +622,6 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
     fn unique_tmp_dir(tag: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
@@ -317,8 +637,7 @@ mod tests {
     }
 
     /// Lần đầu SINH khoá (generated=true) + tạo file; lần sau ĐỌC LẠI cùng khoá
-    /// (generated=false). Khoá là 64 hex (32 byte). Chỉ Windows (cần DPAPI).
-    #[cfg(windows)]
+    /// (generated=false). Khoá là 64 hex (32 byte). Chạy trên mọi nền tảng.
     #[test]
     fn load_or_create_sinh_roi_doc_lai_on_dinh() {
         let dir = unique_tmp_dir("create");
@@ -342,7 +661,6 @@ mod tests {
 
     /// Bí mật vault: sinh (pw 32B + salt 16B) rồi đọc lại ổn định; tách BIỆT
     /// khỏi khoá thiết bị (khác file, khác giá trị).
-    #[cfg(windows)]
     #[test]
     fn load_or_create_vault_secret_sinh_doc_lai_va_tach_khoi_device_key() {
         let dir = unique_tmp_dir("vault");
@@ -372,4 +690,69 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_seal_unseal_round_trip() {
+        let secret = [0x7au8; 32];
+        let sealed = unix_seal(&secret).expect("unix_seal phải thành công");
+        assert_ne!(sealed.as_slice(), &secret[..]);
+        assert!(sealed.starts_with(UNIX_SEAL_MAGIC));
+        let opened = unix_unseal(&sealed).expect("unix_unseal phải thành công");
+        assert_eq!(opened.as_slice(), &secret[..]);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_unseal_corrupted_data_returns_locked() {
+        let secret = [0x55u8; 32];
+        let mut sealed = unix_seal(&secret).expect("unix_seal thành công");
+
+        // Flip a bit in the tag / ciphertext
+        let last_idx = sealed.len() - 1;
+        sealed[last_idx] ^= 0xFF;
+
+        let result = unix_unseal(&sealed);
+        assert!(
+            matches!(result, Err(KeyError::Locked(_))),
+            "tampered sealed blob phải trả KeyError::Locked"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_unseal_wrong_magic_returns_locked() {
+        let secret = [0x55u8; 32];
+        let mut sealed = unix_seal(&secret).expect("unix_seal thành công");
+        sealed[0] ^= 0xFF; // corrupt magic header
+
+        let result = unix_unseal(&sealed);
+        assert!(
+            matches!(result, Err(KeyError::Locked(_))),
+            "wrong magic header phải trả KeyError::Locked"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_keystore_file_permissions_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = unique_tmp_dir("perms");
+        let db_path = dir.join("mem.sqlite");
+
+        let (_, _) = load_or_create_device_key(&db_path).unwrap();
+        let key_file = device_key_path(&db_path);
+        let key_meta = std::fs::metadata(&key_file).unwrap();
+        let key_mode = key_meta.permissions().mode() & 0o777;
+        assert_eq!(key_mode, 0o600, ".device_key phải có quyền 0600 (-rw-------)");
+
+        let (_, _, _) = load_or_create_vault_secret(&dir).unwrap();
+        let vault_file = dir.join(VAULT_SECRET_FILE);
+        let vault_meta = std::fs::metadata(&vault_file).unwrap();
+        let vault_mode = vault_meta.permissions().mode() & 0o777;
+        assert_eq!(vault_mode, 0o600, ".vault_secret phải có quyền 0600 (-rw-------)");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
+

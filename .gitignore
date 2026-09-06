@@ -105,6 +105,8 @@ data/hardware_state.json
 # trỏ đâu. Là bản niêm phong khoá mã hoá facts của người dùng.
 .device_key
 **/.device_key
+.machine_seed
+**/.machine_seed
 
 # Legacy (renamed to liva-gateway)
 openclaw-gateway/

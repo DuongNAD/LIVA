@@ -182,3 +182,104 @@ export interface TaskItem {
     createdAt?: number;
     updatedAt?: number;
 }
+
+// ─── Multi-Channel Management (Milestone 2) ───
+export interface ChannelCapabilities {
+    streaming_text: boolean;
+    binary_attachments: boolean;
+    voice_notes: boolean;
+    interactive_buttons: boolean;
+    typing_indicator: boolean;
+    thread_replies: boolean;
+}
+
+export type ChannelConnectionStatus = 'connected' | 'disconnected' | 'reconnecting' | 'failed' | 'standby';
+
+export interface ChannelItem {
+    id: string;
+    name: string;
+    channel_type: string;
+    status: { status: ChannelConnectionStatus; attempt?: number; next_retry_ms?: number; error?: string } | ChannelConnectionStatus;
+    enabled: boolean;
+    capabilities: ChannelCapabilities;
+    last_seen_unix: number;
+    message_count: number;
+    config_summary: Record<string, string>;
+}
+
+// ─── Node Pairing Monitor (Milestone 2) ───
+export interface PairedNodeInfo {
+    nodeId: string;
+    nodeName: string;
+    role: 'desktop_ui' | 'widget' | 'mobile_companion' | 'headless_node' | 'cli_tool';
+    publicKey: string;
+    approvedAtUnix: number;
+    lastSeenUnix: number;
+    deviceType: 'mobile' | 'desktop' | 'server' | 'terminal' | 'widget';
+}
+
+export interface PendingPairingChallenge {
+    challengeId: string;
+    shortCode: string;
+    nonce: string;
+    nodeId: string;
+    nodeName: string;
+    role: string;
+    publicKey: string;
+    createdAtUnix: number;
+    expiresAtUnix: number;
+    ttlRemainingSeconds: number;
+}
+
+// ─── Browser Automation (Milestone 2) ───
+export interface BrowserStatus {
+    isRunning: boolean;
+    isPaused: boolean;
+    currentUrl: string;
+    pageTitle: string;
+    httpStatus: number;
+    viewportWidth: number;
+    viewportHeight: number;
+    sandboxActive: boolean;
+    ssrfGuard: boolean;
+}
+
+export interface BrowserActionRecord {
+    id: string;
+    timestamp_unix: number;
+    action: string;
+    target: string;
+    status: string;
+    details: string;
+}
+
+// ─── Skill Manifest & ClawHub (Milestone 2) ───
+export interface SkillManifestInfo {
+    skillId: string;
+    name: string;
+    version: string;
+    description: string;
+    author?: string;
+    license?: string;
+    triggers?: Array<{ type: string; config?: unknown }>;
+    permissions?: Array<{ type: string; config?: unknown }>;
+    tools?: Array<{ name: string; description: string; input_schema?: unknown; risk_level?: string }>;
+    runtimeType?: string;
+    markdownInstructions: string;
+    rawContent: string;
+    contentHash: string;
+    dirPath: string;
+}
+
+export interface SkillLogEntry {
+    id: string;
+    skillId: string;
+    timestampUnix: number;
+    caller: string;
+    status: 'SUCCESS' | 'ERROR';
+    durationMs: number;
+    input?: unknown;
+    output?: unknown;
+    error?: string;
+}
+

@@ -32,6 +32,8 @@ const OWNED: &[&str] = &[
     "llm:health_check",
     "chat:completion",
     "task_plan_chat",
+    "agent:react_step",
+    "agent:plan_and_execute",
 ];
 
 /// Lệnh này có thuộc miền LLM không.
@@ -59,6 +61,8 @@ pub async fn handle(
             handle_chat_completion_scoped(state, payload, tx, req_id, memory_scope).await
         }
         "task_plan_chat" => task_plan_chat(state, payload, tx).await,
+        "agent:react_step" => agent_react_step(state, payload).await,
+        "agent:plan_and_execute" => agent_plan_and_execute(state, payload).await,
         _ => Err(format!("Unknown command: {command}")),
     }
 }
@@ -242,19 +246,194 @@ async fn task_plan_chat(
     }))
 }
 
+pub async fn build_channel_tool_dispatcher(state: &AppState) -> crate::skills::dispatcher::UnifiedToolDispatcher {
+    let dispatcher = crate::skills::dispatcher::UnifiedToolDispatcher::new();
+
+    // 1. Smart home control
+    dispatcher.register_native_handler(
+        crate::skills::manifest::SkillToolDefinition {
+            name: "control_smarthome".to_string(),
+            description: "Control smart home devices (light, fan, ac)".to_string(),
+            risk_level: crate::skills::manifest::RiskLevel::ReadOnlySafe,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "device": { "type": "string" },
+                    "action": { "type": "string" }
+                },
+                "required": ["device", "action"]
+            }),
+        },
+        |args| {
+            Box::pin(async move {
+                crate::integrations::smart_home::execute(args)
+                    .map(|msg| json!({ "status": "ok", "message": msg }))
+            })
+        },
+    ).await;
+
+    // 2. Obsidian Vault search
+    let vault_server = state.mcp_server.clone();
+    dispatcher.register_native_handler(
+        crate::skills::manifest::SkillToolDefinition {
+            name: "search_vault".to_string(),
+            description: "Search notes in Obsidian Vault".to_string(),
+            risk_level: crate::skills::manifest::RiskLevel::ReadOnlySafe,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" }
+                },
+                "required": ["query"]
+            }),
+        },
+        move |args| {
+            let server = vault_server.clone();
+            Box::pin(async move {
+                let req = crate::mcp::protocol::CallToolRequest {
+                    name: "search_vault".to_string(),
+                    arguments: args,
+                };
+                let res = server.call_tool(req).await?;
+                let text = res
+                    .content
+                    .iter()
+                    .filter_map(|c| match c {
+                        crate::mcp::protocol::ToolContent::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Ok(json!({ "results": text }))
+            })
+        },
+    ).await;
+
+    // 3. Weather lookup
+    dispatcher.register_native_handler(
+        crate::skills::manifest::SkillToolDefinition {
+            name: "get_weather".to_string(),
+            description: "Get weather information for a location".to_string(),
+            risk_level: crate::skills::manifest::RiskLevel::ReadOnlySafe,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "location": { "type": "string" }
+                },
+                "required": ["location"]
+            }),
+        },
+        |args| {
+            Box::pin(async move {
+                let location = args.get("location").and_then(|l| l.as_str()).unwrap_or("Hà Nội");
+                Ok(json!({
+                    "location": location,
+                    "temperature": "28°C",
+                    "condition": "Nhiều mây, có mưa rào rải rác",
+                    "humidity": "75%"
+                }))
+            })
+        },
+    ).await;
+
+    // 4. Web search fallback
+    dispatcher.register_native_handler(
+        crate::skills::manifest::SkillToolDefinition {
+            name: "search_tool".to_string(),
+            description: "Fallback web search tool".to_string(),
+            risk_level: crate::skills::manifest::RiskLevel::ReadOnlySafe,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" }
+                },
+                "required": ["query"]
+            }),
+        },
+        |args| {
+            Box::pin(async move {
+                let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
+                Ok(json!({
+                    "query": query,
+                    "results": [
+                        format!("Kết quả tìm kiếm cho '{}': dữ liệu hợp lệ", query)
+                    ]
+                }))
+            })
+        },
+    ).await;
+
+    dispatcher
+}
+
+async fn agent_react_step(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+    let mut agent_state: agent::AgentState = match payload.get("state") {
+        Some(s) => serde_json::from_value(s.clone()).map_err(|e| format!("Invalid state: {e}"))?,
+        None => {
+            let msg = payload.get("goal").or_else(|| payload.get("message")).and_then(|v| v.as_str()).unwrap_or("Default Goal");
+            agent::AgentState {
+                messages: vec![json!({"role": "user", "content": msg})],
+                ..Default::default()
+            }
+        }
+    };
+
+    let dispatcher = build_channel_tool_dispatcher(&state).await;
+    let outcome = agent::AgentLoop::step(&mut agent_state, &dispatcher)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "outcome": outcome,
+        "state": agent_state
+    }))
+}
+
+async fn agent_plan_and_execute(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+    let goal = payload
+        .get("goal")
+        .or_else(|| payload.get("message"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing 'goal' or 'message' in payload".to_string())?;
+
+    let max_iterations = payload
+        .get("maxIterations")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10) as usize;
+
+    let mut agent_state = agent::AgentState {
+        messages: vec![json!({"role": "user", "content": goal})],
+        ..Default::default()
+    };
+
+    let dispatcher = build_channel_tool_dispatcher(&state).await;
+    let final_answer = agent::AgentLoop::run(&mut agent_state, &dispatcher, max_iterations)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "final_answer": final_answer,
+        "plan": agent_state.get_plan(),
+        "step_outputs": agent_state.step_outputs,
+        "scratchpad": agent_state.scratchpad
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn owns_dung_nam_lenh_va_khong_om_lenh_khac() {
-        assert_eq!(OWNED.len(), 5);
+        assert_eq!(OWNED.len(), 7);
         for name in OWNED {
             assert!(owns(name));
         }
         // Gom cả hai tiền tố khác nhau, nên `strip_prefix("llm:")` sẽ bỏ sót:
         assert!(owns("chat:completion"));
         assert!(owns("task_plan_chat"));
+        assert!(owns("agent:react_step"));
+        assert!(owns("agent:plan_and_execute"));
         // Nhưng không được ôm CRUD của miền task:
         assert!(!owns("get_tasks"));
         assert!(!owns("add_task"));

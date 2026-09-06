@@ -20,12 +20,12 @@ covers:
 
 | Disposition | Số tài liệu |
 |---|---:|
-| KEEP | 35 |
+| KEEP | 37 |
 | SPLIT | 7 |
 | GENERATE | 5 |
 | FREEZE | 40 |
 | MERGE | 16 |
-| **Tổng** | **103** |
+| **Tổng** | **105** |
 
 ## Quy ước
 
@@ -49,9 +49,9 @@ covers:
 | `docs/00-san-pham/tam-nhin-jarvis.md` | **KEEP** | A | 7 | — | Canonical owner cho tầm nhìn và nguyên tắc sản phẩm. |
 | `docs/01-ban-ve/00-tong-quan-he-thong.md` | **MERGE** | C-foundation | 9 | `docs/03-he-thong-con/runtime-native.md` | Tổng quan as-built cần nhập vào subsystem runtime, tránh cạnh tranh với product vision. |
 | `docs/01-ban-ve/01-kien-truc-tong-the.md` | **SPLIT** | C-foundation | 21 | `docs/01-kien-truc/as-built.md`<br>`docs/03-he-thong-con/runtime-native.md` | Đang trộn topology as-built, target design và runtime composition. |
-| `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md` | **SPLIT** | C-contracts | 21 | `docs/02-hop-dong/tauri-ipc.md`<br>`docs/02-hop-dong/websocket.md` | Hai contract có vòng đời và consumer khác nhau. |
+| `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md` | **SPLIT** | C-contracts | 22 | `docs/02-hop-dong/tauri-ipc.md`<br>`docs/02-hop-dong/websocket.md` | Hai contract có vòng đời và consumer khác nhau. |
 | `docs/01-ban-ve/03-duong-ong-thoai.md` | **FREEZE** | C-voice-complete | 13 | `docs/03-he-thong-con/voice.md`<br>`docs/05-chat-luong/voice-slo.md` | Đã tách canonical voice runtime và SLO; giữ khảo sát chi tiết như snapshot lịch sử. |
-| `docs/01-ban-ve/04-he-llm-va-prompt.md` | **SPLIT** | C-agent | 14 | `docs/03-he-thong-con/llm-routing.md`<br>`docs/02-hop-dong/prompt-context.md` | Model routing và prompt contract cần chủ sở hữu độc lập. |
+| `docs/01-ban-ve/04-he-llm-va-prompt.md` | **SPLIT** | C-agent | 15 | `docs/03-he-thong-con/llm-routing.md`<br>`docs/02-hop-dong/prompt-context.md` | Model routing và prompt contract cần chủ sở hữu độc lập. |
 | `docs/01-ban-ve/05-agent-bo-nho-va-tien-hoa.md` | **FREEZE** | C-agent-tools-complete | 7 | `docs/03-he-thong-con/agent-tools.md`<br>`docs/03-he-thong-con/memory.md`<br>`docs/05-chat-luong/action-policy.md` | Đã tách agent/tool runtime, memory và action policy; evolution còn lại là snapshot experimental. |
 | `docs/01-ban-ve/06-thi-giac-passive-va-governor.md` | **FREEZE** | C-vision-complete | 13 | `docs/03-he-thong-con/vision.md`<br>`docs/03-he-thong-con/context-broker.md`<br>`docs/05-chat-luong/resource-governor.md` | Đã tách perception đang chạy, proactive experimental và resource policy sang ba nguồn chuẩn độc lập. |
 | `docs/01-ban-ve/07-tang-du-lieu-va-bao-mat.md` | **FREEZE** | C-security-complete | 4 | `docs/03-he-thong-con/persistence.md`<br>`docs/05-chat-luong/threat-model.md` | Đã tách data contract và threat model; bản 07 giữ làm snapshot lịch sử. |
@@ -71,16 +71,18 @@ covers:
 | `docs/02-van-hanh/release-v1.0.0-smoke-test.md` | **KEEP** | C-operations | 4 | — | Bằng chứng dựng installer v1.0.0 và checklist nghiệm thu trên Windows sạch. |
 | `docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md` | **FREEZE** | B | 12 | — | Snapshot khảo sát đã ghi rõ ngày và trạng thái đóng băng. |
 | `docs/03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md` | **FREEZE** | B | 22 | — | Đối chiếu tại một thời điểm; capability registry đã thay vai trò trạng thái sống. |
-| `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` | **MERGE** | C-quality | 26 | `docs/06-ke-hoach/roadmap.md`<br>`docs/05-chat-luong/risk-register.md` | Việc mở nhập vào roadmap; risk bền nhập vào risk register. |
+| `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md` | **MERGE** | C-quality | 27 | `docs/06-ke-hoach/roadmap.md`<br>`docs/05-chat-luong/risk-register.md` | Việc mở nhập vào roadmap; risk bền nhập vào risk register. |
 | `docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md` | **FREEZE** | B | 20 | — | Roadmap cũ đã bị master roadmap thay thế; giữ làm lịch sử F/P. |
 | `docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md` | **FREEZE** | B | 5 | — | Đề xuất point-in-time, không phải kiến trúc hay roadmap hiện hành. |
 | `docs/03-danh-gia/05-nang-cap-toan-dien.md` | **SPLIT** | C-roadmap | 14 | `docs/06-ke-hoach/roadmap.md`<br>`docs/99-luu-tru/bao-cao-lich-su/nang-cap-toan-dien-2026-07.md` | Việc còn mở nhập master roadmap; bằng chứng U1–U20 đóng băng. |
 | `docs/03-danh-gia/06-nhan-tin-ra-ngoai.md` | **SPLIT** | C-integrations | 5 | `docs/03-he-thong-con/messaging.md`<br>`docs/06-ke-hoach/epics/messaging-reliability.md` | Tách as-built messaging khỏi backlog outbox/Telegram. |
 | `docs/03-danh-gia/07-wake-word-viec-con-lai.md` | **FREEZE** | C-voice-complete | 3 | `docs/03-he-thong-con/wake-word.md`<br>`docs/05-chat-luong/wake-benchmark.md` | Đã tách architecture và benchmark wake; giữ số đo 27/07/2026 như snapshot lịch sử. |
 | `docs/03-he-thong-con/agent-tools.md` | **KEEP** | C-agent-tools-complete | 11 | — | Canonical as-built cho StateGraph, reflex lane, tool selector, MCP executor và skill runtime. |
+| `docs/03-he-thong-con/automation-va-sandbox.md` | **KEEP** | C-agent-tools-complete | 0 | — | Kiến trúc tự động hoá trình duyệt qua CDP, OS automation và sandbox bảo mật đa tầng. |
 | `docs/03-he-thong-con/context-broker.md` | **KEEP** | C-vision-complete | 4 | — | Canonical owner cho ranh giới proactive observation, consent và cảnh báo passive keylogger. |
 | `docs/03-he-thong-con/desktop-tauri.md` | **KEEP** | C-desktop-complete | 7 | — | Canonical owner cho Tauri boot, window capability, native IPC và session boundary. |
 | `docs/03-he-thong-con/frontend.md` | **KEEP** | C-desktop-complete | 6 | — | Canonical as-built cho Vue entries, widget/dashboard và dual transport. |
+| `docs/03-he-thong-con/gateway-va-skills.md` | **KEEP** | C-desktop-complete | 0 | — | Kiến trúc Gateway Control Plane, message normalization, đa kênh và ClawHub skills runtime. |
 | `docs/03-he-thong-con/memory.md` | **KEEP** | C-memory-complete | 7 | — | Canonical as-built cho checkpoint, conversational RAG, facts, projection worker và kế hoạch semantic memory. |
 | `docs/03-he-thong-con/persistence.md` | **KEEP** | C-security-complete | 18 | — | Canonical as-built cho data root, SQLite schema, migration, durability và vòng đời dữ liệu. |
 | `docs/03-he-thong-con/vision.md` | **KEEP** | C-vision-complete | 5 | — | Canonical as-built cho capture, region diff, vision ask và UI screen watch. |
@@ -143,18 +145,18 @@ covers:
 | `docs/ai/planning/README.md` | **MERGE** | A | 0 | `docs/06-ke-hoach/roadmap.md` | Pointer tương thích cho ai-devkit; roadmap là canonical owner. |
 | `docs/ai/requirements/README.md` | **MERGE** | A | 0 | `docs/00-san-pham/tam-nhin-jarvis.md` | Pointer tương thích cho ai-devkit; yêu cầu sản phẩm không được chép lại. |
 | `docs/ai/testing/README.md` | **MERGE** | A | 0 | `docs/02-van-hanh/04-kiem-thu-va-ci.md` | Pointer tương thích cho ai-devkit; test contract nằm ở tài liệu CI chuẩn. |
-| `docs/README.md` | **KEEP** | A | 51 | — | Mục lục chuyển tiếp và điểm vào duy nhất của bộ tài liệu. |
+| `docs/README.md` | **KEEP** | A | 53 | — | Mục lục chuyển tiếp và điểm vào duy nhất của bộ tài liệu. |
 
 ## File chưa được phép di chuyển ngay
 
 Các file sau có disposition `SPLIT/MERGE` và đang có link Markdown trỏ vào. Phải cập nhật
 inbound link trước, sau đó giữ redirect ít nhất một chu kỳ release.
 
-- `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md`: 26 file trỏ vào.
+- `docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md`: 27 file trỏ vào.
+- `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md`: 22 file trỏ vào.
 - `docs/01-ban-ve/01-kien-truc-tong-the.md`: 21 file trỏ vào.
-- `docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md`: 21 file trỏ vào.
+- `docs/01-ban-ve/04-he-llm-va-prompt.md`: 15 file trỏ vào.
 - `docs/02-van-hanh/03-trien-khai-va-runtime.md`: 15 file trỏ vào.
-- `docs/01-ban-ve/04-he-llm-va-prompt.md`: 14 file trỏ vào.
 - `docs/03-danh-gia/05-nang-cap-toan-dien.md`: 14 file trỏ vào.
 - `docs/01-ban-ve/09-tich-hop-ngoai.md`: 11 file trỏ vào.
 - `docs/01-ban-ve/00-tong-quan-he-thong.md`: 9 file trỏ vào.

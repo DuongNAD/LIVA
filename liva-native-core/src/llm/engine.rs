@@ -105,23 +105,37 @@ pub fn check_prompt_fits(prompt_tokens_len: usize, n_ctx: usize) -> Result<(), S
     ))
 }
 
+/// Compute the length of the common token prefix between two token sequences.
+#[inline]
+pub fn compute_common_prefix_len(a: &[LlamaToken], b: &[LlamaToken]) -> usize {
+    a.iter()
+        .zip(b.iter())
+        .take_while(|(t1, t2)| t1 == t2)
+        .count()
+}
+
 pub fn prune_kv_cache(
     context: &mut LlamaContext,
     n_past: &mut i32,
     n_ctx: i32,
     last_tokens: &mut Vec<LlamaToken>,
 ) {
-    let s = (n_ctx / 8).min(512); // Keep early conversation tokens
-    let k = (n_ctx / 8).min(512); // Discard chunk size
+    if n_ctx <= 0 {
+        return;
+    }
+    let s = (n_ctx / 8).clamp(1, 512); // Keep early conversation tokens
+    let k = (n_ctx / 8).clamp(1, 512); // Discard chunk size
 
-    if *n_past >= n_ctx {
+    if *n_past >= n_ctx && (s + k) <= n_ctx {
         // Discard sequence entries
         let _ = context.clear_kv_cache_seq(Some(0), Some(s as u32), Some((s + k) as u32));
         // Shift remaining token sequence indices
         let _ = context.kv_cache_seq_add(0, Some((s + k) as u32), Some(*n_past as u32), -k);
         *n_past -= k;
-        if last_tokens.len() >= (s + k) as usize {
-            last_tokens.drain(s as usize..(s + k) as usize);
+        let start = s as usize;
+        let end = (s + k) as usize;
+        if last_tokens.len() >= end {
+            last_tokens.drain(start..end);
         }
     }
 }
@@ -138,6 +152,24 @@ impl LlamaRouterManager {
             vocab_only: false,
             mmproj_path: None,
         })
+    }
+
+    /// Returns the currently cached token sequence.
+    pub fn last_tokens(&self) -> &[LlamaToken] {
+        &self.last_tokens
+    }
+
+    /// Explicitly clear the KV cache and reset the cached token sequence.
+    pub fn clear_kv_cache(&mut self) {
+        if let Some(engine) = self.engine.as_mut() {
+            engine.context.clear_kv_cache();
+        }
+        self.last_tokens.clear();
+    }
+
+    /// Calculates how many tokens of `prompt_tokens` match the currently cached prefix.
+    pub fn prefix_cached_len(&self, prompt_tokens: &[LlamaToken]) -> usize {
+        compute_common_prefix_len(&self.last_tokens, prompt_tokens)
     }
 
     /// Set the vision-projector (mmproj) GGUF path used to lazily build the
@@ -283,19 +315,7 @@ impl LlamaRouterManager {
         check_prompt_fits(prompt_tokens_len, self.n_ctx)?;
 
         // 1. Find common prefix with last processed tokens
-        let mut common_len = 0;
-        for (i, (&t1, &t2)) in self
-            .last_tokens
-            .iter()
-            .zip(prompt_tokens.iter())
-            .enumerate()
-        {
-            if t1 == t2 {
-                common_len = i + 1;
-            } else {
-                break;
-            }
-        }
+        let common_len = compute_common_prefix_len(&self.last_tokens, &prompt_tokens);
 
         // 2. Clear KV cache after common prefix
         if common_len > 0 {
@@ -724,5 +744,25 @@ mod tests {
         // cong truc tiep se tran va panic o debug build
         assert!(check_prompt_fits(usize::MAX - 1, 4096).is_err());
         assert!(check_prompt_fits(usize::MAX, usize::MAX).is_err());
+    }
+
+    #[test]
+    fn test_compute_common_prefix_len() {
+        let t1 = LlamaToken(10);
+        let t2 = LlamaToken(20);
+        let t3 = LlamaToken(30);
+        let t4 = LlamaToken(40);
+
+        let seq_a = vec![t1, t2, t3];
+        let seq_b = vec![t1, t2, t4];
+        let seq_c = vec![t1, t2, t3, t4];
+        let seq_d = vec![t4, t3];
+
+        assert_eq!(compute_common_prefix_len(&seq_a, &seq_b), 2);
+        assert_eq!(compute_common_prefix_len(&seq_a, &seq_c), 3);
+        assert_eq!(compute_common_prefix_len(&seq_a, &seq_d), 0);
+        assert_eq!(compute_common_prefix_len(&[], &seq_a), 0);
+        assert_eq!(compute_common_prefix_len(&seq_a, &[]), 0);
+        assert_eq!(compute_common_prefix_len(&seq_a, &seq_a), 3);
     }
 }

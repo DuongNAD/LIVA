@@ -1,6 +1,6 @@
 ---
 title: "Tầng dữ liệu và bảo mật"
-updated: 2026-08-05
+updated: 2026-08-27
 commit: 3688b5f
 status: frozen
 owns: []
@@ -592,7 +592,7 @@ Passphrase `"liva"` → key = `6c 69 76 61` + **28 byte `0x00`**, entropy thực
 
 ### 4.3 Vấn đề 2 — khoá mặc định yếu, công khai
 
-`LIVA_ENCRYPTION_KEY` được đọc ở **cả hai điểm vào** với cùng fallback `"00000000000000000000000000000000"` — `main.rs:63-64` và `liva-desktop/src-tauri/src/lib.rs:270-271` — rồi nhét vào `AppState` qua `EncryptionEngine::new(&encryption_key)` (`main.rs:258`, tauri `lib.rs:372`). Các bin/test (`verify_integrations.rs:13/32`, `verify_duplex.rs:72`, `tests/verify_commands.rs:11`, `db.rs:980/1124`) dùng thẳng khoá zero cố định.
+`LIVA_ENCRYPTION_KEY` được đọc ở **cả hai điểm vào** với cùng fallback `"00000000000000000000000000000000"` — `main.rs:63-64` và `liva-desktop/src-tauri/src/lib.rs:270-271` — rồi nhét vào `AppState` qua `EncryptionEngine::new(&encryption_key)` (`main.rs:258`, tauri `lib.rs:372`). Các bin/test (`verify_duplex.rs:72`, `tests/verify_commands.rs:11`, `db.rs:980/1124`) dùng thẳng khoá zero cố định.
 
 > 📌 Nguồn đầy đủ (bảng biến môi trường, mọi giá trị mặc định, điểm đọc): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 

@@ -38,7 +38,11 @@ function repoGia(sua = () => {}) {
     chep(`liva-desktop/src-tauri/icons/${ic}`)
   }
   // Nguồn resource: chỉ cần TỒN TẠI, nội dung không quan trọng với bộ kiểm.
-  for (const rel of ['node_modules/sqlite-vec-windows-x64/vec0.dll']) {
+// Tạo đủ CẢ HAI nền để bộ kiểm chạy đúng trên Windows lẫn macOS/Linux.
+  for (const rel of [
+    'node_modules/sqlite-vec-windows-x64/vec0.dll',
+    'node_modules/sqlite-vec-darwin-arm64/vec0.dylib',
+  ]) {
     const p = path.join(goc, rel)
     fs.mkdirSync(path.dirname(p), { recursive: true })
     fs.writeFileSync(p, '')
@@ -105,11 +109,14 @@ test('bắt được licenseFile trỏ vào chỗ không có', () => {
   assert.ok(cham(loi, 'licenseFile'), loi.join('\n'))
 })
 
-test('bắt được thiếu vec0.dll — thứ chặn khởi động', () => {
+// Nợ cross-platform: tên artifact vec0 theo nền đang chạy bộ kiểm.
+const VEC0 = process.platform === 'win32' ? 'vec0.dll' : 'vec0.dylib'
+
+test('bắt được thiếu vec0 — thứ chặn khởi động', () => {
   const { loi } = chay((c) => {
     c.bundle.resources = { '../../data/models-manifest.json': 'data/models-manifest.json' }
   })
-  assert.ok(cham(loi, 'vec0.dll'), loi.join('\n'))
+  assert.ok(cham(loi, VEC0), loi.join('\n'))
 })
 
 test('bắt được thiếu manifest model — màn hình chuẩn bị sẽ rỗng', () => {

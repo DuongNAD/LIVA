@@ -29,7 +29,7 @@
 //!
 //! Chữ ký của `handle_command` **không đổi** — đây là điều kiện để việc tách
 //! không lan ra ngoài: mọi caller (`main.rs`, `websocket.rs`, vỏ Tauri,
-//! `telegram.rs`, `verify_integrations`, cùng 34 điểm gọi trong 4 file test)
+//! `telegram.rs`, cùng 34 điểm gọi trong 4 file test)
 //! vẫn gọi y như cũ.
 //!
 //! ## Tách dần, không một cú
@@ -39,12 +39,17 @@
 //! với bất kỳ nhánh lệnh nào vừa được thêm, và git không hợp nhất nổi "tôi dời
 //! 51 nhánh đi" với "tôi thêm nhánh thứ 52 vào giữa".
 
+pub mod browser;
+pub mod canvas;
+pub mod channels;
 pub mod config;
 pub mod consent;
+pub mod diff;
 pub mod integrations;
 pub mod llm;
 pub mod memory;
 pub mod messaging;
+pub mod pairing;
 pub mod setup;
 pub mod skill_store;
 pub mod task;

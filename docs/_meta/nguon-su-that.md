@@ -1,7 +1,7 @@
 ---
 title: "Sổ đăng ký nguồn sự thật"
-updated: 2026-08-07
-commit: bd11c84
+updated: 2026-08-25
+commit: f35961cf
 status: index
 owns:
   - so-do-nguon-su-that
@@ -77,7 +77,20 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `kien-truc-dich-cognitive-runtime` | [Cognitive Runtime](../01-kien-truc/cognitive-runtime.md) | Kiến trúc đích perception → context → policy → tool → observation → memory | roadmap |
 | `phan-cap-rui-ro-hanh-dong` | [Cognitive Runtime](../01-kien-truc/cognitive-runtime.md) | Bốn risk tier và chính sách mặc định cho hành động | roadmap |
 | `master-roadmap-jarvis` | [Master roadmap](../06-ke-hoach/roadmap.md) | Nguồn duy nhất cho milestone, dependency và acceptance gate còn mở | README |
+| `viec-con-lai-mac-v2` | [Việc còn lại trên mac-v2](../06-ke-hoach/viec-con-lai-mac-v2.md) | Punch list MV-1…MV-13 phạm vi NHÁNH: CI chưa chạy, cổng hỏng cấu trúc, vệ sinh repo. Cố ý **không** sở hữu mục U nào — mục MV-10…MV-13 chỉ là con trỏ | roadmap |
 | `quy-hoach-tai-lieu-v2` | [Quy hoạch tài liệu](../07-dong-gop/quy-hoach-tai-lieu.md) | Cấu trúc đích, mapping, chiến lược di trú và docs gates | README, roadmap |
+| `vision-runtime-as-built` | [Vision runtime](../03-he-thong-con/vision.md) | Chụp màn hình, diff vùng và đường hỏi đáp đa phương thức đang chạy thật | README, context broker, roadmap |
+| `vision-command-contract` | [Vision runtime](../03-he-thong-con/vision.md) | Hợp đồng lệnh vision và ranh giới quyền riêng tư/quyền lệnh | desktop Tauri, frontend |
+| `context-broker-boundary` | [Context broker](../03-he-thong-con/context-broker.md) | Ranh giới as-built giữa quan sát chủ động và code experimental chưa nối lại | README, roadmap |
+| `proactive-observation-policy` | [Context broker](../03-he-thong-con/context-broker.md) | Consent hiện hành và cổng bắt buộc trước khi có collector | action policy, threat model |
+| `resource-coexistence-policy` | [Resource governor](../05-chat-luong/resource-governor.md) | Tín hiệu/ngưỡng, hạ priority tiến trình, chuyển GPU layer khi có workload nặng | README, vision runtime |
+| `frontend-runtime-as-built` | [Frontend runtime](../03-he-thong-con/frontend.md) | Hai entry Vue production, bootstrap và platform adapter | README, desktop Tauri |
+| `frontend-transport-contract` | [Frontend runtime](../03-he-thong-con/frontend.md) | Transport của widget và Dashboard, giới hạn build/test | 01-bv/08, desktop Tauri |
+| `desktop-tauri-runtime` | [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) | Cửa sổ, catalog native command, ghost mode và lifecycle | README, frontend |
+| `desktop-capability-boundary` | [Desktop Tauri](../03-he-thong-con/desktop-tauri.md) | Capability theo cửa sổ, native IPC authorization và WebSocket session | threat model |
+| `wer-tieng-viet-do-thuc-te` | [WER tiếng Việt](../05-chat-luong/wer-fleurs-vi.md) | WER đo thật qua đường ống STT sản xuất, quyết định engine mặc định và cách tái lập | voice SLO, roadmap |
+| `so-loi-beta-thuc-dia` | [Sổ lỗi beta thực địa](../05-chat-luong/beta-thuc-dia.md) | Thông tin cần thu mỗi lượt beta và các mục đã xác nhận | roadmap |
+| `adr-ma-hoa-du-lieu-ca-nhan-beta` | [ADR-001](../01-kien-truc/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md) | Quyết định accepted về mã hoá transcript/checkpoint, dense recall và backup key-compatible | threat model, persistence |
 
 ### 2.1 Bản vẽ kỹ thuật — `01-ban-ve/`
 
@@ -90,6 +103,7 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `catalog-lenh-handle-command` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | Catalog lệnh theo miền; số lệnh là snapshot, nguồn thật nằm trong `commands/*` + dispatcher | 01, 04, 08, 09, 03-đg/02 |
 | `khung-nhi-phan-9-byte` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | Header `VoiceFrame` 9 byte, giới hạn 1 MiB, cách đóng/mở khung | 01, 04, 08, 09, 03-đg/02, 03-đg/03 |
 | `bang-opcode` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | 5 opcode nhị phân và ý nghĩa từng mã | 01, 08, 09, 03-đg/02, 03-đg/03 |
+| `bat-dau-nhanh-client` | [02 — Giao thức IPC và WebSocket](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) | §12 — client chạy được trong một file, 0 dependency, dùng làm ví dụ tham chiếu cho cổng 8002 | 03-đg/05 (U27) |
 | `cau-hinh-llm` | [04 — Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md) | Router/expert, `n_ctx`, sampling, GPU layer, nguồn đường dẫn model | 02, 03-đg/02 |
 | `persona-va-chong-injection` | [04 — Hệ LLM và prompt](../01-ban-ve/04-he-llm-va-prompt.md) | Nội dung persona, cách dựng prompt, lớp chặn prompt-injection | 06 |
 | `may-trang-thai-agent` | [Agent và tool runtime](../03-he-thong-con/agent-tools.md) | Entry point, trạng thái và vòng đời agent voice hiện hành | 00, 04 |
@@ -136,6 +150,8 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `cai-dat-windows` | [05 — Cài đặt cho người dùng](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Luồng cài đặt Windows, preflight và tải model cho bản beta | README |
 | `go-va-nang-cap` | [05 — Cài đặt cho người dùng](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Cách gỡ, nâng cấp và giữ dữ liệu người dùng | — |
 | `khac-phuc-su-co-nguoi-dung` | [05 — Cài đặt cho người dùng](../02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Chẩn đoán lỗi phổ biến theo triệu chứng và bước phục hồi | — |
+| `macos-dev` | [07 — Phát triển trên macOS](../02-van-hanh/07-macos-dev.md) | Đường dev macOS: `scripts/start_all.sh`, Metal, số đo CPU cho governor, hash `vec0` theo nền | — |
+| `bao-cao-phat-hanh-v1` | [Báo cáo phát hành v1.0.0](../02-van-hanh/release-v1.0.0-smoke-test.md) | Artifact installer v1.0.0, smoke test home trống và phần nghiệm thu còn lại trên Windows sạch | — |
 
 ### 2.3 Đánh giá — `03-danh-gia/`
 
@@ -145,13 +161,15 @@ Sổ đi kèm hai cơ chế khác trong `_meta/`:
 | `kiem-chung-offline` | [01 — Đối chiếu tuyên bố vs thực tế](../03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md) | Kiểm chứng "chạy hoàn toàn offline": chỗ nào thật, chỗ nào còn gọi mạng | 03-đg/03 |
 | `bang-rui-ro-xep-hang` | [02 — Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) | Rủi ro CRITICAL/HIGH/MEDIUM/LOW, mã định danh C\*/H\*/M\*/L\* | 00, 03, 04, 05, 06, 07, 08, 09, 10, 02-vh/04 |
 | `bang-code-mo-coi` | [02 — Nợ kỹ thuật và rủi ro](../03-danh-gia/02-no-ky-thuat-va-rui-ro.md) | Module chết, hàm `pub` 0 caller, 22 sự kiện UI mồ côi, 14 lệnh core không client gọi | 02, 03, 05, 07, 08, 09, 10, 02-vh/04 |
-| `lo-trinh-5-giai-doan` | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | 5 giai đoạn hành động và thứ tự ưu tiên | 00, 05, 06, 07, 03-đg/02 |
-| `huong-dan-sua-F1-F5` | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | Hướng dẫn sửa chi tiết 5 việc ưu tiên cao nhất | 04, 05, 03-đg/02 |
+| ~~`lo-trinh-5-giai-doan`~~ | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | ⚠️ **Khoá đã nghỉ hưu.** Tài liệu chủ chuyển `status: frozen` + `owns: []`, `superseded_by: 06-ke-hoach/roadmap.md`. Chủ sở hữu hiện hành của "việc còn làm và thứ tự" là `master-roadmap-jarvis` | 00, 05, 06, 07, 03-đg/02 (liên kết lịch sử) |
+| ~~`huong-dan-sua-F1-F5`~~ | [03 — Lộ trình sửa lỗi và nâng cấp](../03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md) | ⚠️ **Khoá đã nghỉ hưu** cùng lý do trên. Giữ dòng này để tra ngược không bị cụt. *(Đo lại 25/08/2026: tên khoá không còn được nhắc ở file nào ngoài sổ này và con trỏ MV-13 của `viec-con-lai-mac-v2.md`; tài liệu frozen vẫn được ~22 file link nhưng đã có `superseded_by` dẫn về roadmap — liên kết lịch sử, giữ nguyên)* | 04, 05, 03-đg/02 (liên kết lịch sử) |
 | `de-xuat-openspace-g0-g4` | [04 — Đề xuất OpenSpace](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) | Phương án tích hợp G0–G4 tại thời điểm đánh giá | — |
 | `phan-ra-openspace-lay-va-tu-choi` | [04 — Đề xuất OpenSpace](../03-danh-gia/04-de-xuat-tich-hop-openspace.md) | Phần OpenSpace nên lấy, trì hoãn hoặc từ chối | — |
-| `duong-co-so-do-luong` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | 8 cổng kiểm đo thật ngày 26/07/2026 kèm lệnh tái lập; mốc phát hiện hồi quy | 02-vh/04 |
-| `backlog-nang-cap-U1-U15` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | 16 mục nâng cấp chất lượng, nhóm A–E (U1–U15 + U21 thêm 01/08/2026), mỗi mục có điều kiện nghiệm thu đo được. Khoá giữ nguyên tên cũ vì đổi tên khoá không thêm thông tin mà làm hỏng tra ngược | 03-đg/03 |
+| `duong-co-so-do-luong` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | **14 cổng kiểm** đo thật ngày **02/08/2026 tại `260c643`** kèm lệnh tái lập; mốc phát hiện hồi quy *(bảng 8 cổng ngày 26/07 đã bị bảng này thay)* | 02-vh/04 |
+| `backlog-nang-cap-U1-U15` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | Mục nâng cấp chất lượng nhóm A–E, mỗi mục có điều kiện nghiệm thu đo được. ⚠️ **Tên khoá không còn phản ánh phạm vi** — backlog nay chạy tới **U33** và dải U16–U20 bị nhóm F chiếm; đọc bảng §2 của tài liệu, đừng suy từ số hiệu. Khoá giữ nguyên tên cũ vì đổi tên không thêm thông tin mà làm hỏng tra ngược | 03-đg/03 |
 | `goi-trinh-dien-U16-U20` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | Nhóm F — 5 mục biến năng lực đã có thành khoảnh khắc demo được, kèm nguyên tắc "giới hạn bởi kỹ thuật, không bởi IQ model" | — |
+| `ra-soat-proj-airi-U24-U29` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | U24–U29 — kết quả rà soát đối chiếu proj-airi: lip-sync, control tag, hợp đồng cổng 8002, endpoint OpenAI, vòng lặp chủ động | roadmap |
+| `locomotion-avatar-U30-U33` | [05 — Nâng cấp toàn diện](../03-danh-gia/05-nang-cap-toan-dien.md) | U30–U33 — chi phí mỗi frame, retarget và locomotion đúng nhịp cho avatar | roadmap |
 | `nhan-tin-ra-ngoai-telegram-messenger` | [06 — Nhắn tin ra ngoài](../03-danh-gia/06-nhan-tin-ra-ngoai.md) | Hiện trạng Messenger/Telegram, outbox và việc nghiệm thu còn lại | roadmap |
 
 ### 2.4 Siêu dữ liệu — `_meta/`

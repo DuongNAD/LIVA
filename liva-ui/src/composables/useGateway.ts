@@ -12,6 +12,13 @@ import type {
   VoiceProfile,
   TaskPlanReplyPayload,
   WSClientEvent,
+  ChannelItem,
+  PairedNodeInfo,
+  PendingPairingChallenge,
+  BrowserStatus,
+  BrowserActionRecord,
+  SkillManifestInfo,
+  SkillLogEntry,
 } from "liva-common";
 
 // State lưu trữ kết nối
@@ -103,6 +110,24 @@ const tasksList = ref<TaskItem[]>([]);
 const avatarModels3D = ref<AvatarModelInfo[]>([]);
 const avatarModels2D = ref<AvatarModelInfo[]>([]);
 const gpuSetupStatus = ref<string>('');
+
+// Milestone 2 State Singletons
+const channelsList = ref<ChannelItem[]>([]);
+const pairedNodesList = ref<PairedNodeInfo[]>([]);
+const pendingPairingList = ref<PendingPairingChallenge[]>([]);
+const browserStatus = ref<BrowserStatus>({
+  isRunning: true,
+  isPaused: false,
+  currentUrl: 'https://liva.ai/dashboard',
+  pageTitle: 'LIVA Cognitive Dashboard',
+  httpStatus: 200,
+  viewportWidth: 1280,
+  viewportHeight: 800,
+  sandboxActive: true,
+  ssrfGuard: true,
+});
+const browserScreenshot = ref<string>('');
+const browserActionLogs = ref<BrowserActionRecord[]>([]);
 
 // Vision (Qwen3-VL "nhìn màn hình") — answer + busy/error state for the UI.
 const visionAnswer = ref<string>('');
@@ -340,6 +365,27 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       break;
     case 'vision:ask':
       finishVision((res as { text?: string })?.text ?? '');
+      break;
+    case 'channels:list':
+      channelsList.value = ((res as { channels?: ChannelItem[] })?.channels || (res as ChannelItem[]) || []) as ChannelItem[];
+      break;
+    case 'pairing:list':
+    case 'pairing:list_nodes':
+      pairedNodesList.value = ((res as { nodes?: PairedNodeInfo[] })?.nodes || (res as PairedNodeInfo[]) || []) as PairedNodeInfo[];
+      break;
+    case 'pairing:list_pending':
+      pendingPairingList.value = ((res as { challenges?: PendingPairingChallenge[] })?.challenges || (res as PendingPairingChallenge[]) || []) as PendingPairingChallenge[];
+      break;
+    case 'browser:status':
+      browserStatus.value = (res as BrowserStatus) || browserStatus.value;
+      break;
+    case 'browser:screenshot':
+      if ((res as { base64Png?: string })?.base64Png) {
+        browserScreenshot.value = (res as { base64Png: string }).base64Png;
+      }
+      break;
+    case 'browser:action_log':
+      browserActionLogs.value = ((res as { actions?: BrowserActionRecord[] })?.actions || (res as BrowserActionRecord[]) || []) as BrowserActionRecord[];
       break;
   }
 };
@@ -831,6 +877,183 @@ export function useGateway() {
     _memoryUpdatedCallback = null;
   };
 
+  const invokeCommand = async <T = unknown>(command: string, payload: unknown = {}): Promise<T> => {
+    if (isTauri) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const res = await invoke<T>("native_ipc_call", { command, payload });
+      mapTauriResponse(command, res, payload);
+      return res;
+    }
+    return new Promise<T>((resolve) => {
+      sendMsg(command, payload);
+      resolve({} as T);
+    });
+  };
+
+  // ─── Multi-Channel Management Helpers ───
+  const fetchChannels = async () => {
+    try {
+      const res = await invokeCommand<{ count: number; channels: ChannelItem[] }>('channels:list');
+      if (res?.channels) channelsList.value = res.channels;
+      return channelsList.value;
+    } catch (e) {
+      logger.error('[useGateway] fetchChannels error:', e);
+      return [];
+    }
+  };
+
+  const configureChannel = async (channelId: string, config: unknown) => {
+    const res = await invokeCommand<{ success: boolean; channel: ChannelItem }>('channels:configure', { channelId, config });
+    await fetchChannels();
+    return res;
+  };
+
+  const getWhatsAppQr = async () => {
+    return await invokeCommand<{ qrData: string; expiresAtUnix: number; ttlSeconds: number; pairingState: string }>('channels:whatsapp_qr');
+  };
+
+  const startChannel = async (channelId: string) => {
+    const res = await invokeCommand<{ success: boolean; channel: ChannelItem }>('channels:start', { channelId });
+    await fetchChannels();
+    return res;
+  };
+
+  const stopChannel = async (channelId: string) => {
+    const res = await invokeCommand<{ success: boolean; channel: ChannelItem }>('channels:stop', { channelId });
+    await fetchChannels();
+    return res;
+  };
+
+  const testChannel = async (channelId: string) => {
+    return await invokeCommand<{ channelId: string; success: boolean; latencyMs: number; status: unknown; message: string }>('channels:test', { channelId });
+  };
+
+  // ─── Node Pairing Monitor Helpers ───
+  const fetchPairedNodes = async () => {
+    try {
+      const res = await invokeCommand<{ count: number; nodes: PairedNodeInfo[] }>('pairing:list_nodes');
+      if (res?.nodes) pairedNodesList.value = res.nodes;
+      return pairedNodesList.value;
+    } catch (e) {
+      logger.error('[useGateway] fetchPairedNodes error:', e);
+      return [];
+    }
+  };
+
+  const fetchPendingPairing = async () => {
+    try {
+      const res = await invokeCommand<{ count: number; challenges: PendingPairingChallenge[] }>('pairing:list_pending');
+      if (res?.challenges) pendingPairingList.value = res.challenges;
+      return pendingPairingList.value;
+    } catch (e) {
+      logger.error('[useGateway] fetchPendingPairing error:', e);
+      return [];
+    }
+  };
+
+  const approvePairing = async (payload: { shortCode?: string; challengeId?: string }) => {
+    const res = await invokeCommand<{ success: boolean; paired: boolean; authToken?: string; serverPublicKey?: string; expiresAtUnix?: number }>('pairing:approve', payload);
+    await fetchPairedNodes();
+    await fetchPendingPairing();
+    return res;
+  };
+
+  const rejectPairing = async (challengeId: string, reason?: string) => {
+    const res = await invokeCommand<{ success: boolean; challengeId: string; reason?: string }>('pairing:reject', { challengeId, reason });
+    await fetchPendingPairing();
+    return res;
+  };
+
+  const revokePairing = async (nodeId: string) => {
+    const res = await invokeCommand<{ success: boolean; nodeId: string; revoked: boolean }>('pairing:revoke', { nodeId });
+    await fetchPairedNodes();
+    return res;
+  };
+
+  const createPairingChallenge = async (nodeName = 'Companion Device', role = 'mobile_companion', publicKey = 'ed25519_client_key') => {
+    const res = await invokeCommand<{ challengeId: string; shortCode: string; nodeId: string; nodeName: string; expiresAtUnix: number; qrPayload: string }>('pairing:create_challenge', { nodeName, role, publicKey });
+    await fetchPendingPairing();
+    return res;
+  };
+
+  // ─── Browser Automation Helpers ───
+  const fetchBrowserStatus = async () => {
+    try {
+      const res = await invokeCommand<BrowserStatus>('browser:status');
+      if (res) browserStatus.value = res;
+      return browserStatus.value;
+    } catch (e) {
+      logger.error('[useGateway] fetchBrowserStatus error:', e);
+      return browserStatus.value;
+    }
+  };
+
+  const fetchBrowserScreenshot = async () => {
+    try {
+      const res = await invokeCommand<{ base64Png: string; width: number; height: number; timestampUnix: number }>('browser:screenshot');
+      if (res?.base64Png) browserScreenshot.value = res.base64Png;
+      return browserScreenshot.value;
+    } catch (e) {
+      logger.error('[useGateway] fetchBrowserScreenshot error:', e);
+      return '';
+    }
+  };
+
+  const fetchBrowserActionLogs = async () => {
+    try {
+      const res = await invokeCommand<{ count: number; actions: BrowserActionRecord[] }>('browser:action_log');
+      if (res?.actions) browserActionLogs.value = res.actions;
+      return browserActionLogs.value;
+    } catch (e) {
+      logger.error('[useGateway] fetchBrowserActionLogs error:', e);
+      return [];
+    }
+  };
+
+  const navigateBrowser = async (url: string) => {
+    const res = await invokeCommand<{ success: boolean; url: string; title: string; httpStatus: number }>('browser:navigate', { url });
+    await fetchBrowserStatus();
+    await fetchBrowserScreenshot();
+    await fetchBrowserActionLogs();
+    return res;
+  };
+
+  const extractBrowserDom = async (mode = 'semantic') => {
+    const res = await invokeCommand<{ mode: string; content: string; length: number }>('browser:extract', { mode });
+    await fetchBrowserActionLogs();
+    return res;
+  };
+
+  const controlBrowser = async (action: 'pause' | 'resume' | 'stop' | 'clear_logs') => {
+    const res = await invokeCommand<{ success: boolean; state?: string; cleared?: boolean }>('browser:control', { action });
+    await fetchBrowserStatus();
+    await fetchBrowserActionLogs();
+    return res;
+  };
+
+  // ─── Extended Skill Manifest & ClawHub Helpers ───
+  const getSkillManifest = async (skillId: string) => {
+    return await invokeCommand<SkillManifestInfo>('skills:get_manifest', { skillId });
+  };
+
+  const getSkillConfig = async (skillId: string) => {
+    return await invokeCommand<{ skillId: string; params: Record<string, unknown>; schema: Record<string, unknown> }>('skills:get_config', { skillId });
+  };
+
+  const saveSkillConfig = async (skillId: string, params: unknown) => {
+    return await invokeCommand<{ success: boolean; skillId: string; params: unknown }>('skills:save_config', { skillId, params });
+  };
+
+  const fetchSkillLogs = async (skillId?: string, limit = 20) => {
+    return await invokeCommand<{ skillId: string; count: number; logs: SkillLogEntry[] }>('skills:logs', { skillId, limit });
+  };
+
+  const installSkillFromHub = async (name: string, repoUrl?: string) => {
+    const res = await invokeCommand<{ success: boolean; skillId: string; name: string; installedPath: string }>('skills:install_from_hub', { name, repoUrl });
+    sendMsg('get_skills_list');
+    return res;
+  };
+
   return {
     init,
     destroy,
@@ -854,6 +1077,12 @@ export function useGateway() {
     userProfile,
     isProfileLoading,
     memoryData,
+    channelsList,
+    pairedNodesList,
+    pendingPairingList,
+    browserStatus,
+    browserScreenshot,
+    browserActionLogs,
     visionAnswer,
     visionBusy,
     watchActive,
@@ -868,6 +1097,30 @@ export function useGateway() {
     updateConfig,
     saveUserProfile,
     sendMsg,
+    invokeCommand,
+    fetchChannels,
+    configureChannel,
+    getWhatsAppQr,
+    startChannel,
+    stopChannel,
+    testChannel,
+    fetchPairedNodes,
+    fetchPendingPairing,
+    approvePairing,
+    rejectPairing,
+    revokePairing,
+    createPairingChallenge,
+    fetchBrowserStatus,
+    fetchBrowserScreenshot,
+    fetchBrowserActionLogs,
+    navigateBrowser,
+    extractBrowserDom,
+    controlBrowser,
+    getSkillManifest,
+    getSkillConfig,
+    saveSkillConfig,
+    fetchSkillLogs,
+    installSkillFromHub,
     getRawWs,
     onTaskPlanReply,
     onSkillCheckResult,

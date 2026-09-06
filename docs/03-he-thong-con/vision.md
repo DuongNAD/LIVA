@@ -17,6 +17,7 @@ covers:
   - liva-native-core/src/lib.rs
   - liva-ui/src/components/dashboard/VisionView.vue
   - liva-ui/src/composables/useGateway.ts
+stale-ok: a0153135
 ---
 # Vision runtime — chụp màn hình, diff vùng và hỏi đáp đa phương thức
 

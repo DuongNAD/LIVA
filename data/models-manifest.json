@@ -3,7 +3,11 @@
   "runtimeArtifacts": {
     "vec0": {
       "dest": "vec0.dll",
-      "sha256": "fcf98662a7ad9dce394b96a88f91032047823831b951c76636787c312a6476e6"
+      "sha256": "fcf98662a7ad9dce394b96a88f91032047823831b951c76636787c312a6476e6",
+      "platforms": {
+        "windows-x64": "fcf98662a7ad9dce394b96a88f91032047823831b951c76636787c312a6476e6",
+        "darwin-arm64": "193e480c50b59a55977d166f4aaf0e1bc8832d6963516e5950f39e4d2ce0b793"
+      }
     }
   },
   "_doc": [

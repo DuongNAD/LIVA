@@ -27,6 +27,7 @@ import {
   weightedRandom,
 } from '../utils/avatarMath';
 import { logger } from '../utils/logger';
+import { currentVisemeFromClock } from '../utils/phonemeLipSync';
 
 // ═══════════════════════════════════════════
 //  OpenSimplex 2D Noise (inline, zero-dep)
@@ -1127,6 +1128,12 @@ export function use3DModel(): Use3DModelReturn {
   /**
    * Per-frame audio lip-sync update — called from the render loop.
    * Reads frequency data, computes RMS per band, maps to VRM expressions.
+   *
+   * VC-8: khi có timeline phoneme đang hiệu lực (`OP_VISME` từ core) thì RMS
+   * chỉ giữ vai trò BIÊN ĐỘ — HÌNH miệng do phoneme quyết: nhóm môi (m/b/p/f/v)
+   * ép gần khép dù âm vẫn to (chỗ RMS không bao giờ phân biệt được), nguyên âm
+   * tăng biểu cảm tương ứng và hạ các cái còn lại. Không có timeline ⇒ hành vi
+   * RMS thuần cũ giữ nguyên.
    */
   function updateAudioLipSync() {
     if (!audioAnalyserNode || !audioFreqData || !vrm.value?.expressionManager) return;
@@ -1134,6 +1141,9 @@ export function use3DModel(): Use3DModelReturn {
 
     // Read current frequency spectrum
     audioAnalyserNode.getByteFrequencyData(audioFreqData as unknown as Uint8Array<ArrayBuffer>);
+
+    const viseme = currentVisemeFromClock();
+    const values: number[] = new Array(BAND_EXPRESSIONS.length).fill(0);
 
     for (let band = 0; band < BAND_RANGES.length; band++) {
       const [startBin, endBin] = BAND_RANGES[band];
@@ -1154,8 +1164,25 @@ export function use3DModel(): Use3DModelReturn {
       smoothedBandRMS[band] = lerp(smoothedBandRMS[band], rms, RMS_SMOOTH_FACTOR);
 
       // Map to VRM expression with sensitivity scaling, clamped to [0, 1]
-      const value = Math.min(smoothedBandRMS[band] * BAND_SENSITIVITY[band], 1.0);
-      em.setValue(BAND_EXPRESSIONS[band], value);
+      values[band] = Math.min(smoothedBandRMS[band] * BAND_SENSITIVITY[band], 1.0);
+    }
+
+    if (viseme !== null) {
+      const matchedBand = BAND_EXPRESSIONS.indexOf(viseme);
+      for (let band = 0; band < values.length; band++) {
+        if (viseme === 'nil') {
+          // Âm môi/không phát — miệng gần khép bất kể năng lượng.
+          values[band] *= 0.12;
+        } else if (band === matchedBand) {
+          values[band] = Math.min(values[band] * 1.35 + 0.25, 1.0);
+        } else {
+          values[band] *= 0.55;
+        }
+      }
+    }
+
+    for (let band = 0; band < BAND_EXPRESSIONS.length; band++) {
+      em.setValue(BAND_EXPRESSIONS[band], values[band]);
     }
   }
 

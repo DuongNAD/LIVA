@@ -1,8 +1,7 @@
 ---
 title: "Kiểm thử và CI"
-updated: 2026-08-07
-commit: bd11c84
-stale-ok: eeed694
+updated: 2026-08-25
+commit: 3a8d5001
 status: living
 owns:
   - bang-test
@@ -28,6 +27,7 @@ covers:
   - scripts/check-installer-config.mjs
   - scripts/check-installer-config.test.mjs
   - scripts/docs-check.mjs
+stale-ok: 4ae8bfb6
 ---
 # Kiểm thử và CI
 
@@ -92,12 +92,39 @@ kết luận `success`.** Hai điều rút ra khi đọc kết quả:
   chứ không theo mã LIVA — đừng biến nó thành hạn ngạch.
 - **`cargo fmt --all -- --check` là gate cứng từ `98efc55`.** Trước đó không có, và
   `CLAUDE.md` từng ghi "No fmt gate" — câu đó đúng cho tới commit ấy.
+- **⚠️ Toàn bộ pipeline chạy `windows-latest`, nên ba gate dưới đây là gate
+  *chỉ-Windows* chứ không phải gate đa nền tảng** (phát hiện 25/08/2026 khi đưa
+  chúng sang macOS): bước e2e gateway hardcode đuôi `.exe` trong đường dẫn binary;
+  `tests/artifact_trust.rs` dọn dẹp bằng `fs::remove_dir` chỉ đúng với junction
+  Windows; và provider coverage tồn tại nhờ cây phụ thuộc sẵn có chứ không do khai
+  báo. Cả ba **xanh trên CI và vẫn sẽ xanh** — 25/25 không phải bằng chứng đa nền
+  tảng. 📌 Chi tiết từng bẫy: [07 — Phát triển trên macOS](07-macos-dev.md)
+- **✅ Job `test-macos` (`macos-latest`) có từ 25/08/2026 (VC-3)** — bộ GỐN, chạy
+  song song job Windows: docs-check · docs-citations · npm ci · ESLint · vue-tsc ·
+  UI coverage · knowledge vault (`typecheck` + `test`) · `cargo test`. **Không** nhân
+  bản 25 bước: llama.cpp CUDA/LLVM và build Tauri là mục hạ tầng riêng. Lý do tồn
+  tại: ba lỗi chỉ runner macOS bắt được (2 mock symlink khoá nhầm root chưa
+  canonicalise `/var` → `/private/var`; 1 khẳng định UNC đòi thông điệp Windows) —
+  đã sửa trong `verification-challenger.test.ts`, vault 27/27 xanh trên macOS.
+  Phân bổ nền hiện hành: **Windows** = toàn bộ 25 bước; **macOS** = 9 bước gọn ở
+  trên; e2e gateway và Tauri desktop **chỉ-Windows** cho tới khi được port có chủ
+  đích.
 
 ## 3. Coverage UI
 
 CI phải gọi `test:coverage`, không gọi `vitest run` trần. Threshold toàn cục
 trong `liva-ui/vitest.config.ts` là chốt chống thụt lùi; các hotspot có ngưỡng
-per-file riêng. Khi một file dưới ngưỡng:
+per-file riêng.
+
+⚠️ **Provider coverage phải được khai báo tường minh, đừng dựa vào cây phụ thuộc.**
+`@vitest/coverage-istanbul` là *optional peer* của vitest: nó có mặt trên máy đã cài
+sẵn từ trước, nên gate chạy được ở đó — nhưng sau một `npm ci` sạch thì `test:coverage`
+gãy vì thiếu provider, tức **cổng không tái lập được**. Từ 25/08/2026 nó nằm trong
+`devDependencies` của `liva-ui` ghim `4.1.5` (khớp đúng version vitest). Đo lại sau khi
+khai báo: **78,52 % stmt · 61,94 % branch · 69,95 % func · 80,86 % line**, không hạ
+ngưỡng nào.
+
+Khi một file dưới ngưỡng:
 
 1. đọc report mới;
 2. thêm test hành vi ở nhánh chưa phủ;
@@ -143,7 +170,7 @@ tay và theo lịch tuần. Release chỉ được coi là sẵn sàng khi:
 npm ci
 npm run devkit:lint
 npm audit --audit-level=high
-cargo audit
+cargo deny check -W unmaintained -W unsound advisories licenses sources
 cargo fmt --all -- --check
 cargo test -p liva-native-core
 cargo test -p liva-desktop
@@ -152,7 +179,13 @@ npm run test:coverage -w liva-ui
 npm run build -w liva-ui
 npm run test:installer
 npm run docs:check
+npm run docs:cite
 ```
+
+⚠️ **`docs:check` KHÔNG bao gồm `docs:cite`.** Hai script là hai bước CI riêng
+(`docs-check.mjs` rồi `docs-citations.mjs`), nên chạy mỗi `docs:check` sẽ bỏ lọt
+đúng loại lỗi mà bước 2 bắt: một toạ độ `file:dòng` trỏ vào file vừa bị di chuyển
+hoặc xoá.
 
 Chỉ báo hoàn tất bằng output mới của các lệnh liên quan tới slice. Không suy ra
 “đã chạy được” từ build thành công, test cũ hoặc trạng thái CI của commit khác.

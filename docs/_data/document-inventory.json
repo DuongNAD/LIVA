@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-07-31",
+  "updated": "2026-08-25",
   "canonical_document": "docs/_generated/kiem-ke-tai-lieu.md",
   "disposition_definitions": {
     "KEEP": "Giữ nguyên trong giai đoạn chuyển tiếp; nội dung vẫn có một vai trò rõ ràng.",
@@ -197,6 +197,13 @@
       "rationale": "Canonical as-built cho StateGraph, reflex lane, tool selector, MCP executor và skill runtime."
     },
     {
+      "path": "docs/03-he-thong-con/automation-va-sandbox.md",
+      "disposition": "KEEP",
+      "wave": "C-agent-tools-complete",
+      "targets": [],
+      "rationale": "Kiến trúc tự động hoá trình duyệt qua CDP, OS automation và sandbox bảo mật đa tầng."
+    },
+    {
       "path": "docs/03-he-thong-con/context-broker.md",
       "disposition": "KEEP",
       "wave": "C-vision-complete",
@@ -216,6 +223,13 @@
       "wave": "C-desktop-complete",
       "targets": [],
       "rationale": "Canonical as-built cho Vue entries, widget/dashboard và dual transport."
+    },
+    {
+      "path": "docs/03-he-thong-con/gateway-va-skills.md",
+      "disposition": "KEEP",
+      "wave": "C-desktop-complete",
+      "targets": [],
+      "rationale": "Kiến trúc Gateway Control Plane, message normalization, đa kênh và ClawHub skills runtime."
     },
     {
       "path": "docs/03-he-thong-con/memory.md",
@@ -353,6 +367,13 @@
       "wave": "C-operations",
       "targets": [],
       "rationale": "Runbook canonical cho online backup, offline restore và rollback SQLite."
+    },
+    {
+      "path": "docs/02-van-hanh/07-macos-dev.md",
+      "disposition": "KEEP",
+      "wave": "C-operations",
+      "targets": [],
+      "rationale": "Runbook canonical cho đường phát triển trên macOS (nhánh mac-v2); bản Windows nằm trong 03-trien-khai-va-runtime."
     },
     {
       "path": "docs/02-van-hanh/release-v1.0.0-smoke-test.md",
@@ -525,6 +546,20 @@
         ".agents/skills/liva-technical-debt-triage/SKILL.md"
       ],
       "rationale": "Prompt dọn dẹp cũ được thay bằng quy trình debt triage có acceptance test."
+    },
+    {
+      "path": "docs/06-ke-hoach/viec-con-lai-mac-v2.md",
+      "disposition": "KEEP",
+      "wave": "C-roadmap",
+      "targets": [],
+      "rationale": "Punch list phạm vi nhánh mac-v2: hạ tầng, cổng kiểm, vệ sinh repo và xác thực. Không sở hữu backlog sản phẩm."
+    },
+    {
+      "path": "docs/06-ke-hoach/viec-can-lam-2026-08-25.md",
+      "disposition": "KEEP",
+      "wave": "C-roadmap",
+      "targets": [],
+      "rationale": "Bảy việc từ lượt rà soát 25/08/2026: ba cổng kiểm (h2, test preflight phụ thuộc đĩa, test vault macOS) và bốn thoại real-time (đo lượt, AEC/barge-in, mẩu TTS đầu, kết lượt). Không sở hữu backlog sản phẩm."
     },
     {
       "path": "docs/06-ke-hoach/roadmap.md",
@@ -789,6 +824,13 @@
       "wave": "archive",
       "targets": [],
       "rationale": "Yêu cầu gốc được bảo toàn nguyên trạng."
+    },
+    {
+      "path": "docs/99-luu-tru/thiet-ke-goc/ORIGINAL_REQUEST_MACOS_2026-06-05.md",
+      "disposition": "FREEZE",
+      "wave": "archive",
+      "targets": [],
+      "rationale": "Yêu cầu gốc của đợt macOS/Apple Silicon (05-06/06/2026) — nguồn của nhánh mac-v2. Nằm untracked ở gốc repo tới 25/08/2026."
     }
   ]
 }

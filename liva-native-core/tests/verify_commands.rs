@@ -124,15 +124,14 @@ async fn test_verify_handle_commands() {
     assert!(res_tg_no_token.is_err(), "should fail if token is missing");
     assert_eq!(res_tg_no_token.unwrap_err(), "Bot token missing");
 
-    // B. With TELEGRAM_BOT_TOKEN
-    unsafe {
-        std::env::set_var("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ");
-    }
-    let res_tg_with_token =
-        handle_command(state.clone(), "telegram:send_text", payload_tg, None, None)
-            .await
-            .expect("should execute send_text command when token is present");
-    assert_eq!(res_tg_with_token, json!({ "success": true }));
+    // B. With TELEGRAM_BOT_TOKEN — ĐÃ BỎ (nợ L9, 25/08/2026).
+    //
+    // Bản trước đặt token GIẢ rồi assert `success: true`. Assertion đó vô nghĩa
+    // vì handler `system_status`/telegram là `tokio::spawn` fire-and-forget —
+    // luôn trả success kể cả khi gửi thật thất bại. Tệ hơn: nó phát sinh request
+    // THẬT ra `api.telegram.org` từ CI với một token sai. Đường "token có mặt"
+    // cần inject client giả mới kiểm chứng được; cho tới khi có injection điểm
+    // đó, chỉ giữ nhánh thiếu token ở trên — nó xác thực được và không ra mạng.
 
     // 3. Verify new UI query commands
     let res_get_config = handle_command(state.clone(), "get_config", json!({}), None, None)

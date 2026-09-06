@@ -41,7 +41,7 @@ flowchart LR
         V29["kien-truc-nodejs-v29/ (16 file)"]
         HIST["bao-cao-lich-su/ (12 mục)"]
         PLAN["ke-hoach-da-hoan-thanh/ (2)"]
-        ORIG["thiet-ke-goc/ (2)"]
+        ORIG["thiet-ke-goc/ (3)"]
     end
 
     subgraph NEW["Kiến trúc hiện tại — Rust"]
@@ -82,7 +82,7 @@ Bộ bản vẽ "v29 Enterprise-Ready Cognitive OS". Đây là phần nguy hiể
 
 ---
 
-## 3. `thiet-ke-goc/` — 2 file · **có 1 file VẪN ĐÚNG**
+## 3. `thiet-ke-goc/` — 3 file · **có 1 file VẪN ĐÚNG**
 
 Đây là thư mục **ít lỗi thời nhất** trong `99-luu-tru/`. Đọc bảng kỹ trước khi bỏ qua.
 
@@ -90,6 +90,7 @@ Bộ bản vẽ "v29 Enterprise-Ready Cognitive OS". Đây là phần nguy hiể
 |---|---|---|---|---|
 | `LIVA_CLIENT_SERVER_DESIGN.md` | 27/06/2026 | Thiết kế **đề xuất** mô hình client-server của LIVA, kèm **đặc tả protocol WebSocket chi tiết** | ⚠️ **Phần protocol WS vẫn KHỚP CODE** — đây là lý do file được giữ nguyên vẹn. Phần lỗi thời là mô tả model: nói **Gemma + Kokoro**, trong khi router thật hiện là **Qwen3-VL-2B** (lõi text + vision) và tuyến TTS đã có thêm VieNeu/Piper | **Được kế thừa trực tiếp** bởi [`../01-ban-ve/02-giao-thuc-ipc-va-websocket.md`](../01-ban-ve/02-giao-thuc-ipc-va-websocket.md) — dùng bản mới, chỉ mở file gốc khi cần truy nguyên ý đồ thiết kế |
 | `ORIGINAL_REQUEST.md` | 27/06/2026 | Yêu cầu gốc bằng tiếng Việt cho **Giai đoạn 4 — Self-Evolving Codebase**: R1 Test Execution Sandbox (`src/evolution/sandbox.rs` spawn `cargo test`, bắt stdout/stderr), R2 Self-Correction Loop (parse lỗi → Mock Agent sinh patch → ghi đè file, **tối đa 3 lần**), R3 Unit Tests | **Đây là yêu cầu của MỘT task đơn lẻ, KHÔNG phải tầm nhìn dự án.** Rất dễ bị hiểu nhầm là "bản yêu cầu gốc của LIVA" vì tên file. Giữ lại để hiểu vì sao `src/evolution/` tồn tại và vì sao có hằng số retry = 3 | [`../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md`](../03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md) (chương agent / tiến hoá — hiện trạng thật của `src/evolution/`) |
+| `ORIGINAL_REQUEST_MACOS_2026-06-05.md` | 05–06/06/2026 | Yêu cầu gốc của **đợt macOS/Apple Silicon**: R1 tương thích engine suy luận native, R2 pipeline biên dịch, R3 khởi động/lifecycle, R4 tối ưu Gemma 4 12B trên Metal, R5 kiểm thử tự động — kèm phần Follow-up 06/06 về root cause và khởi động liền mạch | **Đây là nguồn của nhánh `mac-v2`.** File nằm untracked ở gốc repo (`ORIGINAL_REQUEST (1).md`) từ 08/06 tới 25/08/2026, suýt bị xoá cùng đợt dọn rác vì tên trùng — nội dung KHÔNG trùng bản kia (126 dòng vs 26 dòng, chủ đề khác hẳn) | [`../../02-van-hanh/07-macos-dev.md`](../02-van-hanh/07-macos-dev.md) (đường dev macOS as-built) |
 
 ---
 

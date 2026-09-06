@@ -1,0 +1,348 @@
+{
+  "soDo": {
+    "dongRust": 81909,
+    "dongWeb": 24346,
+    "todos": 0,
+    "libRsDong": 803,
+    "unwrapSanXuat": 146,
+    "fileTestTichHop": 97,
+    "coE2E": true,
+    "eslintCoVue": true,
+    "coCongCoverage": true,
+    "binCoAssert": 11,
+    "binChayDuoc": 3,
+    "tyLeBinChayDuoc": 0.2727272727272727,
+    "buocCI": 38,
+    "jobCI": 2,
+    "congCoLoi": [
+      "fmt",
+      "clippy",
+      "cargo-deny",
+      "npm audit",
+      "vue-tsc",
+      "e2e"
+    ],
+    "buildTrongCIChinh": false,
+    "coPrePush": true,
+    "coCargoDeny": true,
+    "coCongDocs": true,
+    "neoHong": 0,
+    "tyLeKiemDuoc": 0.39540910773787485,
+    "docLoiThoi": 24,
+    "coLenhDev": true,
+    "coSetupModels": true,
+    "coPreflight": true,
+    "fileTestBaoMat": 11,
+    "coKhoaMacDinh": true,
+    "soTest": 689,
+    "clippyWarnings": 0,
+    "fmtSach": true,
+    "doDacDatLuc": "2026-08-27T06:03:00.971Z",
+    "sha": "35f5f26d",
+    "nhanh": "mac-v2",
+    "doLuc": "2026-09-03T08:46:49.958Z"
+  },
+  "diem": {
+    "tieuChi": [
+      {
+        "id": "kien-truc",
+        "ten": "Kiến trúc & thiết kế",
+        "tran": 15,
+        "chiBao": [
+          {
+            "ten": "Tách handle_command khỏi lib.rs",
+            "loai": "do",
+            "tran": 5,
+            "reviewedAt": null,
+            "diem": 5,
+            "hien": "lib.rs 803 dòng"
+          },
+          {
+            "ten": "Tách workspace theo miền",
+            "loai": "tay",
+            "tran": 5,
+            "reviewedAt": "2026-08-27",
+            "diem": 5,
+            "hien": "lõi Rust ↔ vỏ Tauri ↔ UI Vue, tách sạch"
+          },
+          {
+            "ten": "Luận điểm offline-first giữ nhất quán",
+            "loai": "tay",
+            "tran": 5,
+            "reviewedAt": "2026-08-27",
+            "diem": 4,
+            "hien": "từ chối TTS cloud + DuckDB-WASM; còn code mồ côi lộ từng đợt"
+          }
+        ],
+        "diem": 14,
+        "tyLe": 0.9333333333333333
+      },
+      {
+        "id": "chat-luong-ma",
+        "ten": "Chất lượng mã",
+        "tran": 15,
+        "chiBao": [
+          {
+            "ten": "clippy -D warnings",
+            "loai": "do",
+            "tran": 5,
+            "reviewedAt": null,
+            "diem": 5,
+            "hien": "0 cảnh báo"
+          },
+          {
+            "ten": "cargo fmt sạch",
+            "loai": "do",
+            "tran": 2,
+            "reviewedAt": null,
+            "diem": 2,
+            "hien": "sạch"
+          },
+          {
+            "ten": "Không còn TODO/FIXME",
+            "loai": "do",
+            "tran": 2,
+            "reviewedAt": null,
+            "diem": 2,
+            "hien": "0 điểm"
+          },
+          {
+            "ten": "unwrap() trên đường production",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 1,
+            "hien": "146 điểm"
+          },
+          {
+            "ten": "ESLint gate cho cả .ts và .vue",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "có parser SFC"
+          }
+        ],
+        "diem": 13,
+        "tyLe": 0.8666666666666667
+      },
+      {
+        "id": "kiem-thu",
+        "ten": "Kiểm thử",
+        "tran": 20,
+        "chiBao": [
+          {
+            "ten": "Số test chạy thật",
+            "loai": "do",
+            "tran": 6,
+            "reviewedAt": null,
+            "diem": 6,
+            "hien": "689 test xanh"
+          },
+          {
+            "ten": "File test tích hợp",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "97 file"
+          },
+          {
+            "ten": "E2E qua socket thật",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "e2e-gateway + e2e-memory"
+          },
+          {
+            "ten": "Cổng coverage cho UI",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "có, chặn CI"
+          },
+          {
+            "ten": "Probe binary chạy được không cần model",
+            "loai": "do",
+            "tran": 5,
+            "reviewedAt": null,
+            "diem": 1,
+            "hien": "3/11 bin có assert chạy được thiếu model"
+          }
+        ],
+        "diem": 16,
+        "tyLe": 0.8
+      },
+      {
+        "id": "ci",
+        "ten": "CI & cổng tự động",
+        "tran": 15,
+        "chiBao": [
+          {
+            "ten": "Số bước là cổng",
+            "loai": "do",
+            "tran": 5,
+            "reviewedAt": null,
+            "diem": 5,
+            "hien": "38 bước / 2 job"
+          },
+          {
+            "ten": "Bộ cổng cốt lõi có đủ",
+            "loai": "do",
+            "tran": 6,
+            "reviewedAt": null,
+            "diem": 6,
+            "hien": "fmt · clippy · cargo-deny · npm audit · vue-tsc · e2e"
+          },
+          {
+            "ten": "Hook chặn trước khi rời máy",
+            "loai": "do",
+            "tran": 2,
+            "reviewedAt": null,
+            "diem": 2,
+            "hien": "pre-push kiểm sổ tài liệu"
+          },
+          {
+            "ten": "Build ứng dụng chạy ở CI nhánh chính",
+            "loai": "do",
+            "tran": 2,
+            "reviewedAt": null,
+            "diem": 0,
+            "hien": "chỉ chạy khi gắn tag"
+          }
+        ],
+        "diem": 13,
+        "tyLe": 0.8666666666666667
+      },
+      {
+        "id": "tai-lieu",
+        "ten": "Tài liệu",
+        "tran": 15,
+        "chiBao": [
+          {
+            "ten": "Cổng máy kiểm tài liệu",
+            "loai": "do",
+            "tran": 5,
+            "reviewedAt": null,
+            "diem": 5,
+            "hien": "docs-check + docs-citations"
+          },
+          {
+            "ten": "Neo trích dẫn không hỏng",
+            "loai": "do",
+            "tran": 4,
+            "reviewedAt": null,
+            "diem": 4,
+            "hien": "0 neo hỏng"
+          },
+          {
+            "ten": "Tài liệu lỗi thời",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 1,
+            "hien": "24 tài liệu cần rà"
+          },
+          {
+            "ten": "Tỷ lệ trích dẫn kiểm được",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 1,
+            "hien": "40% ngoài vùng đông lạnh"
+          }
+        ],
+        "diem": 11,
+        "tyLe": 0.7333333333333333
+      },
+      {
+        "id": "van-hanh",
+        "ten": "Vận hành thật",
+        "tran": 10,
+        "chiBao": [
+          {
+            "ten": "Khởi động một lệnh",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "npm run dev"
+          },
+          {
+            "ten": "Lệnh soi tài nguyên trước khi chạy",
+            "loai": "do",
+            "tran": 2,
+            "reviewedAt": null,
+            "diem": 2,
+            "hien": "preflight"
+          },
+          {
+            "ten": "Đường tải model tự động",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "có script"
+          },
+          {
+            "ten": "Hạ cấp mềm khi thiếu tài nguyên",
+            "loai": "tay",
+            "tran": 2,
+            "reviewedAt": "2026-08-27",
+            "diem": 2,
+            "hien": "gateway vẫn boot, RAG no-op kèm cảnh báo nêu đúng thư mục"
+          }
+        ],
+        "diem": 10,
+        "tyLe": 1
+      },
+      {
+        "id": "bao-mat",
+        "ten": "Bảo mật & riêng tư",
+        "tran": 10,
+        "chiBao": [
+          {
+            "ten": "Cổng advisory cho crate",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "cargo-deny: advisories + licenses + sources"
+          },
+          {
+            "ten": "Test bề mặt tấn công",
+            "loai": "do",
+            "tran": 3,
+            "reviewedAt": null,
+            "diem": 3,
+            "hien": "11 file (sandbox, uỷ quyền, crypto boot)"
+          },
+          {
+            "ten": "Không còn khoá mã hoá mặc định",
+            "loai": "do",
+            "tran": 2,
+            "reviewedAt": null,
+            "diem": 0,
+            "hien": "DEFAULT_ENCRYPTION_KEY vẫn xuất xưởng"
+          },
+          {
+            "ten": "Không có phép kiểm nào gọi mạng thật",
+            "loai": "tay",
+            "tran": 2,
+            "reviewedAt": "2026-08-27",
+            "diem": 2,
+            "hien": "bản sao cuối bắn ra api.telegram.org đã xoá 27/08"
+          }
+        ],
+        "diem": 8,
+        "tyLe": 0.8
+      }
+    ],
+    "tong": 85,
+    "tran": 100,
+    "tyLeTuDo": 0.86
+  },
+  "sinhLuc": "2026-09-03T08:46:50.825Z"
+}

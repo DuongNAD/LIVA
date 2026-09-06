@@ -14,3 +14,5 @@ export function detectPlatform(): IPlatformAdapter {
   logger.info('[PlatformBridge]', '🌐 Detected Browser Environment (Mock Mode)');
   return new MockWebAdapter();
 }
+
+export const getPlatformAdapter = detectPlatform;

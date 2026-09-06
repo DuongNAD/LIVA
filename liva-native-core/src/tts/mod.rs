@@ -7,6 +7,7 @@ pub mod normalizer;
 pub mod piper;
 pub mod tokenizer;
 pub mod vieneu;
+pub mod viseme;
 
 use audio::TtsAudioPlayer;
 use engine::TtsEngine;
@@ -21,7 +22,22 @@ pub mod style_vector;
 
 pub struct TtsChunker {
     buffer: String,
+    /// VC-6: đang dựng MẨU ĐẦU của lượt hay chưa. Mẫu đầu quyết định TTFA cảm
+    /// nhận nên được phép cắt sớm hơn (xem hằng số ngưỡng bên dưới); từ mẫu thứ
+    /// hai trở đi quay về đúng luật cũ để ngữ điệu không vỡ. `reset()` — ranh
+    /// giới lượt — đưa cờ này về `true`.
+    dang_la_mau_dau: bool,
 }
+
+/// Ngưỡng luật CŨ (từ mẩu thứ hai trở đi).
+const COMMA_MIN_WORDS: usize = 6;
+const MAX_WORDS: usize = 25;
+/// Ngưỡng riêng cho mẩu ĐẦU lượt (VC-6). ⚠️ Ngưỡng dấu phẩy là **2**, không phải
+/// "≥3" như bản đầu của tài liệu: chính câu ví dụ trong nghiệm thu —
+/// "Chào bạn, mình có thể giúp gì cho bạn?" — có dấu phẩy sau từ THỨ HAI, nên
+/// ngưỡng 3 làm điều kiện nghiệm thu "mẫu đầu ra đời sớm hơn" tự mâu thuẫn.
+const FIRST_CHUNK_COMMA_MIN_WORDS: usize = 2;
+const FIRST_CHUNK_MAX_WORDS: usize = 9;
 
 impl Default for TtsChunker {
     fn default() -> Self {
@@ -33,6 +49,7 @@ impl TtsChunker {
     pub fn new() -> Self {
         Self {
             buffer: String::new(),
+            dang_la_mau_dau: true,
         }
     }
 
@@ -41,6 +58,20 @@ impl TtsChunker {
         let mut chunks = Vec::new();
 
         while !self.buffer.is_empty() {
+            // Ngưỡng áp dụng CHO MẨU ĐANG DỰNG — phải đọc lại MỖI VÒNG lặp: mẫu
+            // đầu ra đời giữa chừng (cờ flip) thì các mẩu kế tiếp trong cùng lần
+            // push phải quay về luật cũ ngay.
+            let comma_min_words = if self.dang_la_mau_dau {
+                FIRST_CHUNK_COMMA_MIN_WORDS
+            } else {
+                COMMA_MIN_WORDS
+            };
+            let max_words = if self.dang_la_mau_dau {
+                FIRST_CHUNK_MAX_WORDS
+            } else {
+                MAX_WORDS
+            };
+
             let mut split_at = None;
             let mut word_count = 0;
             let mut word_start = false;
@@ -59,14 +90,16 @@ impl TtsChunker {
                     break;
                 }
 
-                // Comma-like punctuation splits only if we have >= 6 words
-                if (ch == ',' || ch == ';' || ch == ':' || ch == '—') && word_count >= 6 {
+                // Comma-like punctuation & newlines split only if we have enough words
+                if (ch == ',' || ch == ';' || ch == ':' || ch == '—' || ch == '\n')
+                    && word_count >= comma_min_words
+                {
                     split_at = Some((idx + ch.len_utf8(), false));
                     break;
                 }
 
-                // 25-word maximum limit
-                if word_count > 25 {
+                // Maximum word limit
+                if word_count > max_words {
                     split_at = Some((idx, true));
                     break;
                 }
@@ -76,6 +109,8 @@ impl TtsChunker {
                 let chunk: String = self.buffer.drain(0..split_idx).collect();
                 let trimmed = chunk.trim().to_string();
                 if !trimmed.is_empty() {
+                    // Mẫu đầu vừa ra đời ⇒ mọi mẩu sau thuộc luật cũ.
+                    self.dang_la_mau_dau = false;
                     chunks.push(trimmed);
                 }
             } else {
@@ -98,6 +133,8 @@ impl TtsChunker {
 
     pub fn reset(&mut self) {
         self.buffer.clear();
+        // Ranh giới lượt: lượt mới lại bắt đầu bằng luật mẫu-đầu.
+        self.dang_la_mau_dau = true;
     }
 }
 
@@ -136,9 +173,12 @@ pub(crate) struct TtsSynthesisOutcome {
     pub(crate) sample_rate: u32,
     pub(crate) backend: TtsBackend,
     pub(crate) fallback_count: usize,
+    /// Chuỗi phoneme của backend THẮNG cuộc — nguyên liệu cho timeline viseme
+    /// (VC-8 / Milestone 4). `Some(phonemes)` được cung cấp bởi các backend (VieNeu, Piper, Kokoro).
+    pub(crate) phonemes: Option<String>,
 }
 
-type TtsSynthesisResult = Result<(Vec<f32>, u32), String>;
+type TtsSynthesisResult = Result<(Vec<f32>, u32, Option<String>), String>;
 type TtsSynthesisFn<'a> = dyn FnMut() -> TtsSynthesisResult + 'a;
 
 struct TtsSynthesisAttempt<'a> {
@@ -171,12 +211,13 @@ where
             return Err("TTS synthesis cancelled".to_string());
         }
         match (attempt.synthesize)() {
-            Ok((samples, sample_rate)) => {
+            Ok((samples, sample_rate, phonemes)) => {
                 return Ok(TtsSynthesisOutcome {
                     samples,
                     sample_rate,
                     backend: attempt.backend,
                     fallback_count,
+                    phonemes,
                 });
             }
             Err(error) => {
@@ -216,7 +257,7 @@ impl TtsSynthesisPlan {
                 let sample_rate = engine.sample_rate();
                 engine
                     .synthesize(&text)
-                    .map(|samples| (samples, sample_rate))
+                    .map(|(samples, phonemes)| (samples, sample_rate, Some(phonemes)))
             }));
         }
 
@@ -229,7 +270,7 @@ impl TtsSynthesisPlan {
                 let sample_rate = voice.sample_rate();
                 voice
                     .synthesize(&text)
-                    .map(|samples| (samples, sample_rate))
+                    .map(|(samples, phonemes)| (samples, sample_rate, Some(phonemes)))
             }));
         }
 
@@ -248,7 +289,7 @@ impl TtsSynthesisPlan {
                 .lock()
                 .map_err(|_| "Kokoro ONNX session mutex poisoned".to_string())?;
             TtsEngine::generate_from_session(&mut session, &voice_data, &token_ids, 1.0)
-                .map(|samples| (samples, 24_000))
+                .map(|samples| (samples, 24_000, Some(phonemes)))
         }));
 
         run_synthesis_fallback(&mut attempts, is_cancelled)
@@ -682,7 +723,7 @@ mod tests {
             }),
             TtsSynthesisAttempt::new(TtsBackend::Piper, || {
                 secondary_calls.set(secondary_calls.get() + 1);
-                Ok((vec![0.25, -0.25], 22_050))
+                Ok((vec![0.25, -0.25], 22_050, Some("ab".to_string())))
             }),
         ];
 
@@ -693,6 +734,7 @@ mod tests {
         assert_eq!(outcome.fallback_count, 1);
         assert_eq!(outcome.sample_rate, 22_050);
         assert_eq!(outcome.samples, vec![0.25, -0.25]);
+        assert_eq!(outcome.phonemes.as_deref(), Some("ab"));
         assert_eq!(primary_calls.get(), 1);
         assert_eq!(secondary_calls.get(), 1);
     }
@@ -707,7 +749,7 @@ mod tests {
             }),
             TtsSynthesisAttempt::new(TtsBackend::Piper, || {
                 secondary_calls.set(secondary_calls.get() + 1);
-                Ok((vec![0.5], 22_050))
+                Ok((vec![0.5], 22_050, None))
             }),
         ];
 
@@ -734,18 +776,19 @@ mod tests {
 
     #[test]
     fn test_chunker_comma_minimum() {
+        // ⚠️ VC-6: chunker tươi đang ở LUẬT MẪU-ĐẦU (dấu phẩy cắt từ ≥2 từ),
+        // nên mẩu đầu cắt tại dấu phẩy thứ hai (5 từ ≥ 2) thay vì giữ nguyên cả
+        // câu như luật cũ. Luật cũ cho các mẩu SAU có test riêng bên dưới.
         let mut chunker = TtsChunker::new();
 
-        // 5 words before first comma -> should NOT split on first comma.
-        // Second comma makes 10 words -> should split at second comma.
         let chunks = chunker.push("Hello, my name is LIVA, I am your voice assistant.");
         assert_eq!(
             chunks,
-            vec!["Hello, my name is LIVA, I am your voice assistant."]
+            vec!["Hello, my name is LIVA,", "I am your voice assistant."]
         );
 
         let mut chunker2 = TtsChunker::new();
-        // 7 words before comma -> should split.
+        // 8 words before comma -> first-chunk rule (>=2) also splits here.
         let chunks2 =
             chunker2.push("This is a very long clause right here, and then another clause");
         assert_eq!(chunks2, vec!["This is a very long clause right here,"]);
@@ -759,9 +802,103 @@ mod tests {
         // A sentence with 30 words, should split at or before 25th word
         let sentence = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty";
         let chunks = chunker.push(sentence);
+        // VC-6: mẩu ĐẦU có trần riêng 9 từ; push chỉ trả mẩu HOÀN CHỈNH nên
+        // 21 từ còn lại nằm trong buffer chờ.
         assert_eq!(chunks.len(), 1);
         let first_chunk_words: Vec<&str> = chunks[0].split_whitespace().collect();
-        assert_eq!(first_chunk_words.len(), 25);
+        assert_eq!(first_chunk_words.len(), 9);
+
+        // Các mẩu sau về luật cũ: đẩy thêm 5 từ (có khoảng trắng đầu) vượt trần
+        // 25 ⇒ cắt tại từ 26 tính cả buffer (21 + 5), một mẩu 25 từ.
+        let later = chunker.push(" alpha beta gamma delta epsilon");
+        assert_eq!(later.len(), 1);
+        let later_words: Vec<&str> = later[0].split_whitespace().collect();
+        assert_eq!(later_words.len(), 25);
+    }
+
+    // ════════ VC-6 — mẩu đầu của lượt cắt sớm hơn ═══════════════════
+
+    #[test]
+    fn mau_dau_ra_doi_som_va_toan_bo_van_ban_ghep_lai_nguyen_van() {
+        // Câu ví dụ trong nghiệm thu, đẩy vào TỪNG TOKEN như luồng LLM thật.
+        let mut chunker = TtsChunker::new();
+        let tokens = [
+            "Chào", " bạn", ",", " mình", " có", " thể", " giúp", " gì", " cho", " bạn", "?",
+        ];
+        let mut emitted: Vec<String> = Vec::new();
+        let mut first_chunk_at_token = None;
+        for (i, token) in tokens.iter().enumerate() {
+            let out = chunker.push(token);
+            if !out.is_empty() && first_chunk_at_token.is_none() {
+                first_chunk_at_token = Some(i);
+            }
+            emitted.extend(out);
+        }
+        if let Some(rem) = chunker.flush() {
+            emitted.push(rem);
+        }
+
+        // Mẫu đầu ra đời ngay tại token dấu phẩy (index 2) — luật cũ phải chờ
+        // tới "?" ở index cuối cùng.
+        assert_eq!(first_chunk_at_token, Some(2));
+        assert_eq!(emitted.first().map(String::as_str), Some("Chào bạn,"));
+        // Tổng văn bản mọi mẩu ghép lại không đổi một ký tự.
+        assert_eq!(emitted.join(" "), "Chào bạn, mình có thể giúp gì cho bạn?");
+    }
+
+    #[test]
+    fn mau_thu_hai_tro_di_giu_nguyen_luat_cu() {
+        let mut chunker = TtsChunker::new();
+        assert_eq!(chunker.push("Chào bạn,"), vec!["Chào bạn,"]);
+
+        // Từ mẩu thứ hai: dấu phẩy sau 2 từ KHÔNG còn cắt (cần ≥6); chỉ dấu '.'
+        // kết thúc mẩu. Nếu luật mẫu-đầu vẫn còn dính thì câu này bị cắt sớm.
+        let later = chunker.push("tôi là Nam, và tôi đến từ Hà Nội.");
+        assert_eq!(later, vec!["tôi là Nam, và tôi đến từ Hà Nội.".to_string()]);
+    }
+
+    #[test]
+    fn reset_tra_lai_luat_mau_dau_cho_luot_moi() {
+        let mut chunker = TtsChunker::new();
+        chunker.push("Chào bạn,");
+        chunker.reset(); // ranh giới lượt
+
+        // Lượt mới: luật mẫu-đầu có hiệu lực trở lại.
+        assert_eq!(chunker.push("Xin chào,"), vec!["Xin chào,"]);
+    }
+
+    #[test]
+    fn test_chunker_newline_clause_split() {
+        let mut chunker = TtsChunker::new();
+        // First chunk splits on newline with >= 2 words
+        let chunks = chunker.push("Dòng thứ nhất\nDòng thứ hai.");
+        assert_eq!(
+            chunks,
+            vec!["Dòng thứ nhất", "Dòng thứ hai."]
+        );
+
+        let mut chunker2 = TtsChunker::new();
+        let _ = chunker2.push("Chào bạn, ");
+        // Subsequent chunk requires >= 6 words before newline split
+        let chunks2 = chunker2.push("một hai ba\nbốn năm sáu.");
+        // Only 3 words before \n -> not split at \n, splits at '.'
+        assert_eq!(chunks2, vec!["một hai ba\nbốn năm sáu."]);
+    }
+
+    #[test]
+    fn test_tts_synthesis_outcome_passes_phonemes() {
+        let mut attempts = vec![
+            TtsSynthesisAttempt::new(TtsBackend::Kokoro, || {
+                Ok((vec![0.1, -0.1], 24_000, Some("həlˈoʊ".to_string())))
+            }),
+        ];
+
+        let outcome = run_synthesis_fallback(&mut attempts, || false)
+            .expect("Kokoro fallback must succeed");
+
+        assert_eq!(outcome.backend, TtsBackend::Kokoro);
+        assert_eq!(outcome.sample_rate, 24_000);
+        assert_eq!(outcome.phonemes.as_deref(), Some("həlˈoʊ"));
     }
 }
 

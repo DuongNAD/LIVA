@@ -4,9 +4,24 @@ const OPEN_MARKERS: &[&str] = &[
     "<analysis>",
     "<reasoning>",
     "<channel_thought>",
+    "<antthinking>",
+    "<reflection>",
+    "<|thought|>",
+    "<|think|>",
+    "<|reasoning|>",
+    "<|channel_thought|>",
+    "<|channel|>analysis<|message|>",
+    "<|channel|>thought<|message|>",
+    "<|channel|>reasoning<|message|>",
+    "<|channel|>internal<|message|>",
+    "<|channel|>commentary<|message|>",
+    "<|channel|>cot<|message|>",
     "<|channel>analysis",
     "<|channel>thought",
-    "<|channel|>analysis<|message|>",
+    "<|channel>reasoning",
+    "<|channel>internal",
+    "<|channel>commentary",
+    "<|channel>cot",
 ];
 const CLOSE_MARKERS: &[&str] = &[
     "</think>",
@@ -14,8 +29,24 @@ const CLOSE_MARKERS: &[&str] = &[
     "</analysis>",
     "</reasoning>",
     "</channel_thought>",
-    "<|channel>final",
+    "</antthinking>",
+    "</reflection>",
+    "<|/thought|>",
+    "<|/think|>",
+    "<|/reasoning|>",
+    "<|/channel_thought|>",
+    "<|end_of_thought|>",
+    "<|end_thought|>",
     "<|channel|>final<|message|>",
+    "<|channel|>output<|message|>",
+    "<|channel|>response<|message|>",
+    "<|channel|>main<|message|>",
+    "<|channel|>assistant<|message|>",
+    "<|channel>final",
+    "<|channel>output",
+    "<|channel>response",
+    "<|channel>main",
+    "<|channel>assistant",
 ];
 
 #[derive(Debug, Default)]
@@ -94,7 +125,7 @@ fn earliest_marker(input: &str, markers: &[&str]) -> Option<(usize, usize)> {
     markers
         .iter()
         .filter_map(|marker| input.find(marker).map(|position| (position, marker.len())))
-        .min_by_key(|(position, _)| *position)
+        .min_by_key(|(position, len)| (*position, std::cmp::Reverse(*len)))
 }
 
 fn marker_prefix_suffix_len(input: &str, markers: &[&str]) -> usize {
@@ -193,5 +224,144 @@ mod tests {
         visible.push_str(&filter.finish());
 
         assert_eq!(visible, "Answer");
+    }
+
+    #[test]
+    fn test_extended_reasoning_tags_and_channels_filtering() {
+        let test_cases = [
+            ("<|thought|>internal reasoning<|/thought|>Visible text", "Visible text"),
+            ("<|think|>step 1<|/think|>Visible text", "Visible text"),
+            ("<|reasoning|>logic<|/reasoning|>Visible text", "Visible text"),
+            ("<|channel_thought|>deep logic<|/channel_thought|>Visible text", "Visible text"),
+            ("<|thought|>deep logic<|end_of_thought|>Visible text", "Visible text"),
+            ("<|think|>deep logic<|end_thought|>Visible text", "Visible text"),
+            ("<antThinking>internal thoughts</antThinking>Visible text", "Visible text"),
+            ("<reflection>evaluating approach</reflection>Visible text", "Visible text"),
+            ("<|channel|>thought<|message|>thinking...<|channel|>final<|message|>Visible text", "Visible text"),
+            ("<|channel|>reasoning<|message|>thinking...<|channel|>output<|message|>Visible text", "Visible text"),
+            ("<|channel|>internal<|message|>thinking...<|channel|>response<|message|>Visible text", "Visible text"),
+            ("<|channel|>commentary<|message|>thinking...<|channel|>main<|message|>Visible text", "Visible text"),
+            ("<|channel|>cot<|message|>thinking...<|channel|>assistant<|message|>Visible text", "Visible text"),
+            ("<|channel>reasoningthinking...<|channel>outputVisible text", "Visible text"),
+            ("<|channel>cotthinking...<|channel>responseVisible text", "Visible text"),
+            ("<|channel>internalthinking...<|channel>assistantVisible text", "Visible text"),
+        ];
+
+        for (raw, expected) in test_cases {
+            let mut filter = super::VisibleOutputFilter::default();
+            let mut visible = filter.push(raw);
+            visible.push_str(&filter.finish());
+            assert_eq!(visible, expected, "Failed for raw: {raw}");
+        }
+    }
+
+    #[test]
+    fn test_extended_tags_case_insensitivity() {
+        let test_cases = [
+            ("<ANTTHINKING>secret</ANTTHINKING>Answer", "Answer"),
+            ("<REFLECTION>reflecting</REFLECTION>Answer", "Answer"),
+            ("<|THOUGHT|>secret<|/THOUGHT|>Answer", "Answer"),
+            ("<|CHANNEL|>THOUGHT<|MESSAGE|>secret<|CHANNEL|>FINAL<|MESSAGE|>Answer", "Answer"),
+            ("<|CHANNEL>COTsecret<|CHANNEL>OUTPUTAnswer", "Answer"),
+        ];
+
+        for (raw, expected) in test_cases {
+            let mut filter = super::VisibleOutputFilter::default();
+            let mut visible = filter.push(raw);
+            visible.push_str(&filter.finish());
+            assert_eq!(visible, expected, "Failed for case raw: {raw}");
+        }
+    }
+
+    #[test]
+    fn test_split_chunk_streaming_with_new_special_tokens() {
+        // Test arbitrary split streaming across chunks
+        let chunks = [
+            "<antTh",
+            "inking>step 1",
+            " reasoning</antTh",
+            "inking>Final ",
+            "result",
+        ];
+        let mut filter = super::VisibleOutputFilter::default();
+        let mut visible = String::new();
+        for chunk in chunks {
+            visible.push_str(&filter.push(chunk));
+        }
+        visible.push_str(&filter.finish());
+        assert_eq!(visible, "Final result");
+
+        // Test channel syntax split streaming
+        let channel_chunks = [
+            "<|chan",
+            "nel|>thou",
+            "ght<|mess",
+            "age|>secret analysis",
+            "<|chan",
+            "nel|>fin",
+            "al<|mess",
+            "age|>Clean output",
+        ];
+        let mut filter2 = super::VisibleOutputFilter::default();
+        let mut visible2 = String::new();
+        for chunk in channel_chunks {
+            visible2.push_str(&filter2.push(chunk));
+        }
+        visible2.push_str(&filter2.finish());
+        assert_eq!(visible2, "Clean output");
+
+        // Test thought and end_of_thought split streaming
+        let thought_chunks = [
+            "<|tho",
+            "ught|>deep thought",
+            "<|end_of_",
+            "thought|>Hello world",
+        ];
+        let mut filter3 = super::VisibleOutputFilter::default();
+        let mut visible3 = String::new();
+        for chunk in thought_chunks {
+            visible3.push_str(&filter3.push(chunk));
+        }
+        visible3.push_str(&filter3.finish());
+        assert_eq!(visible3, "Hello world");
+    }
+
+    #[test]
+    fn test_from_prompt_tail_with_new_tokens() {
+        for prompt_tail in [
+            "assistant\n<antThinking>\n",
+            "assistant\n<|thought|>",
+            "assistant\n<reflection>\n",
+            "assistant\n<|channel|>thought<|message|>",
+            "assistant\n<|channel>thought",
+        ] {
+            let mut filter = super::VisibleOutputFilter::from_prompt_tail(prompt_tail);
+            let mut visible = filter.push("internal reasoning</antthinking>Final answer");
+            visible.push_str(&filter.finish());
+            assert_eq!(visible, "Final answer", "Failed for prompt tail: {prompt_tail}");
+        }
+    }
+
+    #[test]
+    fn test_fail_closed_partial_new_tokens_at_eof() {
+        // Open marker partial prefixes held back and discarded on EOF
+        for (raw, expected) in [
+            ("Answer<antThin", "Answer"),
+            ("Answer<|channel|>tho", "Answer"),
+            ("Answer<|chan", "Answer"),
+            ("Answer<reflect", "Answer"),
+            ("Answer<|tho", "Answer"),
+        ] {
+            let mut filter = super::VisibleOutputFilter::default();
+            let mut visible = filter.push(raw);
+            visible.push_str(&filter.finish());
+            assert_eq!(visible, expected, "Failed for partial EOF: {raw}");
+        }
+
+        // Close marker partial prefixes inside reasoning block held back and discarded on EOF
+        let mut hidden_filter = super::VisibleOutputFilter::from_prompt_tail("assistant\n<think>\n");
+        let mut visible_hidden = hidden_filter.push("reasoning text<|end_of_");
+        visible_hidden.push_str(&hidden_filter.finish());
+        assert_eq!(visible_hidden, "");
     }
 }

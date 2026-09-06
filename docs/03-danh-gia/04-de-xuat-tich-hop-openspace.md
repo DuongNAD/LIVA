@@ -1,8 +1,7 @@
 ---
 title: "Đề xuất tích hợp OpenSpace (HKUDS)"
-updated: 2026-08-05
-commit: 2dc8e2e
-stale-ok: dec1c14
+updated: 2026-08-25
+commit: a0153135
 status: living
 owns:
   - de-xuat-openspace-g0-g4
@@ -305,7 +304,7 @@ dùng lại đúng enum của `integrations::smart_home`, `action` là tên chu�
 
 #### Ba ràng buộc định hình thiết kế
 
-- **`n_ctx` 4096 + model 2–4B** ⇒ truy hồi top-k (mặc định 4) bằng embedder, và render tham số
+- **`n_ctx` 4096 + model 2–4B** ⇒ truy hồi top-k (7 từ `b8192480`, trước đây 4) bằng embedder, và render tham số
   **một dòng gọn** thay vì dump schema thô (một `schema_for!` đã ~200 token).
 - **`generate_completion` không có grammar/JSON mode** ⇒ hợp đồng output là hai dòng có tiền tố
   và tool chọn **bằng SỐ**, không bằng tên. Bộ parse khoan dung với lời dẫn, code fence, chữ
@@ -422,8 +421,11 @@ Hai điều dữ liệu này phơi ra, không phải thứ đi tìm:
    đo lại được bằng đúng probe này. Chưa làm.
 
 Một ca trượt cụ thể cùng nguyên nhân: `"mở quạt lên giúp mình"` cho top-1 là **`read_markdown`**
-(0,8069), không phải `control_smarthome`. Hiện vô hại vì catalog chỉ có 4 tool và `top_k = 4` nên
-tool đúng vẫn vào prompt — nhưng nó sẽ thành lỗi thật ngay khi catalog lớn lên, tức ngay ở G2.
+(0,8069), không phải `control_smarthome`. Vô hại **tại thời điểm đo**, vì catalog chỉ có 4 tool và
+`top_k = 4` nên tool đúng vẫn vào prompt — nhưng nó sẽ thành lỗi thật ngay khi catalog lớn lên, tức
+ngay ở G2. *(Đúng như dự báo: catalog lên **7** tool kể cả `get_weather`, và nợ này đã khép tại
+`b8192480` (25/08/2026) — `DEFAULT_TOP_K` nâng lên 7 kèm test cưỡng chế
+`catalog_noi_bo_khong_duoc_dai_hon_top_k`, xem U19/M10 ở [05-nang-cap-toan-dien.md](05-nang-cap-toan-dien.md).)*
 
 **Điều (2) đã được làm và đo** — xem bảng ba biến thể ở đầu mục. Kết quả: mô tả đặc trưng hơn sửa
 được ca `"mở quạt lên giúp mình"`, tăng biên ~4×, và kéo `search_vault` từ chỗ hút 8/11 câu trò
@@ -432,8 +434,8 @@ vào `control_smarthome` — mô tả giàu nhất. Đó là lý do ngưỡng tr
 cả ba biến thể, còn ngưỡng trên **điểm** thì được ở (C).
 
 Một hệ quả về cách đọc probe: tầng 1 nay **chỉ phán quyết chiều dương** (câu smart-home phải cho
-`control_smarthome` top-1). Chiều âm chỉ ghi nhận, không phán quyết — vì `top_k = 4` bằng đúng số
-tool nội bộ nên MỌI tool vào prompt bất kể thứ hạng, và danh tính top-1 của một câu trò chuyện
+`control_smarthome` top-1). Chiều âm chỉ ghi nhận, không phán quyết — vì tại thời điểm đo `top_k = 4`
+bằng đúng số tool nội bộ nên MỌI tool vào prompt bất kể thứ hạng, và danh tính top-1 của một câu trò chuyện
 không ảnh hưởng hành vi. Ví dụ: `"let's get back on track"` cho top-1 là `control_smarthome`
 nhưng điểm 0,7695 — **thấp nhất cả corpus** — và LLM vẫn trả `NONE` đúng.
 
@@ -445,9 +447,11 @@ nhưng điểm 0,7695 — **thấp nhất cả corpus** — và LLM vẫn trả 
   2B, hay trên model ngoài hai cái đã thử.
 - **Đường trùng token (khi thiếu embedder) là MÙ.** Đo được: 0 điểm cho *mọi* câu, kể cả tiếng
   Anh ("turn on the light" không chia token nào với "Control a smart home device"). Nó chỉ giữ
-  cho code không sập, không phải một đường dùng được — **G1 trên thực tế CẦN embedder**. Với 4
-  tool nội bộ chuyện này bị che vì `top_k = 4` bằng đúng số tool; thêm một server ngoài
+  cho code không sập, không phải một đường dùng được — **G1 trên thực tế CẦN embedder**. Tại thời
+  điểm đo, với 4 tool nội bộ chuyện này bị che vì `top_k = 4` bằng đúng số tool; thêm một server ngoài
   (`server-filesystem` có 14 tool) là `control_smarthome` bị đẩy khỏi top-4 với mọi câu.
+  *(Nay catalog là 7 và `DEFAULT_TOP_K` = 7 từ `b8192480`, nên tool nội bộ luôn vào prompt; mối
+  nguy còn lại thuộc về tool từ server MCP ngoài.)*
 - **Chưa đo với tool từ server MCP ngoài** trong catalog (`LIVA_TOOL_CALLING_SERVERS`).
 - **Chưa có UI nào** hiển thị nhánh "chỉ đề xuất", nên `ProposeOnly` hiện chỉ chèn một câu vào
   hội thoại để LLM nói lại.

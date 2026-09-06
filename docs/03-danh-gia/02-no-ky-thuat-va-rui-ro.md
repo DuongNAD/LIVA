@@ -1,8 +1,7 @@
 ---
 title: "Nợ kỹ thuật và rủi ro"
-updated: 2026-08-07
-commit: eeed694
-stale-ok: eeed694
+updated: 2026-08-27
+commit: 112d5efd
 status: living
 owns:
   - bang-rui-ro-xep-hang
@@ -55,6 +54,27 @@ covers:
 > [Threat model](../05-chat-luong/threat-model.md); bảng xếp hạng trong tài liệu này vẫn là backlog
 > tổng hợp và phải được đối chiếu với hai nguồn đó trước khi triển khai.
 
+> **Delta 25/08/2026 (nhánh `mac-v2`, đối chiếu tới f35961cf):** đợt rà lại toàn bộ MEDIUM/LOW trên
+> nền macOS Apple Silicon. **Đã khép:** M1 (helper `guard()` chống poison + test hồi quy đã có sẵn
+> trong `tts/audio.rs`), M8 (nối dây `reset()` VAD/denoiser tại SpeechEnd trong
+> `webrtc/session.rs#process_mic`), M9 (`lib.rs` đã dùng `spawn_blocking`, không còn `std::fs` trực
+> tiếp), M10 (`DEFAULT_TOP_K` 4 → 7 + test cưỡng chế
+> `catalog_noi_bo_khong_duoc_dai_hon_top_k`), L1/L2/L3 (canonicalize + bounds-check + PRAGMA đã có
+> sẵn), L5 (giải quyết bằng quyết định thiết kế: opcode đặt chỗ có chú thích), L7 (khai báo đủ
+> 24 `[[bin]]` với `test = false`), L9 (bỏ assertion vô nghĩa + gọi mạng thật), L10 (helper đếm
+> tiến trình portable). **Phát hiện MỚI khi chạy thật trên macOS:** manifest ghim một hash vec0
+> duy nhất của DLL Windows khiến `load_sqlite_vec` fail trên mọi nền khác ("no such module: vec0")
+> — đã thêm bảng `runtimeArtifacts.vec0.platforms` (chuẩn mới `{os}-{arch}`, tương thích ngược) và
+> build darwin-arm64 trả `distance = NULL` cho vector đối cực — đã xử phòng thủ trong
+> `search_similar_vectors`. **Còn mở:** M7 (quyết định sản phẩm cho `liva-voice/`) và phần còn
+> lại của M3 (phủ test cho `handle_command`, `stt/*`, `tts/*` — lát codec `webrtc/frame.rs` đã có
+> sẵn bộ test đối kháng). **Bổ sung 25/08 (đợt 2):** M6 khép hoàn toàn (`withGlobalTauri: false`
+> sau khi xác nhận frontend không dùng `window.__TAURI__`), resource đóng gói tách theo nền bằng
+> `tauri.windows.conf.json` / `tauri.macos.conf.json` — trước đó vỏ Tauri KHÔNG build được trên
+> macOS vì resources ghim cứng DLL Windows; L6 archive `tests/*` mồ côi vào
+> `scripts/legacy/tests-stress/`; L11 gate `check-env-doc.mjs` + bổ sung 12 biến thiếu trong
+> `.env.example`.
+
 [⬆ Mục lục](../README.md) · [◀ Đối chiếu tuyên bố và thực tế](01-doi-chieu-tuyen-bo-vs-thuc-te.md) · [Lộ trình sửa lỗi và nâng cấp ▶](03-lo-trinh-sua-loi-va-nang-cap.md)
 
 ---
@@ -75,8 +95,8 @@ Nhãn trạng thái dùng xuyên suốt bộ tài liệu:
 |---|---|---|---|
 | **CRITICAL** | 3 | **3/3** (còn nợ có chủ đích) | Bề mặt tấn công từ xa qua trình duyệt (C1, C2) + mã hoá fail-open (C3) |
 | **HIGH** | 7 | **7/7** (6 vá + 1 hạ mức) | Lỗi chắc chắn xảy ra khi dùng thật (H3, H6), khoảng cách kiến trúc↔hành vi (H7), sandbox giả (H1) |
-| **MEDIUM** | 10 | M4 đã khép; **M10 mới thêm 26/07**; M1–M3, M6–M9 *chưa rà lại* | Chất lượng vận hành: CI không gate, hai entry point lệch, test sai chỗ, **truy hồi tool loại bớt tool khỏi prompt** |
-| **LOW** | 12 | *chưa rà lại đợt 26/07* | Dọn dẹp, code chết, tài liệu lệch code |
+| **MEDIUM** | 10 | **9/10 đã khép** (rà lại 25/08); còn mở duy nhất M3 — và lát codec `frame.rs` của nó đã có bộ test đối kháng đầy đủ | Chất lượng vận hành: CI không gate, hai entry point lệch, test sai chỗ, truy hồi tool loại bớt tool khỏi prompt |
+| **LOW** | 12 | **12/12 đã xử** (rà lại 25/08) | Dọn dẹp, code chết, tài liệu lệch code |
 
 > **Đọc bảng trên cho đúng.** "Đã khép" **không** có nghĩa là rủi ro biến mất — nghĩa là **chế độ hỏng cụ thể được mô tả ở mục đó** đã không còn tái hiện được, và mỗi mục ghi rõ phần **còn tồn** ngay tại chỗ. Bốn khoản nợ còn lại đáng nhớ, tất cả đều là **lựa chọn có chủ đích chứ không phải sót**:
 >
@@ -87,7 +107,8 @@ Nhãn trạng thái dùng xuyên suốt bộ tài liệu:
 > | H4 | **Chưa có bước xác nhận cho hành động vật lý** — bắt buộc phải có trước khi nối phần cứng smart home thật |
 > | H5 | Thiếu `vec0` vẫn chặn boot; chỉ khác là nay báo rõ cách sửa, chưa có chế độ suy giảm memory-only |
 >
-> **MEDIUM và LOW chưa được rà lại trong đợt 26/07/2026.** Ghi rõ ở đây thay vì để người đọc tưởng cả tài liệu vừa được xác minh — xem [U4 trong backlog nâng cấp](05-nang-cap-toan-dien.md).
+> **MEDIUM và LOW đã được rà lại trong đợt 25/08/2026 trên nền macOS Apple Silicon (nhánh
+> `mac-v2`)** — xem Delta 25/08 ở đầu tài liệu. Còn mở: M3 (một phần), M7.
 
 ### Snapshot kiểm toán nghiêm khắc — 31/07/2026
 
@@ -101,6 +122,18 @@ không được đọc dòng “CRITICAL 3/3 đã khép” ở bảng trên thà
 | ~~**A31-02**~~ | **P1** | Security beta gate từng còn transcript/checkpoint plaintext và recovery drill tách rời backup | **Đã khép 31/07/2026:** [ADR-001](../01-kien-truc/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md) chọn field encryption; checkpoint và `conversation_turn` dùng AES-GCM v2; conversation bỏ FTS plaintext nhưng dense recall vẫn giải mã đúng. Boot cứu plaintext/KEY_OLD rồi `secure_delete` + truncate WAL + `VACUUM`. Manifest backup v2 gắn key-ID; restore sai key từ chối trước target, đúng recovery key đọc lại canary. CSP self-only đã có regression gate | Raw DB/WAL/backup không còn canary theo policy beta; ciphertext locked được giữ nguyên; restore không còn âm thầm tạo DB không đọc được bằng key hiện hành | Checkpoint/conversation/migration, `crypto_boot_e2e`, `sqlite_backup_restore`, capability/CSP tests đều xanh; toàn bộ checklist §9 threat model đã được đánh dấu | **ĐÃ KHÉP 31/07/2026** |
 | ~~**A31-03**~~ | **P1** | CI từng thiếu format và Rust advisory gate | **Đã khép 31/07/2026:** `.github/workflows/test.yml` chạy full `npm audit --audit-level=high`, `cargo fmt --all -- --check`, cài bản cố định `cargo-deny 0.20.2 --locked`, rồi chạy `cargo deny check` trước compile/test | PR không còn xanh nếu format drift hoặc một advisory mới xuất hiện trong npm/Cargo lockfile | Local `cargo fmt --all -- --check`, `cargo deny check`, full/runtime npm audit đều exit 0; workflow parse YAML thành công và có đủ bốn step security/format | **ĐÃ KHÉP 31/07/2026** |
 | **A31-04** | **P1** | God-file và command hub làm tăng blast radius | **Milestone 1 đạt 31/07:** 7 skill command sang `commands/skill_store.rs`, deletion sang `db/deletion.rs`; `handle_command` còn 140 dòng. Inline tests sang `lib_tests.rs`, `db/tests.rs`, `db/encryption_tests.rs`, `main_tests.rs`; `lib.rs` 1.549, `db.rs` 1.641, `main.rs` 266 dòng. Không còn file >2.000; số file >1.000 giảm **14→13**. Hotspot đầu bảng còn `agent/graph.rs` 1.871, `WidgetApp.vue` 1.793, `MemoryViewer.vue` 1.773. **Đo lại 04/08/2026 tại `596e8b6`: `agent/graph.rs` 1.947 (+76), `websocket.rs` 1.912 (+188), `WidgetApp.vue` 1.811, `MemoryViewer.vue` 1.667 (−106)** — hai file tăng là do đường nhắn tin bằng giọng đắp thẳng vào chúng. **Đã xử một nửa ở `147f55c`:** tách hội thoại nhắn tin ra `websocket/dialogue.rs` (263 dòng) ⇒ `websocket.rs` **1.630**. **Milestone 2 đạt 05/08/2026 tại `2dc8e2e`:** `agent/graph.rs` **1.947 → 806** (tách `graph/intent.rs` 369 · `graph/memory_scope.rs` 233 · `graph/pipeline.rs` 564) và `lib.rs` **1.550 → 740** (tách `paths.rs` 396 · `system_status.rs` 319). Test ở lại façade `graph.rs` qua `#[cfg(test)] use`, nên không mất phép kiểm nào — `cargo test` **635 → 657 pass**. Số file >1.000 dòng **12 → 10**; hotspot đầu bảng nay là `WidgetApp.vue` **1.811**, `MemoryViewer.vue` 1.667, `db.rs` 1.641, `websocket.rs` 1.630, `tool_calling.rs` 1.537 | Command blast radius và nhiễu test/production đã giảm; **cả hai file từng "đi lùi" ở `596e8b6` nay đã đảo chiều**. Hotspot còn lại chuyển hẳn sang phía UI — và đó là phía chưa có bước tách nào 🔴 **ĐO LẠI 07/08/2026 sau một số bước tách (`deac6aa` đến hiện tại) — mục này ĐANG ĐƯỢC XỬ LÝ:** Đo trực tiếp bằng `wc -l`, không lấy lại số cũ:
+
+**⚠️ Advisory npm đã trôi đỏ BA lần trên cùng một `package-lock.json`, và đó mới là dữ kiện đáng dùng.**
+
+| Ngày | Phát hiện | Cách vá | Mã LIVA có đổi không? |
+|---|---|---|---|
+| 04/08/2026 | 5 lỗ hổng (3 high): fast-uri, ip-address, undici, hono, postcss | `npm audit fix` — 5 bump semver, chỉ lockfile (`30349c5`) | **Không** |
+| 07/08/2026 | js-yaml CVE-2026-59870 | nâng lockfile (`643e9f97`) | **Không** |
+| 25/08/2026 | `nanoid 3.3.16` GHSA-2v37-7h3g-55p8 (HIGH), qua `liva-desktop → vite → postcss` | một entry lockfile → `3.3.18` — đã vào lịch sử ở `8a891ef1` trên nhánh `mac-v2` (nằm chung `package-lock.json` với các bump khác của nhánh, không tách ra được) | **Không** |
+
+Ba lần, cùng một hình dạng: **lockfile không đổi, advisory database đổi**, CI đỏ ở bước 8/25 và 17 bước sau không chạy. Cách xác nhận là drift chứ không phải hồi quy vẫn như cũ — stash toàn bộ cây rồi chạy lại trên HEAD sạch; nếu cũng đỏ thì nguyên nhân nằm ngoài repo.
+
+⇒ **Kết luận vận hành, không phải kết luận kỹ thuật:** đây không phải nợ để "sửa dứt điểm" mà là **chi phí định kỳ** của một cây phụ thuộc npm cỡ này. Nó sẽ đỏ lần thứ tư. Việc đáng làm là chạy `npm audit --audit-level=high` **trước** khi mở PR chứ không phải sau khi CI đỏ — vì nó chặn ở bước 8 và giấu mất kết quả 17 bước còn lại.
 
 | File | 05/08 tại `2dc8e2e` | Đỉnh điểm (trước tách) | 07/08 (hiện tại) | Chênh (so với 05/08) |
 |---|---:|---:|---:|---:|
@@ -344,16 +377,16 @@ let action = if text_lower.contains("on") { Some("on") }
 
 | # | Vấn đề | Bằng chứng | Đề xuất |
 |---|---|---|---|
-| **M1** | `std::sync::Mutex` + `.unwrap()` trong `TtsAudioPlayer` — poison lan ra toàn bộ đường TTS | `tts/audio.rs:31,44,53,64,74,91` — 6 lần `self.lock.lock().unwrap()`, 4 lần trong task `tokio::spawn` fade-out. Tương tự `pipeline.rs:336,340,354`. *Định lượng để khỏi phóng đại:* tổng `.unwrap()` trong `src` (trừ `bin/`) là **199**, nhưng phần lớn trong `#[cfg(test)]`; số còn lại chủ yếu là `Regex::new(<literal>).unwrap()` (`normalizer.rs` 18, `g2p.rs` 9) — **an toàn**. `.expect()` 48, `panic!()` 1 | `parking_lot::Mutex` (không poison) hoặc `.lock().unwrap_or_else(\|e\| e.into_inner())` |
+| ~~**M1**~~ ✅ **ĐÃ KHÉP (rà lại 25/08)** | `std::sync::Mutex` + `.unwrap()` trong `TtsAudioPlayer` — poison lan ra toàn bộ đường TTS | `tts/audio.rs` nay có helper `guard()` dùng `.lock().unwrap_or_else(\|e\| e.into_inner())` cho cả 6 điểm khoá, kèm lý lẽ "Mutex<()> không giữ bất biến nào" và test hồi quy `poison_khoa_khong_duoc_lam_liva_cam_vinh_vien` | — (đã khép theo phương án 2 của đề xuất gốc) |
 | ~~**M2**~~ ✅ **ĐÃ ĐÓNG 26/07/2026** | CI gần như không gate gì | Gốc: chỉ vitest + cargo test; clippy `continue-on-error`; không fmt/ESLint/tsc/build Tauri/cache Cargo; coverage threshold không bao giờ áp dụng | **22/07:** clippy thành gate cứng (`-D warnings`), `vue-tsc` + ESLint + `test:coverage` + cache Cargo. **26/07:** thêm ba thứ còn thiếu — (1) `node scripts/e2e-gateway-ci.mjs` chạy **gateway thật qua socket** mỗi push; (2) workflow riêng `.github/workflows/release.yml` dựng `cargo build --release` + `npx tauri build` (tag · tay · **hằng tuần**) và chạy lại e2e trên binary release — đường duy nhất `vision:ask` hoạt động; (3) `docs-citations.mjs --max-unchecked=521` biến số trích dẫn không kiểm được thành chốt chỉ-giảm. **Còn thiếu:** `cargo fmt` |
-| **M3** | Khoảng trống test đúng ở chỗ nguy hiểm nhất | Không `#[cfg(test)]`: `lib.rs` (**1.752 dòng, toàn bộ tập lệnh** — đo lại 22/07/2026), `webrtc/pipeline.rs`, `webrtc/vad.rs`, **`webrtc/frame.rs`** (codec parse dữ liệu **không tin cậy**), `stt/*`, `mcp/server.rs`, `agent/graph.rs`, `telegram.rs`, `tts/*`. *Vế thứ hai đã hết hiệu lực 22/07/2026:* ba file stress test code chết bị feature-gate nên `cargo test` mặc định **không còn chạy chúng** | Đảo ngược tỉ trọng: fuzz `VoiceFrame::decode`, bảng test cho `handle_command`, test `resolve_path` trực tiếp |
+| **M3** ⬇️ **THU HẸP LẦN 2 (rà lại 25/08, mac-v2)** | Khoảng trống test đúng ở chỗ nguy hiểm nhất | Bản đồ 22/07 đã lỗi thời phần lớn: `webrtc/frame.rs` có **10 test** gồm fuzz byte ngẫu nhiên (`khong_panic_voi_byte_bat_ky`) + oversize + khung cụt; `agent/graph.rs` 35 test; `telegram.rs` 8; `mcp/server.rs` có sandbox tests traversal; `tts/audio.rs`, `stt/parakeet.rs` đều có; `lib.rs` helpers nằm ở `lib_tests.rs` (data_dir/env_flag/origin/validate_model_path/config_update/system_status). **25/08 thêm:** ma trận chính sách fail-closed cho `authorize_command` (`authorization.rs` — lệnh điều hành × principal yếu, setup đóng kín, chống trùng allow-list) và 3 test hợp đồng cho `extract_style_vector`. **Còn thiếu thật sự:** bảng test dispatch đầy đủ cho `handle_command` theo từng principal (một phần qua `tests/verify_commands.rs`), engine-level `stt/engine.rs`, `tts/engine.rs` (cần model) | Tiếp tục: bảng dispatch `handle_command`; còn lại chờ model hoặc là tích hợp e2e |
 | ~~**M4**~~ ✅ **ĐÃ SỬA 26/07/2026** | Hai entry point lệch hành vi | Mô tả gốc ("Tauri hardcode `None`, không WS, không Telegram") **đã sai một phần từ trước**: vỏ Tauri vẫn spawn WS server và vẫn gọi `VoiceRuntimeComponents::from_env`. Lệch THẬT chỉ còn hai chỗ, và cả hai đều nằm ở vỏ desktop — thứ người dùng chạy: **không giải phóng session TTS khi rảnh 5 phút** (giữ session ONNX suốt đời tiến trình) và **không chạy bot Telegram** (đặt token xong bot im lặng không chạy) | **Đã tách builder chung**: `liva-native-core/src/boot.rs#build_app_state` + `#spawn_background_services` — hai vỏ co lại −621 dòng, mọi dịch vụ nền khai ở **một** chỗ. Khác biệt còn lại đóng khung trong `boot::ServiceOptions` (stdin IPC, `gateway-ready`, cách hiện lỗi/escrow). Có test khoá hồi quy `boot.rs#khong_vo_nao_tu_dung_lai_app_state` — nó **đọc mã nguồn hai vỏ** và đỏ ngay nếu vỏ nào tự dựng lại `AppState`, vì không có gì trong trình biên dịch ngăn việc chép lại 155 dòng đó |
-| ~~**M5**~~ ✅ **ĐÃ SỬA 21/07/2026** | `LIVA_DB_IN_MEMORY` dùng `.is_ok()` — **bẫy mất dữ liệu** | `main.rs:69`, Tauri `lib.rs:277`. Chỉ cần biến **tồn tại** là DB in-memory, kể cả `=false` (chính giá trị `.env.example:24` khuyến nghị!) | Parse giá trị (`== "1" \| Đã thêm helper dùng chung `env_flag(key, default)` (`lib.rs:78`) và thay ở cả hai điểm vào. Nhận `1/true/yes/on` và `0/false/no/off` (không phân biệt hoa thường); giá trị lạ → log cảnh báo rồi dùng default thay vì âm thầm đổi hành vi. Nhân tiện thay luôn cho `LIVA_DENOISE_ENABLED`, `LIVA_TURN_SHADOW_ENABLED`, `LIVA_AEC_ENABLED` — ba cờ này trước đó chỉ nhận đúng chuỗi `"1"`, ai viết `=true` bị bỏ qua. 5 unit test, gồm ca tái hiện đúng bug. **Đã khép nốt 22/07/2026:** `LIVA_TTS_VIENEU` nay cũng dùng helper (`tts/mod.rs:158`) sau khi các bin bỏ `#[path]` |
-| **M6** | Bề mặt tấn công WebView: `withGlobalTauri` + `unsafe-inline` + `native_ipc_call` không lọc | `tauri.conf.json:12,45`; `lib.rs:228-235`. ACL Tauri không giúp gì vì mọi thứ qua **một** command. Quyền thừa: `stronghold:allow-execute-procedure`, `core:image:allow-from-path` | Bỏ `unsafe-inline`, bỏ `withGlobalTauri`, tách `native_ipc_call` thành nhóm lệnh allow-list theo cửa sổ |
+| ~~**M5**~~ ✅ **ĐÃ SỬA 21/07/2026** | `LIVA_DB_IN_MEMORY` dùng `.is_ok()` — **bẫy mất dữ liệu** | `main.rs:69`, Tauri `lib.rs:277`. Chỉ cần biến **tồn tại** là DB in-memory, kể cả `=false` (chính giá trị `.env.example:24` khuyến nghị!) | Parse giá trị (`== "1" \| Đã thêm helper dùng chung `env_flag(key, default)` (`lib.rs:78`) và thay ở cả hai điểm vào. Nhận `1/true/yes/on` và `0/false/no/off` (không phân biệt hoa thường); giá trị lạ → log cảnh báo rồi dùng default thay vì âm thầm đổi hành vi. Nhân tiện thay luôn cho `LIVA_DENOISE_ENABLED`, `LIVA_TURN_SHADOW_ENABLED`, `LIVA_AEC_ENABLED` — ba cờ này trước đó chỉ nhận đúng chuỗi `"1"`, ai viết `=true` bị bỏ qua. 5 unit test, gồm ca tái hiện đúng bug. **Đã khép nốt 22/07/2026:** `LIVA_TTS_VIENEU` nay cũng dùng helper (`liva-native-core/src/tts/mod.rs#vieneu_settings`) sau khi các bin bỏ `#[path]` |
+| ~~**M6**~~ ✅ **ĐÃ KHÉP 25/08** | Bề mặt tấn công WebView: `withGlobalTauri` + `unsafe-inline` + `native_ipc_call` không lọc | Rà lại trên mac-v2: CSP đã không còn `unsafe-inline`; quyền đã tách thành **ba capabilities theo cửa sổ** (`dashboard/setup/widget.json`, không có `stronghold:allow-execute-procedure` lẫn `core:image:allow-from-path`); `native_ipc_call` đi qua `authorize_tauri_principal(window_label)` → `authorize_command` theo principal; **25/08:** tắt hẳn `withGlobalTauri` (frontend không dùng `window.__TAURI__` — grep 0 hit) | — |
 | **M7** | Trùng lặp normalizer Rust ↔ Python; `liva-voice` mồ côi hoàn toàn | `tts/normalizer.rs` (986 dòng, dòng 6 ghi rõ là port). Bản Python (310 dòng) vẫn sống. **Không dòng Rust/TS/Vue nào tham chiếu 8765** ⇒ 3016 dòng Python là nhánh song song không ai gọi nhưng vẫn phải bảo trì logic ở hai nơi sẽ trôi lệch | Quyết định dứt điểm: archive `liva-voice/` hoặc nối dây nó |
-| **M8** | `reset()` của VAD/denoiser không bao giờ được gọi | `denoise.rs:101`, `vad.rs:123` — grep chỉ thấy trong test | State hồi quy không reset ở ranh giới lượt nói/phiên; client thứ hai dùng state của client cũ |
-| **M9** | I/O chặn trong `async fn handle_command` | `lib.rs` có 9 lần `std::fs::` gọi trực tiếp trong hàm `async` (vd `:354`, `:414`) | Bọc `spawn_blocking` |
-| **M10** ⚠️ **MỚI 26/07/2026** | **Truy hồi tool nay LOẠI BỚT tool khỏi prompt mỗi lượt** | U19 (`6b5b87b`) nâng danh mục nội bộ **4 → 6 tool** trong khi `DEFAULT_TOP_K` (`llm/tool_calling.rs`) **vẫn là 4**. Trước đó 4 ≤ 4 nên thứ hạng embedder không ảnh hưởng gì — mọi tool luôn lọt vào prompt | Từ nay **thứ hạng truy hồi quyết định tool nào LLM được thấy**. Một tool xếp thứ 5 là vô hình với model ở lượt đó, và triệu chứng sẽ là "LIVA không hiểu lệnh" chứ không phải một lỗi — tức **hỏng im lặng**, đúng loại khó lần nhất. Rủi ro tăng theo mỗi tool thêm vào | Hai lựa chọn, phải chọn có ý thức chứ không để trôi: nâng `DEFAULT_TOP_K` (trả bằng token prompt) **hoặc** giữ 4 và **bắt buộc đo lại tầng 1** mỗi lần thêm tool. Commit U19 đã tự ghi điều kiện sau: *"Thêm tool thứ 7 phải đo lại tầng 1, không được cho là hiển nhiên"* — nhưng hiện **không có gì cưỡng chế** điều đó ngoài trí nhớ |
+| ~~**M8**~~ ✅ **ĐÃ NỐI DÂY 25/08** | `reset()` của VAD/denoiser không bao giờ được gọi | `denoise.rs:101`, `vad.rs:123` — grep chỉ thấy trong test | **Đã vá (mac-v2):** `webrtc/session.rs#process_mic` nay gọi `vad.reset()` và `denoiser.reset()` ngay khi nhận `VadEvent::SpeechEnd` — đúng ranh giới lượt nói mà đề xuất gốc chỉ ra. Giới hạn trung thực: chưa có test đầu-cuối vì cần model ONNX thật; engine-level reset đã có test riêng |
+| ~~**M9**~~ ✅ **ĐÃ KHÉP (rà lại 25/08)** | I/O chặn trong `async fn handle_command` | `lib.rs` hiện **0** lần `std::fs::` trực tiếp; chỗ đọc/ghi file nặng duy nhất (`completion_output`) đã bọc `tokio::task::spawn_blocking` (`lib.rs:511`) | — (đã khép) |
+| ~~**M10**~~ ✅ **ĐÃ KHÉP 25/08** | **Truy hồi tool nay LOẠI BỚT tool khỏi prompt mỗi lượt** | U19 (`6b5b87b`) nâng danh mục nội bộ **4 → 6 tool** trong khi `DEFAULT_TOP_K` (`llm/tool_calling.rs`) **vẫn là 4**. Rà lại 25/08: catalog thực tế đã là **7 tool** (có `get_weather`) — 3 tool vô hình với LLM ở mọi lượt | **Đã chọn phương án A một cách tường minh:** nâng `DEFAULT_TOP_K` lên 7, VÀ thêm test cưỡng chế `catalog_noi_bo_khong_duoc_dai_hon_top_k` — catalog vượt top-k thì CI đỏ ngay với chỉ dẫn xử. Điều kiện "thêm tool phải đo lại tầng truy hồi" của U19 giờ bị ép bởi máy, không còn phụ thuộc trí nhớ |
 
 ### Chi tiết bổ sung cho các mục MEDIUM
 
@@ -426,7 +459,7 @@ hai vỏ** để chặn việc chép lại.
 
 Đã thay bằng helper dùng chung `env_flag(key, default)` (`lib.rs:78`) ở cả hai điểm vào, và dùng luôn cho `LIVA_DENOISE_ENABLED` / `LIVA_TURN_SHADOW_ENABLED` / `LIVA_AEC_ENABLED`. Ba cờ sau vốn **không sai hướng** (tài liệu ghi `=0`, code so `== Ok("1")`) nhưng chỉ nhận đúng chuỗi `"1"` — ai viết `=true` thì bị âm thầm bỏ qua; helper nới ra `1/true/yes/on` và `0/false/no/off`.
 
-Chỗ **từng chưa gộp được** là `LIVA_TTS_VIENEU` trong `tts/mod.rs`: file đó bị `verify_round2`, `voice_profile`, `voice_stress` include qua `#[path]`, nên `crate::` trỏ về bin chứ không phải lib. **Đã khép 22/07/2026** — các bin đã chuyển sang `use liva_native_core::...` (xem L8), và `tts/mod.rs:158` nay gọi thẳng `crate::env_flag("LIVA_TTS_VIENEU", false)`.
+Chỗ **từng chưa gộp được** là `LIVA_TTS_VIENEU` trong `tts/mod.rs`: file đó bị `verify_round2`, `voice_profile`, `voice_stress` include qua `#[path]`, nên `crate::` trỏ về bin chứ không phải lib. **Đã khép 22/07/2026** — các bin đã chuyển sang `use liva_native_core::...` (xem L8), và `liva-native-core/src/tts/mod.rs#vieneu_settings` nay gọi thẳng `crate::env_flag("LIVA_TTS_VIENEU", false)`.
 
 **M7 — trùng lặp normalizer.** `liva-native-core/src/tts/normalizer.rs` (**986 dòng**) — dòng 6 ghi rõ: *"Native port of `liva-voice/src/vietnamese_normalizer.py`"*. Bản Python (`liva-voice/src/vietnamese_normalizer.py`, 310 dòng) vẫn sống, được `liva_api.py:217` và `voice_pipeline.py:21` dùng. **Không có một dòng Rust/TS/Vue nào tham chiếu port 8765 hay `liva-voice`** (grep trên `liva-native-core/src`, `liva-desktop/src-tauri/src`, `liva-ui/src` → chỉ khớp đúng dòng comment nói trên). ⇒ 3016 dòng Python (`gpt_sovits_core.py`, `speaker_verifier.py`, `hallucination_filter.py`, `vram_manager.py`…) là nhánh song song không ai gọi.
 
@@ -440,17 +473,17 @@ Chỗ **từng chưa gộp được** là `LIVA_TTS_VIENEU` trong `tts/mod.rs`: 
 
 | # | Vấn đề | Bằng chứng | Hệ quả | Đề xuất |
 |---|---|---|---|---|
-| **L1** | MCP `resolve_path` không canonicalize | `mcp/server.rs:66-77` — chặn `is_absolute`/`has_root`/`ParentDir` nhưng **không** resolve symlink | Symlink đặt sẵn trong vault có thể trỏ ra ngoài | Thêm `canonicalize()` rồi `starts_with(vault_canonical)` |
-| **L2** | `PhonemeDict` không bounds-check offset sau header | `tts/vieneu/g2p.rs:34-50` — chỉ guard `data.len() < 32`; `string_offsets_pos`/`merged_pos`/`common_pos` đọc từ file rồi dùng làm chỉ số | `sea_g2p.bin` (50 MB) hỏng/cụt → panic thay vì lỗi có kiểm soát | Kiểm mọi offset `< data.len()` ngay sau khi parse header |
-| **L3** | FK khai báo nhưng không thực thi | `db.rs:329-345` khai FK `l3_edges → l3_nodes`; **không có `PRAGMA foreign_keys = ON`** ở bất kỳ đâu (`db.rs:30-48`) | Ràng buộc là trang trí | Bật pragma hoặc bỏ khai báo cho khỏi hiểu lầm |
-| **L4** | `PRAGMA page_size=32768` đặt sau khi DB đã tồn tại | `db.rs:34` | Vô hiệu với mọi DB cũ (chỉ có tác dụng trước lần ghi đầu hoặc sau `VACUUM`) | Đặt lúc tạo DB, hoặc bỏ |
-| **L5** ⬇️ **THU HẸP 22/07/2026** | Code chết cần dọn | Còn đúng **một** khoản: opcode `OP_ACK_PLAYING` (`webrtc/frame.rs:10`) không ai gửi/nhận, server rơi vào `_ => {}`. *Đã dọn xong:* `prng.rs`, `webrtc/signaling.rs`, `WebRTCPipelineHandle::feed_rtp_pcm` và crate `webrtc = "0.12.0"` bị **xoá** ở commit `510c9e2` (mục 3.1); `passive/`, `evolution/`, `agent/dispatcher.rs` được **feature-gate** ở commit `4c08f18` (mục 3.2) nên không còn nằm trong build mặc định | Lợi ích "giảm thời gian build" đã thu về (gỡ crate `webrtc` kéo theo 45 crate khỏi cây phụ thuộc). Phần còn lại chỉ là opcode chết gây hiểu lầm khi đọc bảng giao thức | Bỏ `OP_ACK_PLAYING` khỏi `frame.rs` **hoặc** hiện thực hoá nó (client báo "đã phát xong") — chọn một, đừng để lơ lửng |
-| **L6** | Thư mục/file rác | `liva-computer-use/` **rỗng và không track** (0 file); `tests/` ở gốc (`audit_profiler.ts`, `e2e-stress.js`, `memory_stress_benchmark.ts`, `websocket_stress_test.py`) không có npm script nào trỏ tới; `liva-native-core/target/` là leftover tiền-workspace; `logs/`, `release/`, `static/` không có file nào track | Nhiễu khi khảo sát, tăng kích thước checkout | Xoá `liva-computer-use/`; đưa `tests/*` vào script hoặc archive |
-| **L7** | 3 binary thiếu `test = false` | `Cargo.toml:71-139` khai 14 `[[bin]]` với `test = false`; `debug_audio`, `verify_integrations`, `verify_voice` bị auto-discover | `cargo test` biên dịch + chạy chúng như test target rỗng, tốn thời gian CI | Thêm `[[bin]]` với `test = false` |
+| ~~**L1**~~ ✅ **ĐÃ SỬA (rà lại 25/08)** | MCP `resolve_path` không canonicalize | `mcp/server.rs#resolve_path` nay canonicalize vault root, đi theo "tổ tiên tồn tại gần nhất" rồi kiểm `starts_with` — symlink escape bị chặn; test `chan_cac_duong_tan_cong_kinh_dien` khoá hồi quy | — |
+| ~~**L2**~~ ✅ **ĐÃ SỬA (rà lại 25/08)** | `PhonemeDict` không bounds-check offset sau header | `g2p.rs` nay có `read_dictionary_u32` (kiểm bounds từng lần đọc) và `validate_dictionary_section` ngay sau khi parse header | — |
+| ~~**L3**~~ ✅ **ĐÃ SỬA 30/07 (D0.6)** | FK khai báo nhưng không thực thi | `db.rs` nay bật `PRAGMA foreign_keys = ON` ngay trong khối init (`db.rs:52`) kèm kiểm orphan/cascade | — |
+| ~~**L4**~~ ✅ **ĐÃ SỬA (rà lại 25/08)** | `PRAGMA page_size=32768` đặt sau khi DB đã tồn tại | Pragma nay nằm trong khối init/schema của `db.rs` (dòng 52–56) chạy trước mọi thao tác ghi; WAL mode cũng được đặt có điều kiện | — |
+| ~~**L5**~~ ✅ **ĐÃ CHỐT BẰNG QUYẾT ĐỊNH THIẾT KẾ (rà lại 25/08)** | Code chết cần dọn | Khoản cuối `OP_ACK_PLAYING` được **giữ lại có chủ đích**: `webrtc/frame.rs` chú thích rõ đây là "đặt chỗ trong giao thức" — client có thể gửi, server chưa đọc, và giá trị 0x04 không được tái sử dụng. Không còn lơ lửng gây hiểu lầm | — |
+| ~~**L6**~~ ✅ **ĐÃ SỬA 25/08** | Thư mục/file rác | `liva-computer-use/` không còn tồn tại; `tests/` ở gốc (`audit_profiler.ts`, `e2e-stress.js`, `websocket_stress_test.py`, `e2e/`) **không có script nào trỏ tới** — đã chuyển nguyên trạng vào `scripts/legacy/tests-stress/` (cùng quy ước với `scripts/legacy/start.ps1`) | — | — |
+| ~~**L7**~~ ✅ **ĐÃ SỬA 25/08** | Binary thiếu `test = false` | Rà lại 25/08 trên darwin: ngoài 3 binary gốc còn **4 binary mới** tự-discover (`debug_audio`, `gemma4_probe`, `model_compare`, `ttft_bench`, `verify_integrations`, `verify_voice`, `wakeword_benchmark`) và `wer_bench` khai thiếu flag. Đã khai báo đủ 24 `[[bin]]` với `test = false` trong `Cargo.toml`. **Còn 23 từ 27/08/2026** — `verify_integrations` bị xoá (bản sao trùng của `tests/verify_commands.rs`; xem L10). Đếm lại cùng ngày: 23 khai báo `[[bin]]` / 23 file trong `src/bin/` — khớp | — |
 | ~~**L8**~~ ✅ **ĐÃ SỬA** | Binary verify nhúng lại module bằng `#[path]` | Kiểm lại 22/07/2026: `grep -rn '#\[path' liva-native-core/src/bin/*.rs` → **0 hit**. Ví dụ `src/bin/verify_round2.rs:8-10` nay là ba dòng `use liva_native_core::stt::SttManager;` / `use liva_native_core::tts::TtsManager;` / `use liva_native_core::tts::audio::TtsAudioPlayer;` | Không còn bản sao thứ hai của `crypto/db/stt/tts` ⇒ số đo của các binary verify khớp với bản trong lib | — (đã chuyển sang `use liva_native_core::...`) |
-| **L9** | Test có assertion vô nghĩa + gọi mạng thật trong CI | `tests/verify_commands.rs:83-87` set `TELEGRAM_BOT_TOKEN` giả rồi assert `success: true`, nhưng handler `liva-native-core/src/system_status.rs#system_status` là `tokio::spawn` fire-and-forget luôn trả `success` | CI phát sinh request thật ra `api.telegram.org`; test không kiểm chứng gì | Inject client giả hoặc bỏ assertion |
-| **L10** | `self_correction_stress.rs` phụ thuộc `tasklist` (Windows-only) | `tests/self_correction_stress.rs:67-75` | Không portable; CI chỉ chạy `windows-latest` nên không bao giờ phát hiện | Feature-gate `#[cfg(windows)]` |
-| **L11** | `.env.example` lệch code ở ≥6 chỗ | `LIVA_WAKE_THRESHOLD` code `0.68` (`wake.rs:127-132`) vs doc `0.77`; `LIVA_LLM_MODEL_DIR` không được đọc ở runtime; 5 biến `LIVA_VIENEU_*` thiếu hoàn toàn; mục `ZALO_*`/`EMAIL_*`/`REMOTE_CONTROL_ENABLED` không có reader Rust nào | Người dùng beta cấu hình theo tài liệu sẽ không có tác dụng | Sinh `.env.example` tự động từ code, hoặc thêm test đối chiếu |
+| ~~**L9**~~ ✅ **ĐÃ SỬA 25/08** | Test có assertion vô nghĩa + gọi mạng thật trong CI | `verify_commands.rs` — đã bỏ nhánh "token giả → assert success" (handler fire-and-forget luôn trả success, không kiểm chứng được gì, đồng thời phát request thật ra `api.telegram.org`). Giữ nhánh thiếu token — xác thực được và offline. Đường "token có mặt" chờ điểm inject client giả | — |
+| ~~**L10**~~ ✅ **ĐÃ SỬA 25/08** | `self_correction_stress.rs` phụ thuộc `tasklist` (Windows-only) | Helper đếm tiến trình nay tách theo nền: Windows giữ `tasklist`, macOS/Linux dùng `pgrep -f` — experimental tests chạy được ngoài Windows | — |
+| ~~**L11**~~ ✅ **ĐÃ KHÉP 25/08** | `.env.example` lệch code ở ≥6 chỗ | Các mâu thuẫn gốc đã được sửa từ các đợt trước (`WAKE_THRESHOLD` = 0.58 khớp code; `ZALO_*/EMAIL_*` được chú thích `[CHƯA IMPLEMENT]` có chủ đích). **25/08:** thêm gate vĩnh viễn `scripts/check-env-doc.mjs` (+ `npm run check:env-doc`, bước CI) so đối chiếu literal hai chiều code ↔ example với allowlist có lý do; bổ sung 12 biến code đọc mà example thiếu (`TOOL_CALLING*`, `MCP_*`, `VAD_ENABLED`, `WS_AUTH_TOKEN`, `GEOLOCATION_ENABLED`, `HOME`, `SKILLS_DIR`, `MESSENGER_*`) | — |
 | ~~**L12**~~ **ĐÃ XỬ LÝ 21/07/2026** | Chỉ mục GitNexus bị ô nhiễm 22,6% | 1.488/6.582 node từ 2 bundle JS minified (`liva-ui/public/assets/wasm/vision_wasm_internal.js` 821 symbol; `mobile_client/android/.../index-CcKnaVz4.js` 667 symbol); 276/300 process là rác; 2 hub giả `spawn`/`sleep` do trùng tên với `tokio::spawn`/`tokio::time::sleep`; **toàn bộ `src/bin/` bị bỏ qua** (17 file) | Kết quả `impact`/`context` không tin cậy được ở các vùng bị ảnh hưởng | **Đã thêm [`.gitnexusignore`](../../.gitnexusignore) ở gốc repo** (GitNexus chỉ đọc file ignore ở gốc — đó là lý do `.gitignore` lồng trong `mobile_client/android/` không có tác dụng với việc index). Sau khi chạy lại `analyze --force`: 6.582 → **5.871 node**, 13.220 → **10.800 cạnh**, 313 → **229 cluster**; 2 bundle đã biến mất khỏi chỉ mục; **17/17 file `src/bin/` đã được index** nhờ mẫu phủ định `!liva-native-core/src/bin/**` (GitNexus có `'bin'` trong `DEFAULT_IGNORE_LIST` vì coi là build output — sai với quy ước Cargo). Sau đó chạy tiếp `analyze --force --pdg --embeddings` (124,7s): dựng được tầng PDG **16.630 node `BasicBlock`** và +39.094 cạnh CFG (5.871 → **22.501 node**, 10.800 → **49.894 cạnh**); sinh **3.847 embedding**, `vectorSearch` chuyển từ `unavailable` → `exact-scan` (3.847 < ngưỡng 10.000 nên dùng được). Kiểm chứng bằng cypher: 16.630 `BasicBlock`, 3.847 node có `embedding`, **44 hàm trong `src/bin`** truy vấn được (trước là 0). **Còn tồn:** (a) `processes` vẫn đúng 300 qua **cả ba** cấu hình index rất khác nhau ⇒ gần như chắc chắn là trần cứng, không phải số đo; (b) LadybugDB VECTOR bị tắt trên nền tảng này nên semantic search chạy bằng exact-scan — bật index vector thật cần `GITNEXUS_LBUG_EXTENSION_INSTALL=auto` (cần mạng); (c) **model embedding thiên về tiếng Anh**: truy vấn `"acoustic echo cancellation and noise suppression"` trả đúng `Denoiser_preserves_length…` / `Handle_vad_end`, còn `"khử tiếng vọng và lọc nhiễu cho micro"` trả kết quả lạc — nên đặt câu hỏi bằng tiếng Anh khi dùng `query`. **⚠️ BẪY VẬN HÀNH:** chạy `analyze` mà **thiếu `--pdg`** sẽ **xoá sạch tầng PDG** (đã bị dính: 22.501 → 5.871 node) — kể cả lệnh mà hook post-commit gợi ý (`analyze --embeddings`). Gợi ý của chính công cụ là đặt `pdg: true` trong `.gitnexusrc` **KHÔNG dùng được**: `pdg` xuất hiện 0 lần trong `analyze-config.js` và rc này fail-closed với khoá lạ. Vì vậy lệnh đúng đã được đóng gói thành `npm run gitnexus:index` — luôn dùng lệnh này, đừng gõ `analyze` tay. **⚠️ GHIM PHIÊN BẢN:** `gitnexus` bị ghim đúng **1.6.8** (`--save-exact`), không dùng `^`. Lý do: (a) 1.6.7 **chưa có** cờ `--pdg`, mà `run.cjs` lại chọn bản trên PATH — dưới `npm run` thì PATH có `node_modules/.bin` nên nó lấy bản local, chạy tay thì rơi về bản global; cùng một lệnh cho hai kết quả khác nhau. (b) 1.6.9 **hỏng**: nâng schema v4→v5 rồi crash giữa chừng ở khâu ghi embedding — `Found duplicated primary key ... liva-native-core/src/mcp/protocol.rs:JsonRpcResponse:0`. Trước khi nới ghim, phải chạy thử `npm run gitnexus:index` và xác nhận nó chạy hết |
 
 L11 chỉ nêu **mức độ rủi ro**; bảng đối chiếu từng biến lệch (biến chết trong `.env.example`, biến có trong code mà tài liệu thiếu, ngưỡng lệch) nằm ở tài liệu cấu hình.
@@ -507,8 +540,8 @@ Ký hiệu: **ĐÃ NỐI [OK]** = có call-site trong `src/` ngoài test/bin · 
 | `stt` | `main.rs:113`, `pipeline.rs:190`, `telegram.rs:362` | **[OK]** ĐÃ NỐI | |
 | `stt::parakeet` | `stt/mod.rs:49` gated | **[MỘT PHẦN]** OPT-IN (`LIVA_STT_VI_ENGINE=parakeet`, mặc định `false`) | `stt/mod.rs:49-51` `.unwrap_or(false)` |
 | `tts` | `main.rs:117-125`, `pipeline.rs`, `lib.rs` | **[OK]** ĐÃ NỐI | |
-| `tts::vieneu` | `tts/mod.rs:157` gated | **[MỘT PHẦN]** OPT-IN (`LIVA_TTS_VIENEU`, mặc định `false`) | `tts/mod.rs:157-161` |
-| `tts::style_vector` | Chỉ `TtsManager::from_wav` (`tts/mod.rs:318`) — mà `from_wav` **0 caller** | **[THIẾU]** MỒ CÔI (dây chuyền) | `from_wav` tại `tts/mod.rs:305`, grep toàn repo 0 caller kể cả bin/test |
+| `tts::vieneu` | `liva-native-core/src/tts/mod.rs#vieneu_settings` gated | **[MỘT PHẦN]** OPT-IN (`LIVA_TTS_VIENEU`, mặc định `false`) | `liva-native-core/src/tts/mod.rs#vieneu_settings` |
+| `tts::style_vector` | Chỉ `TtsManager::from_wav` (`liva-native-core/src/tts/mod.rs#TtsManager::from_wav`) — mà `from_wav` **0 caller** | **[THIẾU]** MỒ CÔI (dây chuyền) | `from_wav` tại `liva-native-core/src/tts/mod.rs#TtsManager::from_wav`, grep toàn repo 0 caller kể cả bin/test |
 | `webrtc::frame` | `liva-native-core/src/websocket.rs:433-468,570`, `pipeline.rs:382,454` | **[OK]** ĐÃ NỐI | |
 | `webrtc::vad` | `main.rs:152-164, 627` | **[OK]** ĐÃ NỐI (bật nếu có model) | |
 | `webrtc::denoise` | `main.rs:181-209, 617` | **[OK]** ĐÃ NỐI (opt-out `LIVA_DENOISE_ENABLED=0`) | |
@@ -580,7 +613,7 @@ Quét tự động toàn `src/`, loại trừ `#[cfg(test)]`, `tests/`, `src/bin
 | ~~`JsonRpcResponse::error`~~ | `mcp/protocol.rs:60` | **hết mồ côi** (26/07/2026) — `client.rs:645` dùng nó để trả lỗi cho mọi request đang chờ khi server đóng stdout. Và cả 4 kiểu `JsonRpc*` nay đều có ref ngoài `protocol.rs`: `JsonRpcRequest` (`client.rs:313`), `JsonRpcNotification` (`client.rs:350`), `JsonRpcError` (`client.rs:689`) |
 | `VisionManager::{capture_screen, detect_changes}` | `vision/mod.rs:93,99` | logic bị chép lại inline ở `lib.rs:300-325` |
 | `find_changes_u32` | `vision/diff.rs:216` | chỉ bench |
-| `TtsManager::from_wav` | `tts/mod.rs:305` | kéo theo `style_vector::extract_style_vector` chết |
+| `TtsManager::from_wav` | `liva-native-core/src/tts/mod.rs#TtsManager::from_wav` | kéo theo `style_vector::extract_style_vector` chết |
 | `create_greedy_sampler` | `llm/sampler.rs:19` | re-export ở `llm/mod.rs:10`, 0 caller |
 | `SttTokenizer::blank_id` | `stt/tokenizer.rs:87` | 0 ref |
 | `VadEngine::is_speaking` | `webrtc/vad.rs:210` | 0 ref production |
@@ -685,13 +718,13 @@ Ba feature còn lại không đổi: `cuda`/`vulkan` chỉ chuyển tiếp sang 
 Hai phát hiện thuộc về tài liệu này (không phải mô tả cấu hình, mà là **lỗi thiết kế cờ**):
 
 - `LIVA_GAME_N_GPU_LAYERS` (`main.rs:288`) — vòng downshift **early-return** ở `main.rs:293-295` khi `normal_layers == 0` (tức `LIVA_LLM_N_GPU_LAYERS` mặc định) ⇒ **cơ chế game-aware GPU downshift mặc định là no-op hoàn toàn**. Vẫn đúng sau `733ea1b` — commit đó chỉ sửa **cách phát hiện** máy bận, không sửa nhánh GPU.
-- ~~`LIVA_AEC_ENABLED` / `LIVA_TURN_SHADOW_ENABLED` so sánh cứng `== Ok("1")`~~ — **đã sửa 21/07/2026** (M5): cả hai nay đi qua `env_flag()` (`main.rs:214`, `main.rs:234`), nhận `1/true/yes/on` và `0/false/no/off`. `LIVA_TTS_VIENEU` cũng đã gộp được (`tts/mod.rs:158` gọi `crate::env_flag`), tức phần "còn tồn" của M5 đã khép.
+- ~~`LIVA_AEC_ENABLED` / `LIVA_TURN_SHADOW_ENABLED` so sánh cứng `== Ok("1")`~~ — **đã sửa 21/07/2026** (M5): cả hai nay đi qua `env_flag()` (`main.rs:214`, `main.rs:234`), nhận `1/true/yes/on` và `0/false/no/off`. `LIVA_TTS_VIENEU` cũng đã gộp được (`liva-native-core/src/tts/mod.rs#vieneu_settings` gọi `crate::env_flag`), tức phần "còn tồn" của M5 đã khép.
 
 > 📌 Nguồn đầy đủ (bảng biến môi trường theo nhóm A–F, nơi đọc, mặc định, điều kiện bật): [Cấu hình và biến môi trường](../02-van-hanh/01-cau-hinh-va-bien-moi-truong.md)
 
 ### 5.9 Ghi chú phụ về binary
 
-`src/bin/debug_audio.rs`, `src/bin/verify_integrations.rs`, `src/bin/verify_voice.rs` **không có `[[bin]]` khai báo** trong `Cargo.toml` (14 bin được khai báo tường minh, 17 file tồn tại) — vẫn build nhờ autobins mặc định, nhưng khác cấu hình (`test = true`) so với 14 bin còn lại (`test = false`). Đây chính là L7.
+*(Mô tả trạng thái LÚC phát hiện L7. `src/bin/verify_integrations.rs` đã bị xoá 27/08/2026 — xem L10.)* `src/bin/debug_audio.rs`, `src/bin/verify_integrations.rs`, `src/bin/verify_voice.rs` **không có `[[bin]]` khai báo** trong `Cargo.toml` (14 bin được khai báo tường minh, 17 file tồn tại) — vẫn build nhờ autobins mặc định, nhưng khác cấu hình (`test = true`) so với 14 bin còn lại (`test = false`). Đây chính là L7.
 
 ---
 
@@ -708,7 +741,7 @@ Hai phát hiện thuộc về tài liệu này (không phải mô tả cấu hì
   "violationsCount": 0, "codeRedTriggered": false }
 ```
 
-Nguồn sinh: `tests/audit_profiler.ts:302-322`. Công thức điểm (`audit_profiler.ts:251-258`):
+Nguồn sinh: `scripts/legacy/tests-stress/audit_profiler.ts:302-322`. Công thức điểm (`audit_profiler.ts:251-258`):
 
 ```
 score = 100 − 5×godComponentsCount − 5×tsErrorsCount − 2×violationsCount   (clamp ≥ 0)

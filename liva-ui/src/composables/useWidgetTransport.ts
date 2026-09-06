@@ -6,6 +6,7 @@ import type { GatewayMessage, MessageDraft } from '../types/gateway';
 import {
   OP_FLUSH,
   OP_SPEAKER_OUT,
+  OP_VISME,
   VOICE_FRAME_HEADER_SIZE,
   parseSpeakerPayload,
 } from '../utils/speakerFrame';
@@ -24,6 +25,8 @@ export interface UseWidgetTransportOptions {
   onJsonMessage: (data: GatewayMessage) => void;
   onSpeakerBinary: (payload: Uint8Array, turnEpoch: number) => void;
   onFlushBinary: (turnEpoch: number) => void;
+  /** VC-8: timeline phoneme→viseme đi trước audio của cùng mẩu. */
+  onVisemeBinary?: (payload: Uint8Array) => void;
 }
 
 export function useWidgetTransport(options: UseWidgetTransportOptions) {
@@ -165,6 +168,20 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
                 options.onFlushBinary(view.getUint32(1, true));
               } else {
                 options.onFlushBinary(0); // Fallback
+              }
+              return;
+            } else if (type === OP_VISME && options.onVisemeBinary) {
+              // VC-8: timeline viseme — payload là JSON, không phải PCM.
+              if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
+                const payloadSize = view.getUint32(5, true);
+                if (
+                  payloadSize > 0 &&
+                  arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE + payloadSize
+                ) {
+                  options.onVisemeBinary(
+                    new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize),
+                  );
+                }
               }
               return;
             } else {

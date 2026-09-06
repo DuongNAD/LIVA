@@ -85,6 +85,7 @@ pub fn build_pipeline_graph(
     tool_event_tx: Option<mpsc::Sender<String>>,
     session_id: u64,
     active_session_id: Arc<std::sync::atomic::AtomicU64>,
+    cancel_token: crate::llm::CancellationToken,
 ) -> StateGraph {
     let mut graph = StateGraph::new();
 
@@ -344,11 +345,13 @@ pub fn build_pipeline_graph(
     let ss3 = Arc::clone(&state_shared);
     let tx3 = llm_chunk_tx.clone();
     let as3 = Arc::clone(&active_session_id);
+    let cancel_token_chat = cancel_token.clone();
     let memory_scope_chat = memory_scope.clone();
     graph.add_node("chat_completion", move |mut state: AgentState| {
         let ss = Arc::clone(&ss3);
         let tx = tx3.clone();
         let as_val = Arc::clone(&as3);
+        let cancel_token_node = cancel_token_chat.clone();
         let memory_scope = memory_scope_chat.clone();
         async move {
             // Lớp 1 của F2: cắt cửa sổ TRƯỚC khi dựng prompt. compile_prompt
@@ -407,12 +410,17 @@ pub fn build_pipeline_graph(
             // Giữ một handle riêng cho persist_turn: closure spawn_blocking bên
             // dưới move mất `ss`.
             let ss_persist = Arc::clone(&ss);
+            let cancel_token_spawn = cancel_token_node.clone();
             let res = tokio::task::spawn_blocking(move || {
-                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                if cancel_token_spawn.is_cancelled()
+                    || as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                {
                     return Err("LLM cancelled before lock".to_string());
                 }
                 let mut llm = ss.llm.blocking_lock();
-                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                if cancel_token_spawn.is_cancelled()
+                    || as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                {
                     return Err("LLM cancelled post-lock".to_string());
                 }
                 if llm.engine.is_none() {
@@ -423,18 +431,26 @@ pub fn build_pipeline_graph(
                     &prompt,
                     crate::llm::persona::TEMP_DEFAULT,
                     crate::llm::persona::TOP_P_DEFAULT,
-                    |token| match send_llm_chunk_if_current(
-                        &tx,
-                        as_val.as_ref(),
-                        session_id,
-                        token,
-                        LLM_TTS_BACKPRESSURE_TIMEOUT,
-                    ) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            tracing::warn!("[LLM] {}", error);
-                            stream_error = Some(error);
-                            false
+                    |token| {
+                        if cancel_token_spawn.is_cancelled()
+                            || as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                        {
+                            stream_error = Some(format!("{LLM_STREAM_ABORT_PREFIX}: session cancelled"));
+                            return false;
+                        }
+                        match send_llm_chunk_if_current(
+                            &tx,
+                            as_val.as_ref(),
+                            session_id,
+                            token,
+                            LLM_TTS_BACKPRESSURE_TIMEOUT,
+                        ) {
+                            Ok(()) => true,
+                            Err(error) => {
+                                tracing::warn!("[LLM] {}", error);
+                                stream_error = Some(error);
+                                false
+                            }
                         }
                     },
                 )?;
@@ -473,12 +489,14 @@ pub fn build_pipeline_graph(
     let ssv = Arc::clone(&state_shared);
     let txv = llm_chunk_tx.clone();
     let asv = Arc::clone(&active_session_id);
+    let cancel_token_vision = cancel_token.clone();
     graph.add_node("vision", move |mut state: AgentState| {
         let ss = Arc::clone(&ssv);
         let tx = txv.clone();
         let tx_fb = txv.clone();
         let as_val = Arc::clone(&asv);
         let as_fallback = Arc::clone(&as_val);
+        let cancel_token_node = cancel_token_vision.clone();
         async move {
             let question = state
                 .messages
@@ -489,8 +507,11 @@ pub fn build_pipeline_graph(
                 .unwrap_or("Trên màn hình đang hiển thị gì?")
                 .to_string();
 
+            let cancel_token_spawn = cancel_token_node.clone();
             let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
-                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                if cancel_token_spawn.is_cancelled()
+                    || as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                {
                     return Err(format!(
                         "{LLM_STREAM_ABORT_PREFIX}: session cancelled before vision capture",
                     ));
@@ -498,7 +519,9 @@ pub fn build_pipeline_graph(
                 // Context-aware: mouse-guided crop while a game is foreground.
                 let (vw, vh, rgb) = crate::vision::capture::capture_for_vision()?;
                 let mut llm = ss.llm.blocking_lock();
-                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                if cancel_token_spawn.is_cancelled()
+                    || as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                {
                     return Err(format!(
                         "{LLM_STREAM_ABORT_PREFIX}: session cancelled after vision lock",
                     ));
@@ -516,18 +539,26 @@ pub fn build_pipeline_graph(
                     },
                     crate::llm::persona::TEMP_DEFAULT,
                     crate::llm::persona::TOP_P_DEFAULT,
-                    |token| match send_llm_chunk_if_current(
-                        &tx,
-                        as_val.as_ref(),
-                        session_id,
-                        token,
-                        LLM_TTS_BACKPRESSURE_TIMEOUT,
-                    ) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            tracing::warn!("[vision] {}", error);
-                            stream_error = Some(error);
-                            false
+                    |token| {
+                        if cancel_token_spawn.is_cancelled()
+                            || as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id
+                        {
+                            stream_error = Some(format!("{LLM_STREAM_ABORT_PREFIX}: session cancelled"));
+                            return false;
+                        }
+                        match send_llm_chunk_if_current(
+                            &tx,
+                            as_val.as_ref(),
+                            session_id,
+                            token,
+                            LLM_TTS_BACKPRESSURE_TIMEOUT,
+                        ) {
+                            Ok(()) => true,
+                            Err(error) => {
+                                tracing::warn!("[vision] {}", error);
+                                stream_error = Some(error);
+                                false
+                            }
                         }
                     },
                 )?;

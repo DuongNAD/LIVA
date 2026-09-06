@@ -12,7 +12,7 @@ description: Prioritize and safely reduce LIVA technical debt using vault eviden
 3. Explore unfamiliar code with GitNexus `query`, inspect candidate symbols with `context`, and run upstream `impact` before changing any existing function, class, or method.
 4. Rank at most three candidates by security or data-loss risk, beta-user impact, existence of a deterministic acceptance test, blast radius, and implementation cost.
 5. For the selected item, record the expected behavior and validation command before editing. Warn and stop for user approval when GitNexus reports HIGH or CRITICAL risk.
-6. Implement one bounded item, run its focused tests and relevant repository gates, then run GitNexus `detect_changes` to verify the affected symbols and flows.
+6. Implement one bounded item, run its focused tests and mandatory repository gates (e.g., `cargo check --workspace`, `cargo test -p liva-native-core`, `npm test` in `liva-ui`), verify scorecard impact via `node scripts/scorecard.mjs`, and run GitNexus `detect_changes` to verify the affected symbols and flows.
 7. Report remaining debt separately from completed work. Follow the repository Git boundary: stage only authorized files; do not commit, merge, push, pull, fetch, tag, or delete branches.
 
 ## Triage output

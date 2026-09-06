@@ -89,6 +89,37 @@ interface CallToolSuccessResult {
   isError?: boolean;
 }
 
+// Hàng rào chống treo cho các lệnh gọi tool trong bộ test tính đúng đắn này.
+//
+// KHÔNG phải phép đo hiệu năng. Bản trước từng có `expect(duration)
+// .toBeLessThan(1000)` và nó NHẤP NHÁY: đỏ trên runner macOS ở 1521 ms vì
+// runner GitHub dùng shared machine chậm hơn máy dev một cách hợp lệ — ngưỡng
+// đó đo TỐC ĐỘ MÁY chứ không đo mã nguồn. Chế độ hỏng mà tên test muốn bắt là
+// treo VÔ HẠN, mà treo vô hạn thì bất kỳ hạn nào cũng bắt được, nên hàng rào
+// được nới RỘNG có chủ đích để không đánh đổi độ tin cậy lấy thứ không cần.
+// Một cổng CI đỏ ngẫu nhiên thì tệ hơn không có cổng, vì nó dạy người ta bấm
+// "chạy lại". Cùng lập luận với doc-comment của
+// `speaker_queue_day_fail_fast_khong_giu_blocking_thread`
+// (liva-native-core/src/webrtc/pipeline.rs).
+const HANG_FENCE_MS = 30_000;
+
+async function callToolWithHangFence(callPromise: Promise<unknown>, label: string): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      callPromise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} TREO quá ${HANG_FENCE_MS}ms — hàng rào chống treo bắn`)),
+          HANG_FENCE_MS
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
   let tempVaultPath: string;
   let client: McpClient;
@@ -186,7 +217,15 @@ describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
         });
         const readResult = rawResult as unknown as CallToolSuccessResult;
         expect(readResult.isError).toBe(true);
-        expect(readResult.content[0].text).toContain('Access denied');
+        // VC-3b: trên POSIX, `\` là ký tự tên file HỢP LỆ nên chuỗi UNC được giữ
+        // nguyên BÊN TRONG vault ⇒ đi qua kiểm bao hàm rồi dừng ở "file not
+        // found" — hành vi ĐÚNG của macOS/Linux, chỉ khác thông điệp Windows.
+        // Khẳng định phải biết nền thay vì đòi thông điệp của nền kia.
+        if (process.platform === 'win32') {
+          expect(readResult.content[0].text).toContain('Access denied');
+        } else {
+          expect(readResult.content[0].text).toMatch(/Access denied|File not found/);
+        }
       }
     });
 
@@ -213,7 +252,12 @@ describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
     test('Circular symlinks are detected and rejected to prevent infinite loops', () => {
       (globalThis as any).symlinkMockState = {
         enabled: true,
-        selfLoopPath: path.resolve(tempVaultPath, 'Skills/self_loop.md'),
+        // ⚠️ Khoá mock bằng canonicalised root: trên macOS `/var` LÀ một symlink
+        // tới `/private/var`, còn `validateAndResolvePath` canonicalise vault
+        // root bằng `fs.realpathSync` trước khi ghép path. Khoá theo
+        // `tempVaultPath` thô thì hai chuỗi không bao giờ khớp ⇒ mock không bắn
+        // ⇒ test đỏ trên macOS (VC-3a).
+        selfLoopPath: path.resolve(fs.realpathSync(tempVaultPath), 'Skills/self_loop.md'),
       };
 
       try {
@@ -228,8 +272,9 @@ describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
     test('Double symlink loops are detected and rejected', () => {
       (globalThis as any).symlinkMockState = {
         enabled: true,
-        loopAPath: path.resolve(tempVaultPath, 'Skills/loop_a.md'),
-        loopBPath: path.resolve(tempVaultPath, 'Skills/loop_b.md'),
+        // Cùng lý do canonicalised root với test phía trên (VC-3a).
+        loopAPath: path.resolve(fs.realpathSync(tempVaultPath), 'Skills/loop_a.md'),
+        loopBPath: path.resolve(fs.realpathSync(tempVaultPath), 'Skills/loop_b.md'),
       };
 
       try {
@@ -275,21 +320,24 @@ describe('LIVA-Obsidian MCP Server Verification Challenger Tests', () => {
       const readResult = rawRead as unknown as CallToolSuccessResult;
       expect(readResult.content[0].text.length).toBe(largeContent.length);
 
-      const start = Date.now();
-      const rawSearch = await client.callTool({
-        name: 'search_vault',
-        arguments: { query: 'TargetKeywordForSearch' }
-      });
-      const searchTime = Date.now() - start;
-      
+      // Hàng rào chống treo (HANG_FENCE_MS) — KHÔNG phải phép đo hiệu năng.
+      // Bản trước là `expect(searchTime).toBeLessThan(1000)` đo tốc độ máy,
+      // không đo mã nguồn; cùng lớp lỗi với test "extremely long queries"
+      // phía dưới. Xem comment ở hằng HANG_FENCE_MS.
+      const rawSearch = await callToolWithHangFence(
+        client.callTool({
+          name: 'search_vault',
+          arguments: { query: 'TargetKeywordForSearch' }
+        }),
+        'search_vault trên file 10 000 dòng',
+      );
+
       const searchResult = rawSearch as unknown as CallToolSuccessResult;
       const results = JSON.parse(searchResult.content[0].text);
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].path).toBe('Knowledge/large_file.md');
       expect(results[0].matches[0].lineNumber).toBe(10008);
-      
-      expect(searchTime).toBeLessThan(1000);
-    });
+    }, 60_000); // Timeout test PHẢI lớn hơn HANG_FENCE_MS để hàng rào là thứ báo đỏ khi treo thật.
 
     test('Server handles empty files safely', async () => {
       const filePath = 'Knowledge/empty_file.md';
@@ -367,19 +415,27 @@ title: "Another title"
   describe('3. Long & Special Character Search Queries', () => {
     test('Server handles extremely long queries without crashing or hanging', async () => {
       const extremelyLongQuery = 'a'.repeat(20000);
-      const start = Date.now();
-      const rawResult = await client.callTool({
-        name: 'search_vault',
-        arguments: { query: extremelyLongQuery }
-      });
-      const duration = Date.now() - start;
+      // Hàng rào chống treo (HANG_FENCE_MS) — KHÔNG phải phép đo hiệu năng.
+      // Bản trước là `expect(duration).toBeLessThan(1000)` và nhấp nháy trên
+      // runner macOS: đỏ ở 1521 ms cho truy vấn 20 000 ký tự, tức runner
+      // shared chỉ chậm hơn — không phải treo. Chế độ hỏng cần bắt là treo VÔ
+      // HẠN nên hạn nào cũng bắt được; hàng rào được nới rộng có chủ đích.
+      // Xem comment ở hằng HANG_FENCE_MS và doc-comment của
+      // `speaker_queue_day_fail_fast_khong_giu_blocking_thread`
+      // (liva-native-core/src/webrtc/pipeline.rs).
+      const rawResult = await callToolWithHangFence(
+        client.callTool({
+          name: 'search_vault',
+          arguments: { query: extremelyLongQuery }
+        }),
+        'search_vault với truy vấn 20 000 ký tự',
+      );
       const result = rawResult as unknown as CallToolSuccessResult;
-      
+
       expect(result.isError).toBeFalsy();
-      expect(duration).toBeLessThan(1000);
       const results = JSON.parse(result.content[0].text);
       expect(results.length).toBe(0);
-    });
+    }, 60_000); // Timeout test PHẢI lớn hơn HANG_FENCE_MS để hàng rào là thứ báo đỏ khi treo thật.
 
     test('Server handles special characters in search query safely', async () => {
       const specialQueries = [

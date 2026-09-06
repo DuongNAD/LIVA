@@ -2,11 +2,8 @@
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 
-const execFileAsync = promisify(execFile)
 const ROOT = path.resolve(import.meta.dirname, '..')
 const DOCS_ROOT = path.join(ROOT, 'docs')
 const REGISTRY_PATH = path.join(DOCS_ROOT, '_data', 'document-inventory.json')
@@ -110,19 +107,17 @@ export function collectInboundLinks(documents) {
   return inbound
 }
 
-async function shortHead() {
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--short', 'HEAD'], {
-    cwd: ROOT,
-    encoding: 'utf8'
-  })
-  return stdout.trim()
-}
-
 function escapeCell(value) {
   return String(value).replaceAll('|', '\\|').replace(/\s+/g, ' ').trim()
 }
 
-export function render(registry, inbound, commit) {
+// ⚠️ `commit` của file sinh PHẢI là chuỗi cố định `'auto'`, không được là
+// `git rev-parse HEAD`: chế độ `--check` sinh lại rồi so với file đã lưu, mà
+// file lưu ghi sha của HEAD *lúc sinh* thì lần so sau (HEAD mới) khác đúng một
+// trường ⇒ đỏ vĩnh viễn sau mọi commit. Tiền lệ: `docs-check.mjs --map` ghi
+// `commit: auto` cho `ban-do-code-tai-lieu.md` vì cùng lý do. `docs-check`
+// bỏ qua stale-check cho các file này vì chúng có `status: index`.
+export function render(registry, inbound, commit = 'auto') {
   const counts = Object.fromEntries(DISPOSITION_ORDER.map((item) => [item, 0]))
   for (const document of registry.documents) counts[document.disposition] += 1
 
@@ -226,8 +221,7 @@ async function main() {
     : [...discoveredPaths, outputRelative].sort()
   assertInventory(registry, validationPaths)
   const inbound = collectInboundLinks(await loadDocuments(discoveredPaths))
-  const output = render(registry, inbound, await shortHead())
-
+  const output = render(registry, inbound)
   if (CHECK_ONLY) {
     let current = ''
     try {

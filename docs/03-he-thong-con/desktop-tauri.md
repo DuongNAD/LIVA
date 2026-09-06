@@ -1,7 +1,7 @@
 ---
 title: "Desktop Tauri — cửa sổ, capability và native IPC boundary"
-updated: 2026-08-07
-commit: bd11c84
+updated: 2026-08-25
+commit: ac693be8
 status: living
 owns:
   - bang-tauri-command
@@ -11,6 +11,8 @@ owns:
 covers:
   - liva-desktop/src-tauri/Cargo.toml
   - liva-desktop/src-tauri/tauri.conf.json
+  - liva-desktop/src-tauri/tauri.macos.conf.json
+  - liva-desktop/src-tauri/tauri.windows.conf.json
   - liva-desktop/src-tauri/src/main.rs
   - liva-desktop/src-tauri/src/lib.rs
   - liva-desktop/src-tauri/capabilities/widget.json
@@ -139,9 +141,24 @@ giữ đến process shutdown bởi runtime Tauri.
 
 ## 9. Đóng gói
 
-Bundle NSIS current-user gồm WebView2 offline installer, `vec0.dll` và
+Bundle NSIS current-user gồm WebView2 offline installer và
 `data/models-manifest.json`; model nặng tải ở lần chạy đầu. `frontendDist` trỏ tới
 `../../liva-ui/dist`.
+
+⚠️ **Từ `286204d7` (25/08/2026), tài nguyên phụ thuộc nền KHÔNG còn nằm trong
+`tauri.conf.json`.** File gốc chỉ giữ phần chung; phần theo nền tách ra hai file
+Tauri tự nạp chồng:
+
+| File | Chứa |
+|---|---|
+| `tauri.windows.conf.json` | `sqlite-vec-windows-x64/vec0.dll` → `vec0.dll`, và `cuda-redist` → `./` |
+| `tauri.macos.conf.json` | `sqlite-vec-darwin-arm64/vec0.dylib` → `vec0.dylib` |
+
+Lý do tách: bản dựng macOS trước đó cố nhặt `vec0.dll` — một artifact Windows
+không tồn tại trên cây phụ thuộc darwin — nên bundle gãy. Thêm tài nguyên mới
+phải hỏi "cái này có phụ thuộc nền không?" trước khi ghi vào file gốc.
+
+📌 Ràng buộc trust theo nền của chính `vec0`: [Phát triển trên macOS](../02-van-hanh/07-macos-dev.md)
 
 ## 10. Acceptance
 

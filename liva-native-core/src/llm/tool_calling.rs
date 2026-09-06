@@ -46,9 +46,15 @@ const PARAM_PREFIX: &str = "   tham số (* = bắt buộc): ";
 
 /// Số tool tối đa chèn vào prompt. Xem ràng buộc 1 ở đầu file.
 ///
-/// 4 là con số có lý do: với `n_ctx` 4096, sau persona + RAG + lịch sử hội thoại
-/// thì phần còn lại cho danh sách tool chỉ còn vài trăm token.
-pub const DEFAULT_TOP_K: usize = 4;
+/// Lịch sử con số này chính là nợ M10: catalog nội bộ lớn dần (4 → 6 ở U19,
+/// nay là **7** kể cả `get_weather`) trong khi `top_k` đứng yên, và từ lúc
+/// catalog > top_k thì **thứ hạng embedder quyết định tool nào LLM được thấy**
+/// — tool xếp sau bị loại khỏi prompt ở mọi lượt, triệu chứng là "LIVA không
+/// hiểu lệnh" chứ không phải một lỗi (hỏng im lặng). Nay nâng lên 7 để mọi
+/// tool nội bộ luôn vào prompt, và test
+/// [`catalog_noi_bo_khong_duoc_dai_hon_top_k`] ở dưới **cưỡng chế** điều đó:
+/// thêm tool mới mà không chủ động reconsider `DEFAULT_TOP_K` thì CI đỏ.
+pub const DEFAULT_TOP_K: usize = 7;
 
 /// Một tool ứng viên, đã phẳng hoá từ mọi nguồn (nội bộ + MCP server ngoài).
 #[derive(Debug, Clone, PartialEq)]
@@ -553,19 +559,65 @@ pub fn parse_selection(raw: &str, so_tool: usize) -> Selection {
     // ARGS: tìm khối JSON đầu tiên SAU `args:` nếu có tiền tố, không thì tìm
     // trong cả output. Thiếu hẳn thì coi như không tham số — tool không tham số
     // là ca hợp lệ, và `validate_arguments` sẽ chặn nếu schema đòi trường.
-    let vung = match raw.to_lowercase().find("args:") {
-        Some(p) => &raw[p + 5..],
-        None => raw,
+    let (vung, co_args) = match raw.to_lowercase().find("args:") {
+        Some(p) => (&raw[p + 5..], true),
+        None => (raw, false),
     };
     let arguments = match first_json_object(vung) {
         Some(khoi) => match serde_json::from_str::<Value>(khoi) {
             Ok(v) if v.is_object() => v,
             Ok(_) => return Selection::Unreadable("ARGS không phải object JSON".to_string()),
-            Err(e) => {
-                return Selection::Unreadable(format!("ARGS không phải JSON hợp lệ: {e}"));
-            }
+            Err(_) => match crate::ast_repair::repair_json_ast(khoi) {
+                Ok(v) if v.is_object() => v,
+                Ok(_) => {
+                    return Selection::Unreadable(
+                        "ARGS không phải object JSON sau AST repair".to_string(),
+                    );
+                }
+                Err(_) => match crate::ast_repair::repair_json_ast(vung) {
+                    Ok(v) if v.is_object() => v,
+                    Ok(_) => {
+                        return Selection::Unreadable(
+                            "ARGS không phải object JSON sau AST repair".to_string(),
+                        );
+                    }
+                    Err(e) => {
+                        return Selection::Unreadable(format!(
+                            "ARGS không phải JSON hợp lệ sau AST repair: {e}"
+                        ));
+                    }
+                },
+            },
         },
-        None => json!({}),
+        None => {
+            if !co_args && !raw.contains('{') && !raw.contains('[') {
+                json!({})
+            } else if co_args {
+                if vung.trim().is_empty() {
+                    json!({})
+                } else {
+                    match crate::ast_repair::repair_json_ast(vung) {
+                        Ok(v) if v.is_object() => v,
+                        Ok(_) => {
+                            return Selection::Unreadable(
+                                "ARGS không phải object JSON sau AST repair".to_string(),
+                            );
+                        }
+                        Err(e) => {
+                            return Selection::Unreadable(format!(
+                                "ARGS không phải JSON hợp lệ sau AST repair: {e}"
+                            ));
+                        }
+                    }
+                }
+            } else {
+                let start = raw.find(|c| c == '{' || c == '[').unwrap_or(0);
+                match crate::ast_repair::repair_json_ast(&raw[start..]) {
+                    Ok(v) if v.is_object() => v,
+                    _ => json!({}),
+                }
+            }
+        }
     };
 
     Selection::Tool {
@@ -1049,6 +1101,27 @@ impl ResolvedCall {
 mod tests {
     use super::*;
 
+    /// Nợ M10 — CỐ CHẾ truy hồi: catalog nội bộ không được dài hơn `DEFAULT_TOP_K`.
+    ///
+    /// Từ lúc số tool vượt top-k, thứ hạng embedder âm thầm loại tool khỏi prompt
+    /// ở mọi lượt — "LIVA không hiểu lệnh" mà không có lỗi nào để nhìn. Test này
+    /// biến điều kiện cam kết trong U19 ("thêm tool phải đo lại tầng 1") thành
+    /// gate cứng: thêm tool mới mà không nâng `DEFAULT_TOP_K` (hoặc bớt tool) thì
+    /// đỏ ngay tại đây, kèm chỉ dẫn cách xử.
+    #[test]
+    fn catalog_noi_bo_khong_duoc_dai_hon_top_k() {
+        let server = crate::mcp::server::NativeMcpServer::new("/tmp/liva-m10-guard");
+        let so_tool = server.list_tools().tools.len();
+        assert!(
+            so_tool <= DEFAULT_TOP_K,
+            "Catalog nội bộ có {so_tool} tool nhưng DEFAULT_TOP_K = {DEFAULT_TOP_K}: \
+             {} tool xếp cuối sẽ bị loại khỏi prompt ở MỌI lượt (nợ M10 — hỏng im \
+             lặng). Chọn một cách CÓ Ý THỨC: nâng DEFAULT_TOP_K và chấp nhận thêm \
+             token prompt, hoặc đo lại tầng truy hồi theo cam kết của U19.",
+            so_tool.saturating_sub(DEFAULT_TOP_K)
+        );
+    }
+
     #[test]
     fn tool_start_event_dung_khuon_websocket_hien_co() {
         let call = ResolvedCall {
@@ -1466,7 +1539,11 @@ mod tests {
             Selection::Unreadable(_)
         ));
         assert!(matches!(
-            parse_selection("TOOL: 1\nARGS: {device: light}", 3),
+            parse_selection("TOOL: 1\nARGS: [1, 2, 3]", 3),
+            Selection::Unreadable(_)
+        ));
+        assert!(matches!(
+            parse_selection("TOOL: 1\nARGS: {{{", 3),
             Selection::Unreadable(_)
         ));
         assert!(
@@ -1768,5 +1845,45 @@ mod tests {
                 ExecPolicy::ProposeOnly
             );
         });
+    }
+
+    #[test]
+    fn test_parse_selection_ast_repair_malformed_json() {
+        // Trailing commas & single quotes
+        let raw1 = "TOOL: 1\nARGS: {'path': 'config.json', 'dry_run': False,}";
+        let sel1 = parse_selection(raw1, 3);
+        match sel1 {
+            Selection::Tool { index, arguments } => {
+                assert_eq!(index, 0);
+                assert_eq!(arguments["path"], "config.json");
+                assert_eq!(arguments["dry_run"], false);
+            }
+            _ => panic!("Expected successful tool selection with repaired AST, got: {sel1:?}"),
+        }
+
+        // Unquoted keys & pythonic None
+        let raw2 = "TOOL: 2\nARGS: {device_id: \"light_1\", timeout: None, speed: 5,}";
+        let sel2 = parse_selection(raw2, 3);
+        match sel2 {
+            Selection::Tool { index, arguments } => {
+                assert_eq!(index, 1);
+                assert_eq!(arguments["device_id"], "light_1");
+                assert_eq!(arguments["timeout"], Value::Null);
+                assert_eq!(arguments["speed"], 5);
+            }
+            _ => panic!("Expected successful tool selection with repaired AST, got: {sel2:?}"),
+        }
+
+        // Truncated / unclosed brackets
+        let raw3 = "TOOL: 3\nARGS: {\"command\": \"cargo test\", \"flags\": [\"--lib\", \"--release\"";
+        let sel3 = parse_selection(raw3, 3);
+        match sel3 {
+            Selection::Tool { index, arguments } => {
+                assert_eq!(index, 2);
+                assert_eq!(arguments["command"], "cargo test");
+                assert_eq!(arguments["flags"], serde_json::json!(["--lib", "--release"]));
+            }
+            _ => panic!("Expected successful tool selection with repaired AST, got: {sel3:?}"),
+        }
     }
 }

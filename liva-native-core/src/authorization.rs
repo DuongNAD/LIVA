@@ -43,6 +43,10 @@ const WIDGET_COMMANDS: &[&str] = &[
     "message:cancel",
     "message:pending",
     "messenger:status",
+    "diff:get_pending_hunks",
+    "agent:submit_hunk_decision",
+    "canvas:get_canvas_state",
+    "canvas:update_widget_state",
 ];
 
 const DASHBOARD_COMMANDS: &[&str] = &[
@@ -57,8 +61,14 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "get_system_status",
     "get_preflight_status",
     "get_skills_list",
+    "test_skill",
+    "test_all_skills",
+    "toggle_skill",
+    "toggle_all_skills",
     "get_user_profile",
     "get_avatar_models",
+    "import_avatar_folder",
+    "delete_avatar_model",
     "consent:get",
     "consent:grant",
     "consent:revoke",
@@ -111,6 +121,49 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "skills:search",
     "skills:signals",
     "skills:history",
+    "skills:get_manifest",
+    "skills:get_config",
+    "skills:save_config",
+    "skills:logs",
+    "skills:install_from_hub",
+    "channels:list",
+    "channels:status",
+    "channels:get_status",
+    "channels:configure",
+    "channels:whatsapp_qr",
+    "channels:start",
+    "channels:stop",
+    "channels:restart",
+    "channels:test",
+    "pairing:list",
+    "pairing:list_nodes",
+    "pairing:list_pending",
+    "pairing:approve",
+    "pairing:reject",
+    "pairing:revoke",
+    "pairing:create_challenge",
+    "browser:status",
+    "browser:screenshot",
+    "browser:navigate",
+    "browser:extract",
+    "browser:action_log",
+    "browser:control",
+    "diff:get_pending_hunks",
+    "diff:get_session",
+    "diff:list_sessions",
+    "diff:parse_raw_diff",
+    "diff:submit_hunk_decision",
+    "agent:submit_hunk_decision",
+    "canvas:stream_widget",
+    "canvas:get_canvas_state",
+    "canvas:update_widget_state",
+    "canvas:close_widget",
+    "canvas:set_layout",
+    "canvas:clear_widgets",
+    "system:diagnostics",
+    "system_diagnostic_probe",
+    "system_diagnostic",
+    "system:telemetry",
 ];
 
 const REMOTE_COMMANDS: &[&str] = &[
@@ -166,5 +219,93 @@ mod tests {
         assert!(
             authorize_command(CommandPrincipal::WebSocketRemote, "get_preflight_status").is_err()
         );
+    }
+
+    /// M3 — MA TRẬN fail-closed: các lệnh điều hành hệ thống KHÔNG được tới tay
+    /// principal không tin cậy. Bất kỳ ai thêm lệnh nhạy cảm vào
+    /// `WIDGET_COMMANDS`/`REMOTE_COMMANDS`/`TELEGRAM_COMMANDS`/`SETUP_COMMANDS`
+    /// đều làm test này đỏ ngay tại đây, kèm tên lệnh vi phạm.
+    #[test]
+    fn dieu_hanh_he_thong_khong_cho_principal_yeu() {
+        const DIEU_HANH: &[&str] = &[
+            "update_config",
+            "reset_memory",
+            "consent:grant",
+            "consent:revoke",
+            "delete_memory_fact",
+            "memory:sweep_retention",
+            "skills:list",
+            "mcp:list_tools",
+            "vision:set_config",
+            "task_plan_chat",
+            "echo",
+            "get_preflight_status",
+            "system:diagnostics",
+            "system_diagnostic_probe",
+            "system_diagnostic",
+            "system:telemetry",
+        ];
+        const YEU: &[CommandPrincipal] = &[
+            CommandPrincipal::TauriWidget,
+            CommandPrincipal::TauriSetup,
+            CommandPrincipal::WebSocketWidget,
+            CommandPrincipal::WebSocketRemote,
+            CommandPrincipal::Telegram,
+        ];
+        for principal in YEU {
+            for cmd in DIEU_HANH {
+                assert!(
+                    authorize_command(*principal, cmd).is_err(),
+                    "{principal:?} KHÔNG được phép gọi '{cmd}'"
+                );
+            }
+        }
+    }
+
+    /// Cửa sổ setup chỉ phục vụ cài đặt artifact: đúng các lệnh `setup:*` —
+    /// mọi thứ khác (kể cả `ping`) phải bị từ chối để cửa sổ này không thành
+    /// đường vào phụ có đặc quyền dashboard.
+    #[test]
+    fn setup_chi_co_cac_lenh_setup() {
+        for cmd in SETUP_COMMANDS {
+            assert!(authorize_command(CommandPrincipal::TauriSetup, cmd).is_ok());
+        }
+        for cmd in ["ping", "status", "get_config", "chat:completion", "echo"] {
+            assert!(
+                authorize_command(CommandPrincipal::TauriSetup, cmd).is_err(),
+                "setup không được phép gọi '{cmd}'"
+            );
+        }
+    }
+
+    /// LocalCli/Test là kênh chẩn đoán đáng tin cậy — chấp nhận mọi lệnh kể cả
+    /// lệnh lạ. Đây là HỢP ĐỒNG; nếu đổi phải sửa threat-model trước.
+    #[test]
+    fn local_cli_va_test_la_tin_cay_day_du() {
+        for cmd in ["lenh-la-ky", "update_config", "reset_memory"] {
+            assert!(authorize_command(CommandPrincipal::LocalCli, cmd).is_ok());
+            assert!(authorize_command(CommandPrincipal::Test, cmd).is_ok());
+        }
+    }
+
+    /// Trùng lắp trong một allow-list không mở quyền thêm nhưng là dấu hiệu drift
+    /// giữa các danh sách — bắt lúc chạy test thay vì khi audit bảo mật.
+    #[test]
+    fn khong_trung_lap_trong_moi_danh_sach() {
+        for (ten, ds) in [
+            ("SETUP", SETUP_COMMANDS),
+            ("WIDGET", WIDGET_COMMANDS),
+            ("DASHBOARD", DASHBOARD_COMMANDS),
+            ("REMOTE", REMOTE_COMMANDS),
+            ("TELEGRAM", TELEGRAM_COMMANDS),
+        ] {
+            let mut da_xem = std::collections::HashSet::new();
+            for cmd in ds {
+                assert!(
+                    da_xem.insert(*cmd),
+                    "danh sách {ten} chứa lệnh trùng '{cmd}'"
+                );
+            }
+        }
     }
 }

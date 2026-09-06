@@ -1,7 +1,7 @@
 ---
 title: "Tích hợp ngoài"
-updated: 2026-08-07
-commit: dec1c14
+updated: 2026-08-27
+commit: 4ae8bfb6
 status: living
 owns:
   - bang-tich-hop-ngoai
@@ -13,7 +13,6 @@ covers:
   - liva-native-core/src/main.rs
   - liva-native-core/src/telegram.rs
   - liva-native-core/src/agent/graph.rs
-  - liva-native-core/src/bin/verify_integrations.rs
   - liva-native-core/src/integrations/smart_home.rs
   - liva-native-core/src/mcp/*
   - liva-native-core/src/tts/*
@@ -171,7 +170,16 @@ impl NativeMcpServer {
 
 `input_schema: schemars::schema::RootSchema` sinh bằng `schema_for!(...)`, serde `rename_all = "camelCase"` → serialize thành `inputSchema` (đúng MCP spec).
 
-**Chống path traversal** (`resolve_path`, `server.rs:67-77`): chặn `is_absolute()`, `has_root()`, mọi `Component::ParentDir`, rồi double-check `full.starts_with(vault_path)`. Áp dụng cho `read_markdown`/`write_markdown`; `search_vault` không cần vì chỉ walk từ root. **Không canonicalize ⇒ symlink có thể lách** (xem chương nợ kỹ thuật).
+**Chống path traversal** (`resolve_path` trong `liva-native-core/src/mcp/server.rs`): chặn `is_absolute()`, `has_root()`, mọi `Component::ParentDir`, rồi double-check `full.starts_with(vault_path)`. Áp dụng cho `read_markdown`/`write_markdown`; `search_vault` không cần vì chỉ walk từ root. **Không canonicalize ⇒ symlink có thể lách** (xem chương nợ kỹ thuật).
+
+**Bổ sung `ff8e960b` (25/08/2026) — hai lối thoát chỉ hở khi chạy ngoài Windows:**
+
+| Lối thoát | Vì sao lọt | Nay chặn thế nào |
+|---|---|---|
+| Drive prefix `C:`, `C:\…`, `C:file` | Trên Windows `join` **thay thế toàn bộ** path khi vế phải mang prefix ổ đĩa; trên Unix chuỗi đó chỉ trông như một tên file bình thường nên mọi kiểm tra bên dưới đều qua | Từ chối khi byte thứ hai là `:` và byte đầu là chữ cái ASCII — chặn ở **cả hai** nền |
+| Phân cách `\` (`..\env`) | `\` là phân cách trên Windows nhưng là **ký tự tên file hợp lệ** trên Unix, nên `Component::ParentDir` không nhận ra | Từ chối thẳng mọi `rel_path` chứa `\` — vault không có lý do chính đáng dùng ký tự này |
+
+⚠️ Đây là cùng một họ với [ba bẫy chỉ-Windows](../02-van-hanh/07-macos-dev.md): logic đường dẫn viết đúng cho một nền, và **CI chạy `windows-latest` nên không bao giờ thấy phía kia**.
 
 **Nối dây:**
 
@@ -411,7 +419,9 @@ if let Some(token) = telegram_token {
 
 ### 9.2.6 Lệnh IPC liên quan Telegram
 
-`"telegram:send_text"` (`liva-native-core/src/commands/integrations.rs:53-74`): đọc `payload["chatId"]` (parse `i64`), `payload["text"]`, `std::env::var("TELEGRAM_BOT_TOKEN")`, **tạo `Bot::new(token)` mới mỗi lần gọi**, `tokio::spawn` gửi, trả `{"success": true}` **ngay lập tức** — fire-and-forget, **không báo lỗi gửi**. Được test ở `src/bin/verify_integrations.rs:80-86`.
+`"telegram:send_text"` (`liva-native-core/src/commands/integrations.rs:53-74`): đọc `payload["chatId"]` (parse `i64`), `payload["text"]`, `std::env::var("TELEGRAM_BOT_TOKEN")`, **tạo `Bot::new(token)` mới mỗi lần gọi**, `tokio::spawn` gửi, trả `{"success": true}` **ngay lập tức** — fire-and-forget, **không báo lỗi gửi**. Được test ở `liva-native-core/src/commands/integrations.rs:97-107` (thiếu tham số → `Err`, không panic) và `liva-native-core/tests/verify_commands.rs:110-125` (thiếu token → `Err "Bot token missing"`).
+
+> ⚠️ **Nhánh "token có mặt" cố tình KHÔNG có test.** Vì handler fire-and-forget luôn trả `{"success": true}`, một assert `success == true` không chứng minh được gì về việc Telegram có nhận tin hay không — trong khi nó phát một request THẬT ra `api.telegram.org`. Nợ L9 đã gỡ assert đó khỏi `verify_commands.rs` ngày 25/08/2026; bản sao cuối cùng của nó sống trong `src/bin/verify_integrations.rs` và đã bị xoá cùng file đó ngày 27/08/2026. Muốn kiểm nhánh này thì phải inject client giả trước.
 
 > 📌 Nguồn đầy đủ (bảng 44 lệnh `handle_command`): [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
@@ -478,7 +488,7 @@ Thiết bị hỗ trợ: **light / ac / fan**; hành động: **on / off**. Meta
 
 > 📌 Nguồn đầy đủ về StateGraph sáu node và cách router chọn nhánh: [Agent và tool runtime](../03-he-thong-con/agent-tools.md) · về 3 lệnh IPC ở trên: [02 — Giao thức IPC và WebSocket](02-giao-thuc-ipc-va-websocket.md)
 
-Test: `smart_home.rs:69-106` (4 unit test) + `src/bin/verify_integrations.rs:51-73`.
+Test: `liva-native-core/src/integrations/smart_home.rs:90-133` (4 unit test) + `liva-native-core/tests/verify_commands.rs:49-108` (qua `handle_command`, assert JSON chính xác).
 
 **Mâu thuẫn schema cần biết:** `NativeMcpServer::control_smarthome` dùng `{device, command}` (String tự do) và **không** gọi `integrations::smart_home::execute`, trong khi `integrations::smart_home` dùng `{device, action}` với enum nghiêm ngặt. **Hai stub riêng biệt, schema lệch nhau.**
 

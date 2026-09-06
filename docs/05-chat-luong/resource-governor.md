@@ -13,6 +13,7 @@ covers:
   - liva-native-core/src/vision/capture.rs
   - liva-native-core/src/llm/engine.rs
   - liva-native-core/src/sysinfo.rs
+stale-ok: a0153135
 ---
 # Resource governor — chính sách sống chung với game và workload nặng
 

@@ -1,7 +1,7 @@
 ---
 title: "Mục lục điều hướng bộ tài liệu LIVA"
-updated: 2026-08-07
-commit: bd11c84
+updated: 2026-08-25
+commit: f35961cf
 status: index
 owns: []
 covers:
@@ -45,6 +45,8 @@ làm trọng tài.
 3. [Inventory capability → module](01-kien-truc/inventory-he-thong.md) — entry point, luồng, test và khoảng trống as-built.
 4. [Kiến trúc đích Cognitive Runtime](01-kien-truc/cognitive-runtime.md) — vòng perception → policy → action → memory.
 5. [Master roadmap](06-ke-hoach/roadmap.md) — nguồn duy nhất cho việc còn làm và thứ tự.
+5b. [Việc còn lại trên nhánh `mac-v2`](06-ke-hoach/viec-con-lai-mac-v2.md) — punch list MV-1…MV-13 phạm vi nhánh: CI chưa từng chạy, hai cổng không bao giờ xanh được, 3 GB rác chưa gitignore.
+5c. [Việc cần làm — rà soát 25/08/2026](06-ke-hoach/viec-can-lam-2026-08-25.md) — VC-1…VC-7: ba cổng kiểm đang đỏ (advisory `h2`, test `preflight` phụ thuộc đĩa, ba test vault trên macOS) và bốn mục thoại real-time, mở đầu bằng việc đo lượt thoại vốn chưa từng có.
 6. [Kiểm kê disposition tài liệu](_generated/kiem-ke-tai-lieu.md) — toàn bộ file được gắn KEEP/SPLIT/GENERATE/FREEZE/MERGE.
 7. [Quy hoạch tài liệu v2](07-dong-gop/quy-hoach-tai-lieu.md) — mapping và gate di trú.
 8. [Voice runtime](03-he-thong-con/voice.md) + [Voice SLO](05-chat-luong/voice-slo.md) — as-built và cổng chất lượng thoại.
@@ -123,7 +125,10 @@ Mô tả **cách làm cho hệ thống chạy được trên một máy thật**
 | [02-mo-hinh-ai-va-tai-nguyen.md](02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md) | Nguồn sự thật của đường dẫn model, bảng model trong `models/`, LLM GGUF ngoài repo, ánh xạ model → module → thiết bị (CPU/GPU), bảng tài nguyên RAM/VRAM, điều kiện build, ba feature flag `cuda`/`vulkan`/`openblas` thật sự làm gì, checklist trước khi chạy trên máy mới | 1 mermaid |
 | [03-trien-khai-va-runtime.md](02-van-hanh/03-trien-khai-va-runtime.md) | Sơ đồ triển khai; bảng tiến trình · cổng · phụ thuộc; bảng bộ nhớ model; **cách chạy đúng** để có đủ cả hai profile (`npm run dev` không khởi động binary lõi); sự cố thường gặp khi khởi động; đóng gói bản build | 1 mermaid |
 | [04-kiem-thu-va-ci.md](02-van-hanh/04-kiem-thu-va-ci.md) | Bản đồ bề mặt kiểm thử; bảng test Rust (cái nào thật sự chạy trong CI); **bảng 17 binary kiểm chứng trong `src/bin/`**; CI pipeline làm và không làm gì; pre-commit hook + ba cách bypass; khoảng trống độ phủ; script/asset mồ côi; công thức chạy nhanh | 4 mermaid |
+| [05-cai-dat-cho-nguoi-dung.md](02-van-hanh/05-cai-dat-cho-nguoi-dung.md) | Hướng dẫn cho **người dùng cuối** trên Windows: yêu cầu máy, cài đặt, lần chạy đầu tải model, dữ liệu nằm ở đâu, nâng cấp/gỡ, khắc phục sự cố, và mục 8 nói thẳng bản cài này **không** làm gì | — |
 | [06-backup-restore-sqlite.md](02-van-hanh/06-backup-restore-sqlite.md) | Runbook online backup, manifest SHA-256, restore offline, rollback và release drill | — |
+| [07-macos-dev.md](02-van-hanh/07-macos-dev.md) | Đường phát triển trên **macOS** (nhánh `mac-v2`): `scripts/start_all.sh`, Metal bật tự động không cần feature flag, số đo CPU thật cho Governor, hash `vec0` theo nền trong trust manifest, và khác biệt đã biết so với bản Windows | — |
+| [release-v1.0.0-smoke-test.md](02-van-hanh/release-v1.0.0-smoke-test.md) | **Snapshot frozen** — báo cáo dựng installer v1.0.0: artifact cục bộ, smoke test home trống trên máy phát triển, phần nghiệm thu còn lại trên Windows sạch | — |
 
 ---
 

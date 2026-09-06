@@ -1,0 +1,34 @@
+#!/bin/sh
+# LIVA Pre-Push Hook — cổng sổ sách tài liệu trước khi rời máy
+# ============================================================
+# Chạy ĐÚNG hai lệnh ở bước 1–2 của .github/workflows/test.yml. Ba lần docs-check
+# đỏ ở CI trên nhánh mac-v2 đều cùng một nguyên nhân: commit mã nguồn mà không
+# kèm lát chỉ-tài-liệu dọn sổ (commit:/stale-ok:) — lời nhắc đã có trong CLAUDE.md,
+# §0.2 và hai prompt nhưng vẫn nổ, vì thứ thiếu là CÁI CHẶN chứ không phải lời nhắc.
+#
+# Vì sao PRE-PUSH mà KHÔNG phải PRE-COMMIT: trình tự sổ sách hợp lệ vốn CẦN một
+# commit mã nguồn đứng một mình TRƯỚC lát tài liệu ghim vào sha của nó — chặn ở
+# pre-commit sẽ chặn nhầm chính bước hợp lệ đó. Commit cục bộ vẫn tự do; chỉ luồng
+# ra khỏi máy bị kiểm.
+#
+# Đường thoát khẩn: git push --no-verify (cờ sẵn có của git). Dùng có chủ đích,
+# đừng biến nó thành thói quen — cổng đỏ nghĩa là sổ sách đang hụt một lát.
+
+echo "📚 LIVA Pre-Push: checking documentation ledger..."
+
+node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
+if [ $? -ne 0 ]; then
+    echo "❌ Pre-push blocked: docs-check thất bại. Xem chi tiết bằng:"
+    echo "   node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia"
+    echo "   (commit mã nguồn cần lát chỉ-tài-liệu commit:/stale-ok: đi sau — xem CLAUDE.md §0.2)"
+    exit 1
+fi
+
+node scripts/docs-citations.mjs --max-unchecked=207
+if [ $? -ne 0 ]; then
+    echo "❌ Pre-push blocked: docs-citations thất bại. Xem chi tiết bằng:"
+    echo "   node scripts/docs-citations.mjs --max-unchecked=207"
+    exit 1
+fi
+
+echo "✅ Pre-push documentation checks passed!"

@@ -18,6 +18,7 @@ covers:
   - liva-ui/public/setup.html
   - data/models-manifest.json
   - scripts/check-installer-config.mjs
+stale-ok: a0153135
 ---
 # Cài đặt và sử dụng LIVA
 

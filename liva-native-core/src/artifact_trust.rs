@@ -62,6 +62,99 @@ pub fn embedded_runtime_artifact_hash(name: &str) -> Result<String, String> {
         })
 }
 
+/// Định danh nền hiện tại theo quy ước của các package npm platform-binary
+/// (`sqlite-vec-darwin-arm64`, …): `{os}-{arch}`.
+///
+/// Dùng để chọn đúng hash của artifact runtime: một binary native (dylib/dll/so)
+/// có nội dung KHÁC NHAU mỗi nền, nên một hash duy nhất trong manifest chỉ đúng
+/// cho đúng một nền — đây chính là lý do vec0 không nạp được trên macOS trước
+/// khi có bảng này.
+pub fn runtime_artifact_platform_key() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "windows-arm64"
+        } else {
+            "windows-x64"
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "darwin-arm64"
+        } else {
+            "darwin-x64"
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "linux-arm64"
+        } else {
+            "linux-x64"
+        }
+    }
+}
+
+/// Hash của runtime artifact cho MỘT nền cụ thể.
+///
+/// Thứ tự tra cứu trong manifest:
+/// 1. `runtimeArtifacts[name].platforms[platform].sha256` — chuẩn mới, mỗi nền
+///    một hash;
+/// 2. nếu entry không có mục `platforms` nào: rơi về `runtimeArtifacts[name].
+///    sha256` (chuẩn cũ, chỉ đúng khi artifact giống nhau mọi nền);
+/// 3. nếu có `platforms` mà thiếu đúng nền đang hỏi: BÁO LỖI RÕ — đừng lặng lẽ
+///    dùng hash của nền khác rồi để `verify_trusted_file` từ chối với thông báo
+///    sai nguyên nhân ("SHA-256 không khớp" thay vì "thiếu hash cho nền này").
+pub fn embedded_runtime_artifact_hash_for_platform(
+    name: &str,
+    platform: &str,
+) -> Result<String, String> {
+    let manifest = embedded_manifest()?;
+    let entry = manifest["runtimeArtifacts"][name].clone();
+    if !entry.is_object() {
+        return Err(format!(
+            "runtime artifact '{name}' không tồn tại trong trust manifest"
+        ));
+    }
+
+    let hop_le = |hash: &str| crate::setup::la_hex_sha256(hash);
+
+    // Mỗi nền chấp nhận HAI dạng giá trị: chuỗi hex trần ("darwin-arm64":
+    // "<sha256>") hoặc object {"sha256": "<hex>"} — chọn một cho gọn khi viết.
+    fn doc_hash(v: &serde_json::Value) -> Option<&str> {
+        let hash = v.as_str().or_else(|| v["sha256"].as_str())?;
+        if crate::setup::la_hex_sha256(hash) {
+            Some(hash)
+        } else {
+            None
+        }
+    }
+
+    if let Some(platforms) = entry["platforms"].as_object() {
+        return platforms
+            .get(platform)
+            .and_then(doc_hash)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                format!(
+                    "runtime artifact '{name}' chưa có SHA-256 hợp lệ cho nền \
+                     '{platform}' trong trust manifest — hãy băm binary của nền đó \
+                     và thêm vào runtimeArtifacts.{name}.platforms.{platform}"
+                )
+            });
+    }
+
+    // Chuẩn cũ: không có bảng platforms — hash duy nhất dùng cho mọi nền.
+    entry["sha256"]
+        .as_str()
+        .filter(|hash| hop_le(hash))
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            format!("runtime artifact '{name}' không có SHA-256 hợp lệ trong trust manifest")
+        })
+}
+
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file =
         File::open(path).map_err(|error| format!("không mở được {}: {error}", path.display()))?;

@@ -230,7 +230,9 @@ pub fn build_app_state() -> Result<Boot, BootError> {
     let db = if in_memory {
         db::DatabasePool::new_in_memory().map_err(BootError::db)?
     } else {
-        db::DatabasePool::new(&db_path).map_err(BootError::db)?
+        let pool = db::DatabasePool::new(&db_path).map_err(BootError::db)?;
+        pool.spawn_idle_checkpoint_worker(std::time::Duration::from_secs(60));
+        pool
     };
 
     // BỎ KHOÁ MẶC ĐỊNH: khoá thật từ env → khoá thiết bị DPAPI (sinh mới nếu
@@ -399,6 +401,7 @@ pub fn spawn_background_services(
     // 1. Chốt phóng chiếu event→vector ngoài đường nóng của chat.
     tasks.push(crate::memory_consolidation::spawn_projection_consumer(
         state.db.clone(),
+        state.crypto.clone(),
     ));
 
     // 2. Retention chỉ chạy khi có policy opt-in. Mặc định không tự xóa dữ liệu.

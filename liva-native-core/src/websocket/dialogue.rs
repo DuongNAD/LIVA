@@ -221,14 +221,7 @@ pub(super) async fn handle_user_voice_text(
                 if token.is_empty() {
                     return true;
                 }
-                let chunk = serde_json::json!({
-                    "event": "ai_stream_chunk",
-                    "payload": {
-                        "textChunk": token,
-                        "isThought": false,
-                    }
-                });
-                if let Ok(chunk_str) = serde_json::to_string(&chunk) {
+                if let Ok(chunk_str) = super::format_ai_stream_chunk(token, false) {
                     let _ = text_tx_inner.blocking_send(chunk_str);
                 }
                 true

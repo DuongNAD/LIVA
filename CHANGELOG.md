@@ -6,6 +6,48 @@ All notable changes to LIVA are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- OpenAI-compatible HTTP surface on the gateway: `/v1/models`,
+  `/v1/chat/completions` (including SSE streaming) and `/v1/audio/speech`.
+  Disabled by default — it opens no socket unless `LIVA_OPENAI_PORT` is set.
+- Preflight screen in the Dashboard reporting model, disk and runtime readiness.
+
+### Changed
+
+- The Skills screen now lists the MCP tools the core actually exposes (7)
+  instead of a single hard-coded entry, and `system_status` reads its count from
+  the same source so the two screens can no longer disagree.
+- Rust advisory gate in CI moved from `cargo audit` to
+  `cargo deny check -W unmaintained -W unsound advisories licenses sources`,
+  adding license and source compliance. Only vulnerabilities fail the build,
+  same as before.
+
+### Fixed
+
+- Widget lip-sync: duplicated audio playback, and an analyser that tracked a
+  chunk that had not been played yet.
+- Avatar control tags are now recognised mid-sentence, not only at the start of
+  a turn, with a matching allow-list on both the TypeScript and Rust sides.
+- Three per-frame costs on the avatar path reduced.
+- Developer tooling now runs outside Windows: the gateway end-to-end check
+  resolves the core binary by platform instead of assuming a `.exe` suffix, and
+  the artifact-trust test removes its symlink fixture with `remove_file` on unix
+  rather than `remove_dir`, which is correct only for a Windows junction. The
+  security assertion in that test — rejecting a symlink escape out of the trust
+  root — was passing throughout; only the teardown was wrong.
+- The UI coverage gate is reproducible from a clean install:
+  `@vitest/coverage-istanbul` is now a declared devDependency instead of an
+  undeclared optional peer. No threshold was lowered.
+
+### Security
+
+- npm advisories cleared three times on lockfile-only bumps: five findings on
+  2026-08-04, js-yaml CVE-2026-59870 on 2026-08-07, and nanoid
+  GHSA-2v37-7h3g-55p8 (high) on 2026-08-25. None of these involved a change to
+  LIVA's own code; they are advisory-database drift against an unchanged
+  lockfile.
+
 ## [1.0.0] - 2026-08-03
 
 ### Added

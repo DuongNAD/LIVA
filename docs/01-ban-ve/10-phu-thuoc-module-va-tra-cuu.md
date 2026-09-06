@@ -20,6 +20,7 @@ covers:
   - liva-ui/src/main.ts
   - liva-ui/src/utils/avatarMath.ts
   - liva-ui/src/workers/audio-worker.ts
+stale-ok: a0153135
 ---
 # Phụ thuộc module và bảng tra cứu nhanh
 

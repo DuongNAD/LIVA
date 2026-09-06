@@ -348,6 +348,14 @@ for (const abs of docs) {
       }
       const target = ds[0]
       const f = docFile(target)
+      // File còn trong chỉ mục git nhưng KHÔNG còn trên đĩa (đã xoá mà chưa
+      // commit) ⇒ `docFile` trả null. Không có guard này cổng ném TypeError
+      // thay vì báo toạ độ hỏng — tức mọi lần xoá file đều làm sập cổng.
+      if (!f) {
+        findings.push({ doc: relDoc, docLine: i + 1, cite: ca, loai: 'file-khong-ton-tai', target,
+          fileLines: 0, context: ctx })
+        continue
+      }
       if (start < 1 || end > f.soDong) {
         findings.push({ doc: relDoc, docLine: i + 1, cite: ca, loai: 'so-dong-vuot-file', target,
           fileLines: f.soDong, context: ctx })

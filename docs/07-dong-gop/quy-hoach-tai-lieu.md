@@ -1,8 +1,8 @@
 ---
 title: "Quy hoạch và di trú tài liệu LIVA v2"
-updated: 2026-08-07
-commit: bd11c84
-stale-ok: deac6aa
+updated: 2026-08-25
+commit: ac693be8
+stale-ok: 4ae8bfb6
 status: living
 owns:
   - quy-hoach-tai-lieu-v2
@@ -181,7 +181,7 @@ metadata sẽ trở thành trang trí.
 |---|---|
 | Registry hợp lệ, evidence tồn tại | `npm run docs:capabilities:check` |
 | Mọi tài liệu có disposition, báo cáo không drift | `npm run docs:inventory:check` |
-| Frontmatter/link/owns/covers/mermaid | `npm run docs:check` |
+| Frontmatter · liên kết tương đối · **neo `#anchor` nội bộ** (từ `98efc55`) · `owns` · `covers` · mermaid | `npm run docs:check` |
 | Citation report, không vượt trần living-doc hiện hành | `npm run docs:cite` |
 | Vault schema và wiki links | `npm run validate --workspace teamwork_projects/obsidian_llm_wiki` |
 | Skill parity/governance | `npm run skills:audit` |

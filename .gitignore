@@ -105,9 +105,21 @@ data/hardware_state.json
 # trỏ đâu. Là bản niêm phong khoá mã hoá facts của người dùng.
 .device_key
 **/.device_key
+.machine_seed
+**/.machine_seed
 
 # Legacy (renamed to liva-gateway)
 openclaw-gateway/
+
+# Engine Python/llama.cpp thế hệ trước, đã bị thay hoàn toàn bởi
+# liva-native-core (xem AGENTS.md §Rust Migration). Trên máy này chỉ còn là
+# workspace cục bộ ~3 GB KHÔNG nằm trong git: venv, venv_backup, bản clone
+# llama.cpp (llama_cpp_src), log build, script Python — hoạt động cuối 06/2026.
+# Ignore để `git add -A` không nuốt trọn; KHÔNG xoá nếu chưa có quyết định
+# rõ ràng của người dùng — xoá là mất vĩnh viễn phần việc không có backup.
+liva-ai-engine/
+# Bản mô phỏng MVC một lần, bỏ dở — rác cục bộ cùng tính chất ở trên.
+mvc-simulation/
 
 # ==========================================
 # 7. THƯ MỤC BUILD

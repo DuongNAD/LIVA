@@ -73,12 +73,36 @@ impl CodeAgent for IterativeMockAgent {
     }
 }
 
+/// Nợ L10: bản trước chỉ gọi `tasklist` (Windows-only) nên khi bật feature
+/// `experimental` trên macOS/Linux, test timeout này panic ngay ở helper thay
+/// vì kiểm chứng điều nó phải kiểm. Nay tách theo nền: Windows giữ nguyên hành
+/// vi, các nền khác dùng `pgrep -f` (exit 1 khi không khớp — đó là trường hợp
+/// bình thường "0 tiến trình", không phải lỗi).
 fn count_running_test_processes(name: &str) -> usize {
-    let output = std::process::Command::new("tasklist")
-        .output()
-        .expect("failed to run tasklist");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.lines().filter(|line| line.contains(name)).count()
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("tasklist")
+            .output()
+            .expect("failed to run tasklist");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.lines().filter(|line| line.contains(name)).count()
+    }
+    #[cfg(not(windows))]
+    {
+        let output = std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(name)
+            .output()
+            .expect("failed to run pgrep");
+        if !output.status.success() && !output.stdout.is_empty() {
+            0
+        } else {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .count()
+        }
+    }
 }
 
 #[tokio::test]

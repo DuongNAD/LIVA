@@ -1,8 +1,8 @@
 ---
 title: "Master roadmap LIVA → JARVIS"
-updated: 2026-08-07
-commit: deac6aa
-stale-ok: eeed694
+updated: 2026-08-25
+commit: f35961cf
+stale-ok: ac693be8
 status: living
 owns:
   - master-roadmap-jarvis
@@ -28,6 +28,8 @@ covers:
 [⬆ Mục lục](../README.md) · [Tầm nhìn](../00-san-pham/tam-nhin-jarvis.md) · [Ma trận năng lực](../_generated/ma-tran-nang-luc.md)
 
 ## 1. Vai trò của tài liệu này
+
+📌 Việc phát sinh từ nhánh `mac-v2` (CI, cổng kiểm, vệ sinh repo) **không** nằm ở đây mà ở [Việc còn lại trên mac-v2](viec-con-lai-mac-v2.md).
 
 Đây là nguồn chuẩn duy nhất cho **việc còn phải làm và thứ tự thực hiện**. Các roadmap
 cũ vẫn được giữ để bảo toàn bằng chứng và lịch sử, nhưng không được thêm hạng mục mới.
@@ -76,12 +78,12 @@ thứ gì đã chạy.
 | D0.2 | xong | Tạo product vision, cognitive architecture và master roadmap | D0.1 | `npm run docs:check` |
 | D0.3 | xong | Di trú mục lục sang cấu trúc mới, giữ link cũ | D0.2 | không link gãy |
 | D0.4 | xong | Phân loại toàn bộ docs: keep/split/generated/frozen/merge | D0.2 | `npm run docs:inventory:check` |
-| D0.5 | đang làm — voice+wake, agent+tools, memory, security+data, vision+proactive+governor, desktop+frontend xong | Giảm citation mơ hồ theo từng subsystem | D0.4 | `npm run docs:cite` giữ trần 207 và tiếp tục giảm |
+| D0.5 | đang làm — voice+wake, agent+tools, memory, security+data, vision+proactive+governor, desktop+frontend xong | Giảm citation mơ hồ theo từng subsystem | D0.4 | `npm run docs:cite` giữ trần 207 và tiếp tục giảm. **Đo 25/08/2026: 187 trích dẫn mơ hồ / trần 207** — còn 20 slot, nên mỗi tài liệu mới thêm toạ độ `lib.rs`/`main.rs`/`engine.rs` trần trụi là ăn dần vào phần đệm đó |
 | D0.6 | xong 2026-07-30 | Bật SQLite foreign keys và kiểm orphan/cascade | persistence D0 | FK/integrity/cascade tests xanh |
 | D0.7 | xong cho local beta 2026-07-31 | Backup/restore và retention/delete propagation | D0.6 | restore drill + raw DB/WAL xanh; DeleteSubject local, Settings execute và retention opt-in bounded-batch đã có; non-local fail-closed |
 | A31-01 | xong 2026-07-31 | Làm sạch Rust/npm supply chain và khóa dependency dễ tổn thương | — | `cargo audit` + full/runtime `npm audit` đều exit 0; test/build các workspace xanh |
 | A31-02 | xong 2026-07-31 | Mã hóa transcript/checkpoint, khép CSP và diễn tập backup cùng key recovery | S0.2–S0.4 | ADR-001; raw DB/WAL/backup không có canary; restore key-ID fail-closed |
-| A31-03 | xong 2026-07-31 | Đưa full npm audit, `cargo fmt --check` và `cargo audit` vào CI bắt buộc | A31-01 | local gate và workflow YAML gate cùng xanh |
+| A31-03 | xong 2026-07-31 | Đưa full npm audit, `cargo fmt --check` và `cargo audit` vào CI bắt buộc | A31-01 | local gate và workflow YAML gate cùng xanh. **Cập nhật 08/08/2026 (`f35961cf`): `cargo audit` đã bị thay bằng `cargo deny check -W unmaintained -W unsound advisories licenses sources` — cùng vai trò advisory, thêm license + source compliance. Nghiệm thu gốc giữ nguyên vì nó mô tả việc đã làm ngày 31/07** |
 | A31-04 | milestone 1 xong 2026-07-31 | Tách command/deletion/test khỏi god-file | — | không file >2.000; `handle_command` 140 dòng; file >1.000 giảm 14→13; lib 505 pass + 1 ignored, bin 30 pass |
 | A31-05 | mở — delivery risk | Chia working tree thành review slices | A31-04 | user tự commit theo lát; agent không commit/push theo git boundary |
 | A31-07 | xong 2026-07-31 | Đối chiếu và quy hoạch tài liệu living; tách các cụm canonical | D0.4 | `npm run docs:check` sạch, inventory đủ 96 tài liệu, citation mơ hồ còn 207 |

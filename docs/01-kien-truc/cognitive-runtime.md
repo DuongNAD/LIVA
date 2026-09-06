@@ -2,7 +2,7 @@
 title: "Kiến trúc đích Cognitive Runtime"
 updated: 2026-07-30
 commit: 3688b5f
-stale-ok: bd11c84
+stale-ok: a0153135
 status: living
 owns:
   - kien-truc-dich-cognitive-runtime

@@ -1,7 +1,7 @@
 ---
 title: "Mô hình AI và tài nguyên"
-updated: 2026-08-07
-commit: bd11c84
+updated: 2026-08-25
+commit: f35961cf
 status: living
 owns:
   - bang-model
@@ -24,6 +24,7 @@ covers:
   - liva-native-core/src/tts/vieneu/mod.rs
   - liva-native-core/tests/integration_tests.rs
   - scripts/ai-pre-commit.cjs
+stale-ok: a0153135
 ---
 # Mô hình AI và tài nguyên
 
@@ -292,9 +293,9 @@ opt-level = 3
 
 - **Node ≥ 20** (`package.json:5-7`); CI dùng **Node 22** + `npm ci`.
 - Pre-commit (`.husky/pre-commit`): `npx lint-staged` rồi `node scripts/ai-pre-commit.cjs`.
-  - `.lintstagedrc.json` **chỉ có** `"*.ts": ["eslint --max-warnings 0 --no-warn-ignored"]` — **KHÔNG có `tsc`**, và **`*.vue` không được xử lý**, trái với mô tả trong `CLAUDE.md`.
+  - `.lintstagedrc.json` là `"*.{ts,vue}": ["eslint --max-warnings 0 --no-warn-ignored"]` — **vẫn KHÔNG có `tsc`** (gate typecheck chỉ sống trong CI). ⚠️ Bản trước của dòng này còn nói **`*.vue` không được xử lý** — điều đó đã **sai từ 22/07/2026**, khi `eslint.config.js` được nối `vue-eslint-parser` và `.lintstagedrc.json` mở rộng sang `*.vue`.
   - `ai-pre-commit.cjs` **cần file `.env`** với `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` (fallback `http://127.0.0.1:8000/v1`, `local-ghost-router`, `gemma-4-E4B-it-Q6_K.gguf` — **model này KHÔNG có** trên `E:\AI_Models`, ở đó chỉ có `-Q4_K_M` và `gemma-4-E4B_q4_0-it.gguf`). Bypass: `SKIP_AI_HOOK=1` (`ai-pre-commit.cjs:8`).
-- CI (`.github/workflows/test.yml`, windows-latest) chạy vitest cho `liva-ui` + `cargo test` cho core; clippy có chạy nhưng không chặn, không có gate `fmt`. Điều đáng nhớ ở đây là **CI cài `choco install llvm` và đặt `LIBCLANG_PATH`** — tức máy local cũng phải có đủ hai thứ đó thì mới build được.
+- CI (`.github/workflows/test.yml`, windows-latest) chạy vitest cho `liva-ui` + `cargo test` cho core. ⚠️ Bản trước của dòng này nói **“clippy có chạy nhưng không chặn, không có gate `fmt`”** — cả hai vế nay đều **SAI**: `cargo fmt --all -- --check` là bước bắt buộc từ `98efc55` (01/08/2026), và clippy chạy `--all-targets -- -D warnings`, tức **0 warning mới được qua**. Điều đáng nhớ ở đây là **CI cài `choco install llvm` và đặt `LIBCLANG_PATH`** — tức máy local cũng phải có đủ hai thứ đó thì mới build được.
 
   > 📌 Nguồn đầy đủ (bảng test, bảng binary verify, từng bước CI pipeline): [Kiểm thử và CI](04-kiem-thu-va-ci.md)
 

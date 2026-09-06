@@ -154,7 +154,13 @@ pub fn own_cpu_percent(
     Some(((own as u128 * 100) / total as u128).min(100) as u8)
 }
 
-/// Mẫu đo trước đó: `(idle, kernel, user, own)`.
+/// Mẫu đo trước đó.
+/// - Windows: `(idle, kernel, user, own)` — tick 100ns từ
+///   `GetSystemTimes`/`GetProcessTimes`.
+/// - macOS: `(busy_ticks, own_us, wall_us, 0)` — tick từ `host_statistics64`,
+///   micro-giây từ `getrusage`, micro-giây đồng hồ wall để quy phần của LIVA
+///   về phần trăm (hai đơn vị tick/µs KHÔNG được trộn lẫn khi tính delta).
+#[cfg_attr(all(not(windows), not(target_os = "macos")), allow(dead_code))]
 static LAST_CPU_SAMPLE: Mutex<Option<(u64, u64, u64, u64)>> = Mutex::new(None);
 
 /// `(CPU ngoài LIVA, CPU của chính LIVA)` — phần trăm, từ **một** lần lấy mẫu.
@@ -227,14 +233,165 @@ pub fn system_cpu_percent() -> Option<u8> {
     cpu_sample().map(|(ngoai, _)| ngoai)
 }
 
-#[cfg(not(windows))]
+/// macOS: tải hệ thống đọc qua `host_statistics64` (tick scheduler của Mach),
+/// phần của riêng LIVA đọc qua `getrusage(RUSAGE_SELF)` (micro-giây cộng dồn).
+/// Hai đơn vị KHÔNG trộn: `%` bận hệ thống tính theo tick, `%` của LIVA tính
+/// theo micro-giây trên đồng hồ wall giữa hai lần gọi. Ngữ nghĩa kết quả giống
+/// bản Windows: `(tải CPU ngoài LIVA, tải CPU của chính LIVA)`.
+///
+/// Không thêm crate mới: hai hàm này thuộc libSystem, khai báo FFI trực tiếp.
+#[cfg(target_os = "macos")]
+pub fn cpu_sample() -> Option<(u8, u8)> {
+    let (busy, idle) = macos_cpu::busy_idle_ticks()?;
+    let own_us = macos_cpu::own_cpu_micros()?;
+    let wall_us = macos_cpu::wall_micros();
+
+    let mut guard = LAST_CPU_SAMPLE.lock().ok()?;
+    // Tuple: (busy_ticks, own_µs, wall_µs, idle_ticks) — xem ghi chú ở LAST_CPU_SAMPLE.
+    let prev = guard.replace((busy, own_us, wall_us, idle))?;
+    drop(guard);
+
+    let busy_d = busy.saturating_sub(prev.0);
+    let own_d_us = own_us.saturating_sub(prev.1);
+    let wall_d_us = wall_us.saturating_sub(prev.2);
+    let idle_d = idle.saturating_sub(prev.3);
+    if wall_d_us == 0 {
+        return None;
+    }
+
+    let total_d = busy_d + idle_d;
+    let busy_pct = if total_d == 0 {
+        0
+    } else {
+        ((busy_d as u128 * 100) / total_d as u128).min(100) as u8
+    };
+    let own_pct = ((own_d_us as u128 * 100) / wall_d_us as u128).min(100) as u8;
+    Some((busy_pct.saturating_sub(own_pct), own_pct))
+}
+
+#[cfg(target_os = "macos")]
+pub fn system_cpu_percent() -> Option<u8> {
+    cpu_sample().map(|(ngoai, _)| ngoai)
+}
+
+/// Các nền khác (Linux build ad-hoc…): chưa đo — trả `None`, không bịa số.
+#[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn cpu_sample() -> Option<(u8, u8)> {
     None
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn system_cpu_percent() -> Option<u8> {
     None
+}
+
+/// FFI thuần với libSystem của macOS — cùng tinh thần "không thêm crate" như
+/// nhánh Windows dùng `windows-sys` có sẵn.
+#[cfg(target_os = "macos")]
+mod macos_cpu {
+    use std::os::raw::{c_int, c_uint, c_void};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Flavor `HOST_CPU_LOAD_INFO` của `host_statistics64` (mach/host_info.h).
+    const HOST_CPU_LOAD_INFO: c_int = 3;
+    const KERN_SUCCESS: c_int = 0;
+    /// `host_cpu_load_info_data_t` = 3 `avenrun` + 4 `cpu_ticks` (đơn vị `integer_t`).
+    const HOST_CPU_LOAD_INFO_COUNT: c_uint = 7;
+    /// Thứ tự `cpu_ticks[]` cố định bởi ABI Darwin (mach/machine.h).
+    const CPU_STATE_USER: usize = 0;
+    const CPU_STATE_SYSTEM: usize = 1;
+    const CPU_STATE_IDLE: usize = 2;
+    const CPU_STATE_NICE: usize = 3;
+    const CPU_STATE_MAX: usize = 4;
+    const RUSAGE_SELF: c_int = 0;
+
+    #[repr(C)]
+    struct HostCpuLoadInfo {
+        avenrun: [i32; 3],
+        cpu_ticks: [u32; CPU_STATE_MAX],
+    }
+
+    #[repr(C)]
+    struct Timeval {
+        tv_sec: i64,
+        tv_usec: i32,
+    }
+
+    #[repr(C)]
+    struct RUsage {
+        ru_utime: Timeval,
+        ru_stime: Timeval,
+        ru_maxrss: i64,
+        ru_ixrss: i64,
+        ru_idrss: i64,
+        ru_isrss: i64,
+        ru_minflt: i64,
+        ru_majflt: i64,
+        ru_nswap: i64,
+        ru_inblock: i64,
+        ru_oublock: i64,
+        ru_msgsnd: i64,
+        ru_msgrcv: i64,
+        ru_nsignals: i64,
+        ru_nvcsw: i64,
+        ru_nivcsw: i64,
+    }
+
+    unsafe extern "C" {
+        fn mach_host_self() -> u32;
+        fn host_statistics64(
+            host: u32,
+            flavor: c_int,
+            host_info_out: *mut c_void,
+            host_info_out_cnt: *mut c_uint,
+        ) -> c_int;
+        fn getrusage(who: c_int, r_usage: *mut RUsage) -> c_int;
+    }
+
+    /// `(busy_ticks, idle_ticks)` toàn hệ thống tại MỘT thời điểm.
+    pub(super) fn busy_idle_ticks() -> Option<(u64, u64)> {
+        unsafe {
+            let mut info = HostCpuLoadInfo {
+                avenrun: [0; 3],
+                cpu_ticks: [0; CPU_STATE_MAX],
+            };
+            let mut count: c_uint = HOST_CPU_LOAD_INFO_COUNT;
+            let kr = host_statistics64(
+                mach_host_self(),
+                HOST_CPU_LOAD_INFO,
+                &mut info as *mut HostCpuLoadInfo as *mut c_void,
+                &mut count,
+            );
+            if kr != KERN_SUCCESS {
+                return None;
+            }
+            let t = &info.cpu_ticks;
+            let busy =
+                t[CPU_STATE_USER] as u64 + t[CPU_STATE_SYSTEM] as u64 + t[CPU_STATE_NICE] as u64;
+            Some((busy, t[CPU_STATE_IDLE] as u64))
+        }
+    }
+
+    /// Micro-giây CPU mà chính tiến trình đã tiêu (user + system), cộng dồn.
+    pub(super) fn own_cpu_micros() -> Option<u64> {
+        unsafe {
+            let mut ru: RUsage = std::mem::zeroed();
+            if getrusage(RUSAGE_SELF, &mut ru) != 0 {
+                return None;
+            }
+            let user_us = ru.ru_utime.tv_sec as u64 * 1_000_000 + ru.ru_utime.tv_usec as u64;
+            let sys_us = ru.ru_stime.tv_sec as u64 * 1_000_000 + ru.ru_stime.tv_usec as u64;
+            Some(user_us.saturating_add(sys_us))
+        }
+    }
+
+    /// Micro-giây kể từ UNIX epoch — mốc chia khoảng giữa hai lần lấy mẫu.
+    pub(super) fn wall_micros() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_micros() as u64)
+            .unwrap_or(0)
+    }
 }
 
 /// Ngưỡng GPU, cùng quy ước với [`busy_cpu_threshold`]: 0 tắt hẳn nhánh,
@@ -496,6 +653,19 @@ fn set_process_below_normal(_lower: bool) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Trên macOS số đo phải THẬT và nằm trong khoảng hợp lý: lần gọi đầu có
+    /// thể `None` (chưa có mẫu trước), lần thứ hai sau một khoảng chờ phải ra
+    /// phần trăm trong [0, 100].
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_sample_nam_trong_khoang_hop_ly() {
+        let _ = cpu_sample();
+        std::thread::sleep(Duration::from_millis(60));
+        let (ngoai, own) = cpu_sample().expect("macOS phải lấy được số đo CPU thật");
+        assert!(ngoai <= 100, "external {ngoai}% vượt 100");
+        assert!(own <= 100, "own {own}% vượt 100");
+    }
 
     #[test]
     fn forced_modes_bypass_detection() {

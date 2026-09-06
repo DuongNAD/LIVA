@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::webrtc::aec::SelfEchoCanceller;
+use crate::webrtc::agc::Agc;
 use crate::webrtc::denoise::GtcrnDenoiser;
 use crate::webrtc::turn_shadow::SmartTurnClassifier;
 use crate::webrtc::vad::{VadEngine, VadEvent};
@@ -15,6 +16,19 @@ pub struct VoiceRuntimeConfig {
     pub denoise_enabled: bool,
     pub turn_shadow_enabled: bool,
     pub aec_enabled: bool,
+    pub agc_enabled: bool,
+}
+
+impl Default for VoiceRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            vad_enabled: true,
+            denoise_enabled: true,
+            turn_shadow_enabled: false,
+            aec_enabled: false,
+            agc_enabled: true,
+        }
+    }
 }
 
 impl VoiceRuntimeConfig {
@@ -24,6 +38,7 @@ impl VoiceRuntimeConfig {
             denoise_enabled: crate::env_flag("LIVA_DENOISE_ENABLED", true),
             turn_shadow_enabled: crate::env_flag("LIVA_TURN_SHADOW_ENABLED", false),
             aec_enabled: crate::env_flag("LIVA_AEC_ENABLED", false),
+            agc_enabled: crate::env_flag("LIVA_AGC_ENABLED", true),
         }
     }
 }
@@ -34,6 +49,7 @@ pub struct VoiceRuntimeComponents {
     pub denoiser: Option<GtcrnDenoiser>,
     pub turn_shadow: Option<SmartTurnClassifier>,
     pub aec: Option<SelfEchoCanceller>,
+    pub agc: Option<Agc>,
 }
 
 impl VoiceRuntimeComponents {
@@ -107,12 +123,14 @@ impl VoiceRuntimeComponents {
         };
 
         let aec = config.aec_enabled.then(SelfEchoCanceller::new);
+        let agc = config.agc_enabled.then(Agc::default_16k);
 
         Self {
             vad,
             denoiser,
             turn_shadow,
             aec,
+            agc,
         }
     }
 }
@@ -203,29 +221,33 @@ impl TurnAudioBuffer {
 /// DSP state owned by exactly one WebSocket connection.
 ///
 /// VAD/GTCRN forks share their immutable loaded model, but all recurrent,
-/// buffering, debounce, and AEC state is connection-local.
+/// buffering, debounce, AGC, and AEC state is connection-local.
 #[derive(Clone)]
 pub struct VoiceSessionAudio {
     vad: Arc<Mutex<Option<VadEngine>>>,
     denoiser: Arc<Mutex<Option<GtcrnDenoiser>>>,
     aec: SessionAec,
+    agc: Arc<Mutex<Option<Agc>>>,
 }
 
 impl VoiceSessionAudio {
-    fn new(
+    pub fn new(
         vad: Option<VadEngine>,
         denoiser: Option<GtcrnDenoiser>,
         aec: Option<SelfEchoCanceller>,
+        agc: Option<Agc>,
     ) -> Self {
         Self {
             vad: Arc::new(Mutex::new(vad)),
             denoiser: Arc::new(Mutex::new(denoiser)),
             aec: Arc::new(Mutex::new(aec)),
+            agc: Arc::new(Mutex::new(agc)),
         }
     }
 
     /// Fork the process-level model holders into state owned by one WebSocket.
     pub async fn from_app_state(state: &AppState) -> Self {
+        let config = VoiceRuntimeConfig::from_env();
         let vad = state.vad.lock().await.as_ref().map(VadEngine::fork_session);
         let denoiser = state
             .denoiser
@@ -239,18 +261,21 @@ impl VoiceSessionAudio {
             .await
             .as_ref()
             .map(|_| SelfEchoCanceller::new());
+        let agc = config.agc_enabled.then(Agc::default_16k);
 
-        Self::new(vad, denoiser, aec)
+        Self::new(vad, denoiser, aec, agc)
     }
 
     pub fn aec_handle(&self) -> SessionAec {
         Arc::clone(&self.aec)
     }
 
-    /// Run the synchronous capture chain. Call only from `spawn_blocking`.
+    /// Process microphone audio through the full DSP pipeline:
+    /// AEC3 -> GTCRN -> Digital AGC -> VAD.
     pub fn process_mic(&self, samples: Vec<f32>) -> Result<MicProcessingResult, String> {
         let mut working = samples;
 
+        // 1. Acoustic Echo Cancellation (Sonora AEC3)
         {
             let mut guard = self
                 .aec
@@ -264,6 +289,7 @@ impl VoiceSessionAudio {
             }
         }
 
+        // 2. Neural Speech Denoising (GTCRN)
         {
             let mut guard = self
                 .denoiser
@@ -277,16 +303,48 @@ impl VoiceSessionAudio {
             }
         }
 
+        // 3. Digital Automatic Gain Control & Limiter
+        {
+            let mut guard = self
+                .agc
+                .lock()
+                .map_err(|_| "WebSocket AGC mutex poisoned".to_string())?;
+            if let Some(agc) = guard.as_mut() {
+                agc.process(&mut working);
+            }
+        }
+
+        // 4. Voice Activity Detection
         let events = {
             let mut guard = self
                 .vad
                 .lock()
                 .map_err(|_| "WebSocket VAD mutex poisoned".to_string())?;
             match guard.as_mut() {
-                Some(vad) => vad.process_audio(&working)?,
+                Some(vad) => {
+                    let events = vad.process_audio(&working)?;
+                    if events.iter().any(|(e, _)| *e == VadEvent::SpeechEnd) {
+                        vad.reset();
+                    }
+                    events
+                }
                 None => Vec::new(),
             }
         };
+
+        // Turn boundary resets
+        if events.iter().any(|(e, _)| *e == VadEvent::SpeechEnd) {
+            if let Ok(mut guard) = self.denoiser.lock()
+                && let Some(denoiser) = guard.as_mut()
+            {
+                denoiser.reset();
+            }
+            if let Ok(mut guard) = self.agc.lock()
+                && let Some(agc) = guard.as_mut()
+            {
+                agc.reset();
+            }
+        }
 
         Ok((events, working))
     }
@@ -294,15 +352,16 @@ impl VoiceSessionAudio {
 
 #[cfg(test)]
 mod tests {
-    use super::{TurnAudioAction, TurnAudioBuffer, VoiceSessionAudio};
+    use super::{TurnAudioAction, TurnAudioBuffer, VoiceRuntimeComponents, VoiceRuntimeConfig, VoiceSessionAudio};
     use crate::webrtc::aec::SelfEchoCanceller;
+    use crate::webrtc::agc::Agc;
     use crate::webrtc::vad::VadEvent;
     use std::sync::Arc;
 
     #[test]
-    fn websocket_sessions_never_share_aec_state() {
-        let session_a = VoiceSessionAudio::new(None, None, Some(SelfEchoCanceller::new()));
-        let session_b = VoiceSessionAudio::new(None, None, Some(SelfEchoCanceller::new()));
+    fn websocket_sessions_never_share_aec_or_agc_state() {
+        let session_a = VoiceSessionAudio::new(None, None, Some(SelfEchoCanceller::new()), Some(Agc::default_16k()));
+        let session_b = VoiceSessionAudio::new(None, None, Some(SelfEchoCanceller::new()), Some(Agc::default_16k()));
 
         let aec_a = session_a.aec_handle();
         let aec_b = session_b.aec_handle();
@@ -310,6 +369,10 @@ mod tests {
         assert!(
             !Arc::ptr_eq(&aec_a, &aec_b),
             "TTS render/capture state must be owned by one WebSocket only"
+        );
+        assert!(
+            !Arc::ptr_eq(&session_a.agc, &session_b.agc),
+            "AGC state must be owned by one WebSocket only"
         );
     }
 
@@ -340,5 +403,49 @@ mod tests {
         };
 
         assert_eq!(next_audio, &[9.0, 10.0, 11.0]);
+    }
+
+    #[test]
+    fn process_mic_full_pipeline_without_models_normalizes_audio() {
+        let session = VoiceSessionAudio::new(
+            None,
+            None,
+            Some(SelfEchoCanceller::new()),
+            Some(Agc::default_16k()),
+        );
+
+        let input = vec![0.02f32; 1600]; // 100ms of quiet audio
+        let (events, output) = session.process_mic(input).expect("process_mic");
+
+        assert!(events.is_empty(), "No VAD model -> no events");
+        assert_eq!(output.len(), 1600);
+        assert!(output.iter().all(|s| s.is_finite()));
+    }
+
+    #[test]
+    fn runtime_components_selective_loading() {
+        let config = VoiceRuntimeConfig {
+            vad_enabled: false,
+            denoise_enabled: false,
+            turn_shadow_enabled: false,
+            aec_enabled: false,
+            agc_enabled: false,
+        };
+        let components = VoiceRuntimeComponents::load("non-existent-dir", config);
+        assert!(components.vad.is_none());
+        assert!(components.denoiser.is_none());
+        assert!(components.turn_shadow.is_none());
+        assert!(components.aec.is_none());
+        assert!(components.agc.is_none());
+    }
+
+    #[test]
+    fn voice_runtime_config_default_matches_specification() {
+        let config = VoiceRuntimeConfig::default();
+        assert!(config.vad_enabled);
+        assert!(config.denoise_enabled);
+        assert!(!config.turn_shadow_enabled);
+        assert!(!config.aec_enabled);
+        assert!(config.agc_enabled);
     }
 }

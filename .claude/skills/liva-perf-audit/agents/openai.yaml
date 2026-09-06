@@ -1,0 +1,11 @@
+interface:
+  display_name: "LIVA Performance Audit"
+  short_description: "Profile latency milestones, benchmark memory, and evaluate performance regressions"
+  default_prompt: "Use $liva-perf-audit to benchmark voice-turn latency, audit memory usage, or run performance regression tests."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "obsidian"
+      description: "Search and read LIVA performance baselines and SLA specifications."
+policy:
+  allow_implicit_invocation: true

@@ -19,9 +19,20 @@
 //! liệu này mới làm đúng.
 
 pub mod contacts;
+pub mod normalized;
 pub mod outbox;
+pub mod session;
 mod voice_dialogue;
 
+pub use normalized::{
+    Attachment, AttachmentSource, ChannelId, ContentPayload, DeliveryReceipt, DeliveryState,
+    DeliveryUrgency, IncomingMessage, MessageId, MessageRecipient, MessageSender, OutgoingContent,
+    OutgoingMessage, SenderRole, TextEntity, TextEntityType,
+};
+pub use session::{
+    InMemorySessionManager, MemoryScope, SessionContext, SessionError, SessionId, SessionManager,
+    SessionState,
+};
 pub use voice_dialogue::{VoiceMessageAction, VoiceMessageDialogue};
 
 use contacts::Platform;

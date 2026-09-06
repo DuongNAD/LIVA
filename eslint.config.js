@@ -35,7 +35,20 @@ export default tseslint.config(
       // (22/07/2026) chúng làm `eslint .` chạy từ gốc repo báo lỗi parse — kể
       // cả khi mã nguồn thật hoàn toàn sạch.
       ".agents/**/*",
-      "scripts/**/*"
+      "scripts/**/*",
+      // Workspace cục bộ không nằm trong git (xem .gitignore): engine Python/
+      // llama.cpp thế hệ cũ đã bị thay bởi liva-native-core, và bản mô phỏng
+      // MVC bỏ dở. Bên trong là venv, clone llama.cpp và build output — lint
+      // chúng chỉ sinh lỗi giả cho ai chạy `eslint .` từ gốc repo.
+      "liva-ai-engine/**/*",
+      "mvc-simulation/**/*",
+      "target*",
+      "target*/**/*",
+      "target_m4",
+      "target_m4/**/*",
+      "target/**",
+      "**/target/**",
+      "**/target_*/**"
     ]
   },
   eslint.configs.recommended,

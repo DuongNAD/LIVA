@@ -306,6 +306,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         None,
         session_id,
         active_session_id,
+        liva_native_core::llm::CancellationToken::new(),
     );
 
     // Test Scenario A: Smart Home Command
@@ -313,6 +314,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         messages: vec![json!({"role": "user", "content": "please turn on the light"})],
         current_node: "router".to_string(),
         context: std::collections::HashMap::new(),
+        ..Default::default()
     };
 
     let final_state_1 = graph.run(initial_state_1).await.unwrap();
@@ -365,12 +367,14 @@ async fn test_case_4_stategraph_llama_nlp() {
         None,
         session_id,
         active_session_id_2,
+        liva_native_core::llm::CancellationToken::new(),
     );
 
     let initial_state_2 = liva_native_core::agent::state::AgentState {
         messages: vec![json!({"role": "user", "content": "hello, tell me a joke"})],
         current_node: "router".to_string(),
         context: std::collections::HashMap::new(),
+        ..Default::default()
     };
 
     let final_state_2 = graph_2.run(initial_state_2).await.unwrap();
@@ -498,6 +502,7 @@ async fn test_f1_checkpoint_key_must_be_stable_across_vad_turns() {
         messages: vec![json!({"role": "user", "content": format!("cau noi thu {}", n)})],
         current_node: "__END__".to_string(),
         context: std::collections::HashMap::new(),
+        ..Default::default()
     };
 
     let count_rows = |thread_like: &str| {

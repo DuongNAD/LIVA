@@ -1,6 +1,6 @@
 ---
 title: "Hệ agent, bộ nhớ và tiến hoá"
-updated: 2026-08-05
+updated: 2026-08-27
 commit: 6b5b87b
 status: frozen
 owns: []
@@ -783,7 +783,7 @@ Hai arm mới trong `handle_command`:
 | `"mcp:list_tools"` | `liva-native-core/src/lib.rs#handle_command` | Trả `state.mcp_server.list_tools()` đã serialize |
 | `"mcp:call_tool"` | `liva-native-core/src/lib.rs#handle_command` | Đọc `name` + `arguments` (thiếu `arguments` coi như `{}`) rồi gọi `state.mcp_server.call_tool(CallToolRequest{..})` (`liva-native-core/src/lib.rs#handle_command`) |
 
-Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét vào `AppState` ở `main.rs` (`:171`, `:267`), và 4 chỗ dựng `AppState` giả cho test/bin (`main.rs#test_state`, `agent/graph.rs:631`, `src/bin/verify_duplex.rs:99`, `src/bin/verify_integrations.rs:41`).
+Bảy hit còn lại là khai báo field (`lib.rs:44`), khởi tạo + nhét vào `AppState` ở `main.rs` (`:171`, `:267`), và 3 chỗ dựng `AppState` giả cho test/bin (`main.rs#test_state`, `agent/graph.rs:631`, `src/bin/verify_duplex.rs:99`). *(Chỗ thứ tư, `src/bin/verify_integrations.rs`, đã xoá 27/08/2026 — bản sao trùng của `tests/verify_commands.rs`.)*
 
 ⇒ Trạng thái đúng hiện nay: MCP server **đã có consumer ở lớp lệnh**, nhưng (a) **chưa client UI nào gọi** `mcp:list_tools`/`mcp:call_tool`, và (b) **agent graph vẫn không đi qua MCP** — node `tool_exec` gọi thẳng `smart_home::execute`. ~~`mcp::client::ProcessWrapper` … thì **vẫn hoàn toàn mồ côi**~~ — **không còn đúng từ 26/07/2026** (rung G0): `src/mcp/client.rs` nay là `McpStdioClient` + `McpClientRegistry`, 1 143 dòng, với 7 call site thật ngoài chính file — ba lệnh `mcp_client:*` trong `handle_command` và hai chỗ trong `llm/tool_calling.rs`. Điểm (b) ở trên vẫn đúng theo cách khác: node `tool_exec` vẫn gọi thẳng `smart_home::execute`, nhưng graph nay **có** một nhánh đi qua MCP — node `mcp_tool_exec`, chỉ chạy khi bật `LIVA_TOOL_CALLING=1`.
 

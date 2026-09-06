@@ -2,7 +2,7 @@
 title: "ADR-001 — Mã hóa dữ liệu cá nhân mức beta"
 updated: 2026-07-31
 commit: 3688b5f
-stale-ok: bd11c84
+stale-ok: a0153135
 status: living
 owns:
   - adr-ma-hoa-du-lieu-ca-nhan-beta

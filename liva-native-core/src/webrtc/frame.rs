@@ -1,4 +1,5 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub const OP_AUTH_HANDSHAKE: u8 = 0x00;
 pub const OP_MIC_IN: u8 = 0x01;
@@ -18,10 +19,126 @@ pub const OP_ACK_PLAYING: u8 = 0x04;
 /// `Off` (`is_awake()` luôn true) nên mọi tiếng động trong phòng sẽ thành một
 /// lượt hội thoại thật. Probe là đường cụt: không chạm pipeline, chỉ trả lời.
 pub const OP_WAKE_PROBE: u8 = 0x05;
+/// VC-8: timeline phoneme→viseme đi KÈM các frame loa của cùng mẩu. Payload là
+/// JSON `{"turn_epoch":u64,"base_seq_id":u32,"visemes":[{"v":"aa","t_ms":0}…]}`
+/// trong đó `t_ms` tính từ mẫu PCM đầu tiên của chunk `base_seq_id`. Gửi qua
+/// CÙNG kênh speaker để bảo đảm thứ tự trước audio của mẩu đó; client không nhận
+/// diện opcode này sẽ bỏ qua an toàn (giữ đường lip-sync RMS cũ).
+pub const OP_VISME: u8 = 0x06;
 
 const MAX_PAYLOAD_BYTES: usize = 1024 * 1024;
 const SPEAKER_PAYLOAD_HEADER_BYTES: usize = 8;
 const SPEAKER_FRAME_DURATION_MS: u64 = 100;
+
+/// Reusable buffer pool for zero-copy binary audio frame transmission and JSON streaming.
+#[derive(Clone, Debug)]
+pub struct BufferPool {
+    pool: Arc<Mutex<Vec<BytesMut>>>,
+    capacity: usize,
+    max_idle: usize,
+}
+
+impl Default for BufferPool {
+    fn default() -> Self {
+        Self::new(64 * 1024, 32)
+    }
+}
+
+static GLOBAL_BUFFER_POOL: OnceLock<BufferPool> = OnceLock::new();
+
+impl BufferPool {
+    pub fn new(capacity: usize, max_idle: usize) -> Self {
+        Self {
+            pool: Arc::new(Mutex::new(Vec::with_capacity(max_idle))),
+            capacity,
+            max_idle,
+        }
+    }
+
+    pub fn global() -> &'static BufferPool {
+        GLOBAL_BUFFER_POOL.get_or_init(BufferPool::default)
+    }
+
+    /// Acquire a buffer from the global pool (convenience static method matching interface contract).
+    pub fn acquire() -> PooledBuffer {
+        Self::global().acquire_buffer()
+    }
+
+    /// Acquire a buffer from this specific pool instance.
+    pub fn acquire_buffer(&self) -> PooledBuffer {
+        let mut pool_guard = self
+            .pool
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut buf = pool_guard
+            .pop()
+            .unwrap_or_else(|| BytesMut::with_capacity(self.capacity));
+        buf.clear();
+        PooledBuffer {
+            buffer: Some(buf),
+            pool: Arc::clone(&self.pool),
+            max_idle: self.max_idle,
+            target_capacity: self.capacity,
+        }
+    }
+
+    pub fn idle_count(&self) -> usize {
+        self.pool
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .len()
+    }
+}
+
+pub struct PooledBuffer {
+    buffer: Option<BytesMut>,
+    pool: Arc<Mutex<Vec<BytesMut>>>,
+    max_idle: usize,
+    target_capacity: usize,
+}
+
+impl PooledBuffer {
+    /// Freeze the pooled buffer into an immutable `Bytes` slice.
+    pub fn into_bytes(mut self) -> Bytes {
+        if let Some(buf) = self.buffer.take() {
+            buf.freeze()
+        } else {
+            Bytes::new()
+        }
+    }
+
+    pub fn get_mut(&mut self) -> &mut BytesMut {
+        self.buffer.as_mut().expect("pooled buffer is present")
+    }
+}
+
+impl std::ops::Deref for PooledBuffer {
+    type Target = BytesMut;
+    fn deref(&self) -> &Self::Target {
+        self.buffer.as_ref().expect("pooled buffer is present")
+    }
+}
+
+impl std::ops::DerefMut for PooledBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.buffer.as_mut().expect("pooled buffer is present")
+    }
+}
+
+impl Drop for PooledBuffer {
+    fn drop(&mut self) {
+        if let Some(mut buf) = self.buffer.take() {
+            if buf.capacity() <= self.target_capacity * 4 {
+                buf.clear();
+                if let Ok(mut pool) = self.pool.lock() {
+                    if pool.len() < self.max_idle {
+                        pool.push(buf);
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct VoiceFrame {
@@ -31,16 +148,36 @@ pub struct VoiceFrame {
 }
 
 impl VoiceFrame {
-    pub fn encode(&self) -> Result<Bytes, String> {
-        if self.payload.len() > MAX_PAYLOAD_BYTES {
+    /// Zero-copy encode a voice frame directly into a caller-supplied `BytesMut` buffer.
+    pub fn encode_into(
+        buf: &mut BytesMut,
+        op: u8,
+        seq: u32,
+        payload: &[u8],
+    ) -> Result<(), String> {
+        if payload.len() > MAX_PAYLOAD_BYTES {
             return Err("Payload exceeds 1MB limit".to_string());
         }
-        let mut buf = BytesMut::with_capacity(9 + self.payload.len());
-        buf.put_u8(self.op_code);
-        buf.put_u32_le(self.seq_id);
-        buf.put_u32_le(self.payload.len() as u32);
-        buf.put_slice(&self.payload);
-        Ok(buf.freeze())
+        buf.reserve(9 + payload.len());
+        buf.put_u8(op);
+        buf.put_u32_le(seq);
+        buf.put_u32_le(payload.len() as u32);
+        buf.put_slice(payload);
+        Ok(())
+    }
+
+    /// Encode the frame using a specific buffer pool.
+    pub fn encode_pooled(&self, pool: &BufferPool) -> Result<Bytes, String> {
+        let mut pooled = pool.acquire_buffer();
+        Self::encode_into(&mut pooled, self.op_code, self.seq_id, &self.payload)?;
+        Ok(pooled.into_bytes())
+    }
+
+    /// Encode the frame using the global buffer pool.
+    pub fn encode(&self) -> Result<Bytes, String> {
+        let mut pooled = BufferPool::acquire();
+        Self::encode_into(&mut pooled, self.op_code, self.seq_id, &self.payload)?;
+        Ok(pooled.into_bytes())
     }
 
     pub fn decode(src: &mut BytesMut) -> Result<Option<Self>, String> {
@@ -86,17 +223,16 @@ pub fn speaker_frames(turn_epoch: u32, sample_rate: u32, samples: &[f32]) -> Vec
         .chunks(samples_per_100ms)
         .enumerate()
         .map(|(seq_id, chunk)| {
-            let mut payload =
-                Vec::with_capacity(SPEAKER_PAYLOAD_HEADER_BYTES + std::mem::size_of_val(chunk));
-            payload.extend_from_slice(&turn_epoch.to_le_bytes());
-            payload.extend_from_slice(&sample_rate.to_le_bytes());
-            for sample in chunk {
-                payload.extend_from_slice(&sample.to_le_bytes());
-            }
+            let total_payload_len = SPEAKER_PAYLOAD_HEADER_BYTES + std::mem::size_of_val(chunk);
+            let mut buf = BytesMut::with_capacity(total_payload_len);
+            buf.put_u32_le(turn_epoch);
+            buf.put_u32_le(sample_rate);
+            let chunk_bytes = bytemuck::cast_slice::<f32, u8>(chunk);
+            buf.put_slice(chunk_bytes);
             VoiceFrame {
                 op_code: OP_SPEAKER_OUT,
                 seq_id: seq_id as u32,
-                payload: Bytes::from(payload),
+                payload: buf.freeze(),
             }
         })
         .collect()
@@ -311,5 +447,42 @@ mod frame_tests {
         assert!(!gate.accepts(&stale));
         assert!(gate.accepts(&current));
         assert!(gate.accepts(&newer));
+    }
+
+    #[test]
+    fn buffer_pool_acquire_and_recycle() {
+        let pool = BufferPool::new(1024, 4);
+        assert_eq!(pool.idle_count(), 0);
+
+        {
+            let mut buf1 = pool.acquire_buffer();
+            buf1.put_slice(b"hello world");
+            assert_eq!(&buf1[..], b"hello world");
+        }
+        // Dropped buffer returns to pool
+        assert_eq!(pool.idle_count(), 1);
+
+        {
+            let mut buf2 = pool.acquire_buffer();
+            assert!(buf2.is_empty(), "reacquired buffer should be cleared");
+            buf2.put_slice(b"fresh data");
+            let bytes = buf2.into_bytes();
+            assert_eq!(&bytes[..], b"fresh data");
+        }
+        // Buffer consumed via into_bytes is not returned on drop
+        assert_eq!(pool.idle_count(), 0);
+    }
+
+    #[test]
+    fn voice_frame_encode_into_contract() {
+        let payload = b"audio chunk payload";
+        let mut buf = BytesMut::new();
+        VoiceFrame::encode_into(&mut buf, OP_SPEAKER_OUT, 123, payload).unwrap();
+
+        let mut decode_buf = buf.clone();
+        let decoded = VoiceFrame::decode(&mut decode_buf).unwrap().unwrap();
+        assert_eq!(decoded.op_code, OP_SPEAKER_OUT);
+        assert_eq!(decoded.seq_id, 123);
+        assert_eq!(&decoded.payload[..], payload);
     }
 }

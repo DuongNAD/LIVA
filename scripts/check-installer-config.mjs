@@ -43,6 +43,29 @@ export function kiemTra(root = ROOT) {
     return { loi: [`không đọc được ${CONF_REL}: ${e.message}`], canhBao }
   }
 
+  // Nợ cross-platform (mac-v2): resource theo nền đã tách sang
+  // `tauri.windows.conf.json` / `tauri.macos.conf.json` — Tauri v2 tự merge
+  // chúng khi build. Validator phải merge giống hệt để kiểm đúng những gì
+  // nền hiện tại sẽ thực sự đóng gói.
+  const PLATFORM_CONF = {
+    win32: 'liva-desktop/src-tauri/tauri.windows.conf.json',
+    darwin: 'liva-desktop/src-tauri/tauri.macos.conf.json',
+    linux: 'liva-desktop/src-tauri/tauri.linux.conf.json',
+  }
+  const platRel = PLATFORM_CONF[process.platform]
+  if (platRel && fs.existsSync(G(platRel))) {
+    try {
+      const plat = doc(G(platRel))
+      // Giữ resources của bản gốc TRƯỚC khi spread — nếu không, resources của
+      // platform config sẽ ĐÈ mất danh sách chung thay vì hợp nhất.
+      const resGoc = conf.bundle?.resources ?? {}
+      conf.bundle = { ...conf.bundle, ...plat.bundle }
+      conf.bundle.resources = { ...resGoc, ...(plat.bundle?.resources ?? {}) }
+    } catch (e) {
+      return { loi: [`không đọc được ${platRel}: ${e.message}`], canhBao }
+    }
+  }
+
   const b = conf.bundle ?? {}
   const w = b.windows ?? {}
   const nsis = w.nsis ?? {}
@@ -100,9 +123,19 @@ export function kiemTra(root = ROOT) {
   // ── 6. Resource: có mặt, và KHÔNG có thứ không được có ───────────────────
   const res = b.resources ?? {}
   const nguon = Object.keys(res)
+  // Binary runtime là THEO NỀN: npm chỉ cài optional deps đúng nền đang chạy,
+  // nên khi kiểm trên macOS/Linux thì package `sqlite-vec-windows-*` không có
+  // ở máy — không phải lỗi cấu hình. Chỉ đòi nguồn tồn tại nếu cùng nền hoặc
+  // không phải binary sqlite-vec.
+  const cung_nen_hoac_thuong = src => {
+    const m = src.match(/sqlite-vec-(windows|darwin|linux)-/)
+    if (m === null) return true
+    return { windows: 'win32', darwin: 'darwin', linux: 'linux' }[m[1]] === process.platform
+  }
   for (const src of nguon) {
     const p = path.resolve(G(THU_MUC_CONF), src)
     if (!fs.existsSync(p)) {
+      if (!cung_nen_hoac_thuong(src)) continue
       loi.push(
         `bundle.resources trỏ vào nguồn không tồn tại: ${src} → ${p}` +
           (src.includes('node_modules') ? ' (chạy `npm ci` trước khi build)' : ''),
@@ -110,8 +143,11 @@ export function kiemTra(root = ROOT) {
     }
   }
   const dich = Object.values(res)
-  if (!dich.some((d) => d.endsWith('vec0.dll'))) {
-    loi.push('bundle.resources thiếu vec0.dll — thiếu nó là KHÔNG MỞ ĐƯỢC database, chặn khởi động')
+  // Nợ cross-platform: tên artifact vec0 theo nền (dll trên Windows, dylib trên
+  // macOS/Linux). Thiếu nó là KHÔNG MỞ ĐƯỢC database — chặn khởi động.
+  const vec0_ten = process.platform === 'win32' ? 'vec0.dll' : 'vec0.dylib'
+  if (!dich.some((d) => d.endsWith(vec0_ten))) {
+    loi.push(`bundle.resources thiếu ${vec0_ten} — thiếu nó là KHÔNG MỞ ĐƯỢC database, chặn khởi động`)
   }
   if (!dich.some((d) => d.endsWith('models-manifest.json'))) {
     loi.push(
@@ -237,6 +273,16 @@ export function kiemTra(root = ROOT) {
     const laHex = (s) => typeof s === 'string' && /^[0-9a-fA-F]{64}$/.test(s)
     if (!laHex(m.runtimeArtifacts?.vec0?.sha256)) {
       loi.push('manifest: runtimeArtifacts.vec0.sha256 phải là SHA-256 64 hex')
+    }
+    // Nợ cross-platform (mac-v2): mỗi nền có binary vec0 khác nhau, nên bảng
+    // `platforms` (nếu có) cũng phải là SHA-256 64 hex — fail closed thay vì
+    // để hash rác vào trust manifest.
+    for (const [nen, gia_tri] of Object.entries(m.runtimeArtifacts?.vec0?.platforms ?? {})) {
+      // Mỗi nền là chuỗi hex trần hoặc object {"sha256": "<hex>"}.
+      const hash = typeof gia_tri === 'string' ? gia_tri : gia_tri?.sha256
+      if (!laHex(hash)) {
+        loi.push(`manifest: runtimeArtifacts.vec0.platforms.${nen}.sha256 phải là SHA-256 64 hex`)
+      }
     }
     for (const f of m.files ?? []) {
       if (!m.groups?.[f.group]) loi.push(`manifest: ${f.dest} thuộc nhóm "${f.group}" chưa khai báo`)

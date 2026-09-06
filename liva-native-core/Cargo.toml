@@ -31,10 +31,13 @@ hex = "0.4"
 bytemuck = "1.16"
 bytes = "1.5.0"
 rand = "0.8"
-uuid = { version = "1.0", features = ["v4"] }
-teloxide = { version = "0.13", features = ["macros"] }
-reqwest = { version = "0.11", features = ["stream", "multipart"] }
-windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_ProcessStatus", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_Storage_FileSystem"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+async-trait = "0.1"
+teloxide = { version = "0.17", features = ["macros"] }
+reqwest = { version = "0.12", features = ["stream", "multipart"] }
+windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_ProcessStatus", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_Storage_FileSystem", "Win32_System_JobObjects"] }
 
 # ONNX Runtime Rust Bindings for fast CPU-only model execution
 ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
@@ -64,7 +67,7 @@ base64 = "0.22.1"
 
 # Safe llama.cpp bindings. `mtmd` enables multimodal (vision) — the Qwen3-VL
 # unified-core PoC; the bundled llama.cpp already has the QWEN3VL arch + clip.
-llama-cpp-2 = { version = "0.1.151", default-features = false, features = ["mtmd"] }
+llama-cpp-2 = { version = "0.1.154", default-features = false, features = ["mtmd"] }
 encoding_rs = "0.8"
 # `image` đã nằm sẵn trong cây phụ thuộc qua `xcap` (và kéo theo codec `png`),
 # nên khai báo trực tiếp ở đây KHÔNG thêm crate nào phải biên dịch. Dùng cho
@@ -87,6 +90,33 @@ nvml-wrapper = "0.12.1"
 # Argon2), phù hợp mã hoá theo từng bản ghi facts.
 hkdf = "0.13.0"
 sha2 = "0.11.0"
+
+# Tier 1 Wasmtime WASI-0.2 Sandbox & Runtime Isolation
+wasmtime = { version = "28.0", default-features = false, features = [
+    "cranelift",
+    "component-model",
+    "async",
+    "runtime",
+    "pooling-allocator",
+    "parallel-compilation",
+    "wat"
+] }
+wasmtime-wasi = { version = "28.0", default-features = true }
+
+# Dynamic Filesystem Watching & Debouncing (ClawHub hot-reload)
+notify = { version = "6.1.1", default-features = false, features = ["macos_fsevent"] }
+notify-debouncer-mini = "0.4.1"
+
+# Phase 3: AES-256-GCM v2 Memory Enclaves, Zeroization, and Parallel Graph Processing
+argon2 = "0.5"
+zeroize = { version = "1.8", features = ["derive", "zeroize_derive"] }
+rayon = "1.10"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.1"
+
+[dev-dependencies]
+tempfile = "3.27"
 
 [features]
 default = []
@@ -169,6 +199,40 @@ test = false
 [[bin]]
 name = "wer_bench"
 path = "src/bin/wer_bench.rs"
+test = false
+
+# Nợ L7: các binary dưới đây trước đây bị auto-discover — `cargo test` biên
+# dịch và chạy chúng như test target rỗng, tốn thời gian CI mà kiểm được 0 thứ.
+# Khai báo tường minh với `test = false` để ra khỏi đường test.
+[[bin]]
+name = "debug_audio"
+path = "src/bin/debug_audio.rs"
+test = false
+
+[[bin]]
+name = "gemma4_probe"
+path = "src/bin/gemma4_probe.rs"
+test = false
+
+[[bin]]
+name = "model_compare"
+path = "src/bin/model_compare.rs"
+test = false
+
+[[bin]]
+name = "ttft_bench"
+path = "src/bin/ttft_bench.rs"
+test = false
+
+[[bin]]
+name = "verify_voice"
+path = "src/bin/verify_voice.rs"
+test = false
+
+[[bin]]
+name = "wakeword_benchmark"
+path = "src/bin/wakeword_benchmark.rs"
+test = false
 
 [[bin]]
 name = "vieneu_probe"
@@ -196,3 +260,8 @@ test = false
 name = "os_control_probe"
 path = "src/bin/os_control_probe.rs"
 test = false
+
+[[bench]]
+name = "bench_hipporag_csr_ppr"
+harness = false
+

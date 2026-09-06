@@ -2,7 +2,7 @@
 title: "Action policy — ranh giới an toàn và acceptance gates"
 updated: 2026-08-07
 commit: bd11c84
-stale-ok: dec1c14
+stale-ok: a0153135
 status: living
 owns:
   - action-policy-as-built

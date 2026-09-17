@@ -1,4 +1,5 @@
 use super::StateGraph;
+use super::complexity::{DoKho, phan_loai_do_kho_with_embedder};
 use super::intent::{Intent, route_intent};
 use super::memory_scope::{
     ConversationMemoryScope, memory_system_message, persist_turn_scoped, recall_context_scoped,
@@ -107,6 +108,17 @@ pub fn build_pipeline_graph(
                 Intent::Vision => {
                     state.current_node = "vision".to_string();
                 }
+                Intent::Weather { location } => {
+                    state.context.insert(
+                        "mcp_call".to_string(),
+                        json!({
+                            "server": crate::llm::tool_calling::NATIVE_SERVER,
+                            "name": "get_weather",
+                            "arguments": { "location": location },
+                        }),
+                    );
+                    state.current_node = "mcp_tool_exec".to_string();
+                }
                 Intent::SmartHome { device, action } => {
                     state.context.insert("device".to_string(), json!(device));
                     state.context.insert("action".to_string(), json!(action));
@@ -154,6 +166,26 @@ pub fn build_pipeline_graph(
                 // mình"), nên nó cũng chính là fallback khi vòng LLM không đọc
                 // được output. Tắt theo mặc định — xem `tool_calling::enabled`.
                 Intent::Chat => {
+                    let embedder_guard = ss.embedder.read().await;
+                    let embedder_ref = embedder_guard
+                        .as_deref()
+                        .map(|e| e as &dyn crate::llm::tool_calling::ToolEmbedder);
+                    let do_kho = phan_loai_do_kho_with_embedder(&text, embedder_ref);
+                    let co_expert =
+                        crate::paths::configured_expert_model_path().is_some_and(|p| p.exists());
+                    let goi_y_expert = matches!(do_kho, DoKho::Kho) && co_expert;
+
+                    state.context.insert(
+                        "do_kho".to_string(),
+                        json!(match do_kho {
+                            DoKho::Thuong => "thuong",
+                            DoKho::Kho => "kho",
+                        }),
+                    );
+                    state
+                        .context
+                        .insert("goi_y_expert".to_string(), json!(goi_y_expert));
+
                     state.current_node =
                         match crate::llm::tool_calling::select_tool(&ss, &text).await {
                             Some(call) => match call.policy {
@@ -402,16 +434,41 @@ pub fn build_pipeline_graph(
                 );
             }
 
-            let prompt = crate::llm::compile_prompt(&chat_messages)?;
+            let do_kho = state
+                .context
+                .get("do_kho")
+                .and_then(|v| v.as_str())
+                .map(|s| {
+                    if s == "kho" {
+                        DoKho::Kho
+                    } else {
+                        DoKho::Thuong
+                    }
+                })
+                .unwrap_or_else(|| {
+                    let embedder_guard = ss.embedder.try_read().ok();
+                    let embedder_ref = embedder_guard.as_ref().and_then(|g| {
+                        g.as_deref()
+                            .map(|e| e as &dyn crate::llm::tool_calling::ToolEmbedder)
+                    });
+                    phan_loai_do_kho_with_embedder(&user_text, embedder_ref)
+                });
+
+            // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
+            let _ = ss.llm.lock().await.maybe_auto_swap(do_kho).await;
+
+            let (model_tx, model_rx) = tokio::sync::oneshot::channel();
 
             // Giữ một handle riêng cho persist_turn: closure spawn_blocking bên
             // dưới move mất `ss`.
             let ss_persist = Arc::clone(&ss);
+            let start_instant = std::time::Instant::now();
             let res = tokio::task::spawn_blocking(move || {
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("LLM cancelled before lock".to_string());
                 }
                 let mut llm = ss.llm.blocking_lock();
+                let _ = model_tx.send(llm.current_model_path.to_string_lossy().to_string());
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("LLM cancelled post-lock".to_string());
                 }
@@ -419,8 +476,8 @@ pub fn build_pipeline_graph(
                     return Err("LLM engine not loaded".to_string());
                 }
                 let mut stream_error = None;
-                let completion = llm.generate_completion(
-                    &prompt,
+                let completion = llm.generate_budgeted_completion(
+                    &chat_messages,
                     crate::llm::persona::TEMP_DEFAULT,
                     crate::llm::persona::TOP_P_DEFAULT,
                     |token| match send_llm_chunk_if_current(
@@ -438,24 +495,64 @@ pub fn build_pipeline_graph(
                         }
                     },
                 )?;
-                finish_streamed_completion(
+                let text = finish_streamed_completion(
                     completion.text,
                     stream_error,
                     as_val.as_ref(),
                     session_id,
-                )
+                )?;
+                Ok((text, completion.prompt_tokens, completion.completion_tokens))
             })
-            .await
-            .map_err(|e| format!("LLM task panicked: {}", e))
-            .and_then(|r| r)?;
+            .await;
+
+            let latency_ms = start_instant.elapsed().as_millis() as i64;
+            let model_id = model_rx.await.unwrap_or_default();
+            let (final_text, prompt_tokens, completion_tokens, outcome, err_kind) = match &res {
+                Ok(Ok((text, p_tok, c_tok))) => {
+                    (text.clone(), *p_tok as i64, *c_tok as i64, "ok", None)
+                }
+                Ok(Err(err)) => ("".to_string(), 0, 0, "err", Some(err.clone())),
+                Err(e) => ("".to_string(), 0, 0, "err", Some(format!("panic: {e}"))),
+            };
+
+            let now_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let record = crate::db::TurnTelemetryRecord {
+                id: None,
+                event_id: None,
+                ts: now_ts,
+                entry_path: "graph".to_string(),
+                model_id,
+                prompt_tokens,
+                completion_tokens,
+                latency_ms,
+                outcome: outcome.to_string(),
+                err_kind,
+            };
+            let db = ss_persist.db.clone();
+            tokio::spawn(async move {
+                if let Err(e) = db
+                    .spawn_writer(move |conn| crate::db::record_turn_telemetry(conn, &record))
+                    .await
+                {
+                    tracing::warn!("Failed to record graph turn telemetry: {e}");
+                }
+            });
+
+            if outcome == "err" {
+                res.map_err(|e| format!("LLM task panicked: {}", e))
+                    .and_then(|r| r)?;
+            }
 
             // Lưu lượt này thành ký ức trước khi cắt lịch sử — nếu không, nội
             // dung bị cắt khỏi cửa sổ ngữ cảnh sẽ mất hẳn.
-            persist_turn_scoped(&ss_persist, &user_text, &res, &memory_scope).await;
+            persist_turn_scoped(&ss_persist, &user_text, &final_text, &memory_scope).await;
 
             state.messages.push(json!({
                 "role": "assistant",
-                "content": res
+                "content": final_text
             }));
             // Cắt lại sau khi thêm câu trả lời: state này được checkpoint
             // xuống `agent_checkpoints`, không cắt thì bảng phình vô hạn.
@@ -489,61 +586,120 @@ pub fn build_pipeline_graph(
                 .unwrap_or("Trên màn hình đang hiển thị gì?")
                 .to_string();
 
-            let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
-                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err(format!(
-                        "{LLM_STREAM_ABORT_PREFIX}: session cancelled before vision capture",
-                    ));
-                }
-                // Context-aware: mouse-guided crop while a game is foreground.
-                let (vw, vh, rgb) = crate::vision::capture::capture_for_vision()?;
-                let mut llm = ss.llm.blocking_lock();
-                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err(format!(
-                        "{LLM_STREAM_ABORT_PREFIX}: session cancelled after vision lock",
-                    ));
-                }
-                if llm.engine.is_none() {
-                    return Err("LLM engine not loaded".to_string());
-                }
-                let mut stream_error = None;
-                let out = llm.answer_with_image(
-                    &question,
-                    crate::llm::engine::VisionImage::Rgb {
-                        width: vw,
-                        height: vh,
-                        data: &rgb,
-                    },
-                    crate::llm::persona::TEMP_DEFAULT,
-                    crate::llm::persona::TOP_P_DEFAULT,
-                    |token| match send_llm_chunk_if_current(
-                        &tx,
+            let ssv_persist = Arc::clone(&ss);
+            let model_id = ss
+                .llm
+                .lock()
+                .await
+                .current_model_path
+                .to_string_lossy()
+                .to_string();
+            let start_instant = std::time::Instant::now();
+
+            let res =
+                tokio::task::spawn_blocking(move || -> Result<(String, usize, usize), String> {
+                    if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                        return Err(format!(
+                            "{LLM_STREAM_ABORT_PREFIX}: session cancelled before vision capture",
+                        ));
+                    }
+                    // Context-aware: mouse-guided crop while a game is foreground.
+                    let (vw, vh, rgb) = crate::vision::capture::capture_for_vision()?;
+                    let mut llm = ss.llm.blocking_lock();
+                    if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                        return Err(format!(
+                            "{LLM_STREAM_ABORT_PREFIX}: session cancelled after vision lock",
+                        ));
+                    }
+                    if llm.engine.is_none() {
+                        return Err("LLM engine not loaded".to_string());
+                    }
+                    let mut stream_error = None;
+                    let out = llm.answer_with_image(
+                        &question,
+                        crate::llm::engine::VisionImage::Rgb {
+                            width: vw,
+                            height: vh,
+                            data: &rgb,
+                        },
+                        crate::llm::persona::TEMP_DEFAULT,
+                        crate::llm::persona::TOP_P_DEFAULT,
+                        |token| match send_llm_chunk_if_current(
+                            &tx,
+                            as_val.as_ref(),
+                            session_id,
+                            token,
+                            LLM_TTS_BACKPRESSURE_TIMEOUT,
+                        ) {
+                            Ok(()) => true,
+                            Err(error) => {
+                                tracing::warn!("[vision] {}", error);
+                                stream_error = Some(error);
+                                false
+                            }
+                        },
+                    )?;
+                    let text = finish_streamed_completion(
+                        out.text,
+                        stream_error,
                         as_val.as_ref(),
                         session_id,
-                        token,
-                        LLM_TTS_BACKPRESSURE_TIMEOUT,
-                    ) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            tracing::warn!("[vision] {}", error);
-                            stream_error = Some(error);
-                            false
-                        }
-                    },
-                )?;
-                finish_streamed_completion(out.text, stream_error, as_val.as_ref(), session_id)
-            })
-            .await
-            .map_err(|e| format!("Vision task panicked: {}", e))
-            .and_then(|r| r);
+                    )?;
+                    Ok((text, out.prompt_tokens, out.completion_tokens))
+                })
+                .await;
+
+            let latency_ms = start_instant.elapsed().as_millis() as i64;
+            let (record_prompt_tokens, record_completion_tokens, outcome, err_kind) = match &res {
+                Ok(Ok((_, p, c))) => (*p as i64, *c as i64, "ok", None),
+                Ok(Err(e)) => (0, 0, "err", Some(e.clone())),
+                Err(e) => (0, 0, "err", Some(format!("panic: {e}"))),
+            };
+            let now_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let record = crate::db::TurnTelemetryRecord {
+                id: None,
+                event_id: None,
+                ts: now_ts,
+                entry_path: "vision".to_string(),
+                model_id,
+                prompt_tokens: record_prompt_tokens,
+                completion_tokens: record_completion_tokens,
+                latency_ms,
+                outcome: outcome.to_string(),
+                err_kind,
+            };
+            let db = ssv_persist.db.clone();
+            tokio::spawn(async move {
+                if let Err(e) = db
+                    .spawn_writer(move |conn| crate::db::record_turn_telemetry(conn, &record))
+                    .await
+                {
+                    tracing::warn!("Failed to record vision turn telemetry: {e}");
+                }
+            });
 
             let text = match res {
-                Ok(t) => t,
-                Err(e) if e.starts_with(LLM_STREAM_ABORT_PREFIX) => {
+                Ok(Ok((t, _, _))) => t,
+                Ok(Err(e)) if e.starts_with(LLM_STREAM_ABORT_PREFIX) => {
                     return Err(e);
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::warn!("[vision] {}", e);
+                    let fallback = "Xin lỗi, hiện mình chưa xem được màn hình.";
+                    send_llm_chunk_if_current(
+                        &tx_fb,
+                        as_fallback.as_ref(),
+                        session_id,
+                        fallback,
+                        std::time::Duration::ZERO,
+                    )?;
+                    fallback.to_string()
+                }
+                Err(e) => {
+                    tracing::warn!("[vision] panic: {}", e);
                     let fallback = "Xin lỗi, hiện mình chưa xem được màn hình.";
                     send_llm_chunk_if_current(
                         &tx_fb,
@@ -566,4 +722,176 @@ pub fn build_pipeline_graph(
 
     graph.set_entry_point("router");
     graph
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::graph::{ConversationMemoryScope, state_khong_co_embedder};
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+    use tokio::sync::mpsc;
+
+    fn make_test_graph(state: Arc<AppState>) -> StateGraph {
+        let (tx, _rx) = mpsc::channel(16);
+        let scope = ConversationMemoryScope::new("test_user", "test_conv").unwrap();
+        let active_id = Arc::new(AtomicU64::new(1));
+        build_pipeline_graph(state, scope, tx, None, 1, active_id)
+    }
+
+    #[tokio::test]
+    async fn test_router_node_chat_complex_prompt_sets_do_kho_kho() {
+        let state_shared = state_khong_co_embedder();
+        let graph = make_test_graph(state_shared);
+
+        let mut state = AgentState::default();
+        state.messages.push(json!({
+            "role": "user",
+            "content": "Viết hàm quicksort bằng Rust và phân tích độ phức tạp thời gian thuật toán từng bước?"
+        }));
+
+        let temp_dir = std::env::temp_dir().join("liva_test_pipeline_expert");
+        std::fs::create_dir_all(&temp_dir).ok();
+        let dummy = temp_dir.join("dummy_expert.gguf");
+        std::fs::write(&dummy, b"dummy").ok();
+        unsafe {
+            std::env::set_var("LIVA_EXPERT_MODEL_PATH", &dummy);
+        }
+
+        let routed = graph.run_single_node("router", state).await.unwrap();
+        assert_eq!(
+            routed.context.get("do_kho").and_then(|v| v.as_str()),
+            Some("kho"),
+            "Prompt phức tạp phải được phân loại do_kho = kho"
+        );
+
+        assert_eq!(
+            routed.context.get("goi_y_expert").and_then(|v| v.as_bool()),
+            Some(true),
+            "goi_y_expert phải là Some(true) khi có expert model tồn tại trên đĩa"
+        );
+        assert_eq!(routed.current_node, "chat_completion");
+
+        unsafe {
+            std::env::remove_var("LIVA_EXPERT_MODEL_PATH");
+        }
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn test_router_node_chat_regular_prompt_sets_do_kho_thuong() {
+        let state_shared = state_khong_co_embedder();
+        let graph = make_test_graph(state_shared);
+
+        let mut state = AgentState::default();
+        state.messages.push(json!({
+            "role": "user",
+            "content": "Xin chào LIVA, hôm nay bạn cảm thấy thế nào?"
+        }));
+
+        let routed = graph.run_single_node("router", state).await.unwrap();
+        assert_eq!(
+            routed.context.get("do_kho").and_then(|v| v.as_str()),
+            Some("thuong"),
+            "Prompt thông thường phải được phân loại do_kho = thuong"
+        );
+        assert_eq!(
+            routed.context.get("goi_y_expert").and_then(|v| v.as_bool()),
+            Some(false),
+            "Prompt thông thường không được kích hoạt goi_y_expert"
+        );
+        assert_eq!(routed.current_node, "chat_completion");
+    }
+
+    #[tokio::test]
+    async fn test_router_node_weather_intent_routes_to_mcp_tool_exec() {
+        let state_shared = state_khong_co_embedder();
+        let graph = make_test_graph(state_shared);
+
+        let mut state = AgentState::default();
+        state.messages.push(json!({
+            "role": "user",
+            "content": "check thời tiết nay"
+        }));
+
+        let routed = graph.run_single_node("router", state).await.unwrap();
+        assert_eq!(routed.current_node, "mcp_tool_exec");
+        let mcp_call = routed.context.get("mcp_call").unwrap();
+        assert_eq!(mcp_call["name"], "get_weather");
+    }
+
+    #[tokio::test]
+    async fn test_router_node_non_chat_intents_do_not_trigger_expert_escalation() {
+        let state_shared = state_khong_co_embedder();
+        let graph = make_test_graph(state_shared);
+
+        // 1. SendMessage
+        let mut state_msg = AgentState::default();
+        state_msg.messages.push(json!({
+            "role": "user",
+            "content": "Nhắn tin cho Minh bảo tối nay đi ăn nhé"
+        }));
+        let routed_msg = graph.run_single_node("router", state_msg).await.unwrap();
+        assert_eq!(routed_msg.current_node, "message_draft");
+        assert!(
+            !routed_msg.context.contains_key("goi_y_expert"),
+            "SendMessage intent không được gán cờ goi_y_expert"
+        );
+        assert!(
+            !routed_msg.context.contains_key("do_kho"),
+            "SendMessage intent không được gán do_kho"
+        );
+
+        // 2. OsControl
+        let mut state_os = AgentState::default();
+        state_os.messages.push(json!({
+            "role": "user",
+            "content": "Tăng âm lượng lên 80%"
+        }));
+        let routed_os = graph.run_single_node("router", state_os).await.unwrap();
+        assert_eq!(routed_os.current_node, "mcp_tool_exec");
+        assert!(
+            !routed_os.context.contains_key("goi_y_expert"),
+            "OsControl intent không được gán cờ goi_y_expert"
+        );
+        assert!(
+            !routed_os.context.contains_key("do_kho"),
+            "OsControl intent không được gán do_kho"
+        );
+
+        // 3. SmartHome
+        let mut state_sh = AgentState::default();
+        state_sh.messages.push(json!({
+            "role": "user",
+            "content": "Bật đèn phòng khách"
+        }));
+        let routed_sh = graph.run_single_node("router", state_sh).await.unwrap();
+        assert_eq!(routed_sh.current_node, "tool_exec");
+        assert!(
+            !routed_sh.context.contains_key("goi_y_expert"),
+            "SmartHome intent không được gán cờ goi_y_expert"
+        );
+        assert!(
+            !routed_sh.context.contains_key("do_kho"),
+            "SmartHome intent không được gán do_kho"
+        );
+
+        // 4. Vision
+        let mut state_vis = AgentState::default();
+        state_vis.messages.push(json!({
+            "role": "user",
+            "content": "Trên màn hình đang hiển thị gì?"
+        }));
+        let routed_vis = graph.run_single_node("router", state_vis).await.unwrap();
+        assert_eq!(routed_vis.current_node, "vision");
+        assert!(
+            !routed_vis.context.contains_key("goi_y_expert"),
+            "Vision intent không được gán cờ goi_y_expert"
+        );
+        assert!(
+            !routed_vis.context.contains_key("do_kho"),
+            "Vision intent không được gán do_kho"
+        );
+    }
 }

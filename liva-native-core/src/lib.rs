@@ -1,3 +1,4 @@
+pub mod active_recall;
 pub mod agent;
 mod artifact_trust;
 mod authorization;
@@ -7,8 +8,8 @@ pub mod commands;
 pub mod consent;
 pub mod crypto;
 pub mod db;
+pub mod db_actor;
 pub mod eval;
-#[cfg(feature = "experimental")]
 pub mod evolution;
 pub mod governor;
 pub mod integrations;
@@ -48,10 +49,10 @@ pub use llm::LlamaRouterManager;
 pub(crate) use paths::update_config_file_at;
 pub use paths::{
     APP_DATA_DIR_NAME, DEFAULT_EXPERT_MODEL, DEFAULT_MODELS_DIR, DEFAULT_ROUTER_MODEL,
-    config_file_path, configured_mmproj_path, configured_models_dir, configured_router_model_path,
-    data_dir, default_vault_path, exe_dir, models_dir_fallback, resolve_resource_path,
-    resource_candidate_paths, resource_write_root, stray_database_paths, user_home_dir,
-    validate_model_path,
+    config_file_path, configured_expert_model_path, configured_mmproj_path, configured_models_dir,
+    configured_router_model_path, data_dir, default_vault_path, exe_dir, models_dir_fallback,
+    resolve_resource_path, resource_candidate_paths, resource_write_root, stray_database_paths,
+    user_home_dir, validate_model_path,
 };
 use std::sync::Arc;
 pub use stt::SttManager;
@@ -82,7 +83,15 @@ pub struct AppState {
     /// `None` khi chưa tải model về — khi đó recall/persist bị bỏ qua và hệ
     /// thống hành xử **đúng như trước khi có RAG**, không lỗi. Xem
     /// `llm::embedder` để biết vì sao nó tách khỏi model chat.
-    pub embedder: tokio::sync::Mutex<Option<llm::embedder::EmbeddingEngine>>,
+    pub embedder: Arc<tokio::sync::RwLock<Option<Arc<llm::embedder::EmbeddingEngine>>>>,
+    pub active_recall: Arc<active_recall::ActiveRecallManager>,
+}
+
+impl AppState {
+    pub fn empty_embedder() -> Arc<tokio::sync::RwLock<Option<Arc<llm::embedder::EmbeddingEngine>>>>
+    {
+        Arc::new(tokio::sync::RwLock::new(None))
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -251,11 +260,11 @@ pub fn resolve_and_rekey(
     let live = EncryptionEngine::new(&passphrase);
 
     // Khoá phụ CỨU dữ liệu: mặc định (máy đang chạy "0"×32) + KEY_OLD (xoay khoá).
-    let default_engine = EncryptionEngine::new(crypto::DEFAULT_ENCRYPTION_KEY);
+    let default_engine = EncryptionEngine::new_rescue(crypto::DEFAULT_ENCRYPTION_KEY);
     let old_engine = std::env::var("LIVA_ENCRYPTION_KEY_OLD")
         .ok()
         .filter(|k| !k.is_empty() && *k != passphrase)
-        .map(|k| EncryptionEngine::new(&k));
+        .map(|k| EncryptionEngine::new_rescue(&k));
     let mut extra: Vec<&EncryptionEngine> = vec![&default_engine];
     if let Some(ref o) = old_engine {
         extra.push(o);
@@ -503,6 +512,19 @@ pub async fn handle_chat_completion_scoped(
         );
     }
 
+    let cap = crate::agent::state::max_history_messages();
+    let sys_count = if messages.len() >= 2 && messages[1].role == "system" {
+        2
+    } else {
+        1
+    };
+    if messages.len() > cap + sys_count {
+        let keep_from = messages.len() - cap;
+        let mut trimmed = messages[..sys_count].to_vec();
+        trimmed.extend_from_slice(&messages[keep_from..]);
+        messages = trimmed;
+    }
+
     let temperature = payload["temperature"]
         .as_f64()
         .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
@@ -510,43 +532,172 @@ pub async fn handle_chat_completion_scoped(
         .as_f64()
         .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
     let stream = payload["stream"].as_bool().unwrap_or(false);
-    let compiled_prompt = llm::compile_prompt(&messages)?;
+
+    let last_user_text = messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.as_str())
+        .unwrap_or("");
+
+    // U22: Active Recall (Spaced Retrieval) can thiệp trước khi gọi LLM (0 token cost).
+    let session_id = format!(
+        "{}:{}",
+        memory_scope.storage_domain(),
+        memory_scope.storage_category()
+    );
+    if let Some(recall_reply) = state.active_recall.try_intercept_turn(
+        last_user_text,
+        &session_id,
+        &state.db,
+        &state.crypto,
+    ) {
+        if let (true, Some(tx_chan), Some(req_id_str)) = (stream, tx, req_id) {
+            let chunk_response = IpcTokenChunkRef {
+                id: &req_id_str,
+                status: "ok",
+                data: IpcTokenChunkData {
+                    token: &recall_reply,
+                    done: false,
+                },
+            };
+            let _ = crate::llm::nen_sinh_tiep(&tx_chan, &chunk_response);
+            let done_chunk = IpcTokenChunkRef {
+                id: &req_id_str,
+                status: "ok",
+                data: IpcTokenChunkData {
+                    token: "",
+                    done: true,
+                },
+            };
+            let _ = crate::llm::nen_sinh_tiep(&tx_chan, &done_chunk);
+        }
+        return Ok(serde_json::json!({ "text": recall_reply }));
+    }
+
+    let do_kho = crate::agent::graph::phan_loai_do_kho(last_user_text);
+
+    // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
+    let _ = state.llm.lock().await.maybe_auto_swap(do_kho).await;
+
+    let start_instant = std::time::Instant::now();
+    let (model_tx, model_rx) = tokio::sync::oneshot::channel();
 
     let state_clone = state.clone();
-    let completion_output = tokio::task::spawn_blocking(move || {
+    let inference_messages = messages.clone();
+    let completion_res = tokio::task::spawn_blocking(move || {
+        let messages = inference_messages;
         let mut llm_manager = state_clone.llm.blocking_lock();
+        let _ = model_tx.send(llm_manager.current_model_path.to_string_lossy().to_string());
         if stream {
             let tx_inner =
                 tx.ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
             let req_id_inner =
                 req_id.ok_or_else(|| "Request ID missing for streaming".to_string())?;
-            llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
-                if piece.is_empty() {
-                    return true;
-                }
-                let chunk_response = IpcTokenChunkRef {
-                    id: &req_id_inner,
-                    status: "ok",
-                    data: IpcTokenChunkData {
-                        token: piece,
-                        done: false,
-                    },
-                };
-                if let Ok(chunk) = serde_json::to_string(&chunk_response) {
-                    let _ = tx_inner.blocking_send(chunk);
-                }
-                true
-            })
+            let mut stream_state = llm::engine::CompletionStream::new(&tx_inner);
+            let completion =
+                llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |piece| {
+                    let chunk_response = IpcTokenChunkRef {
+                        id: &req_id_inner,
+                        status: "ok",
+                        data: IpcTokenChunkData {
+                            token: piece,
+                            done: false,
+                        },
+                    };
+                    stream_state.forward(piece, &chunk_response)
+                });
+            stream_state.finish(completion)
         } else {
-            llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |_| true)
+            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| true)
         }
     })
-    .await
-    .map_err(|e| format!("Blocking task panicked: {e}"))??;
+    .await;
+
+    let model_id = model_rx.await.unwrap_or_default();
+    let latency_ms = start_instant.elapsed().as_millis() as i64;
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let completion_output = match completion_res {
+        Ok(Ok(out)) => {
+            let record = crate::db::TurnTelemetryRecord {
+                id: None,
+                event_id: None,
+                ts: now_ts,
+                entry_path: "chat".to_string(),
+                model_id: model_id.clone(),
+                prompt_tokens: out.prompt_tokens as i64,
+                completion_tokens: out.completion_tokens as i64,
+                latency_ms,
+                outcome: "ok".to_string(),
+                err_kind: None,
+            };
+            let db = state.db.clone();
+            tokio::spawn(async move {
+                if let Err(e) = db
+                    .spawn_writer(move |conn| crate::db::record_turn_telemetry(conn, &record))
+                    .await
+                {
+                    tracing::warn!("Failed to record turn telemetry: {e}");
+                }
+            });
+            out
+        }
+        Ok(Err(err)) => {
+            let record = crate::db::TurnTelemetryRecord {
+                id: None,
+                event_id: None,
+                ts: now_ts,
+                entry_path: "chat".to_string(),
+                model_id: model_id.clone(),
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                latency_ms,
+                outcome: "err".to_string(),
+                err_kind: Some("llm_error".to_string()),
+            };
+            let db = state.db.clone();
+            tokio::spawn(async move {
+                if let Err(e) = db
+                    .spawn_writer(move |conn| crate::db::record_turn_telemetry(conn, &record))
+                    .await
+                {
+                    tracing::warn!("Failed to record turn telemetry: {e}");
+                }
+            });
+            return Err(err);
+        }
+        Err(e) => {
+            let record = crate::db::TurnTelemetryRecord {
+                id: None,
+                event_id: None,
+                ts: now_ts,
+                entry_path: "chat".to_string(),
+                model_id,
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                latency_ms,
+                outcome: "err".to_string(),
+                err_kind: Some(format!("panic: {e}")),
+            };
+            let db = state.db.clone();
+            tokio::spawn(async move {
+                if let Err(e) = db
+                    .spawn_writer(move |conn| crate::db::record_turn_telemetry(conn, &record))
+                    .await
+                {
+                    tracing::warn!("Failed to record turn telemetry: {e}");
+                }
+            });
+            return Err(format!("Blocking task panicked: {e}"));
+        }
+    };
 
     agent::graph::persist_turn_scoped(
         &state,
-        &last_user_text,
+        last_user_text,
         &completion_output.text,
         &memory_scope,
     )
@@ -656,93 +807,11 @@ pub async fn handle_command(
         return commands::skill_store::handle(state, command, payload).await;
     }
 
-    match command {
-        // ── MCP ────────────────────────────────────────────────────────────
-        // `NativeMcpServer` được dựng trong AppState từ lâu nhưng không có
-        // nhánh nào gọi tới, nên toàn bộ 4 tool là code mồ côi. Hai arm dưới
-        // đây nối nó vào lớp lệnh.
-        //
-        // Ranh giới an toàn: mọi thao tác file đi qua `resolve_path`, chặn
-        // đường dẫn tuyệt đối và `..`, và ghim mọi thứ dưới `LIVA_VAULT_PATH`.
-        "mcp:list_tools" => Ok(serde_json::to_value(state.mcp_server.list_tools())
-            .map_err(|e| format!("Failed to serialize tool list: {}", e))?),
-
-        "mcp:call_tool" => {
-            let name = payload
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing 'name' (ten tool). Dung mcp:list_tools de xem danh sach.")?
-                .to_string();
-            // Không có `arguments` thì coi như object rỗng — tool nào cần tham
-            // số sẽ tự báo lỗi deserialize với thông tin cụ thể hơn.
-            let arguments = payload
-                .get("arguments")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
-
-            // Hàng rào allowlist — xem `llm::tool_calling::guard_direct_call`.
-            // Tới 26/07/2026 nhánh này gọi thẳng `state.mcp_server` không kiểm gì,
-            // nên `write_markdown` mở cho bất kỳ client nào nối được vào lớp lệnh
-            // (WS 8002 chưa có xác thực). Phát hiện ở tài liệu 02 §C1.1.
-            llm::tool_calling::guard_direct_call(llm::tool_calling::NATIVE_SERVER, &name)?;
-
-            let result = state
-                .mcp_server
-                .call_tool(mcp::protocol::CallToolRequest { name, arguments })
-                .await?;
-            serde_json::to_value(result)
-                .map_err(|e| format!("Failed to serialize tool result: {}", e))
-        }
-
-        // ── MCP client — chiều gọi RA ngoài (G0) ───────────────────────────
-        // Ba arm trên là LIVA làm server; ba arm dưới là LIVA làm client, nối
-        // `mcp/client.rs` (trước đây là code mồ côi) vào lớp lệnh. Từ đây các
-        // server trong `mcp_config.json` là thật, không còn là trang trí.
-        //
-        // Registry là singleton phạm vi tiến trình chứ không nằm trong
-        // `AppState`: mỗi client giữ một tiến trình con thật, mà `AppState`
-        // được dựng ở 9 chỗ. Xem `mcp::client::global_registry`.
-        "mcp_client:list_servers" => Ok(mcp::client::global_registry().list_servers().await),
-
-        "mcp_client:list_tools" => {
-            let server = payload
-                .get("server")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'server'. Dùng mcp_client:list_servers để xem danh sách.")?;
-            let tools = mcp::client::global_registry().list_tools(server).await?;
-            serde_json::to_value(tools).map_err(|e| format!("Failed to serialize tool list: {}", e))
-        }
-
-        "mcp_client:call_tool" => {
-            let server = payload
-                .get("server")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'server'. Dùng mcp_client:list_servers để xem danh sách.")?;
-            let name = payload
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or("Thiếu 'name' (tên tool). Dùng mcp_client:list_tools để xem danh sách.")?
-                .to_string();
-            let arguments = payload
-                .get("arguments")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
-
-            // Hàng rào allowlist. Nhánh này nghiêm trọng hơn `mcp:call_tool`: nó
-            // tới được MỌI tool trên MỌI server MCP ngoài trong `mcp_config.json`
-            // — tiến trình của người lạ, với đúng quyền chúng có. Mặc định
-            // `ExecPolicy` cho tool ngoài là ProposeOnly, nên mặc định là TỪ CHỐI.
-            llm::tool_calling::guard_direct_call(server, &name)?;
-
-            let result = mcp::client::global_registry()
-                .call_tool(server, mcp::protocol::CallToolRequest { name, arguments })
-                .await?;
-            serde_json::to_value(result)
-                .map_err(|e| format!("Failed to serialize tool result: {}", e))
-        }
-
-        _ => Err(format!("Unknown command: {}", command)),
+    if commands::mcp::owns(command) {
+        return commands::mcp::handle(state, command, payload).await;
     }
+
+    Err(format!("Unknown command: {}", command))
 }
 
 #[cfg(test)]

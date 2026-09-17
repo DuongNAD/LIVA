@@ -32,6 +32,7 @@ const OWNED: &[&str] = &[
     "llm:health_check",
     "chat:completion",
     "task_plan_chat",
+    "telemetry:summary",
 ];
 
 /// Lệnh này có thuộc miền LLM không.
@@ -59,6 +60,7 @@ pub async fn handle(
             handle_chat_completion_scoped(state, payload, tx, req_id, memory_scope).await
         }
         "task_plan_chat" => task_plan_chat(state, payload, tx).await,
+        "telemetry:summary" => telemetry_summary(state, payload).await,
         _ => Err(format!("Unknown command: {command}")),
     }
 }
@@ -101,25 +103,31 @@ async fn embed(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
         return Err("Missing or invalid 'input' parameter".to_string());
     };
 
-    let mut llm_manager = state.llm.lock().await;
-    if llm_manager.vocab_only {
-        return Err("Cannot compute embeddings on a vocab-only model".to_string());
-    }
-    let engine = llm_manager
-        .engine
-        .as_mut()
-        .ok_or_else(|| crate::llm::engine::ERR_NO_MODEL.to_string())?;
-    let mut embeddings = Vec::new();
-    for text in inputs {
-        let emb = llm::get_embedding(&engine.model, &mut engine.context, &text)?;
-        embeddings.push(emb);
-    }
+    let state_clone = state.clone();
+    let embeddings = tokio::task::spawn_blocking(move || -> Result<Vec<Vec<f32>>, String> {
+        let mut llm_manager = state_clone.llm.blocking_lock();
+        if llm_manager.vocab_only {
+            return Err("Cannot compute embeddings on a vocab-only model".to_string());
+        }
+        let engine = llm_manager
+            .engine
+            .as_mut()
+            .ok_or_else(|| crate::llm::engine::ERR_NO_MODEL.to_string())?;
+        let mut embeddings = Vec::with_capacity(inputs.len());
+        for text in inputs {
+            let emb = llm::get_embedding(&engine.model, &mut engine.context, &text)?;
+            embeddings.push(emb);
+        }
+        Ok(embeddings)
+    })
+    .await
+    .map_err(|e| format!("Blocking embedding computation panicked: {e}"))??;
 
     // Vào là một chuỗi thì ra một vector; vào là mảng thì ra mảng vector.
     if mot_chuoi {
-        Ok(serde_json::to_value(&embeddings[0]).unwrap())
+        serde_json::to_value(&embeddings[0]).map_err(|e| e.to_string())
     } else {
-        Ok(serde_json::to_value(embeddings).unwrap())
+        serde_json::to_value(embeddings).map_err(|e| e.to_string())
     }
 }
 
@@ -204,7 +212,6 @@ async fn task_plan_chat(
         .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
     let stream = payload["stream"].as_bool().unwrap_or(tx.is_some());
 
-    let compiled_prompt = llm::compile_prompt(&messages)?;
     let task_id_clone = task_id.clone();
 
     #[derive(serde::Serialize)]
@@ -222,22 +229,19 @@ async fn task_plan_chat(
             let tx_inner =
                 tx.ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
 
-            llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |piece| {
-                if piece.is_empty() {
-                    return true;
-                }
-                let chunk = TaskStreamChunk {
-                    task_id: &task_id_clone,
-                    message: piece,
-                    done: false,
-                };
-                if let Ok(chunk_str) = serde_json::to_string(&chunk) {
-                    let _ = tx_inner.blocking_send(chunk_str);
-                }
-                true
-            })
+            let mut stream_state = llm::engine::CompletionStream::new(&tx_inner);
+            let completion =
+                llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |piece| {
+                    let chunk = TaskStreamChunk {
+                        task_id: &task_id_clone,
+                        message: piece,
+                        done: false,
+                    };
+                    stream_state.forward(piece, &chunk)
+                });
+            stream_state.finish(completion)
         } else {
-            llm_manager.generate_completion(&compiled_prompt, temperature, top_p, |_| true)
+            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| true)
         }
     })
     .await
@@ -250,19 +254,30 @@ async fn task_plan_chat(
     }))
 }
 
+async fn telemetry_summary(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+    let since_ts = payload.get("since_ts").and_then(Value::as_i64);
+    let summary = state
+        .db
+        .spawn_reader(move |conn| crate::db::get_telemetry_summary(conn, since_ts))
+        .await?;
+    serde_json::to_value(&summary)
+        .map_err(|e| format!("Failed to serialize telemetry summary: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn owns_dung_nam_lenh_va_khong_om_lenh_khac() {
-        assert_eq!(OWNED.len(), 5);
+    fn owns_dung_sau_lenh_va_khong_om_lenh_khac() {
+        assert_eq!(OWNED.len(), 6);
         for name in OWNED {
             assert!(owns(name));
         }
-        // Gom cả hai tiền tố khác nhau, nên `strip_prefix("llm:")` sẽ bỏ sót:
+        // Gom cả các tiền tố khác nhau, nên `strip_prefix("llm:")` sẽ bỏ sót:
         assert!(owns("chat:completion"));
         assert!(owns("task_plan_chat"));
+        assert!(owns("telemetry:summary"));
         // Nhưng không được ôm CRUD của miền task:
         assert!(!owns("get_tasks"));
         assert!(!owns("add_task"));

@@ -99,6 +99,7 @@ pub struct SttManager {
     parakeet: Option<Box<dyn ParakeetRecognizer>>,
     use_parakeet_vi: bool,
     parakeet_fallback_reason: Option<String>,
+    last_used: Instant,
     raw_audio_buffer: Vec<f32>,
 
     // Audio stream state
@@ -107,6 +108,26 @@ pub struct SttManager {
     accumulated_tokens: Vec<u32>,
     has_run_encoder: bool,
     is_streaming: bool,
+}
+
+/// Resolve the Parakeet STT model and vocab paths with priority:
+/// env var -> `models/parakeet_vi.onnx` & `models/parakeet_vi_vocab.json`
+/// resolved via `crate::resolve_resource_path` across repo, user data, and exe resources.
+pub fn resolve_parakeet_paths() -> (PathBuf, PathBuf) {
+    let model_path = std::env::var("LIVA_PARAKEET_MODEL_PATH")
+        .map(|p| crate::resolve_resource_path(&p))
+        .unwrap_or_else(|_| crate::resolve_resource_path("models/parakeet_vi.onnx"));
+    let vocab_path = std::env::var("LIVA_PARAKEET_VOCAB_PATH")
+        .map(|p| crate::resolve_resource_path(&p))
+        .unwrap_or_else(|_| {
+            let sibling = model_path.with_file_name("parakeet_vi_vocab.json");
+            if sibling.exists() {
+                sibling
+            } else {
+                crate::resolve_resource_path("models/parakeet_vi_vocab.json")
+            }
+        });
+    (model_path, vocab_path)
 }
 
 impl SttManager {
@@ -133,6 +154,7 @@ impl SttManager {
             parakeet: None,
             use_parakeet_vi,
             parakeet_fallback_reason: None,
+            last_used: Instant::now(),
             raw_audio_buffer: Vec::new(),
             residual_samples: Vec::new(),
             prev_sample: 0.0,
@@ -180,17 +202,13 @@ impl SttManager {
         if !self.use_parakeet_vi {
             return false;
         }
-        let model_path = std::env::var("LIVA_PARAKEET_MODEL_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("models/parakeet_vi.onnx"));
-        let vocab_path = std::env::var("LIVA_PARAKEET_VOCAB_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| model_path.with_file_name("parakeet_vi_vocab.json"));
+        let (model_path, vocab_path) = resolve_parakeet_paths();
         match ParakeetVi::load(&model_path, &vocab_path) {
             Ok(pk) => {
                 tracing::info!("Parakeet-CTC vi STT loaded from {:?}", model_path);
                 self.parakeet = Some(Box::new(pk));
                 self.parakeet_fallback_reason = None;
+                self.last_used = Instant::now();
                 true
             }
             Err(e) => {
@@ -221,18 +239,52 @@ impl SttManager {
         self.use_parakeet_vi = true;
         self.parakeet = None;
         self.parakeet_fallback_reason = None;
+        self.last_used = Instant::now();
     }
 
     #[cfg(test)]
     pub(crate) fn record_parakeet_fallback_for_test(&mut self, reason: &str) {
         self.use_parakeet_vi = false;
         self.parakeet_fallback_reason = Some(reason.to_string());
+        self.last_used = Instant::now();
     }
 
     #[cfg(test)]
     pub(crate) fn record_parakeet_loaded_for_test(&mut self) {
         self.parakeet = Some(Box::new(LoadedParakeetTestDouble));
         self.parakeet_fallback_reason = None;
+        self.last_used = Instant::now();
+    }
+
+    /// Unload the Parakeet model from RAM (~2.4GB) if it has been idle for >= `timeout`.
+    /// Returns true if the model was unloaded, false otherwise.
+    pub fn check_idle_unload(&mut self, timeout: std::time::Duration) -> bool {
+        if self.is_streaming {
+            return false;
+        }
+        if self.parakeet.is_some() && self.last_used.elapsed() >= timeout {
+            tracing::info!(
+                "STT Parakeet model idle for >= {:?}; unloading ~2.4GB weights from RAM",
+                timeout
+            );
+            self.unload_parakeet();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Explicitly unload Parakeet to reclaim RAM immediately.
+    pub fn unload_parakeet(&mut self) {
+        if self.parakeet.is_some() {
+            self.parakeet = None;
+            tracing::info!("Parakeet-CTC vi STT model unloaded from RAM");
+        }
+    }
+
+    /// Check if the Parakeet engine is currently loaded in memory.
+    pub fn is_parakeet_loaded(&self) -> bool {
+        self.parakeet.is_some()
     }
 
     /// Switch the recognition language ("vi", "en", "vi-VN", …).
@@ -279,11 +331,12 @@ impl SttManager {
         pcm_chunk: &[f32],
         is_last: bool,
     ) -> Result<Option<StreamingTranscript>, String> {
+        self.last_used = Instant::now();
         if self.should_use_parakeet() && self.ensure_parakeet_loaded() {
             return self
                 .parakeet
                 .as_mut()
-                .unwrap()
+                .ok_or_else(|| "STT Parakeet engine not ready".to_string())?
                 .feed_chunk(pcm_chunk, is_last);
         }
 
@@ -315,6 +368,7 @@ impl SttManager {
         is_last: bool,
         allow_parakeet: bool,
     ) -> Result<Option<String>, String> {
+        self.last_used = Instant::now();
         if is_last {
             if !self.is_streaming {
                 self.reset_stream();
@@ -329,15 +383,25 @@ impl SttManager {
 
         // Parakeet-CTC path for Vietnamese: streaming chunk or whole-utterance decoding
         if allow_parakeet && self.should_use_parakeet() && self.ensure_parakeet_loaded() {
-            let res = self.parakeet.as_mut().unwrap().feed_chunk(audio, is_last)?;
+            let res = self
+                .parakeet
+                .as_mut()
+                .ok_or_else(|| "STT Parakeet engine not ready".to_string())?
+                .feed_chunk(audio, is_last)?;
             if is_last {
                 self.reset_stream();
             }
             return Ok(res.map(|t| t.partial_text));
         }
 
-        let engine = self.engine.as_mut().unwrap();
-        let tokenizer = self.tokenizer.as_ref().unwrap();
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or_else(|| "STT engine not initialized".to_string())?;
+        let tokenizer = self
+            .tokenizer
+            .as_ref()
+            .ok_or_else(|| "STT tokenizer not loaded".to_string())?;
 
         // 1. Pre-emphasis filter in-place or copied
         let mut preemphed = vec![0.0; audio.len()];
@@ -433,5 +497,57 @@ mod tests {
         assert!(res2.is_some());
         let transcript = res2.unwrap();
         assert!(transcript.is_final);
+    }
+
+    #[test]
+    fn stt_manager_missing_engine_or_tokenizer_returns_err() {
+        let mut stt = SttManager::new("models/nonexistent_model_dir");
+        stt.language = "en".to_string();
+        stt.use_parakeet_vi = false;
+        let chunk = vec![0.0f32; 1600];
+        let res = stt.feed_chunk(&chunk, false);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn stt_idle_unload_reclaims_parakeet_when_timeout_elapsed() {
+        let mut stt = SttManager::new("models/nemotron-asr");
+        stt.record_parakeet_loaded_for_test();
+        assert!(stt.is_parakeet_loaded());
+
+        // Artificially age last_used past 300s timeout
+        stt.last_used = Instant::now() - std::time::Duration::from_secs(305);
+        let unloaded = stt.check_idle_unload(std::time::Duration::from_secs(300));
+        assert!(
+            unloaded,
+            "Parakeet phai duoc giai phong khi qua han timeout"
+        );
+        assert!(
+            !stt.is_parakeet_loaded(),
+            "parakeet phai ve None sau khi unload"
+        );
+    }
+
+    #[test]
+    fn stt_idle_unload_skips_when_recently_active() {
+        let mut stt = SttManager::new("models/nemotron-asr");
+        stt.record_parakeet_loaded_for_test();
+        assert!(stt.is_parakeet_loaded());
+
+        let unloaded = stt.check_idle_unload(std::time::Duration::from_secs(300));
+        assert!(!unloaded, "Khong duoc unload khi vua moi hoat dong");
+        assert!(stt.is_parakeet_loaded());
+    }
+
+    #[test]
+    fn stt_idle_unload_skips_during_streaming() {
+        let mut stt = SttManager::new("models/nemotron-asr");
+        stt.record_parakeet_loaded_for_test();
+        stt.is_streaming = true;
+        stt.last_used = Instant::now() - std::time::Duration::from_secs(305);
+
+        let unloaded = stt.check_idle_unload(std::time::Duration::from_secs(300));
+        assert!(!unloaded, "Khong duoc unload giua chung khi dang streaming");
+        assert!(stt.is_parakeet_loaded());
     }
 }

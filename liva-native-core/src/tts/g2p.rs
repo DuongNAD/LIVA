@@ -47,18 +47,7 @@ impl G2p {
     }
 
     fn try_espeak_ng(text: &str) -> Result<String, String> {
-        let output = super::espeak::espeak_command()
-            .args(["-q", "--ipa", "-v", "en-us", "--", text])
-            .output()
-            .map_err(|e| e.to_string())?;
-
-        if !output.status.success() {
-            return Err("espeak-ng failed".to_string());
-        }
-
-        let ipa = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
-
-        Ok(ipa.trim().to_string())
+        super::espeak::espeak_ipa("en-us", text)
     }
 
     fn fallback_phonemize(text: &str) -> String {

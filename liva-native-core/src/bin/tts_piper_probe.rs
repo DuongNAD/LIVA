@@ -64,7 +64,7 @@ fn main() {
 
     let t0 = std::time::Instant::now();
     let samples = match voice.synthesize(&text) {
-        Ok(s) => s,
+        Ok((s, _phonemes)) => s,
         Err(e) => {
             eprintln!("synthesize failed: {}", e);
             std::process::exit(1);

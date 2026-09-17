@@ -28,7 +28,7 @@ const TRA_CACHE_LEN: usize = 2 * 3 * 1 * 1 * 16; // [2,3,1,1,16]
 const INTER_CACHE_LEN: usize = 2 * 1 * 33 * 16; // [2,1,33,16]
 
 /// Resolve the GTCRN model path: env override, else `models/gtcrn_simple.onnx`
-/// (with `../` fallback for binaries run from `liva-native-core/`).
+/// resolved via `crate::resolve_resource_path` across repo, user data dir, and exe resources.
 pub fn resolve_model_path() -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Ok(p) = std::env::var("LIVA_DENOISE_MODEL_PATH")
@@ -36,17 +36,7 @@ pub fn resolve_model_path() -> std::path::PathBuf {
     {
         return PathBuf::from(p);
     }
-    for candidate in [
-        PathBuf::from("models/gtcrn_simple.onnx"),
-        PathBuf::from("../models/gtcrn_simple.onnx"),
-        // liva-desktop/src-tauri is two levels below the repo root
-        PathBuf::from("../../models/gtcrn_simple.onnx"),
-    ] {
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    PathBuf::from("models/gtcrn_simple.onnx")
+    crate::resolve_resource_path("models/gtcrn_simple.onnx")
 }
 
 pub struct GtcrnDenoiser {

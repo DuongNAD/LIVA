@@ -49,11 +49,14 @@ pub fn apply_punc_norm(text: &str) -> String {
         format!("{}.", stripped)
     } else {
         // Câu dài: chỉ thêm `.` nếu chưa kết thúc bằng , . ! ?
-        let last_char = trimmed.chars().next_back().unwrap();
-        if is_sentence_end(last_char) {
-            trimmed.to_string()
+        if let Some(last_char) = trimmed.chars().next_back() {
+            if is_sentence_end(last_char) {
+                trimmed.to_string()
+            } else {
+                format!("{}.", trimmed)
+            }
         } else {
-            format!("{}.", trimmed)
+            ".".to_string()
         }
     }
 }

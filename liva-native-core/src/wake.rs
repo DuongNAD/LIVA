@@ -28,6 +28,7 @@
 //! contain "liva".
 
 use crate::wake_model::TrainedWakeDetector;
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -60,13 +61,19 @@ pub struct WakeGate {
 }
 
 /// Classifier mặc định cho đường probe khi `LIVA_WAKE_MODEL_PATHS` để trống.
-/// Artifact v2 được gate trên 25,88 giờ validation; hash được pin trong
-/// `data/models-manifest.json` và kiểm tra trước khi ORT nạp model.
-const DEFAULT_PROBE_MODEL: &str = "wake_liva_en_v2.onnx";
+/// Artifact v3 personalized với 24 human positive và 20 negative audio clips;
+/// hash được pin trong `data/models-manifest.json` và kiểm tra trước khi ORT nạp model.
+const DEFAULT_PROBE_MODEL: &str = "wake_liva_en_v3.onnx";
 const DEFAULT_WAKE_THRESHOLD: f32 = 0.58;
 /// Product wake phrase. `LIVA_WAKE_PHRASES` remains an explicit operator
 /// override, but the shipped default intentionally exposes one phrase only.
 const DEFAULT_WAKE_PHRASES: &str = "hey liva";
+
+/// Minimum target audio samples for one-shot clip evaluation in `score_clip`.
+/// openWakeWord requires at least 16 embeddings (196 mel frames = 31,360 samples = 1.96s).
+/// Clips shorter than 2.5s (40,000 samples @ 16kHz) are padded with leading silence
+/// up to 40,000 samples to match the native streaming ring buffer duration.
+pub const WAKE_PAD_TARGET_SAMPLES: usize = 40_000;
 
 /// Verify a resolver-produced model path without weakening the shared
 /// traversal guard. Tauri dev may return `../../models/file.onnx`; the parent
@@ -242,6 +249,10 @@ impl WakeGate {
     /// Nạp lười: mô hình chỉ tải ở lần probe đầu, nên kết nối không bao giờ
     /// probe (Telegram, e2e) không phải trả ~70 ms + vài MB.
     pub fn score_clip(&mut self, audio: &[f32]) -> Option<(String, f32)> {
+        if audio.is_empty() {
+            return None;
+        }
+
         if self.trained_detector.is_none() && !self.detector_load_attempted {
             // Chỉ thử MỘT lần. Thiếu file thì mọi probe sau đó sẽ lặp lại đúng
             // một lần mở file hỏng và một dòng log — mỗi câu nói một lần.
@@ -249,7 +260,22 @@ impl WakeGate {
             self.trained_detector = Self::load_trained_detector(self.mode);
         }
         let detector = self.trained_detector.as_mut()?;
-        match detector.predict_raw(audio) {
+
+        // Đệm silence đầu clip nếu audio ngắn hơn 2,5s (40.000 mẫu @ 16kHz).
+        // openWakeWord yêu cầu tối thiểu 16 embeddings (196 mel frames = 31.360 mẫu = 1,96s).
+        // Nếu audio ngắn hơn mức này mà không đệm, `predict_raw` trả về empty HashMap,
+        // khiến `score_clip` trả về `None` (gây ngộ nhận log "không nạp được").
+        // Dùng `Cow` để đảm bảo zero-allocation / zero-reallocation khi audio >= 40.000 mẫu.
+        let audio_eval: Cow<[f32]> = if audio.len() < WAKE_PAD_TARGET_SAMPLES {
+            let missing = WAKE_PAD_TARGET_SAMPLES - audio.len();
+            let mut padded = vec![0.0f32; WAKE_PAD_TARGET_SAMPLES];
+            padded[missing..].copy_from_slice(audio);
+            Cow::Owned(padded)
+        } else {
+            Cow::Borrowed(audio)
+        };
+
+        match detector.predict_raw(&audio_eval) {
             // Trả điểm CAO NHẤT bất kể ngưỡng; nơi gọi tự so với
             // `model_threshold()`. Lọc ngay tại đây thì một lần trượt sát
             // (0,64 so với ngưỡng 0,68) và một lần trượt xa (0,02) đều ra
@@ -261,6 +287,18 @@ impl WakeGate {
                 None
             }
         }
+    }
+
+    /// Kiểm tra classifier mô hình có đang không khả dụng (chưa nạp, nạp lỗi hoặc bị tắt) hay không.
+    /// Trả về `true` nếu `trained_detector` là `None`.
+    pub fn detector_is_none(&self) -> bool {
+        self.trained_detector.is_none()
+    }
+
+    /// Kiểm tra classifier mô hình đã được nạp thành công hay chưa.
+    /// Trả về `true` nếu `trained_detector` là `Some(...)`.
+    pub fn detector_is_some(&self) -> bool {
+        self.trained_detector.is_some()
     }
 
     pub fn mode(&self) -> WakeMode {
@@ -536,9 +574,103 @@ mod tests {
     }
 
     #[test]
-    fn default_classifier_uses_evaluated_v2_release() {
-        assert_eq!(DEFAULT_PROBE_MODEL, "wake_liva_en_v2.onnx");
+    fn default_classifier_uses_evaluated_v3_release() {
+        assert_eq!(DEFAULT_PROBE_MODEL, "wake_liva_en_v3.onnx");
         assert!((DEFAULT_WAKE_THRESHOLD - 0.58).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn detector_status_methods_reflect_presence() {
+        let g = gate("liva");
+        assert!(g.detector_is_none());
+        assert!(!g.detector_is_some());
+    }
+
+    fn test_trained_detector() -> Option<TrainedWakeDetector> {
+        for candidate_dir in [
+            "models",
+            "../models",
+            "models/wake_fixtures",
+            "../models/wake_fixtures",
+        ] {
+            let p = PathBuf::from(candidate_dir);
+            for model_name in [
+                "wake_liva_en_v3.onnx",
+                "hey_livekit.onnx",
+                "wake_liva_en_v2.onnx",
+            ] {
+                let model_path = p.join(model_name);
+                if !model_path.exists() {
+                    continue;
+                }
+                if let Ok(detector) = TrainedWakeDetector::new(&[&model_path], 0.5) {
+                    return Some(detector);
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn score_clip_pads_short_audio_clips() {
+        let Some(detector) = test_trained_detector() else {
+            eprintln!("skip: wake models/fixtures not present");
+            return;
+        };
+
+        let mut gate = WakeGate {
+            mode: WakeMode::TrainedModel,
+            phrases: vec!["hey liva".to_string()],
+            window: Duration::from_secs(45),
+            awake_until: None,
+            trained_detector: Some(detector),
+            model_threshold: 0.58,
+            detector_load_attempted: true,
+        };
+
+        // 1. Clip rỗng 0s (&[]) trả về None ngay mà không cần inference
+        assert!(gate.score_clip(&[]).is_none());
+
+        // 2. Clip ngắn 0.8s (12.800 mẫu @ 16kHz)
+        // Nếu không đệm, clip chỉ sinh ~80 mel frames (1 embedding < 16), predict_raw trả về empty.
+        // Sau khi đệm lên 40.000 mẫu, sinh đủ 22 embeddings và trả về Some((name, score)).
+        let clip_0_8s = vec![0.005f32; 12_800];
+        let res_0_8s = gate.score_clip(&clip_0_8s);
+        assert!(
+            res_0_8s.is_some(),
+            "0.8s clip (12,800 samples) phải được đệm và trả về Some score, thực tế ra None"
+        );
+        let (name_0_8s, score_0_8s) = res_0_8s.unwrap();
+        assert!(!name_0_8s.is_empty());
+        assert!((0.0..=1.0).contains(&score_0_8s));
+
+        // 3. Clip ngắn 1.2s (19.200 mẫu @ 16kHz)
+        // Nếu không đệm, clip chỉ sinh ~120 mel frames (6 embeddings < 16), predict_raw trả về empty.
+        let clip_1_2s = vec![0.005f32; 19_200];
+        let res_1_2s = gate.score_clip(&clip_1_2s);
+        assert!(
+            res_1_2s.is_some(),
+            "1.2s clip (19,200 samples) phải được đệm và trả về Some score, thực tế ra None"
+        );
+        let (name_1_2s, score_1_2s) = res_1_2s.unwrap();
+        assert!(!name_1_2s.is_empty());
+        assert!((0.0..=1.0).contains(&score_1_2s));
+
+        // 4. Clip đủ chuẩn 2.5s (40.000 mẫu) đánh giá trực tiếp
+        let clip_2_5s = vec![0.005f32; 40_000];
+        let res_2_5s = gate.score_clip(&clip_2_5s);
+        assert!(
+            res_2_5s.is_some(),
+            "Clip 40.000 mẫu (2.5s) phải đánh giá thành công"
+        );
+
+        // 5. Clip dài 3.0s (48.000 mẫu) mượn slice trực tiếp (zero-reallocation)
+        let clip_3_0s = vec![0.005f32; 48_000];
+        let res_3_0s = gate.score_clip(&clip_3_0s);
+        assert!(
+            res_3_0s.is_some(),
+            "Clip 48.000 mẫu (3.0s) phải đánh giá thành công"
+        );
     }
 
     #[test]

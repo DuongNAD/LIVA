@@ -42,7 +42,9 @@ impl TtsEngine {
                 .map_err(|e| e.to_string())?;
             self.session = Some(Arc::new(Mutex::new(session)));
         }
-        Ok(self.session.clone().unwrap())
+        self.session
+            .clone()
+            .ok_or_else(|| "TTS session is not initialized".to_string())
     }
 
     pub fn unload_session(&mut self) {
@@ -58,10 +60,21 @@ impl TtsEngine {
         self.model_path.exists()
     }
 
-    pub fn check_idle_unload(&mut self, idle_duration: std::time::Duration) {
+    pub fn check_idle_unload(&mut self, idle_duration: std::time::Duration) -> bool {
         if self.session.is_some() && self.last_active.elapsed() >= idle_duration {
+            tracing::info!(
+                "Kokoro TTS session idle for {:?}; unloading from RAM",
+                idle_duration
+            );
             self.unload_session();
+            true
+        } else {
+            false
         }
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        self.session.is_some()
     }
 
     pub fn prepare_inference(&mut self) -> Result<InferenceHandles, String> {
@@ -108,7 +121,9 @@ impl TtsEngine {
     // Fallback generate for convenience (backwards compatibility)
     pub fn generate(&mut self, token_ids: &[i64], speed_val: f32) -> Result<Vec<f32>, String> {
         let (session_arc, voice_data) = self.prepare_inference()?;
-        let mut session = session_arc.lock().unwrap();
+        let mut session = session_arc
+            .lock()
+            .map_err(|e| format!("Poisoned TTS session lock: {e}"))?;
         Self::generate_from_session(&mut session, &voice_data, token_ids, speed_val)
     }
 }

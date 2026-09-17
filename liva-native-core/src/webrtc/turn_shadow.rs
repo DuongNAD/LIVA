@@ -29,7 +29,7 @@ use crate::stt::dsp::compute_mel_filterbank;
 use ort::{session::Session, value::Value};
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 const SAMPLE_RATE: usize = 16000;
 const N_SAMPLES: usize = SAMPLE_RATE * 8; // 128_000, the model's fixed window
@@ -39,7 +39,8 @@ const N_MELS: usize = 80;
 const N_FRAMES: usize = N_SAMPLES / HOP; // 800, after dropping the trailing frame
 
 /// Resolve the Smart Turn model path: env override, else
-/// `models/smart_turn_v3.2_cpu.onnx` (with `../` fallback).
+/// `models/smart_turn_v3.2_cpu.onnx` resolved via `crate::resolve_resource_path`
+/// across repo, user data dir, and exe resources.
 pub fn resolve_model_path() -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Ok(p) = std::env::var("LIVA_TURN_MODEL_PATH")
@@ -47,31 +48,56 @@ pub fn resolve_model_path() -> std::path::PathBuf {
     {
         return PathBuf::from(p);
     }
-    for candidate in [
-        PathBuf::from("models/smart_turn_v3.2_cpu.onnx"),
-        PathBuf::from("../models/smart_turn_v3.2_cpu.onnx"),
-        // liva-desktop/src-tauri is two levels below the repo root
-        PathBuf::from("../../models/smart_turn_v3.2_cpu.onnx"),
-    ] {
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    PathBuf::from("models/smart_turn_v3.2_cpu.onnx")
+    crate::resolve_resource_path("models/smart_turn_v3.2_cpu.onnx")
 }
 
 pub struct SmartTurnClassifier {
-    session: Session,
+    session: Arc<Mutex<Session>>,
     fft: Arc<dyn Fft<f32>>,
-    window: Vec<f32>,           // periodic Hann, len N_FFT
-    mel_filters: Vec<Vec<f32>>, // N_MELS x (N_FFT/2+1)
+    window: Arc<[f32]>,           // periodic Hann, len N_FFT
+    mel_filters: Arc<[Vec<f32>]>, // N_MELS x (N_FFT/2+1)
 }
 
-/// Shadow-mode verdict: logged for comparison, never acted on.
-#[derive(Debug, Clone, Copy)]
+/// Turn verdict with probability and completion flag.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TurnVerdict {
     pub probability: f32,
     pub complete: bool,
+}
+
+/// Adaptive end-of-turn decision for the Two-Stage Turn Gate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AdaptiveTurnDecision {
+    /// Turn clearly complete (p > 0.92). Immediate cutoff at ~200ms silence.
+    ImmediateCutoff { probability: f32 },
+    /// Hesitation / thinking pause (0.50 <= p <= 0.92). Extend silence window up to ~450ms.
+    HesitationWait { probability: f32 },
+    /// User still actively speaking / incomplete (p < 0.50). Continue accumulating.
+    Incomplete { probability: f32 },
+}
+
+impl AdaptiveTurnDecision {
+    pub fn from_probability(p: f32) -> Self {
+        if p > 0.92 {
+            Self::ImmediateCutoff { probability: p }
+        } else if p >= 0.50 {
+            Self::HesitationWait { probability: p }
+        } else {
+            Self::Incomplete { probability: p }
+        }
+    }
+
+    pub fn probability(&self) -> f32 {
+        match *self {
+            Self::ImmediateCutoff { probability }
+            | Self::HesitationWait { probability }
+            | Self::Incomplete { probability } => probability,
+        }
+    }
+
+    pub fn is_immediate(&self) -> bool {
+        matches!(self, Self::ImmediateCutoff { .. })
+    }
 }
 
 impl SmartTurnClassifier {
@@ -96,23 +122,36 @@ impl SmartTurnClassifier {
         let mel_filters = compute_mel_filterbank(N_FFT, N_MELS, SAMPLE_RATE as f64);
 
         Ok(Self {
-            session,
+            session: Arc::new(Mutex::new(session)),
             fft,
-            window,
-            mel_filters,
+            window: Arc::from(window.into_boxed_slice()),
+            mel_filters: Arc::from(mel_filters.into_boxed_slice()),
         })
+    }
+
+    /// Fork classifier for a WebSocket connection session while sharing the underlying model.
+    pub fn fork_session(&self) -> Self {
+        Self {
+            session: Arc::clone(&self.session),
+            fft: Arc::clone(&self.fft),
+            window: Arc::clone(&self.window),
+            mel_filters: Arc::clone(&self.mel_filters),
+        }
     }
 
     /// Classify up to the last 8s of 16kHz mono audio. Shorter clips are
     /// zero-padded at the start; longer clips keep only their trailing 8s.
-    pub fn predict(&mut self, samples: &[f32]) -> Result<TurnVerdict, String> {
+    pub fn predict(&self, samples: &[f32]) -> Result<TurnVerdict, String> {
         let features = self.log_mel_features(samples);
 
         let inputs = ort::inputs![
             "input_features" => Value::from_array((vec![1usize, N_MELS, N_FRAMES], features)).map_err(|e| e.to_string())?,
         ];
-        let outputs = self
+        let mut session = self
             .session
+            .lock()
+            .map_err(|_| "Smart Turn ONNX session mutex poisoned".to_string())?;
+        let outputs = session
             .run(inputs)
             .map_err(|e| format!("Smart Turn ONNX run failed: {}", e))?;
 
@@ -127,6 +166,12 @@ impl SmartTurnClassifier {
             probability,
             complete: probability > 0.5,
         })
+    }
+
+    /// Evaluate audio samples and return an AdaptiveTurnDecision for the Two-Stage Gate.
+    pub fn evaluate_turn(&self, samples: &[f32]) -> Result<AdaptiveTurnDecision, String> {
+        let verdict = self.predict(samples)?;
+        Ok(AdaptiveTurnDecision::from_probability(verdict.probability))
     }
 
     fn log_mel_features(&self, samples: &[f32]) -> Vec<f32> {
@@ -206,7 +251,7 @@ mod tests {
             eprintln!("skip: smart_turn_v3.2_cpu.onnx not present");
             return;
         };
-        let mut classifier = SmartTurnClassifier::new(&path).expect("load Smart Turn model");
+        let classifier = SmartTurnClassifier::new(&path).expect("load Smart Turn model");
 
         // Short clip (< 8s): exercises the start-zero-padding path.
         let short: Vec<f32> = (0..8000)
@@ -223,5 +268,55 @@ mod tests {
         let v2 = classifier.predict(&long).expect("predict long clip");
         assert!(v2.probability.is_finite());
         assert!((0.0..=1.0).contains(&v2.probability));
+    }
+
+    #[test]
+    fn test_adaptive_turn_decision_thresholds() {
+        let d_imm = AdaptiveTurnDecision::from_probability(0.95);
+        assert_eq!(
+            d_imm,
+            AdaptiveTurnDecision::ImmediateCutoff { probability: 0.95 }
+        );
+        assert!(d_imm.is_immediate());
+        assert_eq!(d_imm.probability(), 0.95);
+
+        let d_wait = AdaptiveTurnDecision::from_probability(0.75);
+        assert_eq!(
+            d_wait,
+            AdaptiveTurnDecision::HesitationWait { probability: 0.75 }
+        );
+        assert!(!d_wait.is_immediate());
+
+        let d_wait_edge = AdaptiveTurnDecision::from_probability(0.50);
+        assert_eq!(
+            d_wait_edge,
+            AdaptiveTurnDecision::HesitationWait { probability: 0.50 }
+        );
+
+        let d_incomp = AdaptiveTurnDecision::from_probability(0.30);
+        assert_eq!(
+            d_incomp,
+            AdaptiveTurnDecision::Incomplete { probability: 0.30 }
+        );
+        assert!(!d_incomp.is_immediate());
+    }
+
+    #[test]
+    fn test_fork_session_shares_underlying_model() {
+        let Some(path) = model_path_for_test() else {
+            eprintln!("skip: smart_turn_v3.2_cpu.onnx not present");
+            return;
+        };
+        let classifier = SmartTurnClassifier::new(&path).expect("load Smart Turn model");
+        let forked = classifier.fork_session();
+
+        assert!(Arc::ptr_eq(&classifier.session, &forked.session));
+        assert!(Arc::ptr_eq(&classifier.window, &forked.window));
+        assert!(Arc::ptr_eq(&classifier.mel_filters, &forked.mel_filters));
+
+        let short = vec![0.0f32; 1600];
+        let v1 = classifier.predict(&short).expect("predict on parent");
+        let v2 = forked.predict(&short).expect("predict on fork");
+        assert_eq!(v1, v2);
     }
 }

@@ -254,11 +254,12 @@ mod tests {
             turn_shadow: tokio::sync::Mutex::new(None),
             aec: tokio::sync::Mutex::new(None),
             mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
-            embedder: tokio::sync::Mutex::new(None),
+            embedder: crate::AppState::empty_embedder(),
             vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
                 mock_capturer,
                 crate::vision::VisionConfig::default(),
             )),
+            active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
         })
     }
 

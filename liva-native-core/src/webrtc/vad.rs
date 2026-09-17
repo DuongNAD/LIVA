@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 pub enum VadEvent {
     SpeechStart,
     SpeechEnd,
+    SilenceProbe { consecutive_silence_frames: usize },
     None,
 }
 
@@ -70,6 +71,7 @@ pub struct VadConfig {
     pub threshold: f32,
     pub speech_start_threshold: usize,
     pub speech_end_threshold: usize,
+    pub silence_probe_threshold: Option<usize>,
     pub energy_threshold: f32,
     pub high_confidence_threshold: f32,
     pub fast_start_enabled: bool,
@@ -85,6 +87,7 @@ impl Default for VadConfig {
             threshold: 0.5,
             speech_start_threshold: 3,
             speech_end_threshold: 45, // ~1.44s of silence at 32ms frame size
+            silence_probe_threshold: None,
             energy_threshold: 0.001,
             high_confidence_threshold: 0.85,
             fast_start_enabled: true,
@@ -103,6 +106,7 @@ impl VadConfig {
             threshold: 0.5,
             speech_start_threshold: 2,
             speech_end_threshold: 22,
+            silence_probe_threshold: None,
             energy_threshold: 0.001,
             high_confidence_threshold: 0.85,
             fast_start_enabled: true,
@@ -119,6 +123,7 @@ impl VadConfig {
             threshold: 0.5,
             speech_start_threshold: 2,
             speech_end_threshold: 22,
+            silence_probe_threshold: None,
             energy_threshold: 0.001,
             high_confidence_threshold: 0.85,
             fast_start_enabled: true,
@@ -127,9 +132,8 @@ impl VadConfig {
         }
     }
 
-    /// Product config: `Default` values overridable via env, with a snappier
-    /// end-of-turn (22 frames ≈ 0.7s vs the conservative 1.44s default) so
-    /// barge-in and turn-taking feel responsive.
+    /// Product config: `Default` values overridable via env, with Two-Stage Gate:
+    /// silence probe at frame 6 (~192ms) and Stage 3 timeout at frame 14 (~448ms).
     pub fn from_env() -> Self {
         let base = Self::default();
         let get_usize = |key: &str, d: usize| {
@@ -158,6 +162,12 @@ impl VadConfig {
             base.frame_size
         };
 
+        let silence_probe_threshold = if crate::env_flag("LIVA_SILENCE_PROBE_ENABLED", true) {
+            Some(get_usize("LIVA_VAD_PROBE_FRAMES", 6))
+        } else {
+            None
+        };
+
         Self {
             sample_rate: std::env::var("LIVA_VAD_SAMPLE_RATE")
                 .ok()
@@ -166,7 +176,8 @@ impl VadConfig {
             frame_size,
             threshold: get_f32("LIVA_VAD_THRESHOLD", base.threshold),
             speech_start_threshold: get_usize("LIVA_VAD_START_FRAMES", base.speech_start_threshold),
-            speech_end_threshold: get_usize("LIVA_VAD_END_FRAMES", 22),
+            speech_end_threshold: get_usize("LIVA_VAD_END_FRAMES", 14),
+            silence_probe_threshold,
             energy_threshold: get_f32("LIVA_VAD_ENERGY_THRESHOLD", base.energy_threshold),
             high_confidence_threshold: get_f32(
                 "LIVA_VAD_HIGH_CONFIDENCE_THRESHOLD",
@@ -183,9 +194,9 @@ impl VadConfig {
 ///
 /// Priority: `LIVA_VAD_MODEL_PATH` env (honored even if missing, so the
 /// caller's "not found" error names the user's explicit choice) →
-/// standalone v6 model `models/silero_vad_v6.onnx` (kept outside the
-/// nemotron-asr nested repo; `../` variant for bins run from
-/// `liva-native-core/`) → legacy copy bundled in the STT model dir.
+/// standalone v6 model `models/silero_vad_v6.onnx` resolved via
+/// `crate::resolve_resource_path` across repo, user data dir, and exe resources →
+/// legacy copy bundled in the STT model dir.
 pub fn resolve_model_path(stt_model_dir: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Ok(p) = std::env::var("LIVA_VAD_MODEL_PATH")
@@ -193,17 +204,15 @@ pub fn resolve_model_path(stt_model_dir: &str) -> std::path::PathBuf {
     {
         return PathBuf::from(p);
     }
-    for candidate in [
-        PathBuf::from("models/silero_vad_v6.onnx"),
-        PathBuf::from("../models/silero_vad_v6.onnx"),
-        // liva-desktop/src-tauri is two levels below the repo root
-        PathBuf::from("../../models/silero_vad_v6.onnx"),
-    ] {
-        if candidate.exists() {
-            return candidate;
-        }
+    let candidate = crate::resolve_resource_path("models/silero_vad_v6.onnx");
+    if candidate.exists() {
+        return candidate;
     }
-    std::path::Path::new(stt_model_dir).join("silero_vad.onnx")
+    let legacy = crate::resolve_resource_path(&format!("{stt_model_dir}/silero_vad.onnx"));
+    if legacy.exists() {
+        return legacy;
+    }
+    candidate
 }
 
 pub struct VadEngine {
@@ -226,6 +235,10 @@ pub struct VadEngine {
     last_stage0: Option<Stage0Metrics>,
     last_confidence: f32,
 }
+
+/// Maximum capacity for the internal residual buffer (32,000 samples = 2.0s at 16kHz).
+/// Prevents unbounded heap growth in case of frame consumption lag or corrupted inputs.
+pub const MAX_RESIDUAL_CAPACITY: usize = 32_000;
 
 impl VadEngine {
     /// Initialize a new VAD Engine with the specified ONNX model path and config.
@@ -304,10 +317,26 @@ impl VadEngine {
         self.last_stage0
     }
 
+    /// Current number of unconsumed samples in the internal residual buffer.
+    pub fn residual_buffer_len(&self) -> usize {
+        self.residual_buffer.len()
+    }
+
     /// Push raw PCM samples and process any complete frames (160, 256, or 512 samples).
     /// Returns a list of VAD events triggered during processing with their confidence score.
     pub fn process_audio(&mut self, samples: &[f32]) -> Result<Vec<(VadEvent, f32)>, String> {
-        self.residual_buffer.extend_from_slice(samples);
+        let samples_to_append = if samples.len() > MAX_RESIDUAL_CAPACITY {
+            &samples[samples.len() - MAX_RESIDUAL_CAPACITY..]
+        } else {
+            samples
+        };
+
+        let total_len = self.residual_buffer.len() + samples_to_append.len();
+        if total_len > MAX_RESIDUAL_CAPACITY {
+            let excess = total_len - MAX_RESIDUAL_CAPACITY;
+            self.residual_buffer.drain(0..excess);
+        }
+        self.residual_buffer.extend_from_slice(samples_to_append);
         let mut events = Vec::new();
         let frame_size = self.config.frame_size;
 
@@ -324,7 +353,13 @@ impl VadEngine {
             self.last_stage0 = Some(stage0);
 
             // Stage 1: Silero VAD v6 Neural Model Inference
-            let (is_speech, confidence) = self.run_inference(&frame)?;
+            let (is_speech, confidence) = match self.run_inference(&frame) {
+                Ok(res) => res,
+                Err(err) => {
+                    self.residual_buffer.clear();
+                    return Err(err);
+                }
+            };
             self.last_confidence = confidence;
 
             // Two-Tier Decision and State Machine update
@@ -420,14 +455,30 @@ impl VadEngine {
             self.consecutive_silence_frames += 1;
             self.consecutive_speech_frames = 0;
 
-            if self.is_speaking
-                && self.consecutive_silence_frames >= self.config.speech_end_threshold
-            {
-                self.is_speaking = false;
-                return Some(VadEvent::SpeechEnd);
+            if self.is_speaking {
+                if let Some(probe_frames) = self.config.silence_probe_threshold
+                    && self.consecutive_silence_frames == probe_frames
+                {
+                    return Some(VadEvent::SilenceProbe {
+                        consecutive_silence_frames: self.consecutive_silence_frames,
+                    });
+                }
+
+                if self.consecutive_silence_frames >= self.config.speech_end_threshold {
+                    self.is_speaking = false;
+                    return Some(VadEvent::SpeechEnd);
+                }
             }
         }
         None
+    }
+
+    /// Immediately terminate speech state, clearing silence and speech counters.
+    /// Used when Stage 1 Fast Cutoff triggers SpeechEnd early.
+    pub fn force_speech_end(&mut self) {
+        self.is_speaking = false;
+        self.consecutive_silence_frames = 0;
+        self.consecutive_speech_frames = 0;
     }
 
     /// Legacy / test-facing interface for standard boolean state machine evaluation.
@@ -630,5 +681,166 @@ mod tests {
             prototype.state.iter().all(|&value| value == 0.0),
             "session inference must not mutate the process-level prototype"
         );
+    }
+
+    #[test]
+    fn test_silence_probe_fires_at_frame_6_without_clearing_speech_state() {
+        let model_path = resolve_model_path("models/nemotron-asr");
+        if !model_path.exists() {
+            eprintln!("skip: Silero VAD model not present");
+            return;
+        }
+
+        let config = VadConfig {
+            silence_probe_threshold: Some(6),
+            speech_end_threshold: 14,
+            ..VadConfig::default()
+        };
+        let mut engine = VadEngine::new(&model_path, config).expect("load Silero VAD model");
+
+        // Fast start into speaking state
+        let _ = engine.test_update_state_machine_with_confidence(true, 0.90, 0.01);
+        assert!(engine.is_speaking());
+
+        // Feed 5 frames of silence - should return None
+        for _ in 1..=5 {
+            let ev = engine.test_update_state_machine(false);
+            assert_eq!(ev, None);
+            assert!(engine.is_speaking());
+        }
+
+        // Frame 6 should trigger SilenceProbe { consecutive_silence_frames: 6 }
+        let ev6 = engine.test_update_state_machine(false);
+        assert_eq!(
+            ev6,
+            Some(VadEvent::SilenceProbe {
+                consecutive_silence_frames: 6
+            })
+        );
+        assert!(
+            engine.is_speaking(),
+            "Speech state must remain active on probe"
+        );
+    }
+
+    #[test]
+    fn test_vietnamese_hesitation_pause_bridges_across_silence_probe() {
+        let model_path = resolve_model_path("models/nemotron-asr");
+        if !model_path.exists() {
+            eprintln!("skip: Silero VAD model not present");
+            return;
+        }
+
+        let config = VadConfig {
+            silence_probe_threshold: Some(6),
+            speech_end_threshold: 14,
+            ..VadConfig::default()
+        };
+        let mut engine = VadEngine::new(&model_path, config).expect("load Silero VAD model");
+
+        // Start speaking
+        let _ = engine.test_update_state_machine_with_confidence(true, 0.90, 0.01);
+        assert!(engine.is_speaking());
+
+        // Pause for 7 frames (224ms @ 32ms) - simulate hesitation particle "ờ...", "thì..."
+        for f in 1..=7 {
+            let ev = engine.test_update_state_machine(false);
+            if f == 6 {
+                assert_eq!(
+                    ev,
+                    Some(VadEvent::SilenceProbe {
+                        consecutive_silence_frames: 6
+                    })
+                );
+            } else {
+                assert_eq!(ev, None);
+            }
+        }
+        assert!(engine.is_speaking());
+
+        // User speaks again
+        let ev_speech = engine.test_update_state_machine_with_confidence(true, 0.80, 0.01);
+        assert_eq!(
+            ev_speech, None,
+            "Already speaking, no new SpeechStart event"
+        );
+        assert!(engine.is_speaking());
+        assert_eq!(engine.consecutive_silence_frames, 0);
+    }
+
+    #[test]
+    fn test_stage3_timeout_fires_at_frame_14() {
+        let model_path = resolve_model_path("models/nemotron-asr");
+        if !model_path.exists() {
+            eprintln!("skip: Silero VAD model not present");
+            return;
+        }
+
+        let config = VadConfig {
+            silence_probe_threshold: Some(6),
+            speech_end_threshold: 14,
+            ..VadConfig::default()
+        };
+        let mut engine = VadEngine::new(&model_path, config).expect("load Silero VAD model");
+
+        let _ = engine.test_update_state_machine_with_confidence(true, 0.90, 0.01);
+        assert!(engine.is_speaking());
+
+        for f in 1..=13 {
+            let ev = engine.test_update_state_machine(false);
+            if f == 6 {
+                assert_eq!(
+                    ev,
+                    Some(VadEvent::SilenceProbe {
+                        consecutive_silence_frames: 6
+                    })
+                );
+            } else {
+                assert_eq!(ev, None);
+            }
+            assert!(engine.is_speaking());
+        }
+
+        // Frame 14 triggers SpeechEnd
+        let ev14 = engine.test_update_state_machine(false);
+        assert_eq!(ev14, Some(VadEvent::SpeechEnd));
+        assert!(!engine.is_speaking());
+    }
+
+    #[test]
+    fn test_force_speech_end_resets_vad_state() {
+        let model_path = resolve_model_path("models/nemotron-asr");
+        if !model_path.exists() {
+            eprintln!("skip: Silero VAD model not present");
+            return;
+        }
+
+        let config = VadConfig {
+            silence_probe_threshold: Some(6),
+            speech_end_threshold: 14,
+            ..VadConfig::default()
+        };
+        let mut engine = VadEngine::new(&model_path, config).expect("load Silero VAD model");
+
+        let _ = engine.test_update_state_machine_with_confidence(true, 0.90, 0.01);
+        assert!(engine.is_speaking());
+
+        // Reach frame 6 probe
+        for _ in 1..=6 {
+            let _ = engine.test_update_state_machine(false);
+        }
+        assert!(engine.is_speaking());
+        assert_eq!(engine.consecutive_silence_frames, 6);
+
+        // Stage 1 Fast Cutoff forces end
+        engine.force_speech_end();
+        assert!(!engine.is_speaking());
+        assert_eq!(engine.consecutive_silence_frames, 0);
+
+        // Subsequent silence frames should not trigger SpeechEnd
+        for _ in 1..=14 {
+            let ev = engine.test_update_state_machine(false);
+            assert_eq!(ev, None);
+        }
     }
 }

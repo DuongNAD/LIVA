@@ -107,10 +107,10 @@ impl Cfg {
 /// A loaded VieNeu voice: the four ONNX sessions, the tied embedding/head
 /// weights, and one selected speaker (anchor + in-context ref codes).
 pub struct VieNeuVoice {
-    sess_pre: Session,
-    sess_dec: Session,
-    sess_ac: Session,
-    sess_codec: Session,
+    sess_pre: Option<Session>,
+    sess_dec: Option<Session>,
+    sess_ac: Option<Session>,
+    sess_codec: Option<Session>,
 
     text_emb: Array2<f32>,  // (Vt, H)
     audio_emb: Array3<f32>, // (n_vq, Va, H)
@@ -138,6 +138,7 @@ pub struct VieNeuVoice {
     rng: StdRng,
     voice_name: String,
     sample_rate: u32,
+    last_active: std::time::Instant,
 }
 
 impl VieNeuVoice {
@@ -254,10 +255,10 @@ impl VieNeuVoice {
         );
 
         Ok(Self {
-            sess_pre,
-            sess_dec,
-            sess_ac,
-            sess_codec,
+            sess_pre: Some(sess_pre),
+            sess_dec: Some(sess_dec),
+            sess_ac: Some(sess_ac),
+            sess_codec: Some(sess_codec),
             text_emb,
             audio_emb,
             anchor,
@@ -276,6 +277,7 @@ impl VieNeuVoice {
             rng,
             voice_name,
             sample_rate: 48_000,
+            last_active: std::time::Instant::now(),
         })
     }
 
@@ -323,13 +325,75 @@ impl VieNeuVoice {
         self.sample_rate
     }
 
+    pub fn is_loaded(&self) -> bool {
+        self.sess_pre.is_some()
+            && self.sess_dec.is_some()
+            && self.sess_ac.is_some()
+            && self.sess_codec.is_some()
+    }
+
+    /// Lazily re-instantiate the 4 ONNX sessions if previously unloaded.
+    pub fn ensure_sessions(&mut self) -> Result<(), String> {
+        self.last_active = std::time::Instant::now();
+        if !self.is_loaded() {
+            let intra = std::env::var("LIVA_VIENEU_THREADS")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(4);
+            let need = |name: &str| -> std::path::PathBuf { self.model_dir.join(name) };
+            let build = |name: &str| -> Result<Session, String> {
+                Session::builder()
+                    .map_err(|e| e.to_string())?
+                    .with_intra_threads(intra)
+                    .map_err(|e| e.to_string())?
+                    .with_inter_threads(1)
+                    .map_err(|e| e.to_string())?
+                    .commit_from_file(need(name))
+                    .map_err(|e| format!("load {}: {}", name, e))
+            };
+            let sess_pre = build("vieneu_prefill.onnx")?;
+            let sess_dec = build("vieneu_decode_step.onnx")?;
+            let sess_ac = build("vieneu_acoustic_cached.onnx")?;
+            let sess_codec = build("moss_audio_tokenizer_decode_full.onnx")?;
+            tracing::info!("VieNeu-TTS ONNX sessions lazily reloaded into RAM");
+            self.sess_pre = Some(sess_pre);
+            self.sess_dec = Some(sess_dec);
+            self.sess_ac = Some(sess_ac);
+            self.sess_codec = Some(sess_codec);
+        }
+        Ok(())
+    }
+
+    /// Explicitly unload VieNeu ONNX sessions to reclaim ~480MB from RAM.
+    pub fn unload_sessions(&mut self) {
+        if self.is_loaded() {
+            tracing::info!("VieNeu-TTS idle unload: reclaiming ONNX sessions from RAM (~480MB)");
+            self.sess_pre = None;
+            self.sess_dec = None;
+            self.sess_ac = None;
+            self.sess_codec = None;
+        }
+    }
+
+    pub fn check_idle_unload(&mut self, idle_duration: std::time::Duration) -> bool {
+        if self.is_loaded() && self.last_active.elapsed() >= idle_duration {
+            self.unload_sessions();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn voice_name(&self) -> &str {
         &self.voice_name
     }
 
     /// Synthesize UTF-8 text (already number/date-normalized upstream) to mono
     /// f32 samples at [`Self::sample_rate`] (48 kHz).
-    pub fn synthesize(&mut self, text: &str) -> Result<Vec<f32>, String> {
+    ///
+    /// Trả kèm chuỗi phoneme từ sea-g2p — nguyên liệu cho timeline viseme (VC-8).
+    pub fn synthesize(&mut self, text: &str) -> Result<(Vec<f32>, String), String> {
+        self.ensure_sessions()?;
         let phonemes = self.g2p.phonemize(&punc::apply_punc_norm(text));
         if phonemes.trim().is_empty() {
             return Err(format!("no phonemes produced for text: {:?}", text));
@@ -374,8 +438,11 @@ impl VieNeuVoice {
             "inputs_embeds" => Value::from_array((vec![1usize, t_prompt, h_dim], prompt_embeds))
                 .map_err(|e| e.to_string())?,
         ];
-        let pre = self
+        let sess_pre = self
             .sess_pre
+            .as_mut()
+            .ok_or_else(|| "VieNeu prefill session not initialized".to_string())?;
+        let pre = sess_pre
             .run(pre_inputs)
             .map_err(|e| format!("prefill run: {}", e))?;
         let mut past_k: Vec<Vec<f32>> = Vec::with_capacity(self.cfg.n_layers);
@@ -443,8 +510,11 @@ impl VieNeuVoice {
                         .into(),
                 ));
             }
-            let out = self
+            let sess_dec = self
                 .sess_dec
+                .as_mut()
+                .ok_or_else(|| "VieNeu decode session not initialized".to_string())?;
+            let out = sess_dec
                 .run(feed)
                 .map_err(|e| format!("decode_step run: {}", e))?;
             let hd = extract_f32(&out, "hidden")?;
@@ -457,9 +527,10 @@ impl VieNeuVoice {
         }
 
         if frames.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), phonemes));
         }
         self.decode_codes(&frames)
+            .map(|samples| (samples, phonemes))
     }
 
     /// rows: each is `[text_or_slot_id, code_0..code_{n_vq-1}]`. Returns a
@@ -554,8 +625,11 @@ impl VieNeuVoice {
             "past_k_0" => empty_k,
             "past_v_0" => empty_v,
         ];
-        let out = self
+        let sess_ac = self
             .sess_ac
+            .as_mut()
+            .ok_or_else(|| "VieNeu acoustic session not initialized".to_string())?;
+        let out = sess_ac
             .run(seed_inputs)
             .map_err(|e| format!("acoustic seed run: {}", e))?;
         let hidden = extract_f32(&out, "hidden")?; // (1,2,H) → 2*H
@@ -591,8 +665,11 @@ impl VieNeuVoice {
                 "past_k_0" => Value::from_array((vec![1usize, loc_heads, past_len, loc_hd], pk.clone())).map_err(|e| e.to_string())?,
                 "past_v_0" => Value::from_array((vec![1usize, loc_heads, past_len, loc_hd], pv.clone())).map_err(|e| e.to_string())?,
             ];
-            let out = self
+            let sess_ac = self
                 .sess_ac
+                .as_mut()
+                .ok_or_else(|| "VieNeu acoustic session not initialized".to_string())?;
+            let out = sess_ac
                 .run(step_inputs)
                 .map_err(|e| format!("acoustic step run: {}", e))?;
             let hd = extract_f32(&out, "hidden")?; // (1,1,H)
@@ -608,7 +685,10 @@ impl VieNeuVoice {
         // EOS when argmax(slot0 · text_emb^T) == speech_generation_end.
         let slot0v = ArrayView1::from(&slot0);
         let text_logits = self.text_emb.dot(&slot0v);
-        let eos = argmax(text_logits.as_slice().unwrap()) as i64 == self.cfg.eos_speech;
+        let logits_slice = text_logits.as_slice().ok_or_else(|| {
+            "VieNeu acoustic step: text_logits tensor is non-contiguous".to_string()
+        })?;
+        let eos = argmax(logits_slice) as i64 == self.cfg.eos_speech;
         Ok((codes, eos))
     }
 
@@ -640,8 +720,11 @@ impl VieNeuVoice {
             "audio_codes" => Value::from_array((vec![1usize, t, n], codes)).map_err(|e| e.to_string())?,
             "audio_code_lengths" => Value::from_array((vec![1usize], vec![t as i32])).map_err(|e| e.to_string())?,
         ];
-        let out = self
+        let sess_codec = self
             .sess_codec
+            .as_mut()
+            .ok_or_else(|| "VieNeu codec session not initialized".to_string())?;
+        let out = sess_codec
             .run(inputs)
             .map_err(|e| format!("codec decode run: {}", e))?;
         // audio: (1, channels, samples) → mean over channels → mono.
@@ -1163,5 +1246,17 @@ mod config_validation_tests {
         assert!(speaker_anchor(&speaker, &weights, &valid, &short, &valid, 1e-5).is_err());
         assert!(speaker_anchor(&speaker, &weights, &valid, &valid, &short, 1e-5).is_err());
         assert!(speaker_anchor(&speaker, &weights, &valid, &valid, &valid, -1.0).is_err());
+    }
+
+    #[test]
+    fn non_contiguous_array_as_slice_is_none() {
+        let arr = array![1.0f32, 2.0, 3.0, 4.0];
+        let slice_view = arr.slice(ndarray::s![..;2]);
+        assert!(slice_view.as_slice().is_none());
+        let res: Result<&[f32], String> = slice_view.as_slice().ok_or_else(|| {
+            "VieNeu acoustic step: text_logits tensor is non-contiguous".to_string()
+        });
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("non-contiguous"));
     }
 }

@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::webrtc::frame::{OP_FLUSH, VoiceFrame, speaker_frames};
-use crate::webrtc::session::SessionAec;
+use crate::webrtc::session::{SessionAec, VoiceSessionAudio};
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -17,6 +17,10 @@ fn push_tts_token(
     } else {
         chunker.push(&spoken)
     }
+}
+
+fn lipsync_phoneme_enabled() -> bool {
+    crate::tts::viseme::lipsync_enabled_from(std::env::var("LIVA_LIPSYNC").ok().as_deref())
 }
 
 #[derive(Clone)]
@@ -88,6 +92,7 @@ pub enum PipelineEvent {
     VadEnd(Vec<f32>), // Raw audio samples
     Interrupted,
     SpeakText(String),
+    ResetDsp,
     SttCompleted {
         session_id: u64,
         result: Result<Option<String>, String>,
@@ -142,6 +147,12 @@ impl WebRTCPipelineHandle {
             .try_send(PipelineEvent::SpeakText(text))
             .map_err(|e| format!("Failed to queue SpeakText: {e}"))
     }
+
+    pub fn reset_dsp(&self) -> Result<(), String> {
+        self.event_tx
+            .try_send(PipelineEvent::ResetDsp)
+            .map_err(|e| format!("Failed to queue ResetDsp: {e}"))
+    }
 }
 
 pub struct WebRTCActor {
@@ -167,6 +178,7 @@ pub struct WebRTCActor {
     state_shared: Arc<AppState>,
     outgoing: VoiceOutbound,
     session_aec: SessionAec,
+    voice_session: Option<VoiceSessionAudio>,
 }
 
 impl WebRTCActor {
@@ -201,9 +213,29 @@ impl WebRTCActor {
             state_shared,
             outgoing,
             session_aec,
+            voice_session: None,
         };
 
         (handle, actor)
+    }
+
+    /// Attach connection-scoped DSP processors (VAD, GTCRN denoiser, AEC) to enable
+    /// state reset on session/turn completion.
+    pub fn with_voice_session(mut self, voice_session: VoiceSessionAudio) -> Self {
+        self.voice_session = Some(voice_session);
+        self
+    }
+
+    /// Reset recurrent states across VAD, GTCRN Denoiser, and AEC upon turn completion.
+    pub fn reset_turn_dsp(&self) {
+        if let Some(ref session) = self.voice_session {
+            session.reset_dsp();
+        } else if let Ok(mut guard) = self.session_aec.lock() {
+            let Some(ref mut aec) = *guard else {
+                return;
+            };
+            aec.reset();
+        }
     }
 
     pub async fn run(mut self) {
@@ -222,6 +254,9 @@ impl WebRTCActor {
                 PipelineEvent::SpeakText(text) => {
                     self.handle_speak_text(text).await;
                 }
+                PipelineEvent::ResetDsp => {
+                    self.reset_turn_dsp();
+                }
                 PipelineEvent::SttCompleted { session_id, result } => {
                     self.handle_stt_completed(session_id, result).await;
                 }
@@ -236,6 +271,7 @@ impl WebRTCActor {
                 }
             }
         }
+        self.reset_turn_dsp();
         info!("WebRTCActor control loop stopped.");
     }
 
@@ -253,6 +289,10 @@ impl WebRTCActor {
     }
 
     async fn handle_vad_end(&mut self, audio_data: Vec<f32>) {
+        if audio_data.is_empty() {
+            tracing::warn!("[WebRTCActor] Received empty audio_data in handle_vad_end, ignoring");
+            return;
+        }
         info!("🎙️ [VAD] Speech END detected. Processing audio...");
         self.cancel_active_operations().await;
         self.transition_to(PipelineState::VadEnd);
@@ -289,6 +329,7 @@ impl WebRTCActor {
     async fn handle_interrupted(&mut self) {
         info!("🎙️ [Pipeline] Interruption requested.");
         self.cancel_active_operations().await;
+        self.reset_turn_dsp();
         self.transition_to(PipelineState::Interrupted);
         self.transition_to(PipelineState::Idle);
     }
@@ -328,10 +369,12 @@ impl WebRTCActor {
             }
             Ok(_) => {
                 info!("[STT] Completed empty transcript. Standing by.");
+                self.reset_turn_dsp();
                 self.transition_to(PipelineState::Idle);
             }
             Err(e) => {
                 error!("[STT] Error: {}. Returning to Idle.", e);
+                self.reset_turn_dsp();
                 self.transition_to(PipelineState::Idle);
             }
         }
@@ -339,10 +382,21 @@ impl WebRTCActor {
 
     async fn spawn_llm_and_tts(&mut self, text: String) {
         let session_id = self.session_id;
-        let conversation_id = self.conversation_id.clone();
+        let conversation_id = if self.conversation_id.trim().is_empty() {
+            "default".to_string()
+        } else {
+            self.conversation_id.clone()
+        };
         let memory_scope =
             crate::agent::graph::ConversationMemoryScope::new("local", &conversation_id)
-                .expect("WebSocket conversation id must be valid");
+                .unwrap_or_else(|err| {
+                    tracing::warn!(
+                        conversation_id = %conversation_id,
+                        error = %err,
+                        "Invalid conversation scope, falling back to default"
+                    );
+                    crate::agent::graph::ConversationMemoryScope::default()
+                });
         let event_tx = self.event_tx.clone();
         let state_clone = Arc::clone(&self.state_shared);
         let active_session_id_llm = Arc::clone(&self.active_session_id);
@@ -355,10 +409,10 @@ impl WebRTCActor {
         let event_tx_llm = event_tx.clone();
         let active_session_id_llm_task = Arc::clone(&active_session_id_llm);
         let llm_handle = tokio::spawn(async move {
-            let checkpointer = crate::agent::memory::SqliteCheckpointer::new(
+            let checkpointer = Arc::new(crate::agent::memory::SqliteCheckpointer::new(
                 Arc::new(state_llm.db.clone()),
                 state_llm.crypto.clone(),
-            );
+            ));
             // Khoá là conversation_id, KHÔNG phải session_id: session_id tăng ở
             // mỗi sự kiện VAD nên dùng nó thì không bao giờ đọc lại được gì.
             let thread_id = conversation_id;
@@ -384,7 +438,7 @@ impl WebRTCActor {
             };
 
             // Build and run the graph
-            let graph = crate::agent::graph::build_pipeline_graph(
+            let mut graph = crate::agent::graph::build_pipeline_graph(
                 Arc::clone(&state_llm),
                 memory_scope,
                 llm_chunk_tx,
@@ -392,17 +446,12 @@ impl WebRTCActor {
                 session_id,
                 Arc::clone(&active_session_id_llm_task),
             );
+            graph.set_checkpointer(Arc::clone(&checkpointer), thread_id.clone());
 
             let run_res = graph.run(state).await;
 
             let result = match run_res {
-                Ok(final_state) => {
-                    let save_res = checkpointer.save_checkpoint(&thread_id, &final_state).await;
-                    if let Err(e) = save_res {
-                        error!("Failed to save checkpoint: {}", e);
-                    }
-                    Ok(())
-                }
+                Ok(_final_state) => Ok(()),
                 Err(e) => {
                     error!("Graph run error: {}", e);
                     Err(e)
@@ -430,6 +479,7 @@ impl WebRTCActor {
             let mut avatar_speech_filter = crate::tts::AvatarSpeechFilter::default();
             let mut seq_id = 0u32;
             let mut is_speaking = false;
+            let lipsync_phonemes = lipsync_phoneme_enabled();
 
             let mut process_and_send_chunk = |chunk: &str| -> Result<(), String> {
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
@@ -446,12 +496,45 @@ impl WebRTCActor {
                 let outcome = plan.synthesize(|| {
                     active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id
                 })?;
-                let audio_samples = outcome.samples;
-                let sample_rate = outcome.sample_rate;
 
                 if active_session_id_tts.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("Session cancelled post-inference".to_string());
                 }
+
+                // VC-8: phát timeline phoneme→viseme TRƯỚC các frame loa của
+                // cùng mẩu (cùng kênh FIFO ⇒ client nhận timeline trước khi có
+                // audio để áp). Kokoro fallback không có phoneme tin cậy → không
+                // phát, client tự rơi về đường RMS cũ.
+                if lipsync_phonemes && let Some(ref phonemes) = outcome.phonemes {
+                    let duration_ms = (outcome.samples.len() as f64
+                        / f64::from(outcome.sample_rate)
+                        * 1000.0) as u64;
+                    let cues = crate::tts::viseme::build_viseme_timeline(phonemes, duration_ms);
+                    if !cues.is_empty() {
+                        let payload = serde_json::json!({
+                            "turn_epoch": session_id,
+                            "base_seq_id": seq_id,
+                            "visemes": cues.iter()
+                                .map(|c| serde_json::json!({
+                                    "v": c.viseme.as_str(),
+                                    "t_ms": c.t_ms,
+                                }))
+                                .collect::<Vec<_>>(),
+                        });
+                        outgoing.blocking_send_speaker_if_current(
+                            &active_session_id_tts,
+                            session_id,
+                            VoiceFrame {
+                                op_code: crate::webrtc::frame::OP_VISME,
+                                seq_id,
+                                payload: bytes::Bytes::from(payload.to_string()),
+                            },
+                        )?;
+                    }
+                }
+
+                let audio_samples = outcome.samples;
+                let sample_rate = outcome.sample_rate;
                 info!(
                     turn_epoch = session_id,
                     backend = outcome.backend.as_str(),
@@ -528,6 +611,7 @@ impl WebRTCActor {
         if let Err(e) = result {
             error!("[LLM] Error: {}", e);
             self.cancel_active_operations().await;
+            self.reset_turn_dsp();
             self.transition_to(PipelineState::Idle);
         }
     }
@@ -539,6 +623,7 @@ impl WebRTCActor {
         if let Err(e) = result {
             error!("[TTS] Error: {}", e);
         }
+        self.reset_turn_dsp();
         self.transition_to(PipelineState::Idle);
     }
 
@@ -570,6 +655,7 @@ impl WebRTCActor {
 
 impl Drop for WebRTCActor {
     fn drop(&mut self) {
+        self.reset_turn_dsp();
         if let Some(h) = self.stt_handle.take() {
             h.abort();
         }

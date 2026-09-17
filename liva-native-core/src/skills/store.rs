@@ -77,8 +77,10 @@ impl<'a> SkillStore<'a> {
     /// khi chỉ có một nguồn sửa. Kiểu DAG (nhiều nhánh) là để G4 dùng: một bản vá
     /// do OpenSpace đề xuất có thể mọc từ một version cũ mà không ghi đè nhánh
     /// người dùng đang chạy.
-    pub fn upsert(&self, s: &super::LoadedSkill) -> Result<Option<String>, String> {
-        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
+    fn upsert_conn(
+        conn: &rusqlite::Connection,
+        s: &super::LoadedSkill,
+    ) -> Result<Option<String>, String> {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         let now = bay_gio();
         let dir = s.dir_path.to_string_lossy().to_string();
@@ -134,15 +136,26 @@ impl<'a> SkillStore<'a> {
         Ok(Some(version_id))
     }
 
+    pub fn upsert(&self, s: &super::LoadedSkill) -> Result<Option<String>, String> {
+        let skill = s.clone();
+        self.db
+            .writer_actor
+            .blocking_execute(move |conn| Self::upsert_conn(conn, &skill))
+    }
+
     /// Đồng bộ cả một cây skill. Trả về `(số skill, số version mới)`.
     pub fn sync_tree(&self, root: &std::path::Path) -> Result<(usize, usize), String> {
         let ds = super::load_skill_tree(root)?;
-        let mut moi = 0usize;
-        for s in &ds {
-            if self.upsert(s)?.is_some() {
-                moi += 1;
+        let ds_clone = ds.clone();
+        let moi = self.db.writer_actor.blocking_execute(move |conn| {
+            let mut count = 0usize;
+            for s in &ds_clone {
+                if Self::upsert_conn(conn, s)?.is_some() {
+                    count += 1;
+                }
             }
-        }
+            Ok(count)
+        })?;
         tracing::info!(
             "kho skill: {} skill từ {}, {} version mới",
             ds.len(),
@@ -153,7 +166,7 @@ impl<'a> SkillStore<'a> {
     }
 
     pub fn list(&self) -> Result<Vec<SkillRecord>, String> {
-        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
+        let conn = self.db.readers.get().map_err(|e| e.to_string())?;
         let mut st = conn
             .prepare(
                 "SELECT skill_id, name, description, dir_path, current_version_id, updated_at
@@ -179,7 +192,7 @@ impl<'a> SkillStore<'a> {
 
     /// Thân bài của bản hiện hành, dùng cho truy hồi.
     pub fn current_body(&self, skill_id: &str) -> Result<Option<String>, String> {
-        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
+        let conn = self.db.readers.get().map_err(|e| e.to_string())?;
         conn.query_row(
             "SELECT v.body FROM skills s
              JOIN skill_versions v ON v.version_id = s.current_version_id
@@ -197,7 +210,7 @@ impl<'a> SkillStore<'a> {
     /// (do lỗi hoặc do ai đó sửa DB tay) không được làm treo tiến trình.
     pub fn history(&self, skill_id: &str) -> Result<Vec<SkillVersion>, String> {
         const MAX_LICH_SU: usize = 1000;
-        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
+        let conn = self.db.readers.get().map_err(|e| e.to_string())?;
         let mut hien: Option<String> = conn
             .query_row(
                 "SELECT current_version_id FROM skills WHERE skill_id = ?1",
@@ -250,26 +263,28 @@ impl<'a> SkillStore<'a> {
 
     /// Ghi một tín hiệu chất lượng. **G2 chỉ ghi;** đọc nó vào xếp hạng là G3.
     pub fn record_signal(&self, s: &Signal) -> Result<i64, String> {
-        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
-        conn.execute(
-            "INSERT INTO skill_signals
-                 (skill_id, version_id, kind, actionability, evidence_status,
-                  failure_signature, merge_key, detail, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                s.skill_id,
-                s.version_id,
-                s.kind,
-                s.actionability,
-                s.evidence_status,
-                s.failure_signature,
-                s.merge_key,
-                s.detail,
-                bay_gio()
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(conn.last_insert_rowid())
+        let signal = s.clone();
+        self.db.writer_actor.blocking_execute(move |conn| {
+            conn.execute(
+                "INSERT INTO skill_signals
+                     (skill_id, version_id, kind, actionability, evidence_status,
+                      failure_signature, merge_key, detail, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    signal.skill_id,
+                    signal.version_id,
+                    signal.kind,
+                    signal.actionability,
+                    signal.evidence_status,
+                    signal.failure_signature,
+                    signal.merge_key,
+                    signal.detail,
+                    bay_gio()
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(conn.last_insert_rowid())
+        })
     }
 
     /// Đếm **vấn đề phân biệt** cho nhiều skill một lượt — đầu vào của prior G3.
@@ -300,7 +315,7 @@ impl<'a> SkillStore<'a> {
         if skill_ids.is_empty() {
             return Ok(ra);
         }
-        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
+        let conn = self.db.readers.get().map_err(|e| e.to_string())?;
 
         // Một placeholder cho mỗi id. Không nội suy chuỗi vào SQL — `skill_id` đến
         // từ payload lệnh trên WS 8002 (không xác thực), nên nó là dữ liệu người
@@ -343,7 +358,7 @@ impl<'a> SkillStore<'a> {
     /// Dùng cho việc báo cáo/chẩn đoán ("chuyện này xảy ra bao nhiêu lần rồi?").
     /// Cho prior xếp hạng thì dùng [`Self::signal_tallies`] — xem lý do ở đó.
     pub fn signal_counts(&self, skill_id: &str) -> Result<Vec<(String, i64)>, String> {
-        let conn = self.db.writer.get().map_err(|e| e.to_string())?;
+        let conn = self.db.readers.get().map_err(|e| e.to_string())?;
         let mut st = conn
             .prepare(
                 "SELECT kind, COUNT(*) FROM skill_signals

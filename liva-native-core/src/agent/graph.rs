@@ -1,7 +1,9 @@
+use super::memory::SqliteCheckpointer;
 use super::state::AgentState;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 pub type NodeFuture = Pin<Box<dyn Future<Output = Result<AgentState, String>> + Send>>;
 pub type NodeFn = Box<dyn Fn(AgentState) -> NodeFuture + Send + Sync>;
@@ -10,6 +12,8 @@ pub struct StateGraph {
     nodes: HashMap<String, NodeFn>,
     edges: HashMap<String, String>,
     entry_point: String,
+    checkpointer: Option<Arc<SqliteCheckpointer>>,
+    thread_id: Option<String>,
 }
 
 impl Default for StateGraph {
@@ -24,6 +28,8 @@ impl StateGraph {
             nodes: HashMap::new(),
             edges: HashMap::new(),
             entry_point: "START".to_string(),
+            checkpointer: None,
+            thread_id: None,
         }
     }
 
@@ -47,7 +53,55 @@ impl StateGraph {
         self.entry_point = node.to_string();
     }
 
+    /// Attach an optional checkpointer and thread ID for intermediate per-node checkpointing.
+    pub fn with_checkpointer(
+        mut self,
+        checkpointer: Arc<SqliteCheckpointer>,
+        thread_id: impl Into<String>,
+    ) -> Self {
+        self.checkpointer = Some(checkpointer);
+        self.thread_id = Some(thread_id.into());
+        self
+    }
+
+    /// Set an optional checkpointer and thread ID on an existing mutable graph.
+    pub fn set_checkpointer(
+        &mut self,
+        checkpointer: Arc<SqliteCheckpointer>,
+        thread_id: impl Into<String>,
+    ) {
+        self.checkpointer = Some(checkpointer);
+        self.thread_id = Some(thread_id.into());
+    }
+
+    /// Clear the checkpointer configuration.
+    pub fn clear_checkpointer(&mut self) {
+        self.checkpointer = None;
+        self.thread_id = None;
+    }
+
     pub async fn run(&self, initial_state: AgentState) -> Result<AgentState, String> {
+        let cp_ref = self.checkpointer.as_deref().zip(self.thread_id.as_deref());
+        self.run_internal(initial_state, cp_ref).await
+    }
+
+    /// Execute the graph with an explicit checkpointer and thread ID,
+    /// persisting intermediate state after each node completes.
+    pub async fn run_with_checkpoint(
+        &self,
+        initial_state: AgentState,
+        thread_id: &str,
+        checkpointer: &SqliteCheckpointer,
+    ) -> Result<AgentState, String> {
+        self.run_internal(initial_state, Some((checkpointer, thread_id)))
+            .await
+    }
+
+    async fn run_internal(
+        &self,
+        initial_state: AgentState,
+        active_checkpoint: Option<(&SqliteCheckpointer, &str)>,
+    ) -> Result<AgentState, String> {
         let mut state = initial_state;
         if state.current_node.is_empty() || state.current_node == "START" {
             state.current_node = self.entry_point.clone();
@@ -69,16 +123,69 @@ impl StateGraph {
                     state.current_node = "__END__".to_string();
                 }
             }
+
+            // Persist intermediate state snapshot immediately after node execution & edge resolution
+            if let Some((cp, tid)) = active_checkpoint {
+                match cp.save_checkpoint(tid, &state).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            "[StateGraph] Failed to save checkpoint for thread '{}' after node '{}': {}",
+                            tid,
+                            current,
+                            e
+                        );
+                    }
+                }
+            }
         }
 
         Ok(state)
     }
+
+    /// Resume execution of an interrupted thread from its last saved checkpoint.
+    ///
+    /// Returns `Ok(Some(final_state))` if an in-progress interrupted turn was found and completed,
+    /// or `Ok(None)` if no checkpoint was found or if the checkpoint was already completed (`__END__`).
+    pub async fn resume(&self, thread_id: &str) -> Result<Option<AgentState>, String> {
+        let cp = self
+            .checkpointer
+            .as_ref()
+            .ok_or_else(|| "No checkpointer configured for StateGraph".to_string())?;
+
+        let saved = cp.load_checkpoint(thread_id).await?;
+        match saved {
+            Some(state) if !state.current_node.is_empty() && state.current_node != "__END__" => {
+                let final_state = self.run_with_checkpoint(state, thread_id, cp).await?;
+                Ok(Some(final_state))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub async fn run_single_node(
+        &self,
+        node_name: &str,
+        state: AgentState,
+    ) -> Result<AgentState, String> {
+        let node_fn = self
+            .nodes
+            .get(node_name)
+            .ok_or_else(|| format!("Node '{}' not found", node_name))?;
+        node_fn(state).await
+    }
 }
 
+mod complexity;
 mod intent;
 mod memory_scope;
 mod pipeline;
 
+pub use complexity::{
+    COMPLEX_ABSOLUTE_THRESHOLD, ComplexityCentroids, DEFAULT_ROUTING_THRESHOLD, DoKho,
+    EMBEDDING_DIM, RoutingTier, phan_loai_do_kho, phan_loai_do_kho_with_embedder, route_llm,
+    route_llm_with_embedder,
+};
 pub use intent::{Intent, route_intent};
 pub use memory_scope::{
     ConversationMemoryScope, memory_system_message, persist_turn, persist_turn_scoped,
@@ -92,6 +199,37 @@ use intent::tach_nhan_tin;
 use memory_scope::{persist_embedded_turn, rag_top_k, recall_embedded_context};
 #[cfg(test)]
 use pipeline::{finish_streamed_completion, send_llm_chunk_if_current};
+
+#[cfg(test)]
+pub(crate) fn state_khong_co_embedder() -> std::sync::Arc<crate::AppState> {
+    use std::sync::Arc;
+    let capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
+        64,
+        64,
+        crate::vision::capture::PixelFormat::Rgba,
+    ));
+    Arc::new(crate::AppState {
+        db: crate::db::DatabasePool::new_in_memory().expect("in-memory db"),
+        crypto: crate::crypto::EncryptionEngine::new("00000000000000000000000000000000"),
+        stt: tokio::sync::Mutex::new(crate::stt::SttManager::new("non_existent_dir")),
+        tts: tokio::sync::Mutex::new(None),
+        tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
+        llm: tokio::sync::Mutex::new(
+            crate::llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
+        ),
+        vad: tokio::sync::Mutex::new(None),
+        denoiser: tokio::sync::Mutex::new(None),
+        turn_shadow: tokio::sync::Mutex::new(None),
+        aec: tokio::sync::Mutex::new(None),
+        mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
+        embedder: crate::AppState::empty_embedder(),
+        vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
+            capturer,
+            crate::vision::VisionConfig::default(),
+        )),
+        active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
+    })
+}
 
 #[cfg(test)]
 mod tach_nhan_tin_tests {
@@ -490,39 +628,10 @@ mod rag_tests {
     use super::{
         ConversationMemoryScope, persist_embedded_turn, persist_turn, persist_turn_scoped,
         rag_top_k, recall_context, recall_context_scoped, recall_embedded_context,
+        state_khong_co_embedder,
     };
     use crate::AppState;
     use std::sync::Arc;
-
-    /// AppState tối thiểu, **không có model embedding** — đúng tình huống của
-    /// người dùng chưa tải model về.
-    fn state_khong_co_embedder() -> Arc<AppState> {
-        let capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
-            64,
-            64,
-            crate::vision::capture::PixelFormat::Rgba,
-        ));
-        Arc::new(AppState {
-            db: crate::db::DatabasePool::new_in_memory().expect("in-memory db"),
-            crypto: crate::crypto::EncryptionEngine::new("00000000000000000000000000000000"),
-            stt: tokio::sync::Mutex::new(crate::stt::SttManager::new("non_existent_dir")),
-            tts: tokio::sync::Mutex::new(None),
-            tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(
-                crate::llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
-            ),
-            vad: tokio::sync::Mutex::new(None),
-            denoiser: tokio::sync::Mutex::new(None),
-            turn_shadow: tokio::sync::Mutex::new(None),
-            aec: tokio::sync::Mutex::new(None),
-            mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
-            embedder: tokio::sync::Mutex::new(None),
-            vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
-                capturer,
-                crate::vision::VisionConfig::default(),
-            )),
-        })
-    }
 
     fn dem_vector(state: &Arc<AppState>) -> i64 {
         let conn = state.db.readers.get().unwrap();

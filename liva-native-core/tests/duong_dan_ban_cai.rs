@@ -245,6 +245,64 @@ fn ban_cai_tim_duoc_model_trong_thu_muc_nguoi_dung() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// **C1c** — các model ONNX của STT (Parakeet), Silero VAD, GTCRN denoise, và Smart Turn
+/// tải về thư mục người dùng (`models/`) phải được tìm thấy đúng cách qua các hàm resolve.
+#[test]
+fn ban_cai_tim_duoc_onnx_models_stt_vad_denoise_turn() {
+    let _g = nam_khoa();
+    let cwd_gia = thu_muc_tam("cwd");
+    let home = thu_muc_tam("home");
+    let models_dir = home.join("models");
+    std::fs::create_dir_all(&models_dir).unwrap();
+    std::fs::write(models_dir.join("parakeet_vi.onnx"), b"parakeet_model").unwrap();
+    std::fs::write(models_dir.join("parakeet_vi_vocab.json"), b"parakeet_vocab").unwrap();
+    std::fs::write(models_dir.join("silero_vad_v6.onnx"), b"silero_vad").unwrap();
+    std::fs::write(models_dir.join("gtcrn_simple.onnx"), b"gtcrn").unwrap();
+    std::fs::write(models_dir.join("smart_turn_v3.2_cpu.onnx"), b"smart_turn").unwrap();
+
+    trong_moi_truong_ban_cai(&cwd_gia, &home, || {
+        // 1. Parakeet model & vocab
+        let (parakeet_model, parakeet_vocab) = liva_native_core::stt::resolve_parakeet_paths();
+        assert!(
+            parakeet_model.exists(),
+            "bản cài không tìm ra parakeet_vi.onnx: nhận {:?}",
+            parakeet_model
+        );
+        assert!(
+            parakeet_vocab.exists(),
+            "bản cài không tìm ra parakeet_vi_vocab.json: nhận {:?}",
+            parakeet_vocab
+        );
+
+        // 2. Silero VAD v6
+        let vad_model = liva_native_core::webrtc::vad::resolve_model_path("models/nemotron-asr");
+        assert!(
+            vad_model.exists(),
+            "bản cài không tìm ra silero_vad_v6.onnx: nhận {:?}",
+            vad_model
+        );
+
+        // 3. GTCRN Denoise
+        let denoise_model = liva_native_core::webrtc::denoise::resolve_model_path();
+        assert!(
+            denoise_model.exists(),
+            "bản cài không tìm ra gtcrn_simple.onnx: nhận {:?}",
+            denoise_model
+        );
+
+        // 4. Smart Turn Shadow
+        let turn_model = liva_native_core::webrtc::turn_shadow::resolve_model_path();
+        assert!(
+            turn_model.exists(),
+            "bản cài không tìm ra smart_turn_v3.2_cpu.onnx: nhận {:?}",
+            turn_model
+        );
+    });
+
+    let _ = std::fs::remove_dir_all(&cwd_gia);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// **C1b** — tài nguyên đóng gói kèm installer nằm cạnh exe / trong `resources/`.
 ///
 /// Thuần (nhận `exe_dir` làm tham số) để test được mà không phải giả lập vị trí

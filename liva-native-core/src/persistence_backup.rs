@@ -189,12 +189,14 @@ pub fn backup_database(
     let mut database_guard = RemoveOnDrop::new(temporary_database.clone());
     let mut manifest_guard = RemoveOnDrop::new(temporary_manifest.clone());
 
-    {
-        let source = pool.writer.get()?;
-        source
-            .backup(DatabaseName::Main, &temporary_database, None)
-            .map_err(|error| BackupRestoreError::new(format!("online backup failed: {error}")))?;
-    }
+    let temp_db_path = temporary_database.clone();
+    pool.writer_actor
+        .blocking_execute(move |source| {
+            source
+                .backup(DatabaseName::Main, &temp_db_path, None)
+                .map_err(|error| format!("online backup failed: {error}"))
+        })
+        .map_err(BackupRestoreError::new)?;
     let schema_version = validate_sqlite(&temporary_database)
         .map_err(|error| BackupRestoreError::new(format!("backup validation failed: {error}")))?;
     sync_file(&temporary_database)

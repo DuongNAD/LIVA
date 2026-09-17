@@ -179,7 +179,12 @@ export type WSServerEvent =
     | 'explorer_cat_result'
     | 'explorer_error'
     // Utility
-    | 'pong';
+    | 'pong'
+    // AI Expert Suggestion (khi phát hiện câu hỏi phức tạp cần expert model)
+    | 'ai_expert_suggestion'
+    // Vision Screen Inspection (hướng mắt và đầu avatar theo toạ độ ROI màn hình)
+    | 'vision_inspect'
+    | 'vision_inspect_clear';
 
 // ─── Unified Message Envelope ───
 export interface WSMessage<P = unknown> {
@@ -192,6 +197,15 @@ export interface TaskPlanReplyPayload {
     taskId: string;
     message: string;
     done: boolean;
+}
+
+export interface AIExpertSuggestionPayload {
+    turn_id?: string;
+    complexity?: string;
+    message?: string;
+    goi_y_expert?: boolean;
+    do_kho?: string;
+    user_text?: string;
 }
 
 export interface GPUSetupPayload {
@@ -207,3 +221,9 @@ export interface EnvConfigPayload {
     content: string;
     vault?: Record<string, string>;
 }
+
+export interface VisionInspectPayload {
+    x: number;
+    y: number;
+}
+

@@ -35,13 +35,13 @@ impl AgentDispatcher {
     }
 
     pub async fn register_agent(&self, role: AgentRole, sender: mpsc::Sender<AgentMessage>) {
-        let mut senders = self.senders.write().unwrap();
+        let mut senders = self.senders.write().unwrap_or_else(|p| p.into_inner());
         senders.insert(role, sender);
     }
 
     pub async fn dispatch(&self, msg: AgentMessage) -> Result<(), String> {
         let sender = {
-            let senders = self.senders.read().unwrap();
+            let senders = self.senders.read().unwrap_or_else(|p| p.into_inner());
             senders.get(&msg.to).cloned()
         };
         if let Some(sender) = sender {

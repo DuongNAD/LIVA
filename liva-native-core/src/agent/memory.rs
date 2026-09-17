@@ -14,26 +14,12 @@ impl SqliteCheckpointer {
     }
 
     pub async fn save_checkpoint(&self, thread_id: &str, state: &AgentState) -> Result<(), String> {
-        let pool = self.db.clone();
-        let crypto = self.crypto.clone();
-        let tid = thread_id.to_string();
-        let st = state.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.writer.get().map_err(|e| e.to_string())?;
-            let state_json = serde_json::to_string(&st).map_err(|e| e.to_string())?;
-            let encrypted = crypto.encrypt(&state_json)?;
-
-            conn.execute(
-                "INSERT OR REPLACE INTO agent_checkpoints (thread_id, state_json) VALUES (?1, ?2)",
-                rusqlite::params![tid, encrypted],
-            )
-            .map_err(|e| e.to_string())?;
-
-            Ok::<(), String>(())
-        })
-        .await
-        .map_err(|e| e.to_string())?
+        let state_json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+        let encrypted = self.crypto.encrypt(&state_json)?;
+        self.db
+            .writer_actor
+            .save_agent_checkpoint(thread_id.to_string(), encrypted)
+            .await
     }
 
     pub async fn load_checkpoint(&self, thread_id: &str) -> Result<Option<AgentState>, String> {

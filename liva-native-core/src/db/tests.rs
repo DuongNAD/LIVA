@@ -1054,4 +1054,306 @@ mod tests {
             assert_eq!(res.unwrap(), 42);
         }
     }
+
+    #[test]
+    fn test_ebbinghaus_decay_fresh_vs_old_vs_reinforced() {
+        use crate::crypto::EncryptionEngine;
+        use crate::db::{
+            DatabasePool, MEMORY_VECTOR_DIM, MetadataFilter, persist_conversation_event_vector,
+            reinforce_memory_access, search_similar_vectors,
+        };
+
+        let pool = DatabasePool::new_in_memory().unwrap();
+        let conn = pool.writer.get().unwrap();
+        let engine = EncryptionEngine::new("test-ebbinghaus-key-32-bytes!!");
+
+        let dummy_vector = vec![0.1f32; MEMORY_VECTOR_DIM];
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let thirty_days_ms = 30 * 86_400_000i64;
+
+        // 1. Fresh memory (created now)
+        persist_conversation_event_vector(
+            &conn,
+            &engine,
+            "turn_fresh",
+            "Nội dung mới hôm nay",
+            &dummy_vector,
+            "local",
+            "default",
+        )
+        .unwrap();
+
+        // 2. Old memory from 30 days ago (access_count = 0)
+        persist_conversation_event_vector(
+            &conn,
+            &engine,
+            "turn_old",
+            "Nội dung từ 30 ngày trước",
+            &dummy_vector,
+            "local",
+            "default",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE vectors_meta SET created_at = ?1, last_accessed_at = 0, access_count = 0 WHERE vec_id = 'turn_old'",
+            rusqlite::params![now_ms - thirty_days_ms],
+        )
+        .unwrap();
+
+        // 3. Old memory from 30 days ago but reinforced 10 times (access_count = 10)
+        persist_conversation_event_vector(
+            &conn,
+            &engine,
+            "turn_reinforced",
+            "Nội dung quan trọng được củng cố nhiều lần",
+            &dummy_vector,
+            "local",
+            "default",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE vectors_meta SET created_at = ?1, last_accessed_at = 0, access_count = 10 WHERE vec_id = 'turn_reinforced'",
+            rusqlite::params![now_ms - thirty_days_ms],
+        )
+        .unwrap();
+
+        let filter = MetadataFilter::default();
+        let hits = search_similar_vectors(&conn, &engine, &dummy_vector, 5, &filter).unwrap();
+        assert_eq!(hits.len(), 3);
+
+        let fresh_hit = hits.iter().find(|h| h.vec_id == "turn_fresh").unwrap();
+        let old_hit = hits.iter().find(|h| h.vec_id == "turn_old").unwrap();
+        let reinforced_hit = hits.iter().find(|h| h.vec_id == "turn_reinforced").unwrap();
+
+        // Fresh memory score should be higher than 30-day-old memory score
+        assert!(fresh_hit.score > old_hit.score);
+
+        // Ratio of old memory to fresh memory score should be close to exp(-1.0) ~= 0.368
+        let decay_ratio = old_hit.score / fresh_hit.score;
+        assert!(
+            (decay_ratio - 0.368).abs() < 0.05,
+            "Decay ratio {} should be close to 0.368",
+            decay_ratio
+        );
+
+        // Reinforced memory should decay slower: reinforced score > unreinforced old score
+        assert!(
+            reinforced_hit.score > old_hit.score,
+            "Reinforced memory score ({}) should be higher than old memory score ({})",
+            reinforced_hit.score,
+            old_hit.score
+        );
+
+        // Test dynamic reinforcement update
+        let updated = reinforce_memory_access(&conn, &["turn_old"], now_ms).unwrap();
+        assert_eq!(updated, 1);
+
+        let (last_acc, acc_cnt): (i64, i64) = conn
+            .query_row(
+                "SELECT last_accessed_at, access_count FROM vectors_meta WHERE vec_id = 'turn_old'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(last_acc, now_ms);
+        assert_eq!(acc_cnt, 1);
+    }
+
+    #[test]
+    fn test_l3_csr_graph_database_sync_and_ppr() {
+        use crate::db::{DatabasePool, insert_l3_edge_sync, insert_l3_node_sync};
+
+        let pool = DatabasePool::new_in_memory().unwrap();
+
+        // Insert nodes and edges via synchronized functions
+        insert_l3_node_sync(
+            &pool,
+            "project_liva",
+            "Project LIVA",
+            "{\"type\":\"system\"}",
+        )
+        .unwrap();
+
+        insert_l3_node_sync(
+            &pool,
+            "hipporag_engine",
+            "HippoRAG Memory Engine",
+            "{\"layer\":\"L3\"}",
+        )
+        .unwrap();
+
+        insert_l3_edge_sync(
+            &pool,
+            "project_liva",
+            "hipporag_engine",
+            "incorporates",
+            1.0,
+        )
+        .unwrap();
+
+        // Verify SQLite table contents
+        let conn = pool.writer.get().unwrap();
+        let node_count: i64 = conn
+            .query_row("SELECT count(*) FROM l3_nodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(node_count, 2);
+
+        let edge_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM l3_edges WHERE obsolete = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(edge_count, 1);
+
+        // Verify in-memory CSR graph cache was updated synchronously
+        let graph = pool.csr_graph.read().unwrap();
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(graph.edge_count(), 2); // Bidirectional in CSR
+
+        let seeds = [("project_liva", 1.0f32)];
+        let ppr = graph.personalized_pagerank_readonly(&seeds, 3, 0.85, 2);
+        assert_eq!(ppr.len(), 2);
+
+        let node_ids: Vec<String> = ppr.into_iter().map(|(id, _)| id).collect();
+        assert!(node_ids.contains(&"project_liva".to_string()));
+        assert!(node_ids.contains(&"hipporag_engine".to_string()));
+    }
+
+    #[test]
+    fn test_turn_telemetry_schema_and_migration_10() {
+        let pool = DatabasePool::new_in_memory().expect("create in-memory db");
+        let conn = pool.writer.get().expect("get connection");
+
+        // 1. Kiểm tra PRAGMA user_version >= 10
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("query PRAGMA user_version");
+        assert!(
+            version >= 10,
+            "PRAGMA user_version phải ít nhất là 10 sau khi bổ sung turn_telemetry"
+        );
+
+        // 2. Kiểm tra bảng turn_telemetry tồn tại
+        let table_exists: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='turn_telemetry'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("check table existence");
+        assert_eq!(
+            table_exists, 1,
+            "Bảng turn_telemetry phải được tạo thành công"
+        );
+
+        // 3. Kiểm tra các index hỗ trợ tối ưu truy vấn
+        let index_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('idx_telemetry_ts', 'idx_telemetry_model')",
+                [],
+                |r| r.get(0),
+            )
+            .expect("check index existence");
+        assert_eq!(
+            index_count, 2,
+            "Cả 2 index idx_telemetry_ts và idx_telemetry_model phải tồn tại"
+        );
+
+        // 4. Test ghi và đọc record trực tiếp
+        let record = TurnTelemetryRecord {
+            id: None,
+            event_id: Some("test-m10".to_string()),
+            ts: 123456,
+            entry_path: "chat".to_string(),
+            model_id: "qwen-test".to_string(),
+            prompt_tokens: 10,
+            completion_tokens: 20,
+            latency_ms: 150,
+            outcome: "ok".to_string(),
+            err_kind: None,
+        };
+        let row_id = record_turn_telemetry(&conn, &record).expect("insert record");
+        assert!(row_id > 0);
+
+        let summary = get_telemetry_summary(&conn, None).expect("get summary");
+        assert_eq!(summary.total_turns, 1);
+        assert_eq!(summary.avg_latency_ms, 150.0);
+    }
+
+    #[test]
+    fn test_ebbinghaus_decay_ancient_memory_floor_clamp() {
+        use crate::crypto::EncryptionEngine;
+        use crate::db::{
+            DatabasePool, MEMORY_VECTOR_DIM, MetadataFilter, persist_conversation_event_vector,
+            search_similar_vectors,
+        };
+
+        let pool = DatabasePool::new_in_memory().unwrap();
+        let conn = pool.writer.get().unwrap();
+        let engine = EncryptionEngine::new("test-ebbinghaus-floor-clamp-32b!");
+
+        let dummy_vector = vec![0.1f32; MEMORY_VECTOR_DIM];
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let one_year_ms = 365 * 86_400_000i64;
+
+        // 1. Fresh memory (created now)
+        persist_conversation_event_vector(
+            &conn,
+            &engine,
+            "turn_fresh",
+            "Nội dung mới hôm nay",
+            &dummy_vector,
+            "local",
+            "default",
+        )
+        .unwrap();
+
+        // 2. Ancient memory from 365 days ago (access_count = 0)
+        persist_conversation_event_vector(
+            &conn,
+            &engine,
+            "turn_ancient",
+            "Nội dung từ 1 năm trước",
+            &dummy_vector,
+            "local",
+            "default",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE vectors_meta SET created_at = ?1, last_accessed_at = 0, access_count = 0 WHERE vec_id = 'turn_ancient'",
+            rusqlite::params![now_ms - one_year_ms],
+        )
+        .unwrap();
+
+        let filter = MetadataFilter::default();
+        let hits = search_similar_vectors(&conn, &engine, &dummy_vector, 5, &filter).unwrap();
+        assert_eq!(hits.len(), 2);
+
+        let fresh_hit = hits.iter().find(|h| h.vec_id == "turn_fresh").unwrap();
+        let ancient_hit = hits.iter().find(|h| h.vec_id == "turn_ancient").unwrap();
+
+        // Without clamp(0.05, 1.0):
+        // delta_days = 365, tau = 30 => exp(-365/30) = exp(-12.1667) ~= 0.00000517
+        // With clamp(0.05, 1.0):
+        // decay_factor = 0.05 exactly.
+        let decay_ratio = ancient_hit.score / fresh_hit.score;
+        assert!(
+            (decay_ratio - 0.05).abs() < 0.001,
+            "Ancient memory decay ratio {} must be clamped to lower floor 0.05",
+            decay_ratio
+        );
+        assert!(
+            ancient_hit.score >= 0.049,
+            "Ancient memory score {} must not vanish below the 0.05 floor",
+            ancient_hit.score
+        );
+    }
 }

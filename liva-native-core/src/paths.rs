@@ -355,6 +355,42 @@ pub fn configured_mmproj_path() -> Option<std::path::PathBuf> {
     Some(dir.join(mmproj))
 }
 
+fn expert_model_path_from_config(config: &serde_json::Value) -> Option<std::path::PathBuf> {
+    let ai = config.get("ai").cloned().unwrap_or(serde_json::Value::Null);
+    let provider = ai
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("local");
+    if provider != "local" {
+        return None;
+    }
+    let dir = ai
+        .get("localModelsDir")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(models_dir_fallback);
+    let expert = ai
+        .get("expertModel")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?;
+    Some(dir.join(expert))
+}
+
+/// Expert GGUF từ biến môi trường LIVA_EXPERT_MODEL_PATH (ưu tiên cao nhất cho test/deployment)
+/// hoặc từ file config; `None` khi chưa cấu hình hoặc provider không phải local.
+/// Không fallback về `DEFAULT_EXPERT_MODEL` khi thiếu cấu hình.
+pub fn configured_expert_model_path() -> Option<std::path::PathBuf> {
+    if let Ok(path_str) = std::env::var("LIVA_EXPERT_MODEL_PATH") {
+        let trimmed = path_str.trim();
+        if !trimmed.is_empty() {
+            return Some(std::path::PathBuf::from(trimmed));
+        }
+    }
+    let config = read_config_file();
+    expert_model_path_from_config(&config)
+}
+
 /// Thư mục model cấu hình, fallback về vùng dữ liệu người dùng.
 pub fn configured_models_dir() -> std::path::PathBuf {
     let config = read_config_file();
@@ -393,4 +429,107 @@ pub fn validate_model_path(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod expert_model_path_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn co_expert_model_va_local_models_dir() {
+        let cfg = json!({
+            "ai": {
+                "provider": "local",
+                "localModelsDir": "E:\\AI_Models",
+                "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"
+            }
+        });
+        let path = expert_model_path_from_config(&cfg);
+        assert_eq!(
+            path,
+            Some(
+                std::path::PathBuf::from("E:\\AI_Models")
+                    .join("gemma-4-12B-it-qat-UD-Q4_K_XL.gguf")
+            )
+        );
+    }
+
+    #[test]
+    fn co_expert_model_nhung_khong_co_local_models_dir_thi_dung_fallback() {
+        let cfg = json!({
+            "ai": {
+                "provider": "local",
+                "expertModel": "custom_expert.gguf"
+            }
+        });
+        let path = expert_model_path_from_config(&cfg);
+        assert_eq!(path, Some(models_dir_fallback().join("custom_expert.gguf")));
+    }
+
+    #[test]
+    fn provider_khac_local_thi_tra_ve_none_du_co_expert_model() {
+        for provider in ["cloud", "openai", "anthropic", "custom"] {
+            let cfg = json!({
+                "ai": {
+                    "provider": provider,
+                    "localModelsDir": "E:\\AI_Models",
+                    "expertModel": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"
+                }
+            });
+            assert_eq!(
+                expert_model_path_from_config(&cfg),
+                None,
+                "provider={provider} phải trả về None"
+            );
+        }
+    }
+
+    #[test]
+    fn thieu_khoa_expert_model_tra_ve_none_khong_fallback() {
+        let cfg = json!({
+            "ai": {
+                "provider": "local",
+                "localModelsDir": "E:\\AI_Models",
+                "routerModel": "router.gguf"
+            }
+        });
+        assert_eq!(
+            expert_model_path_from_config(&cfg),
+            None,
+            "thiếu expertModel không được fallback về DEFAULT_EXPERT_MODEL"
+        );
+    }
+
+    #[test]
+    fn expert_model_chuoi_rong_tra_ve_none() {
+        let cfg = json!({
+            "ai": {
+                "provider": "local",
+                "localModelsDir": "E:\\AI_Models",
+                "expertModel": ""
+            }
+        });
+        assert_eq!(expert_model_path_from_config(&cfg), None);
+    }
+
+    #[test]
+    fn config_rong_hoac_thieu_ai_tra_ve_none() {
+        assert_eq!(expert_model_path_from_config(&json!({})), None);
+        assert_eq!(expert_model_path_from_config(&json!({"ai": null})), None);
+        assert_eq!(
+            expert_model_path_from_config(&json!({"ai": "invalid"})),
+            None
+        );
+    }
+
+    #[test]
+    fn configured_expert_model_path_doc_tu_file_neu_co() {
+        if config_file_path().exists() {
+            let path = configured_expert_model_path();
+            let cfg = read_config_file();
+            let expected = expert_model_path_from_config(&cfg);
+            assert_eq!(path, expected);
+        }
+    }
 }

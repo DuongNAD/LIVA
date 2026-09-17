@@ -31,11 +31,12 @@ fn test_state() -> Arc<AppState> {
         mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
             "test_vault",
         )),
-        embedder: tokio::sync::Mutex::new(None),
+        embedder: liva_native_core::AppState::empty_embedder(),
         vision: tokio::sync::Mutex::new(liva_native_core::vision::VisionManager::new(
             mock_capturer,
             liva_native_core::vision::VisionConfig::default(),
         )),
+        active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
     })
 }
 

@@ -91,6 +91,14 @@ fn embedded_manifest_pin_dung_wake_v2_artifact() {
 }
 
 #[test]
+fn embedded_manifest_pin_dung_wake_v3_artifact() {
+    assert_eq!(
+        embedded_file_hash("models/wake_liva_en_v3.onnx").unwrap(),
+        "459d3a803f199c6b228fe711b4a1eeb9dc0da2cd51ea36c5ff7e6a2c45cf0202"
+    );
+}
+
+#[test]
 fn canonicalization_chan_symlink_hoac_junction_escape() {
     let root = temp_dir();
     let outside = temp_dir();

@@ -31,6 +31,16 @@ pub struct ConversationMemoryScope {
     recall_category: Option<String>,
 }
 
+impl Default for ConversationMemoryScope {
+    fn default() -> Self {
+        Self {
+            owner_domain: "memory_owner:local".to_string(),
+            conversation_category: "conversation:default".to_string(),
+            recall_category: None,
+        }
+    }
+}
+
 impl ConversationMemoryScope {
     pub fn new(owner_id: &str, conversation_id: &str) -> Result<Self, String> {
         Self::build(owner_id, conversation_id, false)
@@ -81,6 +91,7 @@ impl ConversationMemoryScope {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn persist_embedded_turn(
     conn: &rusqlite::Connection,
     engine: &crate::crypto::EncryptionEngine,
@@ -100,6 +111,7 @@ pub(super) fn persist_embedded_turn(
     )
 }
 
+#[allow(dead_code)]
 pub(super) fn recall_embedded_context(
     conn: &rusqlite::Connection,
     engine: &crate::crypto::EncryptionEngine,
@@ -143,14 +155,19 @@ pub async fn recall_context_scoped(
     if query.trim().is_empty() {
         return None;
     }
+    let engine = {
+        let guard = state.embedder.read().await;
+        match guard.as_ref() {
+            Some(e) => e.clone(),
+            None => return None,
+        }
+    };
     let state = Arc::clone(state);
     let query = query.to_string();
     let scope = scope.clone();
     let top_k = rag_top_k();
 
     tokio::task::spawn_blocking(move || {
-        let mut guard = state.embedder.blocking_lock();
-        let engine = guard.as_mut()?;
         let vector = match engine.embed_query(&query) {
             Ok(v) => v,
             Err(e) => {
@@ -158,16 +175,92 @@ pub async fn recall_context_scoped(
                 return None;
             }
         };
-        drop(guard);
 
         let conn = state.db.readers.get().ok()?;
-        match recall_embedded_context(&conn, &state.crypto, &scope, &query, &vector, top_k) {
-            Ok(memories) => memories,
+        let hits = match crate::db::search_hybrid_vectors(
+            &conn,
+            &state.crypto,
+            &query,
+            &vector,
+            top_k,
+            &scope.recall_filter(),
+            1.0,
+            1.0,
+        ) {
+            Ok(h) => h,
             Err(e) => {
                 tracing::warn!("[RAG] search_hybrid_vectors that bai: {}", e);
-                None
+                Vec::new()
+            }
+        };
+
+        // 1. Dynamic Reinforcement: non-blocking touch of recalled memory vectors
+        if !hits.is_empty() {
+            let recalled_vec_ids: Vec<String> = hits.iter().map(|h| h.vec_id.clone()).collect();
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            state
+                .db
+                .writer_actor
+                .reinforce_memories(recalled_vec_ids, now_ms);
+        }
+
+        // 2. HippoRAG Knowledge Graph multi-hop retrieval
+        let mut graph_context = String::new();
+        if let Ok(graph) = state.db.csr_graph.read() {
+            let seeds = graph.find_seed_nodes(&query, 3);
+            if !seeds.is_empty() {
+                let seed_refs: Vec<(&str, f32)> =
+                    seeds.iter().map(|(id, w)| (id.as_str(), *w)).collect();
+                let ppr_nodes = graph.personalized_pagerank_readonly(&seed_refs, 3, 0.85, 3);
+                if !ppr_nodes.is_empty() {
+                    let mut lines = Vec::new();
+                    for (node_id, score) in ppr_nodes {
+                        if let Some(idx) = graph.get_node_index(&node_id) {
+                            let label = graph.get_node_label(idx).unwrap_or(&node_id);
+                            let props = graph.get_node_properties(idx).unwrap_or("{}");
+                            if props != "{}" && !props.is_empty() {
+                                lines.push(format!(
+                                    "- [Tri thức] {}: {} (kích hoạt: {:.2})",
+                                    label, props, score
+                                ));
+                            } else {
+                                lines.push(format!(
+                                    "- [Tri thức] {} (kích hoạt: {:.2})",
+                                    label, score
+                                ));
+                            }
+                        }
+                    }
+                    if !lines.is_empty() {
+                        graph_context =
+                            format!("\n[HippoRAG Knowledge Graph]\n{}", lines.join("\n"));
+                    }
+                }
             }
         }
+
+        if hits.is_empty() && graph_context.is_empty() {
+            return None;
+        }
+
+        let mut memories = hits
+            .iter()
+            .map(|hit| format!("- {}", hit.content.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if !graph_context.is_empty() {
+            if memories.is_empty() {
+                memories = graph_context.trim_start().to_string();
+            } else {
+                memories.push_str(&graph_context);
+            }
+        }
+
+        Some(memories)
     })
     .await
     .ok()
@@ -210,24 +303,35 @@ pub async fn persist_turn_scoped(
     let scope = scope.clone();
     let content = format!("Người dùng: {}\nLIVA: {}", user_text.trim(), reply.trim());
 
-    let _ = tokio::task::spawn_blocking(move || {
-        let mut guard = state.embedder.blocking_lock();
-        let Some(engine) = guard.as_mut() else { return };
-        let vector = match engine.embed_passage(&content) {
-            Ok(v) => v,
-            Err(e) => {
+    let engine = {
+        let guard = state.embedder.read().await;
+        match guard.as_ref() {
+            Some(e) => e.clone(),
+            None => return,
+        }
+    };
+
+    let content_for_embed = content.clone();
+    let vector =
+        match tokio::task::spawn_blocking(move || engine.embed_passage(&content_for_embed)).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => {
                 tracing::warn!("[RAG] embed_passage that bai: {}", e);
                 return;
             }
+            Err(e) => {
+                tracing::warn!("[RAG] embed_passage task panicked: {}", e);
+                return;
+            }
         };
-        drop(guard);
 
-        let Ok(conn) = state.db.writer.get() else {
-            return;
-        };
-        if let Err(e) = persist_embedded_turn(&conn, &state.crypto, &scope, &content, &vector) {
-            tracing::warn!("[RAG] upsert_vector that bai: {}", e);
-        }
-    })
-    .await;
+    let crypto = Arc::new(state.crypto.clone());
+    if let Err(e) = state
+        .db
+        .writer_actor
+        .persist_turn(scope, content, vector, crypto)
+        .await
+    {
+        tracing::warn!("[RAG] DbActor persist_turn that bai: {}", e);
+    }
 }

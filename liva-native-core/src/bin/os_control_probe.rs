@@ -30,7 +30,7 @@ use liva_native_core::agent::graph::{Intent, route_intent};
 use liva_native_core::integrations::os_control::{MediaArgs, VolumeArgs};
 use liva_native_core::llm::embedder::{EmbeddingEngine, resolve_model_dir};
 use liva_native_core::llm::tool_calling::{
-    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, compile_selection_prompt,
+    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, ToolEmbedder, compile_selection_prompt,
     parse_selection, rank_tools, validate_arguments,
 };
 use liva_native_core::mcp::server::NativeMcpServer;
@@ -124,7 +124,7 @@ fn main() {
 
     // ── Tầng 1: truy hồi ────────────────────────────────────────────────────
     let dir = resolve_model_dir();
-    let mut embedder = match EmbeddingEngine::load(&dir) {
+    let embedder = match EmbeddingEngine::load(&dir) {
         Ok(e) => Some(e),
         Err(e) => {
             println!("!!! Không nạp được embedder ({}): {e}", dir.display());
@@ -142,7 +142,7 @@ fn main() {
             let top = rank_tools(
                 &catalog,
                 cau,
-                embedder.as_mut().map(|e| e as _),
+                embedder.as_ref().map(|e| e as &dyn ToolEmbedder),
                 DEFAULT_TOP_K,
             );
             let vao_prompt: Vec<&str> = top
@@ -218,7 +218,7 @@ fn main() {
         let top = rank_tools(
             &catalog,
             cau,
-            embedder.as_mut().map(|e| e as _),
+            embedder.as_ref().map(|e| e as &dyn ToolEmbedder),
             DEFAULT_TOP_K,
         );
         let ung_vien: Vec<_> = top.iter().map(|&i| &catalog.tools()[i]).collect();

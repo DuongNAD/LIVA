@@ -320,7 +320,7 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         match llm::embedder::EmbeddingEngine::load(&dir) {
             Ok(e) => {
                 info!("Đã nạp model embedding từ {dir:?} — bộ nhớ dài hạn BẬT");
-                Some(e)
+                Some(Arc::new(e))
             }
             Err(e) => {
                 tracing::warn!("Bộ nhớ dài hạn TẮT: {e}");
@@ -344,7 +344,8 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         aec: tokio::sync::Mutex::new(voice.aec),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
-        embedder: tokio::sync::Mutex::new(embedder),
+        embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
+        active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
     });
 
     Ok(Boot {
@@ -399,6 +400,7 @@ pub fn spawn_background_services(
     // 1. Chốt phóng chiếu event→vector ngoài đường nóng của chat.
     tasks.push(crate::memory_consolidation::spawn_projection_consumer(
         state.db.clone(),
+        state.crypto.clone(),
     ));
 
     // 2. Retention chỉ chạy khi có policy opt-in. Mặc định không tự xóa dữ liệu.
@@ -484,19 +486,48 @@ pub fn spawn_background_services(
         }));
     }
 
-    // 6. Giải phóng session TTS khi rảnh 5 phút.
+    // 6. Multi-Model Idle Memory Reclamation (TTS & STT).
     //
-    //    Trước 26/07/2026 việc này CHỈ có ở gateway. App desktop — thứ người
-    //    dùng thật sự chạy, và chạy cả ngày — không bao giờ trả lại session
-    //    ONNX của Kokoro/Piper.
+    //    Periodically checks both TTS (Kokoro ~80MB, VieNeu ~500MB) and STT (Parakeet ~2.4GB)
+    //    engines for idle inactivity. If inactive for >= timeout (default: 300s / 5 minutes),
+    //    unloads heavy ONNX sessions to return up to ~2.98GB RAM to the operating system.
+    //
+    //    Lock-Safety & Non-Blocking Design:
+    //    - Uses `try_lock()` via `check_voice_idle_unload`. If either engine is
+    //      actively synthesizing or transcribing speech, the lock attempt fails immediately,
+    //      and the maintenance task skips that engine without contending with hot audio pipelines.
+    //    - Unloading drops ONNX sessions in-memory without holding locks across file I/O.
+    //    - Subsequent synthesis or transcription requests lazily reload models on demand.
     {
         let state = state.clone();
         tasks.push(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            let interval_secs = std::env::var("LIVA_IDLE_CHECK_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(60);
+            let idle_timeout_secs = std::env::var("LIVA_MODEL_IDLE_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(300); // Default: 300s (5 minutes)
+            let timeout = std::time::Duration::from_secs(idle_timeout_secs);
+
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            interval.tick().await; // Skip initial tick at boot
+
             loop {
                 interval.tick().await;
-                if let Some(tts) = state.tts.lock().await.as_ref() {
-                    tts.check_idle_unload();
+                let report = check_voice_idle_unload(&state, timeout);
+                if report.tts_unloaded {
+                    tracing::info!(
+                        "[Maintenance] Reclaimed idle TTS model memory (timeout: {}s)",
+                        idle_timeout_secs
+                    );
+                }
+                if report.stt_unloaded {
+                    tracing::info!(
+                        "[Maintenance] Reclaimed idle STT Parakeet model memory (~2.4GB, timeout: {}s)",
+                        idle_timeout_secs
+                    );
                 }
             }
         }));
@@ -532,6 +563,37 @@ pub fn spawn_background_services(
         }));
     }
 
+    // 9. Periodic SQLite WAL checkpoint maintenance (PASSIVE).
+    //
+    //    Runs on the dedicated DbActor writer thread to prevent unbounded growth of
+    //    the SQLite -wal journal file during continuous multi-hour sessions without
+    //    blocking concurrent readers or IPC commands.
+    {
+        let db = state.db.clone();
+        tasks.push(tokio::spawn(async move {
+            let interval_secs = std::env::var("LIVA_WAL_CHECKPOINT_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(900); // Default: 15 minutes
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            interval.tick().await; // Skip first tick so we don't checkpoint immediately at startup
+
+            loop {
+                interval.tick().await;
+                match db.writer_actor.checkpoint_wal().await {
+                    Ok(()) => {
+                        tracing::debug!(
+                            "[Maintenance] Periodic WAL checkpoint completed successfully"
+                        );
+                    }
+                    Err(err) => {
+                        tracing::warn!("[Maintenance] Periodic WAL checkpoint failed: {err}");
+                    }
+                }
+            }
+        }));
+    }
+
     // 8. Governor ưu tiên CPU: hạ tiến trình xuống BELOW_NORMAL khi có game.
     //
     //    Là `std::thread` chứ không phải task tokio vì `SetPriorityClass` tác
@@ -548,6 +610,55 @@ pub fn spawn_background_services(
     }
 
     tasks
+}
+
+/// Result report from a voice engine idle unload sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VoiceIdleUnloadReport {
+    pub tts_unloaded: bool,
+    pub stt_unloaded: bool,
+    /// Estimated memory returned to OS in bytes (~580MB for TTS, ~2.4GB for STT)
+    pub approx_reclaimed_bytes: u64,
+}
+
+/// Helper function to perform a strictly non-blocking idle check on both TTS and STT engines.
+///
+/// Uses `try_lock()` for both engines. If an engine is currently active (synthesizing
+/// or transcribing audio), its lock attempt fails immediately without blocking the caller,
+/// and that engine is skipped for this cycle.
+///
+/// If inactive for >= `timeout`, unloads heavy ONNX sessions to return up to ~2.98GB RAM to the OS.
+/// Returns a [`VoiceIdleUnloadReport`] summarizing which models were unloaded and estimated bytes freed.
+pub fn check_voice_idle_unload(
+    state: &AppState,
+    timeout: std::time::Duration,
+) -> VoiceIdleUnloadReport {
+    let mut tts_unloaded = false;
+    let mut stt_unloaded = false;
+    let mut approx_reclaimed_bytes = 0u64;
+
+    // 1. TTS check: Kokoro (~80MB) and VieNeu (~500MB)
+    if let Ok(guard) = state.tts.try_lock()
+        && let Some(ref tts) = *guard
+        && tts.check_idle_unload_timeout(timeout)
+    {
+        tts_unloaded = true;
+        approx_reclaimed_bytes += 580 * 1024 * 1024;
+    }
+
+    // 2. STT check: Parakeet-vi (~2.4GB)
+    if let Ok(mut stt) = state.stt.try_lock()
+        && stt.check_idle_unload(timeout)
+    {
+        stt_unloaded = true;
+        approx_reclaimed_bytes += 2400 * 1024 * 1024;
+    }
+
+    VoiceIdleUnloadReport {
+        tts_unloaded,
+        stt_unloaded,
+        approx_reclaimed_bytes,
+    }
 }
 
 /// Huỷ mọi dịch vụ nền và đợi chúng dừng hẳn.
@@ -692,5 +803,50 @@ mod tests {
         // `can + DU_PHONG` phải dùng saturating_add: tràn sẽ quấn về số nhỏ và
         // biến điều kiện thành "đủ VRAM", đúng ngược ý.
         assert_eq!(super::gpu_layers_theo_vram(u64::MAX, u64::MAX), 0);
+    }
+
+    #[tokio::test]
+    async fn check_voice_idle_unload_non_blocking_when_locked() {
+        let db = db::DatabasePool::new_in_memory().expect("in-memory db");
+        let stt_manager = stt::SttManager::new("non_existent_dir");
+        let llm_manager = llm::LlamaRouterManager::new(512, 0).expect("llm manager");
+        let capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
+            8,
+            8,
+            crate::vision::capture::PixelFormat::Rgba,
+        ));
+        let state = Arc::new(AppState {
+            db,
+            crypto: crate::crypto::EncryptionEngine::new("00000000000000000000000000000000"),
+            stt: tokio::sync::Mutex::new(stt_manager),
+            tts: tokio::sync::Mutex::new(None),
+            tts_player: tts::audio::TtsAudioPlayer::new(None),
+            llm: tokio::sync::Mutex::new(llm_manager),
+            vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
+            mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
+            vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
+                capturer,
+                crate::vision::VisionConfig::default(),
+            )),
+            embedder: AppState::empty_embedder(),
+            active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
+        });
+
+        // Simulate active transcription by holding state.stt lock
+        let stt_guard = state.stt.lock().await;
+
+        // check_voice_idle_unload MUST NOT block or deadlock when STT lock is held
+        let report = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            check_voice_idle_unload(&state, std::time::Duration::from_secs(300))
+        })
+        .await
+        .expect("check_voice_idle_unload must return immediately without blocking");
+
+        // STT was busy, so it must not be unloaded
+        assert!(!report.stt_unloaded);
+        drop(stt_guard);
     }
 }

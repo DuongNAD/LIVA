@@ -383,7 +383,7 @@ fn test_schema_version_and_tables_verification() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .expect("query user_version");
     assert_eq!(version, db::SCHEMA_VERSION);
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     // Verify tables exist
     let count_idemp: i64 = conn

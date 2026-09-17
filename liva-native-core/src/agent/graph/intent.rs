@@ -3,6 +3,8 @@
 pub enum Intent {
     /// Hỏi về nội dung màn hình → nhánh vision.
     Vision,
+    /// Hỏi thời tiết / nhiệt độ / trời mưa → nhánh mcp_tool_exec get_weather.
+    Weather { location: Option<String> },
     /// Điều khiển thiết bị → nhánh tool_exec.
     SmartHome {
         device: &'static str,
@@ -199,7 +201,7 @@ pub(super) fn tach_nhan_tin(text: &str) -> Option<(String, String, Option<String
 ///
 /// Dùng `is_alphanumeric` chứ không phải `is_ascii_alphanumeric` để giữ nguyên
 /// chữ tiếng Việt có dấu — `đèn`, `bật`, `tắt` phải là một token trọn vẹn.
-fn tokenize(text: &str) -> Vec<String> {
+pub(super) fn tokenize(text: &str) -> Vec<String> {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|s| !s.is_empty())
@@ -208,7 +210,7 @@ fn tokenize(text: &str) -> Vec<String> {
 }
 
 /// Câu có chứa cụm từ (dãy token liên tiếp) này không?
-fn has_phrase(tokens: &[String], phrase: &[&str]) -> bool {
+pub(super) fn has_phrase(tokens: &[String], phrase: &[&str]) -> bool {
     if phrase.is_empty() || tokens.len() < phrase.len() {
         return false;
     }
@@ -218,8 +220,111 @@ fn has_phrase(tokens: &[String], phrase: &[&str]) -> bool {
 }
 
 /// Câu có chứa **nguyên** từ này không (không phải chuỗi con).
-fn has_word(tokens: &[String], word: &str) -> bool {
+pub(super) fn has_word(tokens: &[String], word: &str) -> bool {
     tokens.iter().any(|t| t == word)
+}
+
+/// Tách ý định và địa điểm thời tiết nếu có.
+pub(super) fn tach_thoi_tiet(text: &str, tokens: &[String]) -> Option<Option<String>> {
+    let la_thoi_tiet = has_phrase(tokens, &["thời", "tiết"])
+        || has_phrase(tokens, &["dự", "báo", "thời", "tiết"])
+        || has_phrase(tokens, &["nhiệt", "độ"])
+        || has_phrase(tokens, &["mưa", "không"])
+        || has_phrase(tokens, &["có", "mưa"])
+        || (has_word(tokens, "mưa")
+            && (has_word(tokens, "hôm") || has_word(tokens, "mai") || has_word(tokens, "trời")))
+        || has_word(tokens, "weather");
+
+    if !la_thoi_tiet {
+        return None;
+    }
+
+    let goc: Vec<&str> = text.split_whitespace().collect();
+    let gap: Vec<String> = goc
+        .iter()
+        .map(|t| crate::wake::normalize_for_match(t))
+        .collect();
+
+    // 1. Tìm sau "ở", "tại", "khu vực"
+    for i in 0..gap.len() {
+        if gap[i] == "o"
+            || gap[i] == "tai"
+            || (gap[i] == "khu" && i + 1 < gap.len() && gap[i + 1] == "vuc")
+        {
+            let start = if gap[i] == "khu" { i + 2 } else { i + 1 };
+            if start < goc.len() {
+                let mut end = goc.len();
+                while end > start {
+                    let last_norm = &gap[end - 1];
+                    if matches!(
+                        last_norm.as_str(),
+                        "hom" | "nay" | "the" | "nao" | "nhi" | "khong" | "nhe" | "a"
+                    ) {
+                        end -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                if end > start {
+                    let loc = goc[start..end]
+                        .join(" ")
+                        .trim_matches(|c: char| !c.is_alphanumeric())
+                        .to_string();
+                    if !loc.is_empty() {
+                        return Some(Some(loc));
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Tìm ngay sau cụm "thời tiết" nếu từ kế tiếp không phải từ chỉ thời gian / câu hỏi
+    for i in 0..gap.len().saturating_sub(1) {
+        if gap[i] == "thoi" && gap[i + 1] == "tiet" {
+            let start = i + 2;
+            if start < goc.len() {
+                let mut end = goc.len();
+                while end > start {
+                    let last_norm = &gap[end - 1];
+                    if matches!(
+                        last_norm.as_str(),
+                        "hom"
+                            | "nay"
+                            | "the"
+                            | "nao"
+                            | "nhi"
+                            | "khong"
+                            | "nhe"
+                            | "a"
+                            | "mai"
+                            | "sao"
+                            | "chua"
+                    ) {
+                        end -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                if end > start {
+                    let first_norm = &gap[start];
+                    if !matches!(
+                        first_norm.as_str(),
+                        "hom" | "nay" | "mai" | "the" | "ra" | "gio" | "bay" | "sao"
+                    ) {
+                        let loc = goc[start..end]
+                            .join(" ")
+                            .trim_matches(|c: char| !c.is_alphanumeric())
+                            .to_string();
+                        if !loc.is_empty() {
+                            return Some(Some(loc));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Some(None)
 }
 
 /// Suy ý định từ câu của người dùng.
@@ -262,6 +367,11 @@ pub fn route_intent(text: &str) -> Intent {
         || has_phrase(&tokens, &["trên", "màn"])
     {
         return Intent::Vision;
+    }
+
+    // ── Thời tiết / Nhiệt độ / Mưa ──────────────────────────────────────────
+    if let Some(location) = tach_thoi_tiet(text, &tokens) {
+        return Intent::Weather { location };
     }
 
     // ── Điều khiển máy: âm lượng / phát nhạc (U19) ─────────────────────────
@@ -365,5 +475,42 @@ pub fn route_intent(text: &str) -> Intent {
     match (device, action) {
         (Some(device), Some(action)) => Intent::SmartHome { device, action },
         _ => Intent::Chat,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_weather_intent_routing() {
+        assert_eq!(
+            route_intent("check thời tiết nay"),
+            Intent::Weather { location: None }
+        );
+        assert_eq!(
+            route_intent("thời tiết hôm nay thế nào"),
+            Intent::Weather { location: None }
+        );
+        assert_eq!(
+            route_intent("ngoài trời có mưa không"),
+            Intent::Weather { location: None }
+        );
+        assert_eq!(
+            route_intent("nhiệt độ bây giờ bao nhiêu"),
+            Intent::Weather { location: None }
+        );
+        assert_eq!(
+            route_intent("thời tiết ở Đà Nẵng hôm nay"),
+            Intent::Weather {
+                location: Some("Đà Nẵng".to_string())
+            }
+        );
+        assert_eq!(
+            route_intent("dự báo thời tiết tại Hà Nội"),
+            Intent::Weather {
+                location: Some("Hà Nội".to_string())
+            }
+        );
     }
 }

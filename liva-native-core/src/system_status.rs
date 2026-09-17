@@ -131,7 +131,10 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
     let denoise = co_module!(state.denoiser);
     let aec = co_module!(state.aec);
     let turn_shadow = co_module!(state.turn_shadow);
-    let embedder = co_module!(state.embedder);
+    let embedder = match state.embedder.try_read() {
+        Ok(g) => g.is_some(),
+        Err(_) => true,
+    };
 
     let voice_status = if stt_status == "offline" || tts_status == "offline" {
         "degraded"

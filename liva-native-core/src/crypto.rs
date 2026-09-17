@@ -100,6 +100,12 @@ impl EncryptionEngine {
                  Đặt LIVA_ENCRYPTION_KEY thành một khoá bí mật 32 byte cho dữ liệu thật."
             );
         }
+        Self::new_rescue(key_str)
+    }
+
+    /// Khởi tạo engine dùng cho mục đích giải mã cứu hộ (rekey / recovery).
+    /// Tuyệt đối KHÔNG phát cảnh báo giả khi sử dụng khoá mặc định để đọc bản ghi cũ.
+    pub fn new_rescue(key_str: &str) -> Self {
         let mut legacy_key = [0u8; 32];
         let bytes = key_str.as_bytes();
         let len = bytes.len().min(32);
@@ -583,5 +589,14 @@ mod tests {
         let b = EncryptionEngine::new("11111111111111111111111111111111");
         let enc = a.encrypt("x").unwrap();
         assert_eq!(b.try_decrypt(&enc), Err(DecryptError::AuthFailed));
+    }
+
+    #[test]
+    fn new_rescue_equivalent_to_new() {
+        let engine_new = EncryptionEngine::new("test-key-rescue-verification-32");
+        let engine_rescue = EncryptionEngine::new_rescue("test-key-rescue-verification-32");
+        assert_eq!(engine_new.key_id(), engine_rescue.key_id());
+        let encrypted = engine_new.encrypt("secret_message").unwrap();
+        assert_eq!(engine_rescue.decrypt_read(&encrypted), "secret_message");
     }
 }

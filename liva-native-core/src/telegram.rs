@@ -388,7 +388,7 @@ async fn handle_message(
 // Download and transcribe voice messages using the local STT model
 async fn process_voice_message(
     bot: &Bot,
-    file_id: &str,
+    file_id: &teloxide::types::FileId,
     state: &Arc<AppState>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     struct TempFileGuard {
@@ -403,15 +403,42 @@ async fn process_voice_message(
         }
     }
 
-    let file = bot.get_file(file_id).await?;
+    let file = bot.get_file(file_id.clone()).await?;
     let file_url = format!(
         "https://api.telegram.org/file/bot{}/{}",
         bot.token(),
         file.path
     );
 
-    let response = reqwest::get(&file_url).await?;
-    let audio_bytes = response.bytes().await?;
+    // Hạn chờ tải file thoại từ Telegram API (mặc định 30 giây). Nếu mạng nghẽn hoặc mất kết nối,
+    // reqwest::Client có timeout tường minh sẽ ngắt và cảnh báo thay vì treo vô hạn.
+    let download_timeout_secs = std::env::var("LIVA_TELEGRAM_DOWNLOAD_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(download_timeout_secs))
+        .build()
+        .map_err(|e| format!("Failed to build reqwest client: {e}"))?;
+
+    let response = match client.get(&file_url).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            warn!(
+                "Tải tin nhắn thoại Telegram thất bại / quá hạn {}s: {}",
+                download_timeout_secs, e
+            );
+            return Err(format!("Tải voice Telegram thất bại: {e}").into());
+        }
+    };
+    let audio_bytes = match response.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("Đọc dữ liệu voice Telegram thất bại: {}", e);
+            return Err(format!("Đọc byte voice Telegram thất bại: {e}").into());
+        }
+    };
 
     let temp_input_path = std::env::temp_dir().join(format!("tg_voice_{}.ogg", file_id));
     let temp_output_path = std::env::temp_dir().join(format!("tg_voice_{}.raw", file_id));
@@ -429,24 +456,66 @@ async fn process_voice_message(
         .to_str()
         .ok_or("Temp output path is not valid UTF-8")?;
 
-    let status = tokio::process::Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-i",
-            input_path_str,
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-f",
-            "f32le",
-            output_path_str,
-        ])
-        .status()
-        .await?;
+    // Hạn chờ giải mã ffmpeg (mặc định 30 giây). Nếu ffmpeg treo chờ stdin hoặc lặp vô hạn,
+    // bọc trong `tokio::time::timeout` và huỷ cả cây tiến trình con (qua taskkill trên Windows
+    // và child.kill) để tránh rò rỉ tiến trình và giải phóng tài nguyên.
+    let ffmpeg_timeout_secs = std::env::var("LIVA_TELEGRAM_FFMPEG_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30);
 
-    if !status.success() {
-        return Err("ffmpeg decoding failed".into());
+    let mut cmd = tokio::process::Command::new("ffmpeg");
+    cmd.args([
+        "-y",
+        "-i",
+        input_path_str,
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-f",
+        "f32le",
+        output_path_str,
+    ]);
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn ffmpeg: {e}"))?;
+
+    let wait_child = child.wait();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(ffmpeg_timeout_secs),
+        wait_child,
+    )
+    .await
+    {
+        Ok(Ok(status)) => {
+            if !status.success() {
+                warn!("ffmpeg decoding failed with status: {:?}", status);
+                return Err("ffmpeg decoding failed".into());
+            }
+        }
+        Ok(Err(e)) => {
+            warn!("ffmpeg process wait error: {}", e);
+            return Err(format!("ffmpeg process wait error: {e}").into());
+        }
+        Err(_) => {
+            warn!(
+                "ffmpeg giải mã tin thoại quá hạn {}s; tiến hành huỷ cây tiến trình",
+                ffmpeg_timeout_secs
+            );
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(pid) = child.id() {
+                    let _ = tokio::process::Command::new("taskkill")
+                        .args(["/F", "/T", "/PID", &pid.to_string()])
+                        .status()
+                        .await;
+                }
+            }
+            let _ = child.kill().await;
+            return Err(format!("ffmpeg decoding timed out after {}s", ffmpeg_timeout_secs).into());
+        }
     }
 
     let raw_bytes = tokio::fs::read(&temp_output_path).await?;

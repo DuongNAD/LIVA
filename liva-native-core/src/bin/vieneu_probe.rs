@@ -123,7 +123,7 @@ fn main() {
     for (tag, out, text) in cases {
         let t = Instant::now();
         match engine.synthesize(&text) {
-            Ok(samples) => {
+            Ok((samples, _phonemes)) => {
                 let dur = samples.len() as f32 / sr as f32;
                 let wall = t.elapsed().as_secs_f32();
                 let rtf = if dur > 0.0 { wall / dur } else { f32::NAN };

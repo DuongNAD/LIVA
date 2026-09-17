@@ -28,11 +28,12 @@ fn test_state() -> Arc<AppState> {
         mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
             "test_vault",
         )),
-        embedder: tokio::sync::Mutex::new(None),
+        embedder: liva_native_core::AppState::empty_embedder(),
         vision: tokio::sync::Mutex::new(liva_native_core::vision::VisionManager::new(
             mock_capturer,
             liva_native_core::vision::VisionConfig::default(),
         )),
+        active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
     })
 }
 
@@ -79,6 +80,7 @@ fn widget_duoc_hoi_thoai_nhung_khong_duoc_quan_tri() {
         "message:pending",
         "message:confirm",
         "message:cancel",
+        "telemetry:summary",
     ] {
         duoc(CommandPrincipal::TauriWidget, command);
         duoc(CommandPrincipal::WebSocketWidget, command);
@@ -120,6 +122,7 @@ fn dashboard_duoc_quan_tri_ui_nhung_khong_co_cua_thoat_native_tho() {
         "consent:grant",
         "vision:set_config",
         "voice:set_vieneu_voice",
+        "telemetry:summary",
     ] {
         duoc(CommandPrincipal::TauriDashboard, command);
         duoc(CommandPrincipal::WebSocketDashboard, command);

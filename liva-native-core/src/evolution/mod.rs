@@ -11,6 +11,144 @@ pub trait CodeAgent: Send + Sync {
     ) -> impl std::future::Future<Output = Result<String, String>> + Send;
 }
 
+pub type CustomCodeFixFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>;
+pub type CustomCodeFixFn = dyn Fn(&str) -> CustomCodeFixFuture + Send + Sync;
+
+/// Trình xử lý backend cho `LlmCodeAgent`.
+pub enum CodeAgentBackend {
+    /// LLM engine cục bộ dựa trên `LlamaRouterManager`
+    LocalRouter(std::sync::Arc<tokio::sync::Mutex<crate::llm::LlamaRouterManager>>),
+    /// Trình xử lý tuỳ biến (cho mock engine, external provider, hoặc test harness)
+    Custom(std::sync::Arc<CustomCodeFixFn>),
+}
+
+/// Adapter kết nối vòng lặp tự sửa lỗi `CodeAgent` vào LLM engine thật hoặc provider tùy biến.
+pub struct LlmCodeAgent {
+    backend: CodeAgentBackend,
+    pub system_instruction: Option<String>,
+    pub temperature: f32,
+    pub top_p: f32,
+}
+
+impl LlmCodeAgent {
+    /// Khởi tạo `LlmCodeAgent` với `LlamaRouterManager` cục bộ
+    pub fn new_local(
+        llm: std::sync::Arc<tokio::sync::Mutex<crate::llm::LlamaRouterManager>>,
+    ) -> Self {
+        Self {
+            backend: CodeAgentBackend::LocalRouter(llm),
+            system_instruction: None,
+            temperature: 0.2,
+            top_p: 0.95,
+        }
+    }
+
+    /// Khởi tạo `LlmCodeAgent` với một async handler tùy biến
+    pub fn new_custom<F, Fut>(handler: F) -> Self
+    where
+        F: Fn(&str) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<String, String>> + Send + 'static,
+    {
+        Self {
+            backend: CodeAgentBackend::Custom(std::sync::Arc::new(move |prompt| {
+                Box::pin(handler(prompt))
+            })),
+            system_instruction: None,
+            temperature: 0.2,
+            top_p: 0.95,
+        }
+    }
+
+    pub fn with_system_instruction(mut self, instruction: impl Into<String>) -> Self {
+        self.system_instruction = Some(instruction.into());
+        self
+    }
+
+    pub fn with_sampling(mut self, temperature: f32, top_p: f32) -> Self {
+        self.temperature = temperature;
+        self.top_p = top_p;
+        self
+    }
+}
+
+/// Dựng prompt yêu cầu LLM sửa mã nguồn dựa trên log lỗi
+pub fn build_code_repair_prompt(
+    system_instruction: Option<&str>,
+    source_content: &str,
+    error_log: &str,
+) -> String {
+    let sys = system_instruction.unwrap_or(
+        "You are an expert software engineer specializing in Rust.\n\
+         Given the source code and error log, provide the exact fixed source code.\n\
+         Output ONLY the replacement code inside a single ```rust ... ``` code block without any conversational filler.",
+    );
+
+    format!(
+        "{sys}\n\n\
+         ### SOURCE CODE:\n\
+         ```rust\n\
+         {source_content}\n\
+         ```\n\n\
+         ### ERROR LOG:\n\
+         {error_log}\n\n\
+         ### FIXED SOURCE CODE:\n"
+    )
+}
+
+/// Bóc tách mã nguồn thuần từ phản hồi của LLM (gỡ bỏ code fences nếu có)
+pub fn extract_code_from_response(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(start_idx) = trimmed.find("```") {
+        let after_opening = &trimmed[start_idx + 3..];
+        // Bỏ qua tag ngôn ngữ (vd: `rust\n` hoặc `\n`)
+        let code_start = if let Some(newline_idx) = after_opening.find('\n') {
+            &after_opening[newline_idx + 1..]
+        } else {
+            after_opening
+        };
+
+        if let Some(end_idx) = code_start.rfind("```") {
+            return code_start[..end_idx].trim().to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+impl CodeAgent for LlmCodeAgent {
+    async fn suggest_fix(&self, source_content: &str, error_log: &str) -> Result<String, String> {
+        let prompt = build_code_repair_prompt(
+            self.system_instruction.as_deref(),
+            source_content,
+            error_log,
+        );
+
+        let raw_reply = match &self.backend {
+            CodeAgentBackend::Custom(handler) => handler(&prompt).await?,
+            CodeAgentBackend::LocalRouter(llm_lock) => {
+                let llm_clone = llm_lock.clone();
+                let temp = self.temperature;
+                let top_p = self.top_p;
+                let prompt_clone = prompt.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    let mut mgr = llm_clone.blocking_lock();
+                    mgr.generate_completion(&prompt_clone, temp, top_p, |_| true)
+                        .map(|out| out.text)
+                })
+                .await
+                .map_err(|e| format!("JoinError: {e}"))??
+            }
+        };
+
+        let fixed_code = extract_code_from_response(&raw_reply);
+        if fixed_code.is_empty() {
+            return Err("LLM returned empty code fix".to_string());
+        }
+        Ok(fixed_code)
+    }
+}
+
 pub struct SelfCorrectionLoop<A: CodeAgent> {
     agent: A,
     max_retries: usize,
@@ -313,5 +451,59 @@ edition = "2021"
             .await
             .expect("Failed to read src/lib.rs");
         assert_eq!(current_content.trim(), corrected_code.trim());
+    }
+
+    #[test]
+    fn test_extract_code_from_response_variants() {
+        // Variant 1: ```rust ... ```
+        let raw1 = "Here is the fix:\n```rust\npub fn hello() -> &'static str {\n    \"world\"\n}\n```\nHope this helps!";
+        assert_eq!(
+            extract_code_from_response(raw1),
+            "pub fn hello() -> &'static str {\n    \"world\"\n}"
+        );
+
+        // Variant 2: ``` ... ``` without language tag
+        let raw2 = "```\nlet a = 10;\nlet b = 20;\n```";
+        assert_eq!(extract_code_from_response(raw2), "let a = 10;\nlet b = 20;");
+
+        // Variant 3: Raw code without fences
+        let raw3 = "fn solve() -> bool { true }";
+        assert_eq!(
+            extract_code_from_response(raw3),
+            "fn solve() -> bool { true }"
+        );
+    }
+
+    #[test]
+    fn test_build_code_repair_prompt_contains_essentials() {
+        let prompt = build_code_repair_prompt(
+            None,
+            "pub fn broken() {",
+            "error[E0601]: `main` function not found in crate",
+        );
+        assert!(prompt.contains("### SOURCE CODE:"));
+        assert!(prompt.contains("pub fn broken() {"));
+        assert!(prompt.contains("### ERROR LOG:"));
+        assert!(prompt.contains("error[E0601]"));
+        assert!(prompt.contains("### FIXED SOURCE CODE:"));
+    }
+
+    #[tokio::test]
+    async fn test_llm_code_agent_custom_handler_flow() {
+        let agent = LlmCodeAgent::new_custom(|prompt| {
+            assert!(prompt.contains("fn bug()"));
+            assert!(prompt.contains("mismatched types"));
+            std::future::ready(Ok("```rust\nfn bug() -> i32 { 100 }\n```".to_string()))
+        });
+
+        let fix = agent
+            .suggest_fix(
+                "fn bug() -> i32 { \"hello\" }",
+                "error[E0308]: mismatched types",
+            )
+            .await
+            .expect("fix generated");
+
+        assert_eq!(fix, "fn bug() -> i32 { 100 }");
     }
 }

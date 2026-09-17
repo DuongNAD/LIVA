@@ -148,16 +148,18 @@ impl Phien {
 /// vào `webSocketDebuggerUrl` lấy từ `/json/version`.
 async fn pid_trinh_duyet() -> Result<u32, String> {
     let cong = cong();
-    let body = tokio::time::timeout(
-        han_cho(),
-        reqwest::get(format!("http://127.0.0.1:{cong}/json/version")),
-    )
+    // Bọc CẢ get lẫn .text() vào MỘT timeout: nếu chỉ bọc get, phía server giữ kết nối mở
+    // nhưng không đẩy body về thì .text().await sẽ treo vô hạn ngoài tầm kiểm soát.
+    let body = tokio::time::timeout(han_cho(), async {
+        let resp = reqwest::get(format!("http://127.0.0.1:{cong}/json/version"))
+            .await
+            .map_err(|e| format!("Không hỏi được trình duyệt: {e}"))?;
+        resp.text()
+            .await
+            .map_err(|e| format!("Không đọc được phản hồi phiên bản: {e}"))
+    })
     .await
-    .map_err(|_| "Hết hạn chờ khi hỏi phiên bản trình duyệt".to_string())?
-    .map_err(|e| format!("Không hỏi được trình duyệt: {e}"))?
-    .text()
-    .await
-    .map_err(|e| format!("Không đọc được phản hồi phiên bản: {e}"))?;
+    .map_err(|_| "Hết hạn chờ khi hỏi phiên bản trình duyệt".to_string())??;
 
     let v: Value = serde_json::from_str(&body)
         .map_err(|e| format!("Phản hồi /json/version không phải JSON: {e}"))?;
@@ -263,21 +265,22 @@ struct Tab {
 
 async fn liet_ke_tab() -> Result<Vec<Tab>, String> {
     let cong = cong();
-    let body = tokio::time::timeout(
-        han_cho(),
-        reqwest::get(format!("http://127.0.0.1:{cong}/json/list")),
-    )
+    // Bọc CẢ get lẫn .text() vào MỘT timeout tương tự pid_trinh_duyet() để tránh treo khi đọc body.
+    let body = tokio::time::timeout(han_cho(), async {
+        let resp = reqwest::get(format!("http://127.0.0.1:{cong}/json/list"))
+            .await
+            .map_err(|e| {
+                format!(
+                    "Không thấy trình duyệt nào mở debug port ở 127.0.0.1:{cong} ({e}).\n{}",
+                    cach_mo_trinh_duyet()
+                )
+            })?;
+        resp.text()
+            .await
+            .map_err(|e| format!("Không đọc được danh sách tab: {e}"))
+    })
     .await
-    .map_err(|_| format!("Hết hạn chờ khi hỏi trình duyệt ở cổng {cong}"))?
-    .map_err(|e| {
-        format!(
-            "Không thấy trình duyệt nào mở debug port ở 127.0.0.1:{cong} ({e}).\n{}",
-            cach_mo_trinh_duyet()
-        )
-    })?
-    .text()
-    .await
-    .map_err(|e| format!("Không đọc được danh sách tab: {e}"))?;
+    .map_err(|_| format!("Hết hạn chờ khi hỏi trình duyệt ở cổng {cong}"))??;
 
     let v: Value = serde_json::from_str(&body)
         .map_err(|e| format!("Danh sách tab không phải JSON hợp lệ: {e}"))?;

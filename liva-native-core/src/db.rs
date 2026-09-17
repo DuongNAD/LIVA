@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+pub mod csr_graph;
 mod deletion;
 
 pub use deletion::{
@@ -133,22 +134,29 @@ fn vec0_trust_candidates(
     paths
         .into_iter()
         .map(std::path::PathBuf::from)
-        .map(|path| {
-            if path.starts_with(&dev_root) {
-                let relative = path
-                    .strip_prefix(&dev_root)
-                    .expect("prefix checked")
-                    .to_path_buf();
-                (dev_root.clone(), relative)
+        .filter_map(|path| {
+            if let Ok(relative) = path.strip_prefix(&dev_root) {
+                Some((dev_root.clone(), relative.to_path_buf()))
+            } else if let Some(root) = exe_dir {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    Some((root.to_path_buf(), relative.to_path_buf()))
+                } else if let Some(parent) = path.parent() {
+                    let rel = path
+                        .file_name()
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_default();
+                    Some((parent.to_path_buf(), rel))
+                } else {
+                    None
+                }
+            } else if let Some(parent) = path.parent() {
+                let rel = path
+                    .file_name()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_default();
+                Some((parent.to_path_buf(), rel))
             } else {
-                let root = exe_dir
-                    .expect("non-dev vec0 candidate requires exe_dir")
-                    .to_path_buf();
-                let relative = path
-                    .strip_prefix(&root)
-                    .expect("packaged candidate is below exe_dir")
-                    .to_path_buf();
-                (root, relative)
+                None
             }
         })
         .collect()
@@ -234,6 +242,8 @@ pub fn get_reader_pool_size() -> u32 {
 pub struct DatabasePool {
     pub writer: Pool<CustomSqliteManager>,
     pub readers: Pool<CustomSqliteManager>,
+    pub writer_actor: crate::db_actor::DbActorHandle,
+    pub csr_graph: Arc<std::sync::RwLock<csr_graph::CsrGraph>>,
 }
 
 impl DatabasePool {
@@ -259,7 +269,16 @@ impl DatabasePool {
         let conn = writer.get()?;
         init_schemas(&conn)?;
 
-        Ok(DatabasePool { writer, readers })
+        let writer_actor = crate::db_actor::DbActorHandle::new(writer.clone());
+        let graph = csr_graph::CsrGraph::from_db(&conn)?;
+        let csr_graph = Arc::new(std::sync::RwLock::new(graph));
+
+        Ok(DatabasePool {
+            writer,
+            readers,
+            writer_actor,
+            csr_graph,
+        })
     }
 
     pub fn new_in_memory() -> Result<Self, Box<dyn std::error::Error>> {
@@ -290,7 +309,16 @@ impl DatabasePool {
         let conn = writer.get()?;
         init_schemas(&conn)?;
 
-        Ok(DatabasePool { writer, readers })
+        let writer_actor = crate::db_actor::DbActorHandle::new(writer.clone());
+        let graph = csr_graph::CsrGraph::from_db(&conn)?;
+        let csr_graph = Arc::new(std::sync::RwLock::new(graph));
+
+        Ok(DatabasePool {
+            writer,
+            readers,
+            writer_actor,
+            csr_graph,
+        })
     }
 
     /// Execute a read-only closure synchronously with a pooled reader connection.
@@ -306,17 +334,21 @@ impl DatabasePool {
         f(&conn)
     }
 
-    /// Execute a write closure synchronously with the pooled writer connection.
+    /// Execute a write closure synchronously on the dedicated DbActor thread.
+    ///
+    /// Routes via DbActorHandle to enforce single-writer discipline.
     pub fn with_writer<F, R>(&self, f: F) -> Result<R, rusqlite::Error>
     where
-        F: FnOnce(&mut rusqlite::Connection) -> Result<R, rusqlite::Error>,
+        F: FnOnce(&rusqlite::Connection) -> Result<R, rusqlite::Error> + Send + 'static,
+        R: Send + 'static,
     {
-        let mut conn = self.writer.get().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
-                "Failed to acquire SQLite writer connection from pool: {e}"
-            ))))
-        })?;
-        f(&mut conn)
+        self.writer_actor
+            .blocking_execute(move |conn| f(conn).map_err(|e| e.to_string()))
+            .map_err(|e| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                    "DbActor with_writer failed: {e}"
+                ))))
+            })
     }
 
     /// Execute a read-only closure asynchronously on tokio's blocking threadpool with a pooled reader connection.
@@ -331,16 +363,42 @@ impl DatabasePool {
             .map_err(|e| format!("spawn_reader blocking task panicked: {e}"))?
     }
 
-    /// Execute a write closure asynchronously on tokio's blocking threadpool with the pooled writer connection.
+    /// Execute a write closure asynchronously on the dedicated DbActor thread with the pooled writer connection.
     pub async fn spawn_writer<F, R>(&self, f: F) -> Result<R, String>
     where
-        F: FnOnce(&mut rusqlite::Connection) -> Result<R, rusqlite::Error> + Send + 'static,
+        F: FnOnce(&rusqlite::Connection) -> Result<R, rusqlite::Error> + Send + 'static,
         R: Send + 'static,
     {
-        let pool = self.clone();
-        tokio::task::spawn_blocking(move || pool.with_writer(f).map_err(|e| e.to_string()))
+        self.writer_actor
+            .execute(move |conn| f(conn).map_err(|e| e.to_string()))
             .await
-            .map_err(|e| format!("spawn_writer blocking task panicked: {e}"))?
+    }
+
+    /// Asynchronously insert an L3 knowledge graph triple via DbActor and update in-memory CSR cache.
+    pub async fn insert_l3_triple(
+        &self,
+        subject: &str,
+        predicate: &str,
+        object: &str,
+        weight: f32,
+    ) -> Result<(), String> {
+        self.writer_actor
+            .insert_l3_triple(
+                subject.to_string(),
+                predicate.to_string(),
+                object.to_string(),
+                weight,
+            )
+            .await?;
+
+        if let Ok(mut graph) = self.csr_graph.write() {
+            graph.add_node(subject.to_string(), subject.to_string(), "{}".to_string());
+            graph.add_node(object.to_string(), object.to_string(), "{}".to_string());
+            graph.add_edge(subject, object, predicate, weight, true);
+            graph.compile_csr();
+        }
+
+        Ok(())
     }
 }
 
@@ -559,6 +617,21 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             reason TEXT NOT NULL DEFAULT 'superseded'
         );
         CREATE INDEX IF NOT EXISTS idx_facts_history_key ON facts_history(key, domain);
+
+        CREATE TABLE IF NOT EXISTS turn_telemetry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT,
+            ts INTEGER NOT NULL,
+            entry_path TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            prompt_tokens INTEGER NOT NULL,
+            completion_tokens INTEGER NOT NULL,
+            latency_ms INTEGER NOT NULL,
+            outcome TEXT NOT NULL,
+            err_kind TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON turn_telemetry(ts);
+        CREATE INDEX IF NOT EXISTS idx_telemetry_model ON turn_telemetry(model_id);
     ")?;
 
     let count: i64 = conn.query_row(
@@ -605,7 +678,7 @@ fn ensure_foreign_key_integrity(conn: &Connection) -> Result<(), rusqlite::Error
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -804,6 +877,24 @@ const MIGRATIONS: &[(i64, &str)] = &[
          );
          CREATE INDEX IF NOT EXISTS idx_facts_history_key ON facts_history(key, domain);",
     ),
+    // Migration 10: Turn Telemetry Ledger (U21)
+    (
+        10,
+        "CREATE TABLE IF NOT EXISTS turn_telemetry (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             event_id TEXT,
+             ts INTEGER NOT NULL,
+             entry_path TEXT NOT NULL,
+             model_id TEXT NOT NULL,
+             prompt_tokens INTEGER NOT NULL,
+             completion_tokens INTEGER NOT NULL,
+             latency_ms INTEGER NOT NULL,
+             outcome TEXT NOT NULL,
+             err_kind TEXT
+         );
+         CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON turn_telemetry(ts);
+         CREATE INDEX IF NOT EXISTS idx_telemetry_model ON turn_telemetry(model_id);",
+    ),
 ];
 
 /// Đưa schema từ phiên bản hiện tại của DB lên [`SCHEMA_VERSION`].
@@ -867,12 +958,19 @@ pub struct Fact {
     pub importance: f64,
     pub confidenceScore: f64,
     pub sourceTurnId: Option<String>,
+    #[serde(default = "default_fact_memory_strength")]
     pub memory_strength: f64,
+    #[serde(default)]
     pub last_accessed_at: i64,
+    #[serde(default)]
     pub access_count: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+fn default_fact_memory_strength() -> f64 {
+    1.0
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct MetadataFilter {
     pub r#type: Option<String>,
     pub domain: Option<String>,
@@ -1005,9 +1103,13 @@ pub fn set_fact(
                 importance = excluded.importance,
                 confidenceScore = excluded.confidenceScore,
                 sourceTurnId = excluded.sourceTurnId,
-                memory_strength = excluded.memory_strength,
-                last_accessed_at = excluded.last_accessed_at,
-                access_count = excluded.access_count",
+                memory_strength = CASE
+                    WHEN excluded.memory_strength > 0.0 AND excluded.memory_strength != 1.0
+                    THEN excluded.memory_strength
+                    ELSE facts.memory_strength
+                END,
+                last_accessed_at = MAX(facts.last_accessed_at, excluded.last_accessed_at),
+                access_count = MAX(facts.access_count, excluded.access_count)",
             (
                 &fact.key,
                 &encrypted_val,
@@ -1298,6 +1400,37 @@ pub fn migrate_facts_encryption(
     rekey_facts_encryption(conn, engine, &[])
 }
 
+/// Cập nhật thời điểm truy xuất và tăng biến đếm số lần truy xuất cho một fact.
+pub fn touch_fact_access(
+    conn: &Connection,
+    key: &str,
+    now_ts: i64,
+) -> Result<bool, rusqlite::Error> {
+    let rows_affected = conn.execute(
+        "UPDATE facts SET last_accessed_at = ?1, access_count = access_count + 1 WHERE key = ?2",
+        rusqlite::params![now_ts, key],
+    )?;
+    Ok(rows_affected > 0)
+}
+
+/// Cập nhật các thông số lịch ôn (spaced retrieval) cho một fact khi nhớ đúng hoặc không nhớ.
+pub fn update_fact_recall_stats(
+    conn: &Connection,
+    key: &str,
+    memory_strength: f64,
+    now_ts: i64,
+) -> Result<bool, rusqlite::Error> {
+    let rows_affected = conn.execute(
+        "UPDATE facts 
+         SET memory_strength = ?1, 
+             last_accessed_at = ?2, 
+             access_count = access_count + 1 
+         WHERE key = ?3",
+        rusqlite::params![memory_strength, now_ts, key],
+    )?;
+    Ok(rows_affected > 0)
+}
+
 pub fn get_fact(
     conn: &Connection,
     engine: &EncryptionEngine,
@@ -1313,7 +1446,7 @@ pub fn get_fact(
         let enc_value: String = row.get(1)?;
         let decrypted_value = engine.decrypt_read(&enc_value);
 
-        Ok(Some(Fact {
+        let fact = Fact {
             key: row.get(0)?,
             value: decrypted_value,
             createdAt: row.get(2)?,
@@ -1327,7 +1460,24 @@ pub fn get_fact(
             memory_strength: row.get(10)?,
             last_accessed_at: row.get(11)?,
             access_count: row.get(12)?,
-        }))
+        };
+
+        // Ghi lại trên đường đọc nếu connection là read-write.
+        // Lỗi ghi KHÔNG được làm hỏng lượt đọc — nuốt vào tracing::warn!, đừng ?
+        let is_readonly = conn
+            .is_readonly(rusqlite::DatabaseName::Main)
+            .unwrap_or(true);
+        if !is_readonly {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if let Err(e) = touch_fact_access(conn, key, now) {
+                tracing::warn!("get_fact: cannot update access stats for '{key}': {e}");
+            }
+        }
+
+        Ok(Some(fact))
     } else {
         Ok(None)
     }
@@ -1406,6 +1556,14 @@ pub fn upsert_vector(
         .unwrap_or_default()
         .as_millis() as i64;
 
+    // Guard atomicity: If caller did not provide an active transaction,
+    // establish an unchecked transaction for the multi-table upsert.
+    let tx = if conn.is_autocommit() {
+        Some(conn.unchecked_transaction()?)
+    } else {
+        None
+    };
+
     // 1. Insert or ignore into vectors_meta
     let changes = conn.execute(
         "INSERT OR IGNORE INTO vectors_meta (vec_id, type, content, domain, category, trace_keywords, file_target, source_event_ids, created_at, last_accessed_at, decay_weight, access_count)
@@ -1471,6 +1629,10 @@ pub fn upsert_vector(
         )?;
     }
 
+    if let Some(tx) = tx {
+        tx.commit()?;
+    }
+
     Ok(())
 }
 
@@ -1479,7 +1641,7 @@ pub fn upsert_vector(
 /// `event_id == vec_id` là khóa lineage cố định cho consolidation. Event chỉ giữ metadata
 /// điều phối; nội dung plaintext đã nằm trong `vectors_meta` nên không nhân bản vào
 /// `rawUserMsg`/`rawAiReply`.
-pub(crate) fn persist_conversation_event_vector(
+pub fn persist_conversation_event_vector(
     conn: &Connection,
     engine: &EncryptionEngine,
     event_id: &str,
@@ -1538,7 +1700,7 @@ pub fn search_similar_vectors(
     let (meta_conditions, meta_params) = build_metadata_conditions(filter);
 
     let sql = format!(
-        "SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight, m.created_at \
+        "SELECT v.rowid, v.distance, m.vec_id, m.content, m.type, m.domain, m.category, m.trace_keywords, m.source_event_ids, m.decay_weight, m.created_at, m.last_accessed_at, m.access_count \
          FROM vec_idx v \
          INNER JOIN vectors_meta m ON m.id = v.rowid \
          WHERE v.embedding MATCH vec_quantize_int8(?, 'unit') \
@@ -1568,6 +1730,8 @@ pub fn search_similar_vectors(
         let source_event_ids_raw: String = row.get(8)?;
         let decay_weight: f64 = row.get(9)?;
         let created_at: i64 = row.get(10)?;
+        let last_accessed_at: i64 = row.get(11)?;
+        let access_count: i64 = row.get(12)?;
 
         let content = if r#type == "conversation_turn" {
             match engine.read_fact(&stored_content) {
@@ -1586,11 +1750,28 @@ pub fn search_similar_vectors(
         let trace_keywords = serde_json::from_str(&trace_keywords_raw).unwrap_or_default();
         let source_event_ids = serde_json::from_str(&source_event_ids_raw).unwrap_or_default();
 
+        // Ebbinghaus Forgetting Curve with Dynamic Reinforcement:
+        // S(t) = S0 * exp(-delta_t / (tau * (1.0 + 0.2 * ln(1 + n_access))))
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let ref_time = if last_accessed_at > 0 {
+            last_accessed_at
+        } else {
+            created_at
+        };
+        let delta_days = ((now_ms - ref_time).max(0) as f64) / 86_400_000.0;
+        let tau = 30.0; // 30-day baseline retention half-life
+        let n_access = access_count.max(0) as f64;
+        let stability = tau * (1.0 + 0.2 * (1.0 + n_access).ln());
+        let decay_factor = (-delta_days / stability).exp().clamp(0.05, 1.0);
+
         // Calculate similarity matching JS:
         // similarity = Math.max(0, 1.0 - (distF32 * distF32) / 2.0) where distF32 = distance / 120.0
         let dist_f32 = distance / 120.0;
         let similarity = (1.0 - (dist_f32 * dist_f32) / 2.0).max(0.0);
-        let score = similarity * decay_weight;
+        let score = similarity * decay_weight * decay_factor;
 
         results.push(VectorSearchResult {
             id: rowid,
@@ -1810,6 +1991,96 @@ pub fn search_hybrid_vectors(
     Ok(results)
 }
 
+/// Reinforces memory access counts and updates last_accessed_at timestamp in SQLite vectors_meta table.
+pub fn reinforce_memory_access(
+    conn: &Connection,
+    vec_ids: &[&str],
+    now_ms: i64,
+) -> Result<usize, rusqlite::Error> {
+    if vec_ids.is_empty() {
+        return Ok(0);
+    }
+    let mut updated = 0;
+    let mut stmt = conn.prepare(
+        "UPDATE vectors_meta SET last_accessed_at = ?1, access_count = access_count + 1 WHERE vec_id = ?2",
+    )?;
+    for vec_id in vec_ids {
+        updated += stmt.execute(rusqlite::params![now_ms, vec_id])?;
+    }
+    Ok(updated)
+}
+
+/// Inserts or updates an L3 knowledge graph node into SQLite and updates the In-Memory CSR Cache.
+pub fn insert_l3_node_sync(
+    pool: &DatabasePool,
+    id: &str,
+    label: &str,
+    properties: &str,
+) -> Result<(), rusqlite::Error> {
+    let id_owned = id.to_string();
+    let label_owned = label.to_string();
+    let properties_owned = properties.to_string();
+
+    pool.writer_actor
+        .blocking_execute(move |conn| {
+            conn.execute(
+                "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET label = excluded.label, properties = excluded.properties",
+                rusqlite::params![id_owned, label_owned, properties_owned],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        })
+        .map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "DbActor insert_l3_node_sync failed: {e}"
+            ))))
+        })?;
+
+    if let Ok(mut graph) = pool.csr_graph.write() {
+        graph.add_node(id.to_string(), label.to_string(), properties.to_string());
+        graph.compile_csr();
+    }
+
+    Ok(())
+}
+
+/// Inserts or updates an L3 knowledge graph edge into SQLite and updates the In-Memory CSR Cache.
+pub fn insert_l3_edge_sync(
+    pool: &DatabasePool,
+    source: &str,
+    target: &str,
+    relation: &str,
+    weight: f32,
+) -> Result<(), rusqlite::Error> {
+    let source_owned = source.to_string();
+    let target_owned = target.to_string();
+    let relation_owned = relation.to_string();
+
+    pool.writer_actor
+        .blocking_execute(move |conn| {
+            conn.execute(
+                "INSERT INTO l3_edges (source, target, relation, weight, obsolete) VALUES (?1, ?2, ?3, ?4, 0)
+                 ON CONFLICT(source, target, relation) DO UPDATE SET weight = excluded.weight, obsolete = 0",
+                rusqlite::params![source_owned, target_owned, relation_owned, weight as f64],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        })
+        .map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "DbActor insert_l3_edge_sync failed: {e}"
+            ))))
+        })?;
+
+    if let Ok(mut graph) = pool.csr_graph.write() {
+        graph.add_edge(source, target, relation, weight, true);
+        graph.compile_csr();
+    }
+
+    Ok(())
+}
+
 // ── Cognitive Runtime v1: Idempotency and Audit Ledger DB Accessors ──
 
 pub fn record_action_audit(
@@ -1904,6 +2175,154 @@ pub fn delete_fact_cascade(
     domain: &str,
 ) -> Result<FactDeletionCounts, rusqlite::Error> {
     MemoryDeleteCoordinator::delete_fact_cascade(conn, key, domain)
+}
+
+// ─── Turn Telemetry Ledger (U21) ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TurnTelemetryRecord {
+    pub id: Option<i64>,
+    pub event_id: Option<String>,
+    pub ts: i64,
+    pub entry_path: String,
+    pub model_id: String,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub latency_ms: i64,
+    pub outcome: String,
+    pub err_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct TelemetrySummary {
+    pub total_turns: i64,
+    pub ok_turns: i64,
+    pub err_turns: i64,
+    pub avg_latency_ms: f64,
+    pub p50_latency_ms: i64,
+    pub p95_latency_ms: i64,
+    pub total_prompt_tokens: i64,
+    pub total_completion_tokens: i64,
+    pub models: std::collections::HashMap<String, i64>,
+    pub entry_paths: std::collections::HashMap<String, i64>,
+}
+
+pub fn record_turn_telemetry(
+    conn: &Connection,
+    record: &TurnTelemetryRecord,
+) -> Result<i64, rusqlite::Error> {
+    conn.execute(
+        "INSERT INTO turn_telemetry (
+            event_id, ts, entry_path, model_id, prompt_tokens, completion_tokens, latency_ms, outcome, err_kind
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![
+            record.event_id,
+            record.ts,
+            record.entry_path,
+            record.model_id,
+            record.prompt_tokens,
+            record.completion_tokens,
+            record.latency_ms,
+            record.outcome,
+            record.err_kind,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_telemetry_summary(
+    conn: &Connection,
+    since_ts: Option<i64>,
+) -> Result<TelemetrySummary, rusqlite::Error> {
+    // 1. Latencies for p50 and p95
+    let mut lat_stmt = conn.prepare(
+        "SELECT latency_ms FROM turn_telemetry 
+         WHERE (?1 IS NULL OR ts >= ?1) 
+         ORDER BY latency_ms ASC",
+    )?;
+    let latencies: Vec<i64> = lat_stmt
+        .query_map([since_ts], |row| row.get(0))?
+        .filter_map(Result::ok)
+        .collect();
+
+    let total_turns = latencies.len() as i64;
+    if total_turns == 0 {
+        return Ok(TelemetrySummary::default());
+    }
+
+    let p50_idx = ((total_turns as f64) * 0.50).floor() as usize;
+    let p95_idx = ((total_turns as f64) * 0.95).floor() as usize;
+    let p50_latency_ms = latencies[p50_idx.min(latencies.len() - 1)];
+    let p95_latency_ms = latencies[p95_idx.min(latencies.len() - 1)];
+
+    // 2. Aggregate stats
+    let (ok_turns, err_turns, avg_latency_ms, total_prompt_tokens, total_completion_tokens): (
+        i64,
+        i64,
+        f64,
+        i64,
+        i64,
+    ) = conn.query_row(
+        "SELECT 
+            COALESCE(SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN outcome = 'err' THEN 1 ELSE 0 END), 0),
+            COALESCE(AVG(latency_ms), 0.0),
+            COALESCE(SUM(prompt_tokens), 0),
+            COALESCE(SUM(completion_tokens), 0)
+         FROM turn_telemetry
+         WHERE (?1 IS NULL OR ts >= ?1)",
+        [since_ts],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        },
+    )?;
+
+    // 3. Group by model
+    let mut models = std::collections::HashMap::new();
+    let mut model_stmt = conn.prepare(
+        "SELECT model_id, COUNT(*) FROM turn_telemetry 
+         WHERE (?1 IS NULL OR ts >= ?1) 
+         GROUP BY model_id",
+    )?;
+    let model_rows = model_stmt.query_map([since_ts], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    for row in model_rows.flatten() {
+        models.insert(row.0, row.1);
+    }
+
+    // 4. Group by entry_path
+    let mut entry_paths = std::collections::HashMap::new();
+    let mut path_stmt = conn.prepare(
+        "SELECT entry_path, COUNT(*) FROM turn_telemetry 
+         WHERE (?1 IS NULL OR ts >= ?1) 
+         GROUP BY entry_path",
+    )?;
+    let path_rows = path_stmt.query_map([since_ts], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    for row in path_rows.flatten() {
+        entry_paths.insert(row.0, row.1);
+    }
+
+    Ok(TelemetrySummary {
+        total_turns,
+        ok_turns,
+        err_turns,
+        avg_latency_ms: (avg_latency_ms * 100.0).round() / 100.0,
+        p50_latency_ms,
+        p95_latency_ms,
+        total_prompt_tokens,
+        total_completion_tokens,
+        models,
+        entry_paths,
+    })
 }
 
 #[cfg(test)]

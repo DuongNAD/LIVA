@@ -114,7 +114,7 @@ pub fn bm25_scores(skills: &[LoadedSkill], query: &str) -> Vec<f32> {
 pub fn rank_skills(
     skills: &[LoadedSkill],
     query: &str,
-    embedder: Option<&mut dyn ToolEmbedder>,
+    embedder: Option<&dyn ToolEmbedder>,
     top_k: usize,
 ) -> Vec<RankedSkill> {
     rank_skills_with_prior(skills, query, embedder, top_k, &[])
@@ -141,7 +141,7 @@ pub fn rank_skills(
 pub fn rank_skills_with_prior(
     skills: &[LoadedSkill],
     query: &str,
-    embedder: Option<&mut dyn ToolEmbedder>,
+    embedder: Option<&dyn ToolEmbedder>,
     top_k: usize,
     hinh_phat: &[f32],
 ) -> Vec<RankedSkill> {
@@ -228,7 +228,7 @@ fn cham_diem_cosine(
     skills: &[LoadedSkill],
     query: &str,
     ung_vien: &mut [RankedSkill],
-    e: &mut dyn ToolEmbedder,
+    e: &dyn ToolEmbedder,
 ) -> Result<(), String> {
     let q = e.embed_query_vec(query)?;
     for r in ung_vien.iter_mut() {
@@ -335,7 +335,7 @@ mod tests {
     /// "migration" theo trục 1. Câu tiếng Việt được cắm để khớp trục 0.
     struct EmbGia;
     impl ToolEmbedder for EmbGia {
-        fn embed_query_vec(&mut self, t: &str) -> Result<Vec<f32>, String> {
+        fn embed_query_vec(&self, t: &str) -> Result<Vec<f32>, String> {
             Ok(vec![
                 if t.contains("thay đổi mã") {
                     1.0
@@ -349,7 +349,7 @@ mod tests {
                 },
             ])
         }
-        fn embed_passage_vec(&mut self, t: &str) -> Result<Vec<f32>, String> {
+        fn embed_passage_vec(&self, t: &str) -> Result<Vec<f32>, String> {
             Ok(vec![
                 if t.contains("diff") { 1.0 } else { 0.0 },
                 if t.contains("migration") { 1.0 } else { 0.0 },
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn embedder_cuu_duoc_ca_bm25_mu() {
         let s = bo();
-        let r = rank_skills(&s, "giúp mình xem lại thay đổi mã", Some(&mut EmbGia), 1);
+        let r = rank_skills(&s, "giúp mình xem lại thay đổi mã", Some(&EmbGia), 1);
         assert_eq!(
             s[r[0].index].name, "git-review",
             "embedder phải nối câu tiếng Việt với skill tiếng Anh — đây là cả lý do có bước rerank"
@@ -371,10 +371,10 @@ mod tests {
 
     struct EmbHong;
     impl ToolEmbedder for EmbHong {
-        fn embed_query_vec(&mut self, _: &str) -> Result<Vec<f32>, String> {
+        fn embed_query_vec(&self, _: &str) -> Result<Vec<f32>, String> {
             Err("model hỏng".into())
         }
-        fn embed_passage_vec(&mut self, _: &str) -> Result<Vec<f32>, String> {
+        fn embed_passage_vec(&self, _: &str) -> Result<Vec<f32>, String> {
             Err("model hỏng".into())
         }
     }
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn embedder_loi_thi_roi_ve_bm25_chu_khong_hong() {
         let s = bo();
-        let r = rank_skills(&s, "sqlite migration", Some(&mut EmbHong), 1);
+        let r = rank_skills(&s, "sqlite migration", Some(&EmbHong), 1);
         assert_eq!(s[r[0].index].name, "db-migrate");
         assert!(r[0].cosine.is_none(), "lỗi embedder ⇒ không có điểm cosine");
     }

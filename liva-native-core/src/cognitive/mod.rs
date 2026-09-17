@@ -10,6 +10,7 @@ pub mod observation;
 pub mod policy;
 pub mod proposal;
 pub mod redaction;
+pub mod triple_extractor;
 
 pub use events::{
     EventSensitivity, PerceptionEvent, PerceptionPayload, SessionEvent, SessionEventStream,

@@ -46,9 +46,15 @@ const PARAM_PREFIX: &str = "   tham số (* = bắt buộc): ";
 
 /// Số tool tối đa chèn vào prompt. Xem ràng buộc 1 ở đầu file.
 ///
-/// 4 là con số có lý do: với `n_ctx` 4096, sau persona + RAG + lịch sử hội thoại
-/// thì phần còn lại cho danh sách tool chỉ còn vài trăm token.
-pub const DEFAULT_TOP_K: usize = 4;
+/// Lịch sử con số này chính là nợ M10: catalog nội bộ lớn dần (4 → 6 ở U19,
+/// nay là **7** kể cả `get_weather`) trong khi `top_k` đứng yên, và từ lúc
+/// catalog > top_k thì **thứ hạng embedder quyết định tool nào LLM được thấy**
+/// — tool xếp sau bị loại khỏi prompt ở mọi lượt, triệu chứng là "LIVA không
+/// hiểu lệnh" chứ không phải một lỗi (hỏng im lặng). Nay nâng lên 7 để mọi
+/// tool nội bộ luôn vào prompt, và test
+/// [`catalog_noi_bo_khong_duoc_dai_hon_top_k`] ở dưới **cưỡng chế** điều đó:
+/// thêm tool mới mà không chủ động reconsider `DEFAULT_TOP_K` thì CI đỏ.
+pub const DEFAULT_TOP_K: usize = 7;
 
 /// Một tool ứng viên, đã phẳng hoá từ mọi nguồn (nội bộ + MCP server ngoài).
 #[derive(Debug, Clone, PartialEq)]
@@ -165,17 +171,35 @@ impl ToolCatalog {
 /// Có trait này thì test xếp hạng chạy được **mà không nạp 470 MB ONNX** —
 /// nếu không, mọi test về thứ tự tool sẽ phải kéo theo model thật, tức thực tế
 /// là không có test nào.
-pub trait ToolEmbedder {
-    fn embed_query_vec(&mut self, text: &str) -> Result<Vec<f32>, String>;
-    fn embed_passage_vec(&mut self, text: &str) -> Result<Vec<f32>, String>;
+pub trait ToolEmbedder: Send + Sync {
+    fn embed_query_vec(&self, text: &str) -> Result<Vec<f32>, String>;
+    fn embed_passage_vec(&self, text: &str) -> Result<Vec<f32>, String>;
 }
 
 impl ToolEmbedder for crate::llm::embedder::EmbeddingEngine {
-    fn embed_query_vec(&mut self, text: &str) -> Result<Vec<f32>, String> {
+    fn embed_query_vec(&self, text: &str) -> Result<Vec<f32>, String> {
         self.embed_query(text)
     }
-    fn embed_passage_vec(&mut self, text: &str) -> Result<Vec<f32>, String> {
+    fn embed_passage_vec(&self, text: &str) -> Result<Vec<f32>, String> {
         self.embed_passage(text)
+    }
+}
+
+impl<T: ToolEmbedder + ?Sized> ToolEmbedder for std::sync::Arc<T> {
+    fn embed_query_vec(&self, text: &str) -> Result<Vec<f32>, String> {
+        (**self).embed_query_vec(text)
+    }
+    fn embed_passage_vec(&self, text: &str) -> Result<Vec<f32>, String> {
+        (**self).embed_passage_vec(text)
+    }
+}
+
+impl<T: ToolEmbedder + ?Sized> ToolEmbedder for &T {
+    fn embed_query_vec(&self, text: &str) -> Result<Vec<f32>, String> {
+        (**self).embed_query_vec(text)
+    }
+    fn embed_passage_vec(&self, text: &str) -> Result<Vec<f32>, String> {
+        (**self).embed_passage_vec(text)
     }
 }
 
@@ -230,7 +254,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 pub fn rank_tools(
     catalog: &ToolCatalog,
     query: &str,
-    embedder: Option<&mut dyn ToolEmbedder>,
+    embedder: Option<&dyn ToolEmbedder>,
     k: usize,
 ) -> Vec<usize> {
     rank_tools_scored(catalog, query, embedder, k)
@@ -253,7 +277,7 @@ pub fn rank_tools(
 pub fn rank_tools_scored(
     catalog: &ToolCatalog,
     query: &str,
-    embedder: Option<&mut dyn ToolEmbedder>,
+    embedder: Option<&dyn ToolEmbedder>,
     k: usize,
 ) -> Vec<(usize, f32)> {
     if catalog.is_empty() || k == 0 {
@@ -285,7 +309,7 @@ pub fn rank_tools_scored(
 fn embed_scores(
     catalog: &ToolCatalog,
     query: &str,
-    embedder: &mut dyn ToolEmbedder,
+    embedder: &dyn ToolEmbedder,
 ) -> Result<Vec<f32>, String> {
     let q = embedder.embed_query_vec(query)?;
     let mut out = Vec::with_capacity(catalog.len());
@@ -707,6 +731,7 @@ const NATIVE_AUTOEXEC: &[&str] = &[
     "control_smarthome",
     "control_volume",
     "control_media",
+    "get_weather",
 ];
 
 impl ExecPolicy {
@@ -931,15 +956,15 @@ pub async fn select_tool(
     }
 
     let top: Vec<usize> = {
-        let state = std::sync::Arc::clone(state);
+        let engine_opt = {
+            let guard = state.embedder.read().await;
+            guard.as_ref().cloned()
+        };
         let catalog = catalog.clone();
         let query = user_text.to_string();
         tokio::task::spawn_blocking(move || {
-            let mut guard = state.embedder.blocking_lock();
-            match guard.as_mut() {
-                Some(e) => rank_tools(&catalog, &query, Some(e), DEFAULT_TOP_K),
-                None => rank_tools(&catalog, &query, None, DEFAULT_TOP_K),
-            }
+            let embedder_ref = engine_opt.as_deref().map(|e| e as &dyn ToolEmbedder);
+            rank_tools(&catalog, &query, embedder_ref, DEFAULT_TOP_K)
         })
         .await
         .ok()?
@@ -1102,6 +1127,27 @@ impl ResolvedCall {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// Nợ M10 — CƯỠNG CHẾ truy hồi: catalog nội bộ không được dài hơn `DEFAULT_TOP_K`.
+    ///
+    /// Từ lúc số tool vượt top-k, thứ hạng embedder âm thầm loại tool khỏi prompt
+    /// ở mọi lượt — "LIVA không hiểu lệnh" mà không có lỗi nào để nhìn. Test này
+    /// biến điều kiện cam kết trong U19 ("thêm tool phải đo lại tầng 1") thành
+    /// gate cứng: thêm tool mới mà không nâng `DEFAULT_TOP_K` (hoặc bớt tool) thì
+    /// đỏ ngay tại đây, kèm chỉ dẫn cách xử.
+    #[test]
+    fn catalog_noi_bo_khong_duoc_dai_hon_top_k() {
+        let server = crate::mcp::server::NativeMcpServer::new("/tmp/liva-m10-guard");
+        let so_tool = server.list_tools().tools.len();
+        assert!(
+            so_tool <= DEFAULT_TOP_K,
+            "Catalog nội bộ có {so_tool} tool nhưng DEFAULT_TOP_K = {DEFAULT_TOP_K}: \
+             {} tool xếp cuối sẽ bị loại khỏi prompt ở MỌI lượt (nợ M10 — hỏng im \
+             lặng). Chọn một cách CÓ Ý THỨC: nâng DEFAULT_TOP_K và chấp nhận thêm \
+             token prompt, hoặc đo lại tầng truy hồi theo cam kết của U19.",
+            so_tool.saturating_sub(DEFAULT_TOP_K)
+        );
+    }
 
     #[test]
     fn tool_start_event_dung_khuon_websocket_hien_co() {
@@ -1654,13 +1700,13 @@ mod tests {
     /// chứa từ khoá đã cắm sẵn.
     struct EmbedderGia;
     impl ToolEmbedder for EmbedderGia {
-        fn embed_query_vec(&mut self, text: &str) -> Result<Vec<f32>, String> {
+        fn embed_query_vec(&self, text: &str) -> Result<Vec<f32>, String> {
             Ok(vec![
                 if text.contains("vault") { 1.0 } else { 0.0 },
                 if text.contains("đèn") { 1.0 } else { 0.0 },
             ])
         }
-        fn embed_passage_vec(&mut self, text: &str) -> Result<Vec<f32>, String> {
+        fn embed_passage_vec(&self, text: &str) -> Result<Vec<f32>, String> {
             Ok(vec![
                 if text.contains("vault") { 1.0 } else { 0.0 },
                 if text.contains("smart home") {
@@ -1677,7 +1723,7 @@ mod tests {
         let c = catalog_smarthome();
         // "đèn" không xuất hiện trong mô tả tool nào ⇒ đường trùng token mù,
         // nhưng embedder nối nó với "smart home".
-        let top = rank_tools(&c, "bật đèn", Some(&mut EmbedderGia), 1);
+        let top = rank_tools(&c, "bật đèn", Some(&EmbedderGia), 1);
         assert_eq!(
             c.tools()[top[0]].name,
             "control_smarthome",
@@ -1687,10 +1733,10 @@ mod tests {
 
     struct EmbedderHong;
     impl ToolEmbedder for EmbedderHong {
-        fn embed_query_vec(&mut self, _: &str) -> Result<Vec<f32>, String> {
+        fn embed_query_vec(&self, _: &str) -> Result<Vec<f32>, String> {
             Err("model hỏng".to_string())
         }
-        fn embed_passage_vec(&mut self, _: &str) -> Result<Vec<f32>, String> {
+        fn embed_passage_vec(&self, _: &str) -> Result<Vec<f32>, String> {
             Err("model hỏng".to_string())
         }
     }
@@ -1698,7 +1744,7 @@ mod tests {
     #[test]
     fn embedder_loi_thi_roi_ve_trung_token_chu_khong_hong() {
         let c = catalog_smarthome();
-        let top = rank_tools(&c, "read the markdown file", Some(&mut EmbedderHong), 1);
+        let top = rank_tools(&c, "read the markdown file", Some(&EmbedderHong), 1);
         assert_eq!(c.tools()[top[0]].name, "read_markdown");
     }
 
@@ -1851,7 +1897,8 @@ mod tests {
                 mock_capturer,
                 crate::vision::VisionConfig::default(),
             )),
-            embedder: tokio::sync::Mutex::new(None),
+            embedder: crate::AppState::empty_embedder(),
+            active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
         })
     }
 

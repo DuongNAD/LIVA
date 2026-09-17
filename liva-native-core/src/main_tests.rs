@@ -115,8 +115,9 @@ mod tests {
             mcp_server: Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
                 "test_vault",
             )),
-            embedder: tokio::sync::Mutex::new(None),
+            embedder: AppState::empty_embedder(),
             vision: tokio::sync::Mutex::new(vision_manager),
+            active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
         })
     }
 

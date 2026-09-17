@@ -25,6 +25,23 @@ fn wake_probe_classifier_direct_accept(score: Option<f32>, model_threshold: f32)
     score.is_some_and(|value| value.is_finite() && value > model_threshold)
 }
 
+/// Định dạng thông điệp chẩn đoán cho classifier khi wake probe bị từ chối hoặc cần ghi log.
+/// Phân biệt tường minh 3 trường hợp:
+/// 1. Classifier được đánh giá và trả về điểm số: "model score (threshold target)"
+/// 2. Classifier chưa nạp được / bị tắt: "không nạp được / đã tắt"
+/// 3. Classifier đã nạp nhưng audio không đủ độ dài sinh embedding: "không đủ embedding (clip quá ngắn)"
+fn format_wake_probe_classifier_diagnostic(
+    best_score: &Option<(String, f32)>,
+    model_threshold: f32,
+    detector_is_some: bool,
+) -> String {
+    match best_score {
+        Some((name, score)) => format!("{} {:.3} (threshold {:.2})", name, score, model_threshold),
+        None if !detector_is_some => "không nạp được / đã tắt".to_string(),
+        None => "không đủ embedding (clip quá ngắn)".to_string(),
+    }
+}
+
 #[derive(Serialize)]
 pub struct WebSocketSessionTicket {
     pub token: String,
@@ -189,6 +206,7 @@ fn websocket_principal(
 fn authorize_websocket_event(principal: CommandPrincipal, event_name: &str) -> Result<(), String> {
     let command = match event_name {
         "user_voice_command" | "chat:completion" => "chat:completion",
+        "voice:interrupt" | "interrupt" => "voice:tts_stop",
         command => command,
     };
     authorize_command(principal, command)
@@ -238,6 +256,40 @@ impl AbortOnDropTask {
 impl Drop for AbortOnDropTask {
     fn drop(&mut self) {
         self.0.abort();
+    }
+}
+
+pub struct AbortOnDropJoinSet(tokio::task::JoinSet<()>);
+
+impl AbortOnDropJoinSet {
+    pub fn new() -> Self {
+        Self(tokio::task::JoinSet::new())
+    }
+}
+
+impl Default for AbortOnDropJoinSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AbortOnDropJoinSet {
+    pub fn spawn<F>(&mut self, task: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        while self.0.try_join_next().is_some() {}
+        self.0.spawn(task);
+    }
+
+    pub fn abort_all(&mut self) {
+        self.0.abort_all();
+    }
+}
+
+impl Drop for AbortOnDropJoinSet {
+    fn drop(&mut self) {
+        self.0.abort_all();
     }
 }
 
@@ -324,8 +376,14 @@ impl WebSocketServer {
                     continue;
                 }
             };
-            let (stream, peer_address) =
-                accepted.map_err(|error| format!("WebSocket accept failed: {error}"))?;
+            let (stream, peer_address) = match accepted {
+                Ok(pair) => pair,
+                Err(error) => {
+                    warn!("Transient WebSocket accept error: {error}; backing off 50ms");
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+            };
             let connection_state = Arc::clone(&state);
             let connection_auth_token = self.auth_token.clone();
             let connection_sessions = self.sessions.clone();
@@ -336,7 +394,10 @@ impl WebSocketServer {
                     HttpResponse::builder()
                         .status(status)
                         .body(Some(message.to_string()))
-                        .expect("static rejection response is always valid")
+                        .unwrap_or_else(|e| {
+                            error!("Failed to build static rejection response: {e}");
+                            HttpResponse::new(Some(message.to_string()))
+                        })
                 };
 
                 #[allow(clippy::result_large_err)]
@@ -398,9 +459,13 @@ impl WebSocketServer {
                             return;
                         }
                     };
-                let principal = *principal_slot
-                    .get()
-                    .expect("successful WebSocket handshake resolves principal");
+                let principal = match principal_slot.get() {
+                    Some(p) => *p,
+                    None => {
+                        error!("WebSocket handshake completed without principal in slot, rejecting connection");
+                        return;
+                    }
+                };
 
                 let _client = WsClientGuard::new();
                 if let Err(error) =
@@ -500,7 +565,14 @@ async fn handle_ws_connection(
         conversation_id
     );
     let memory_scope = crate::agent::graph::ConversationMemoryScope::new("local", &conversation_id)
-        .expect("WebSocket conversation id must be valid");
+        .unwrap_or_else(|err| {
+            warn!(
+                conversation_id = %conversation_id,
+                error = %err,
+                "Invalid WebSocket conversation scope, falling back to default"
+            );
+            crate::agent::graph::ConversationMemoryScope::default()
+        });
     let voice_session =
         crate::webrtc::session::VoiceSessionAudio::from_app_state(state.as_ref()).await;
     let (pipeline_handle, actor) = crate::webrtc::pipeline::WebRTCActor::new(
@@ -510,6 +582,7 @@ async fn handle_ws_connection(
         conversation_id.clone(),
         voice_session.aec_handle(),
     );
+    let actor = actor.with_voice_session(voice_session.clone());
     let actor_handle = AbortOnDropTask::new(tokio::spawn(actor.run()));
     let voice_message_dialogue = Arc::new(tokio::sync::Mutex::new(
         crate::messaging::VoiceMessageDialogue::default(),
@@ -598,6 +671,7 @@ async fn handle_ws_connection(
     }));
 
     let mut turn_audio = TurnAudioBuffer::new(1536);
+    let mut join_set = AbortOnDropJoinSet::new();
     let mut wake_gate = wake::WakeGate::from_env();
     if wake_gate.enabled() {
         info!("Wake-word gate enabled (mode {:?})", wake_gate.mode());
@@ -635,6 +709,10 @@ async fn handle_ws_connection(
                                 payload: frame.payload.clone(),
                             };
                             let _ = control_tx.send(handshake_frame).await;
+                        }
+                        OP_FLUSH => {
+                            info!("🎙️ [WebSocket] Client requested interruption via OP_FLUSH");
+                            let _ = pipeline_handle.on_interrupted();
                         }
                         OP_WAKE_PROBE => {
                             // Cổng đánh thức của widget. Client tự cắt MỘT câu ứng
@@ -728,13 +806,11 @@ async fn handle_ws_connection(
                                     let rms = (samples_vec.iter().map(|s| s * s).sum::<f32>()
                                         / samples_vec.len().max(1) as f32)
                                         .sqrt();
-                                    let classifier = match &best_score {
-                                        Some((name, score)) => format!(
-                                            "{} {:.3} (threshold {:.2})",
-                                            name, score, model_threshold
-                                        ),
-                                        None => "không nạp được".to_string(),
-                                    };
+                                    let classifier = format_wake_probe_classifier_diagnostic(
+                                        &best_score,
+                                        model_threshold,
+                                        wake_gate.detector_is_some(),
+                                    );
                                     info!(
                                         "Wake probe rejected — nghe ra {:?} | classifier {} | clip {:.2}s rms {:.4} đỉnh {:.3}",
                                         heard, classifier, duration_secs, rms, peak
@@ -773,10 +849,10 @@ async fn handle_ws_connection(
                             // see docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md): AEC3 self-echo
                             // cancellation, then GTCRN denoise, then VAD — all in one
                             // blocking task with DSP state owned by this WebSocket.
-                            let voice_session = voice_session.clone();
+                            let voice_session_capture = voice_session.clone();
                             let (events, cleaned_samples) =
                                 tokio::task::spawn_blocking(move || {
-                                    voice_session.process_mic(samples_vec)
+                                    voice_session_capture.process_mic(samples_vec)
                                 })
                                 .await
                                 .map_err(|e| format!("Audio pipeline task panicked: {}", e))??;
@@ -801,6 +877,7 @@ async fn handle_ws_connection(
                             for action in turn_audio.ingest(&samples_vec, &vad_events) {
                                 match action {
                                     TurnAudioAction::Started => {
+                                        voice_session.clear_aec_render();
                                         // Barge-in only when awake — while the wake gate sleeps,
                                         // ambient speech (game chat, calls) must not cancel anything.
                                         if wake_gate.is_awake()
@@ -809,52 +886,202 @@ async fn handle_ws_connection(
                                             error!("Failed on_vad_start: {}", e);
                                         }
                                     }
+                                    TurnAudioAction::SilenceProbe {
+                                        consecutive_silence_frames,
+                                        audio,
+                                    } => {
+                                        let voice_session_turn = voice_session.clone();
+                                        let audio_for_turn = audio.clone();
+                                        let decision = tokio::task::spawn_blocking(move || {
+                                            voice_session_turn.evaluate_turn(&audio_for_turn)
+                                        })
+                                        .await
+                                        .ok()
+                                        .flatten();
+
+                                        let silence_duration_ms =
+                                            (consecutive_silence_frames as u64) * 32;
+
+                                        match decision {
+                                            Some(Ok(
+                                                crate::webrtc::turn_shadow::AdaptiveTurnDecision::ImmediateCutoff {
+                                                    probability,
+                                                },
+                                            )) => {
+                                                info!(
+                                                    "[smart-turn:adaptive] Stage 1 Fast Cutoff at frame {} (p={:.3} > 0.92, ~{}ms)",
+                                                    consecutive_silence_frames,
+                                                    probability,
+                                                    silence_duration_ms
+                                                );
+
+                                                let _ = text_tx
+                                                    .send(
+                                                        serde_json::json!({
+                                                            "type": "voice:turn_arbitration",
+                                                            "event": "voice:turn_arbitration",
+                                                            "stage": "stage_1_fast",
+                                                            "confidence": probability,
+                                                            "silence_duration_ms": silence_duration_ms,
+                                                            "payload": {
+                                                                "stage": "stage_1_fast",
+                                                                "confidence_score": probability,
+                                                                "silence_duration_ms": silence_duration_ms,
+                                                                "is_turn_complete": true
+                                                            }
+                                                        })
+                                                        .to_string(),
+                                                    )
+                                                    .await;
+
+                                                let speech_audio =
+                                                    turn_audio.force_end().unwrap_or(audio);
+                                                voice_session.force_vad_speech_end();
+
+                                                if wake_gate.is_awake() {
+                                                    wake_gate.note_activity();
+                                                    if let Err(e) =
+                                                        pipeline_handle.on_vad_end(speech_audio)
+                                                    {
+                                                        error!(
+                                                            "Failed on_vad_end in Stage 1 Fast Cutoff: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                } else if wake_gate.uses_stt_confirm() {
+                                                    let state_wake = state.clone();
+                                                    let audio_for_stt = speech_audio.clone();
+                                                    let transcript =
+                                                        tokio::task::spawn_blocking(move || {
+                                                            let mut stt =
+                                                                state_wake.stt.blocking_lock();
+                                                            stt.transcribe_for_wake(&audio_for_stt)
+                                                        })
+                                                        .await;
+                                                    if let Ok(Ok(Some(text))) = transcript
+                                                        && wake_gate.try_wake(&text)
+                                                    {
+                                                        info!(
+                                                            "Wake word detected (tier-2 STT): {:?}",
+                                                            text
+                                                        );
+                                                        if let Err(e) = pipeline_handle
+                                                            .on_vad_end(speech_audio)
+                                                        {
+                                                            error!("Failed on_vad_end: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Some(Ok(
+                                                crate::webrtc::turn_shadow::AdaptiveTurnDecision::HesitationWait {
+                                                    probability,
+                                                },
+                                            )) => {
+                                                info!(
+                                                    "[smart-turn:adaptive] Stage 2 Adaptive Hold at frame {} (p={:.3}, holding for pause/conjunction)",
+                                                    consecutive_silence_frames, probability
+                                                );
+
+                                                let _ = text_tx
+                                                    .send(
+                                                        serde_json::json!({
+                                                            "type": "voice:turn_arbitration",
+                                                            "event": "voice:turn_arbitration",
+                                                            "stage": "stage_2_hold",
+                                                            "confidence": probability,
+                                                            "silence_duration_ms": silence_duration_ms,
+                                                            "payload": {
+                                                                "stage": "stage_2_hold",
+                                                                "confidence_score": probability,
+                                                                "silence_duration_ms": silence_duration_ms,
+                                                                "is_turn_complete": false
+                                                            }
+                                                        })
+                                                        .to_string(),
+                                                    )
+                                                    .await;
+                                            }
+                                            Some(Ok(
+                                                crate::webrtc::turn_shadow::AdaptiveTurnDecision::Incomplete {
+                                                    probability,
+                                                },
+                                            )) => {
+                                                info!(
+                                                    "[smart-turn:adaptive] Stage 2 Adaptive Hold (incomplete utterance, p={:.3} < 0.50)",
+                                                    probability
+                                                );
+
+                                                let _ = text_tx
+                                                    .send(
+                                                        serde_json::json!({
+                                                            "type": "voice:turn_arbitration",
+                                                            "event": "voice:turn_arbitration",
+                                                            "stage": "stage_2_hold",
+                                                            "confidence": probability,
+                                                            "silence_duration_ms": silence_duration_ms,
+                                                            "payload": {
+                                                                "stage": "stage_2_hold",
+                                                                "confidence_score": probability,
+                                                                "silence_duration_ms": silence_duration_ms,
+                                                                "is_turn_complete": false
+                                                            }
+                                                        })
+                                                        .to_string(),
+                                                    )
+                                                    .await;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
                                     TurnAudioAction::Ended(speech_audio) => {
+                                        if speech_audio.is_empty() {
+                                            tracing::warn!(
+                                                "[TurnAudioAction] Dropping empty speech_audio turn"
+                                            );
+                                            continue;
+                                        }
+
+                                        let silence_duration_ms = 14u64 * 32; // ~448ms
+                                        info!(
+                                            "[smart-turn:adaptive] Stage 3 Timeout fallback at frame 14 (~{}ms)",
+                                            silence_duration_ms
+                                        );
+
+                                        let _ = text_tx
+                                            .send(
+                                                serde_json::json!({
+                                                    "type": "voice:turn_arbitration",
+                                                    "event": "voice:turn_arbitration",
+                                                    "stage": "stage_3_timeout",
+                                                    "confidence": 0.0,
+                                                    "silence_duration_ms": silence_duration_ms,
+                                                    "payload": {
+                                                        "stage": "stage_3_timeout",
+                                                        "confidence_score": 0.0,
+                                                        "silence_duration_ms": silence_duration_ms,
+                                                        "is_turn_complete": true
+                                                    }
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
+
                                         if wake_gate.is_awake() {
                                             wake_gate.note_activity();
-
-                                            // Shadow-mode Smart Turn v3.2 (opt-in, off by default):
-                                            // fire-and-forget, log-only, never gates the real
-                                            // pipeline — see webrtc::turn_shadow module docs.
-                                            let state_shadow = state.clone();
-                                            let shadow_audio = speech_audio.clone();
-                                            tokio::spawn(async move {
-                                                let verdict =
-                                                    tokio::task::spawn_blocking(move || {
-                                                        let mut guard = state_shadow
-                                                            .turn_shadow
-                                                            .blocking_lock();
-                                                        guard
-                                                            .as_mut()
-                                                            .map(|c| c.predict(&shadow_audio))
-                                                    })
-                                                    .await;
-                                                if let Ok(Some(Ok(v))) = verdict {
-                                                    info!(
-                                                        "[shadow:smart-turn] probability={:.3} complete={} (VAD already decided: ended)",
-                                                        v.probability, v.complete
-                                                    );
-                                                }
-                                            });
-
                                             if let Err(e) = pipeline_handle.on_vad_end(speech_audio)
                                             {
-                                                error!("Failed on_vad_end: {}", e);
+                                                error!(
+                                                    "Failed on_vad_end in Stage 3 Timeout: {}",
+                                                    e
+                                                );
                                             }
                                         } else if wake_gate.uses_stt_confirm() {
-                                            // Asleep, tier-2 (asr_prefix/hybrid): transcribe once and
-                                            // forward only if the transcript contains the wake phrase
-                                            // ("LIVA, …" works in one breath — same utterance forwarded).
-                                            // In hybrid this is the fallback when the tier-1 classifier
-                                            // missed (typically a Vietnamese pronunciation).
                                             let state_wake = state.clone();
                                             let audio_for_stt = speech_audio.clone();
                                             let transcript =
                                                 tokio::task::spawn_blocking(move || {
                                                     let mut stt = state_wake.stt.blocking_lock();
-                                                    // Wake detection uses the light Nemotron path even
-                                                    // in Parakeet mode — never load the 2.4GB model just
-                                                    // to hear "liva" while asleep.
                                                     stt.transcribe_for_wake(&audio_for_stt)
                                                 })
                                                 .await;
@@ -879,8 +1106,6 @@ async fn handle_ws_connection(
                                                 }
                                             }
                                         }
-                                        // else: asleep + trained_model-only → tier-1 classifier
-                                        // (check_streaming, above) is the sole gate; no STT run.
                                     }
                                 }
                             }
@@ -900,6 +1125,12 @@ async fn handle_ws_connection(
                 }
                 let trim_text = text.trim();
                 if !trim_text.is_empty() {
+                    if trim_text == "[INTERRUPT]" {
+                        info!("🎙️ [WebSocket] Interruption requested via [INTERRUPT] string");
+                        let _ = pipeline_handle.on_interrupted();
+                        continue;
+                    }
+
                     // Try parsing as legacy client event
                     if let Ok(legacy_val) = serde_json::from_str::<serde_json::Value>(trim_text)
                         && let Some(event_str) = legacy_val["event"].as_str()
@@ -928,8 +1159,20 @@ async fn handle_ws_connection(
                         let voice_message_dialogue = Arc::clone(&voice_message_dialogue);
                         let pipeline_handle_clone = pipeline_handle.clone();
 
-                        tokio::spawn(async move {
+                        join_set.spawn(async move {
                             match event_name.as_str() {
+                                "audio_play_started" | "audio_play_finished" => {
+                                    // Graceful no-op for telemetry / audio playback lifecycle notifications.
+                                    // Core manages audio state and barge-in via native WebRTC/VAD and epoch watermarks.
+                                    tracing::debug!(
+                                        event = %event_name,
+                                        "Handled client audio playback telemetry event (no-op)"
+                                    );
+                                }
+                                "voice:interrupt" | "interrupt" => {
+                                    info!("🎙️ [WebSocket] Interruption requested via {} event", event_name);
+                                    let _ = pipeline_handle_clone.on_interrupted();
+                                }
                                 "get_config" => {
                                     match handle_command_as(
                                         principal,
@@ -1351,6 +1594,35 @@ async fn handle_ws_connection(
                                     let uv_lower = user_text.to_lowercase();
                                     if uv_lower.contains("màn hình") || uv_lower.contains("screen")
                                     {
+                                        let cursor_coords = tokio::task::spawn_blocking(|| {
+                                            if let Some((cx, cy)) = crate::vision::capture::cursor_position() {
+                                                use crate::vision::capture::ScreenCapturer;
+                                                let (sw, sh) = crate::vision::capture::NativeScreenCapturer::new(0)
+                                                    .dimensions()
+                                                    .unwrap_or((1920, 1080));
+                                                let nx = (cx as f64 / sw.max(1) as f64).clamp(0.0, 1.0);
+                                                let ny = (cy as f64 / sh.max(1) as f64).clamp(0.0, 1.0);
+                                                Some((nx, ny))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .await
+                                        .ok()
+                                        .flatten();
+
+                                        if let Some((nx, ny)) = cursor_coords {
+                                            let _ = text_tx_clone
+                                                .send(
+                                                    serde_json::json!({
+                                                        "event": "vision_inspect",
+                                                        "payload": { "x": nx, "y": ny }
+                                                    })
+                                                    .to_string(),
+                                                )
+                                                .await;
+                                        }
+
                                         let q = user_text.clone();
                                         let sc = state_clone.clone();
                                         let text_tx_inner = text_tx_clone.clone();
@@ -1376,10 +1648,7 @@ async fn handle_ws_connection(
                                                                 "event": "ai_stream_chunk",
                                                                 "payload": { "textChunk": token, "isThought": false }
                                                             });
-                                                            if let Ok(s) = serde_json::to_string(&chunk) {
-                                                                let _ = text_tx_inner.blocking_send(s);
-                                                            }
-                                                            true
+                                                            crate::llm::nen_sinh_tiep(&text_tx_inner, &chunk)
                                                         },
                                                     )
                                                     .map(|o| o.text)
@@ -1403,6 +1672,15 @@ async fn handle_ws_connection(
                                             .send(
                                                 serde_json::json!({
                                                     "event": "ai_thinking_end",
+                                                    "payload": {}
+                                                })
+                                                .to_string(),
+                                            )
+                                            .await;
+                                        let _ = text_tx_clone
+                                            .send(
+                                                serde_json::json!({
+                                                    "event": "vision_inspect_clear",
                                                     "payload": {}
                                                 })
                                                 .to_string(),
@@ -1524,7 +1802,7 @@ async fn handle_ws_connection(
                     let state_clone = state.clone();
                     let req_id_clone = req_id.clone();
 
-                    tokio::spawn(async move {
+                    join_set.spawn(async move {
                         let result = handle_command_as(
                             principal,
                             state_clone,
@@ -1558,6 +1836,7 @@ async fn handle_ws_connection(
             }
             tokio_tungstenite::tungstenite::Message::Close(_) => {
                 send_task.abort();
+                join_set.abort_all();
                 break;
             }
             _ => {}
@@ -1566,6 +1845,7 @@ async fn handle_ws_connection(
 
     // Clean up
     let _ = pipeline_handle.on_interrupted();
+    join_set.abort_all();
     send_task.abort();
     actor_handle.abort();
     Ok(())
@@ -1575,8 +1855,9 @@ async fn handle_ws_connection(
 mod security_tests {
     use super::{
         WebSocketSessionAuthority, auth_token_for_ip, authorize_websocket_event,
-        bearer_token_matches, la_race_dong_websocket, loi_chat_thanh_cau_noi,
-        wake_probe_classifier_direct_accept, websocket_principal, websocket_session_digest,
+        bearer_token_matches, format_wake_probe_classifier_diagnostic, la_race_dong_websocket,
+        loi_chat_thanh_cau_noi, wake_probe_classifier_direct_accept, websocket_principal,
+        websocket_session_digest,
     };
     use crate::CommandPrincipal;
     use std::net::{IpAddr, Ipv4Addr};
@@ -1759,6 +2040,30 @@ mod security_tests {
         assert!(wake_probe_classifier_direct_accept(Some(0.97), 0.96));
     }
 
+    #[test]
+    fn wake_probe_classifier_diagnostic_formatting() {
+        let threshold = 0.58;
+
+        // Case a: Model chưa nạp / bị tắt (detector_is_some = false)
+        assert_eq!(
+            format_wake_probe_classifier_diagnostic(&None, threshold, false),
+            "không nạp được / đã tắt"
+        );
+
+        // Case b: Model đã nạp (detector_is_some = true) nhưng clip không đủ embedding
+        assert_eq!(
+            format_wake_probe_classifier_diagnostic(&None, threshold, true),
+            "không đủ embedding (clip quá ngắn)"
+        );
+
+        // Case c: Model đã đánh giá và trả về điểm số dưới ngưỡng
+        let score = Some(("wake_liva_en_v3.onnx".to_string(), 0.0142));
+        assert_eq!(
+            format_wake_probe_classifier_diagnostic(&score, threshold, true),
+            "wake_liva_en_v3.onnx 0.014 (threshold 0.58)"
+        );
+    }
+
     /// Khoá đúng chỗ bản cũ làm sai: "chưa nạp model" phải nói là ĐANG NẠP, và
     /// mọi thứ khác mới là "đã xảy ra lỗi".
     ///
@@ -1795,5 +2100,46 @@ mod security_tests {
             let s = loi_chat_thanh_cau_noi(ca);
             assert!(s.contains("đã xảy ra lỗi"), "ca {ca:?} → {s}");
         }
+    }
+
+    #[tokio::test]
+    async fn abort_on_drop_join_set_cancels_tracked_tasks() {
+        use super::AbortOnDropJoinSet;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let executed_after_abort = Arc::new(AtomicBool::new(false));
+        let executed_after_abort_clone = Arc::clone(&executed_after_abort);
+
+        let mut join_set = AbortOnDropJoinSet::new();
+        join_set.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            executed_after_abort_clone.store(true, Ordering::SeqCst);
+        });
+
+        // Aborting all tasks in the join set cancels running background tasks
+        join_set.abort_all();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !executed_after_abort.load(Ordering::SeqCst),
+            "Aborted task must not execute following code"
+        );
+
+        // Also verify drop of AbortOnDropJoinSet cancels tasks
+        let dropped_task_executed = Arc::new(AtomicBool::new(false));
+        let dropped_task_clone = Arc::clone(&dropped_task_executed);
+        {
+            let mut scoped_set = AbortOnDropJoinSet::new();
+            scoped_set.spawn(async move {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                dropped_task_clone.store(true, Ordering::SeqCst);
+            });
+            // scoped_set dropped here
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !dropped_task_executed.load(Ordering::SeqCst),
+            "Dropped JoinSet must abort all spawned tasks"
+        );
     }
 }

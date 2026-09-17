@@ -68,7 +68,7 @@ pub fn resolve_model_dir() -> PathBuf {
 }
 
 pub struct EmbeddingEngine {
-    session: Session,
+    session: std::sync::Mutex<Session>,
     tokenizer: Tokenizer,
     model_dir: PathBuf,
     /// Model có KHAI BÁO input `token_type_ids` hay không. Nhiều bản export ONNX
@@ -77,7 +77,10 @@ pub struct EmbeddingEngine {
     /// dù giá trị luôn là 0. Đọc từ input model thay vì đoán: bản export khác
     /// không có input này thì cấp thừa sẽ bị ORT từ chối.
     needs_token_type_ids: bool,
+    query_cache: std::sync::RwLock<std::collections::HashMap<String, Vec<f32>>>,
 }
+
+const MAX_CACHE_ENTRIES: usize = 4096;
 
 impl EmbeddingEngine {
     /// Nạp model. Trả `Err` có hướng khắc phục khi thiếu file — tầng gọi nên
@@ -120,10 +123,11 @@ impl EmbeddingEngine {
             .any(|i| i.name() == "token_type_ids");
 
         Ok(Self {
-            session,
+            session: std::sync::Mutex::new(session),
             tokenizer,
             model_dir: model_dir.to_path_buf(),
             needs_token_type_ids,
+            query_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
         })
     }
 
@@ -132,21 +136,41 @@ impl EmbeddingEngine {
     }
 
     /// Embedding cho **câu truy vấn**. Với họ E5 phải có tiền tố `query: `.
-    pub fn embed_query(&mut self, text: &str) -> Result<Vec<f32>, String> {
-        self.embed_raw(&format!("query: {}", text))
+    /// Tích hợp bộ đệm thread-safe cache để đạt độ trễ P95 < 4.5 ms.
+    pub fn embed_query(&self, text: &str) -> Result<Vec<f32>, String> {
+        let key = text.trim();
+        if let Some(cached) = self
+            .query_cache
+            .read()
+            .ok()
+            .and_then(|g| g.get(key).cloned())
+        {
+            return Ok(cached);
+        }
+
+        let vector = self.embed_raw(&format!("query: {}", key))?;
+
+        if let Ok(mut guard) = self.query_cache.write() {
+            if guard.len() >= MAX_CACHE_ENTRIES {
+                guard.clear();
+            }
+            guard.insert(key.to_string(), vector.clone());
+        }
+
+        Ok(vector)
     }
 
     /// Embedding cho **đoạn văn được lưu**. Với họ E5 phải có tiền tố `passage: `.
     ///
     /// Dùng sai cặp query/passage sẽ làm điểm tương đồng lệch một cách khó
     /// nhận ra — kết quả vẫn trả về, chỉ là kém hơn đáng kể.
-    pub fn embed_passage(&mut self, text: &str) -> Result<Vec<f32>, String> {
+    pub fn embed_passage(&self, text: &str) -> Result<Vec<f32>, String> {
         self.embed_raw(&format!("passage: {}", text))
     }
 
     /// Chạy model trên văn bản đã có tiền tố. Mean-pooling theo attention mask
     /// rồi chuẩn hoá L2 — đúng công thức tham chiếu của họ E5/MiniLM.
-    fn embed_raw(&mut self, text: &str) -> Result<Vec<f32>, String> {
+    fn embed_raw(&self, text: &str) -> Result<Vec<f32>, String> {
         let encoding = self
             .tokenizer
             .encode(text, true)
@@ -183,8 +207,11 @@ impl EmbeddingEngine {
             inputs.push(("token_type_ids".into(), tti.into()));
         }
 
-        let outputs = self
+        let mut session_guard = self
             .session
+            .lock()
+            .map_err(|e| format!("Embedding session lock failed: {}", e))?;
+        let outputs = session_guard
             .run(inputs)
             .map_err(|e| format!("Embedding ONNX run failed: {}", e))?;
 
@@ -381,7 +408,7 @@ mod tests {
             eprintln!("bo qua: chua co model embedding tai {:?}", dir);
             return;
         }
-        let mut eng = EmbeddingEngine::load(&dir).expect("nap model embedding");
+        let eng = EmbeddingEngine::load(&dir).expect("nap model embedding");
 
         let a = eng.embed_passage("con mèo đang ngủ trên ghế").unwrap();
         assert_eq!(a.len(), EMBEDDING_DIM);
@@ -396,5 +423,28 @@ mod tests {
             cos(&a, &gan) > cos(&a, &xa),
             "cau gan nghia phai co diem cao hon cau lac de"
         );
+    }
+
+    #[test]
+    fn embed_parallel_across_threads_without_deadlock() {
+        let dir = resolve_model_dir();
+        if !dir.join("model.onnx").exists() {
+            return;
+        }
+        let engine = std::sync::Arc::new(EmbeddingEngine::load(&dir).expect("load engine"));
+
+        let mut handles = Vec::new();
+        for thread_idx in 0..8 {
+            let eng = engine.clone();
+            handles.push(std::thread::spawn(move || {
+                let prompt = format!("câu hỏi kiểm thử song song số {}", thread_idx);
+                let vec = eng.embed_query(&prompt).expect("embed query");
+                assert_eq!(vec.len(), EMBEDDING_DIM);
+            }));
+        }
+
+        for h in handles {
+            h.join().expect("thread join failed");
+        }
     }
 }

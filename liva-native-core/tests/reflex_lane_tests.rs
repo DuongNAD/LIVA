@@ -156,7 +156,7 @@ fn test_reflex_lane_vision_priority() {
 #[test]
 fn test_reflex_lane_chat_fallback_and_no_false_positives() {
     let cases = [
-        "thời tiết hôm nay thế nào?",
+        "hôm nay là thứ mấy?",
         "giải thích thuật toán Dijkstra",
         "xin chào LIVA",
         "let's get back on track",
@@ -167,6 +167,27 @@ fn test_reflex_lane_chat_fallback_and_no_false_positives() {
     for input in cases {
         let intent = route_intent(input);
         assert_eq!(intent, Intent::Chat, "Failed on input: '{input}'");
+    }
+}
+
+#[test]
+fn test_reflex_lane_weather() {
+    let cases = [
+        ("thời tiết hôm nay thế nào?", None),
+        ("thời tiết ở Đà Nẵng hôm nay", Some("Đà Nẵng")),
+        ("dự báo thời tiết tại Hà Nội", Some("Hà Nội")),
+        ("ngoài trời có mưa không", None),
+    ];
+
+    for (input, expected_loc) in cases {
+        let intent = route_intent(input);
+        assert_eq!(
+            intent,
+            Intent::Weather {
+                location: expected_loc.map(|s| s.to_string())
+            },
+            "Failed on input: '{input}'"
+        );
     }
 }
 

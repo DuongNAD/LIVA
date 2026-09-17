@@ -12,6 +12,7 @@ pub struct ConsolidationBatchResult {
     pub consolidated: usize,
     pub retried: usize,
     pub dead_lettered: usize,
+    pub l3_triples_extracted: usize,
 }
 
 struct PendingEvent {
@@ -22,31 +23,47 @@ struct PendingEvent {
 }
 
 pub async fn consume_pending_once(
-    db: crate::db::DatabasePool,
+    db: &crate::db::DatabasePool,
+    crypto: &crate::crypto::EncryptionEngine,
     batch_size: usize,
 ) -> Result<ConsolidationBatchResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let conn = db
-            .writer
-            .get()
-            .map_err(|error| format!("khong lay duoc DB writer: {error}"))?;
-        process_pending_batch(&conn, PROJECTION_WORKER_ID, batch_size)
-            .map_err(|error| format!("event projection consumer loi: {error}"))
-    })
-    .await
-    .map_err(|error| format!("event projection worker panic: {error}"))?
+    let csr_graph = db.csr_graph.clone();
+    let crypto = crypto.clone();
+    db.writer_actor
+        .execute(move |conn| {
+            let result = process_pending_batch(conn, &crypto, PROJECTION_WORKER_ID, batch_size)
+                .map_err(|error| format!("event projection consumer loi: {error}"))?;
+
+            // Re-synchronize In-Memory CsrGraph with newly extracted L3 knowledge triples
+            #[allow(clippy::collapsible_if)]
+            if result.l3_triples_extracted > 0 {
+                if let Ok(graph) = crate::db::csr_graph::CsrGraph::from_db(conn) {
+                    let _ = csr_graph.write().map(|mut g_lock| *g_lock = graph);
+                }
+            }
+
+            Ok(result)
+        })
+        .await
 }
 
-pub fn spawn_projection_consumer(db: crate::db::DatabasePool) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run_default_projection_consumer(db))
+pub fn spawn_projection_consumer(
+    db: crate::db::DatabasePool,
+    crypto: crate::crypto::EncryptionEngine,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(run_default_projection_consumer(db, crypto))
 }
 
-pub async fn run_default_projection_consumer(db: crate::db::DatabasePool) {
-    run_projection_consumer(db, DEFAULT_INTERVAL, DEFAULT_BATCH_SIZE).await;
+pub async fn run_default_projection_consumer(
+    db: crate::db::DatabasePool,
+    crypto: crate::crypto::EncryptionEngine,
+) {
+    run_projection_consumer(db, crypto, DEFAULT_INTERVAL, DEFAULT_BATCH_SIZE).await;
 }
 
 pub async fn run_projection_consumer(
     db: crate::db::DatabasePool,
+    crypto: crate::crypto::EncryptionEngine,
     interval_duration: std::time::Duration,
     batch_size: usize,
 ) {
@@ -55,13 +72,14 @@ pub async fn run_projection_consumer(
 
     loop {
         interval.tick().await;
-        match consume_pending_once(db.clone(), batch_size).await {
+        match consume_pending_once(&db, &crypto, batch_size).await {
             Ok(result) if result.processed > 0 => {
                 tracing::info!(
                     processed = result.processed,
                     consolidated = result.consolidated,
                     retried = result.retried,
                     dead_lettered = result.dead_lettered,
+                    l3_triples = result.l3_triples_extracted,
                     "event projection batch completed"
                 );
             }
@@ -75,6 +93,7 @@ pub async fn run_projection_consumer(
 
 pub fn process_pending_batch(
     conn: &Connection,
+    crypto: &crate::crypto::EncryptionEngine,
     worker_id: &str,
     batch_size: usize,
 ) -> Result<ConsolidationBatchResult, rusqlite::Error> {
@@ -102,6 +121,58 @@ pub fn process_pending_batch(
 
     for event in &events {
         if projection_matches(&transaction, event)? {
+            // L3 Knowledge Graph extraction: extract triples from turn content
+            let content: Option<String> = transaction
+                .query_row(
+                    "SELECT content FROM vectors_meta WHERE vec_id = ?1",
+                    [&event.event_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            if let Some(raw_content) = content {
+                let turn_content = match crypto.read_fact(&raw_content) {
+                    crate::crypto::FactRead::Ok(plain) => plain,
+                    crate::crypto::FactRead::Locked { reason } => {
+                        tracing::warn!(
+                            event_id = %event.event_id,
+                            reason = %reason,
+                            "Bỏ qua trích xuất tri thức L3 cho conversation turn bị khóa (sai LIVA_ENCRYPTION_KEY)"
+                        );
+                        String::new()
+                    }
+                };
+
+                if !turn_content.is_empty() {
+                    let triples =
+                        crate::cognitive::triple_extractor::extract_triples(&turn_content);
+                    for triple in &triples {
+                        // 1. Insert Subject Node
+                        transaction.execute(
+                            "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?1, '{}')
+                             ON CONFLICT(id) DO UPDATE SET label = excluded.label",
+                            [&triple.subject],
+                        )?;
+
+                        // 2. Insert Object Node
+                        transaction.execute(
+                            "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?1, '{}')
+                             ON CONFLICT(id) DO UPDATE SET label = excluded.label",
+                            [&triple.object],
+                        )?;
+
+                        // 3. Insert Edge (Subject -> Object)
+                        transaction.execute(
+                            "INSERT INTO l3_edges (source, target, relation, weight, obsolete)
+                             VALUES (?1, ?2, ?3, ?4, 0)
+                             ON CONFLICT(source, target, relation) DO UPDATE SET weight = excluded.weight, obsolete = 0",
+                            params![triple.subject, triple.object, triple.relation, triple.weight as f64],
+                        )?;
+                        result.l3_triples_extracted += 1;
+                    }
+                }
+            }
+
             let updated = transaction.execute(
                 "UPDATE events \
                  SET consolidated = 1, consolidation_status = 'consolidated' \
@@ -229,7 +300,7 @@ mod tests {
         )
         .expect("seed event");
 
-        let result = super::process_pending_batch(&conn, "projection-worker", 10)
+        let result = super::process_pending_batch(&conn, &test_crypto(), "projection-worker", 10)
             .expect("consume pending event");
 
         assert_eq!(result.processed, 1);
@@ -255,7 +326,7 @@ mod tests {
         assert_eq!(checkpoint.0, 1);
         assert!(checkpoint.1.contains("turn_consumer_1"));
 
-        let rerun = super::process_pending_batch(&conn, "projection-worker", 10)
+        let rerun = super::process_pending_batch(&conn, &test_crypto(), "projection-worker", 10)
             .expect("rerun is idempotent");
         assert_eq!(rerun, super::ConsolidationBatchResult::default());
         let checkpoint_after: (i64, String, i64) = conn
@@ -286,8 +357,9 @@ mod tests {
         .expect("seed invalid event");
 
         for expected_retry in 1..=2 {
-            let result = super::process_pending_batch(&conn, "projection-worker", 10)
-                .expect("retry invalid event");
+            let result =
+                super::process_pending_batch(&conn, &test_crypto(), "projection-worker", 10)
+                    .expect("retry invalid event");
             assert_eq!(result.retried, 1);
             let state: (String, i64) = conn
                 .query_row(
@@ -300,7 +372,7 @@ mod tests {
             assert_eq!(state, ("pending".to_string(), expected_retry));
         }
 
-        let result = super::process_pending_batch(&conn, "projection-worker", 10)
+        let result = super::process_pending_batch(&conn, &test_crypto(), "projection-worker", 10)
             .expect("move invalid event to dlq");
         assert_eq!(result.dead_lettered, 1);
         let state: (String, i64) = conn
@@ -322,7 +394,7 @@ mod tests {
             .expect("dlq count");
         assert_eq!(dlq_count, 1);
 
-        let idle = super::process_pending_batch(&conn, "projection-worker", 10)
+        let idle = super::process_pending_batch(&conn, &test_crypto(), "projection-worker", 10)
             .expect("dlq event is excluded");
         assert_eq!(idle.processed, 0);
         let dlq_count_after: i64 = conn
@@ -353,7 +425,7 @@ mod tests {
         conn.execute("DROP TABLE consolidation_checkpoints", [])
             .expect("force checkpoint failure");
 
-        let result = super::process_pending_batch(&conn, "projection-worker", 10);
+        let result = super::process_pending_batch(&conn, &test_crypto(), "projection-worker", 10);
         assert!(result.is_err(), "checkpoint lỗi phải làm cả batch thất bại");
 
         let event: (i64, String) = conn
@@ -384,7 +456,7 @@ mod tests {
             .expect("seed event");
         }
 
-        let result = super::consume_pending_once(pool.clone(), 10)
+        let result = super::consume_pending_once(&pool, &test_crypto(), 10)
             .await
             .expect("async consumer");
         assert_eq!(result.consolidated, 1);
@@ -420,6 +492,7 @@ mod tests {
 
         let worker = tokio::spawn(super::run_projection_consumer(
             pool.clone(),
+            test_crypto(),
             std::time::Duration::from_millis(5),
             10,
         ));
@@ -464,7 +537,7 @@ mod tests {
             .expect("seed event");
         }
 
-        let worker = super::spawn_projection_consumer(pool.clone());
+        let worker = super::spawn_projection_consumer(pool.clone(), test_crypto());
         tokio::time::timeout(std::time::Duration::from_secs(1), async {
             loop {
                 let status: String = {

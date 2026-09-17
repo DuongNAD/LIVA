@@ -28,7 +28,7 @@
 use liva_native_core::agent::graph::{Intent, route_intent};
 use liva_native_core::llm::embedder::{EmbeddingEngine, resolve_model_dir};
 use liva_native_core::llm::tool_calling::{
-    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, compile_selection_prompt,
+    DEFAULT_TOP_K, NATIVE_SERVER, Selection, ToolCatalog, ToolEmbedder, compile_selection_prompt,
     parse_selection, rank_tools, rank_tools_scored, validate_arguments,
 };
 use liva_native_core::mcp::server::NativeMcpServer;
@@ -92,7 +92,7 @@ const CORPUS_NGUONG: &[(&str, bool)] = &[
 /// có khoảng trống giữa hai nhóm, một ngưỡng tiền lọc bỏ hẳn lượt LLM cho câu trò
 /// chuyện. Nếu KHÔNG có khoảng trống thì ngưỡng là ý tồi, và biết điều đó cũng là
 /// kết quả.
-fn do_nguong(catalog: &ToolCatalog, embedder: &mut EmbeddingEngine) {
+fn do_nguong(catalog: &ToolCatalog, embedder: &EmbeddingEngine) {
     println!("── Đo ngưỡng: điểm cosine top-1 ──");
     let mut co_tool: Vec<f32> = Vec::new();
     let mut tro_chuyen: Vec<f32> = Vec::new();
@@ -210,7 +210,7 @@ fn main() {
 
     // ── Tầng 1: truy hồi ────────────────────────────────────────────────────
     let dir = resolve_model_dir();
-    let mut embedder = match EmbeddingEngine::load(&dir) {
+    let embedder = match EmbeddingEngine::load(&dir) {
         Ok(e) => Some(e),
         Err(e) => {
             println!("!!! Không nạp được embedder ({}): {e}", dir.display());
@@ -240,7 +240,7 @@ fn main() {
             let top = rank_tools(
                 &catalog,
                 cau,
-                embedder.as_mut().map(|e| e as _),
+                embedder.as_ref().map(|e| e as &dyn ToolEmbedder),
                 DEFAULT_TOP_K,
             );
             let top1 = catalog.tools()[top[0]].name.as_str();
@@ -262,7 +262,7 @@ fn main() {
             }
         }
         println!();
-        if let Some(e) = embedder.as_mut() {
+        if let Some(e) = embedder.as_ref() {
             do_nguong(&catalog, e);
         }
     }
@@ -313,7 +313,7 @@ fn main() {
         let top = rank_tools(
             &catalog,
             cau,
-            embedder.as_mut().map(|e| e as _),
+            embedder.as_ref().map(|e| e as &dyn ToolEmbedder),
             DEFAULT_TOP_K,
         );
         let ung_vien: Vec<_> = top.iter().map(|&i| &catalog.tools()[i]).collect();

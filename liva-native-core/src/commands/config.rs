@@ -108,6 +108,7 @@ const OWNED: &[&str] = &[
     "get_voice_profiles",
     "select_voice_profile",
     "get_system_status",
+    "get_memory_status",
     "get_preflight_status",
     "get_skills_list",
     "toggle_skill",
@@ -133,28 +134,44 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             "status": "healthy",
             "version": env!("CARGO_PKG_VERSION")
         })),
-        "get_config" => get_config(),
+        "get_config" => tokio::task::spawn_blocking(get_config)
+            .await
+            .map_err(|error| format!("Config reader task failed: {error}"))?,
         "update_config" => update_config(state, payload).await,
-        "get_ai_config" => get_ai_config(),
+        "get_ai_config" => tokio::task::spawn_blocking(get_ai_config)
+            .await
+            .map_err(|error| format!("AI config reader task failed: {error}"))?,
         "get_voice_status" => get_voice_status(state).await,
         // `resolve_resource_path` chứ không phải đường dẫn tương đối trần: chạy ngoài
         // gốc repo (bản Tauri đã đóng gói) thì `data/voices` trỏ vào CWD và trả rỗng —
         // im lặng, trông y như "máy không có giọng nào".
-        "get_voice_profiles" => Ok(json!(liet_ke_thu_muc(&resolve_resource_path(
-            "data/voices"
-        )))),
+        "get_voice_profiles" => tokio::task::spawn_blocking(|| {
+            Ok(json!(liet_ke_thu_muc(&resolve_resource_path(
+                "data/voices"
+            ))))
+        })
+        .await
+        .map_err(|error| format!("Voice profiles reader task failed: {error}"))?,
         "select_voice_profile" => select_voice_profile(payload).await,
         "get_system_status" => system_status(state).await,
+        "get_memory_status" => get_memory_status(state).await,
         "get_preflight_status" => {
             let items = tokio::task::spawn_blocking(crate::preflight::thu_thap)
                 .await
                 .map_err(|error| format!("Preflight worker failed: {error}"))?;
             Ok(json!({ "items": items }))
         }
-        "get_skills_list" => get_skills_list(&state),
+        "get_skills_list" => {
+            let state_clone = Arc::clone(&state);
+            tokio::task::spawn_blocking(move || get_skills_list(&state_clone))
+                .await
+                .map_err(|error| format!("Skills list reader task failed: {error}"))?
+        }
         "toggle_skill" => toggle_skill(state, payload).await,
         "toggle_all_skills" => toggle_all_skills(state, payload).await,
-        "get_user_profile" => get_user_profile(),
+        "get_user_profile" => tokio::task::spawn_blocking(get_user_profile)
+            .await
+            .map_err(|error| format!("User profile reader task failed: {error}"))?,
         // Ba nhánh dưới đây chạm đĩa, nên phải rời khỏi worker async — cùng lý do
         // `update_config` (:267) và `toggle_skill` (:384) đã làm. `import_avatar_folder`
         // là ca xấu nhất: nó copy tới 200 file, giữ worker hàng giây và làm nghẽn cả
@@ -162,10 +179,14 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         "update_user_profile" => tokio::task::spawn_blocking(move || update_user_profile(&payload))
             .await
             .map_err(|error| format!("User profile writer task failed: {error}"))?,
-        "get_avatar_models" => Ok(json!({
-            "models2d": liet_ke_avatar(&resolve_resource_path("models/live2d"), true),
-            "models3d": liet_ke_avatar(&resolve_resource_path("models/vrm"), false),
-        })),
+        "get_avatar_models" => tokio::task::spawn_blocking(|| {
+            Ok(json!({
+                "models2d": liet_ke_avatar(&resolve_resource_path("models/live2d"), true),
+                "models3d": liet_ke_avatar(&resolve_resource_path("models/vrm"), false),
+            }))
+        })
+        .await
+        .map_err(|error| format!("Avatar models reader task failed: {error}"))?,
         "import_avatar_folder" => {
             tokio::task::spawn_blocking(move || import_avatar_folder(&payload))
                 .await
@@ -250,7 +271,9 @@ fn liet_ke_avatar(path: &std::path::Path, la_2d: bool) -> Vec<Value> {
                 "name": name,
                 "filename": filename,
                 "size": size,
+                "type": "3d",
                 "format": format,
+                "isActive": false,
             }));
         }
     }
@@ -502,24 +525,70 @@ async fn toggle_all_skills(state: Arc<AppState>, payload: Value) -> Result<Value
 }
 
 async fn get_voice_status(state: Arc<AppState>) -> Result<Value, String> {
-    let is_test = {
-        let stt_lock = state.stt.lock().await;
-        stt_lock.model_dir.to_str() == Some("non_existent_dir")
+    // Consolidated single acquisition / non-blocking check to eliminate lock contention
+    let (is_test, stt_ready) = match state.stt.try_lock() {
+        Ok(stt) => {
+            let test = stt.model_dir.to_str() == Some("non_existent_dir");
+            let ready = test || stt.model_dir.exists();
+            (test, ready)
+        }
+        Err(_) => (false, true), // Active transcription in progress => ready
     };
 
-    let stt_ready = is_test || {
-        let stt_lock = state.stt.lock().await;
-        stt_lock.model_dir.exists()
-    };
-
-    let tts_ready = is_test || {
-        let tts_lock = state.tts.lock().await;
-        tts_lock.is_some()
-    };
+    let tts_ready = is_test
+        || match state.tts.try_lock() {
+            Ok(tts) => tts.is_some(),
+            Err(_) => true, // Active speech synthesis in progress => ready
+        };
 
     Ok(json!({
         "stt": if stt_ready { "ready" } else { "offline" },
         "tts": if tts_ready { "ready" } else { "offline" }
+    }))
+}
+
+async fn get_memory_status(state: Arc<AppState>) -> Result<Value, String> {
+    let ram = crate::sysinfo::ram_bytes();
+    let proc_mem = crate::sysinfo::process_memory_bytes();
+
+    let stt_parakeet_loaded = match state.stt.try_lock() {
+        Ok(s) => s.is_parakeet_loaded(),
+        Err(_) => true,
+    };
+    let (tts_kokoro_loaded, tts_vieneu_loaded) = match state.tts.try_lock() {
+        Ok(guard) => match guard.as_ref() {
+            Some(t) => (t.kokoro_is_loaded(), t.vieneu_is_loaded()),
+            None => (false, false),
+        },
+        Err(_) => (false, false),
+    };
+
+    let mut reclaimable_bytes: u64 = 0;
+    if stt_parakeet_loaded {
+        reclaimable_bytes += 2_400_000_000;
+    }
+    if tts_vieneu_loaded {
+        reclaimable_bytes += 500_000_000;
+    }
+    if tts_kokoro_loaded {
+        reclaimable_bytes += 80_000_000;
+    }
+
+    Ok(json!({
+        "osStats": {
+            "totalMemory": ram.map(|(t, _)| t),
+            "freeMemory": ram.map(|(_, f)| f),
+        },
+        "processMemory": {
+            "rssMemory": proc_mem.map(|(rss, _)| rss),
+            "commitCharge": proc_mem.map(|(_, commit)| commit),
+        },
+        "modelMemory": {
+            "sttParakeetLoaded": stt_parakeet_loaded,
+            "ttsKokoroLoaded": tts_kokoro_loaded,
+            "ttsVieneuLoaded": tts_vieneu_loaded,
+            "reclaimableApproxBytes": reclaimable_bytes,
+        }
     }))
 }
 
@@ -850,7 +919,7 @@ mod tests {
         // thêm nhánh vào `handle` mà quên `OWNED` sẽ làm test này đỏ.
         assert_eq!(
             OWNED.len(),
-            19,
+            20,
             "đổi số nhánh thì cập nhật cả OWNED lẫn test"
         );
         for name in OWNED {
@@ -862,6 +931,7 @@ mod tests {
         );
         assert!(!owns("get_tasks"), "get_tasks thuộc miền task, chưa tách");
         assert!(owns("get_preflight_status"));
+        assert!(owns("get_memory_status"));
         assert!(owns("import_avatar_folder"));
         assert!(owns("toggle_skill"));
         assert!(owns("toggle_all_skills"));
@@ -1133,7 +1203,8 @@ mod tests {
                 mock_capturer,
                 crate::vision::VisionConfig::default(),
             )),
-            embedder: tokio::sync::Mutex::new(None),
+            embedder: crate::AppState::empty_embedder(),
+            active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
         })
     }
 

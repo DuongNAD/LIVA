@@ -85,6 +85,89 @@ pub struct Governor {
     last_check: Mutex<Option<Instant>>,
 }
 
+/// Visual ROI State Machine for VRAM Budget Management (750 MB VLM mutual exclusion).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualRoiState {
+    /// Dormant / Voice-only state (VLM unloaded from VRAM, saving 750 MB).
+    Dormant,
+    /// Active visual query processing (VLM loaded on GPU).
+    Active,
+    /// Cooldown window (15s after last visual query before unloading VLM).
+    Cooldown { until: Instant },
+}
+
+pub struct VisualGovernor {
+    state: Mutex<VisualRoiState>,
+    cooldown: Duration,
+}
+
+impl Default for VisualGovernor {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(15))
+    }
+}
+
+impl VisualGovernor {
+    pub fn new(cooldown: Duration) -> Self {
+        Self {
+            state: Mutex::new(VisualRoiState::Dormant),
+            cooldown,
+        }
+    }
+
+    /// Requests activation for a visual ROI inspection task.
+    pub fn acquire_visual_slot(&self) {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = VisualRoiState::Active;
+    }
+
+    /// Marks visual query completion and enters cooldown window.
+    pub fn release_visual_slot(&self) {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = VisualRoiState::Cooldown {
+            until: Instant::now() + self.cooldown,
+        };
+    }
+
+    /// Checks if the VLM should be unloaded (if cooldown expired or already dormant).
+    pub fn should_unload_vlm(&self) -> bool {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match *guard {
+            VisualRoiState::Dormant => true,
+            VisualRoiState::Active => false,
+            VisualRoiState::Cooldown { until } => {
+                if Instant::now() >= until {
+                    *guard = VisualRoiState::Dormant;
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        let guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        matches!(*guard, VisualRoiState::Active)
+    }
+
+    pub fn is_dormant(&self) -> bool {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match *guard {
+            VisualRoiState::Dormant => true,
+            VisualRoiState::Cooldown { until } => {
+                if Instant::now() >= until {
+                    *guard = VisualRoiState::Dormant;
+                    true
+                } else {
+                    false
+                }
+            }
+            VisualRoiState::Active => false,
+        }
+    }
+}
+
 const CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Ngưỡng mặc định coi máy là "đang bận". 80% để tránh bật nhầm khi máy chỉ
@@ -346,7 +429,7 @@ impl Governor {
             GovernorMode::Auto => {}
         }
 
-        let mut last = self.last_check.lock().unwrap();
+        let mut last = self.last_check.lock().unwrap_or_else(|e| e.into_inner());
         let stale = last.is_none_or(|t| t.elapsed() >= CHECK_INTERVAL);
         if stale {
             // Fullscreen HOAC tai CPU cao. Hai dau hieu bu tru cho nhau: fullscreen
@@ -516,6 +599,29 @@ mod tests {
             last_check: Mutex::new(None),
         };
         assert!(gov.game_mode_active());
+    }
+
+    #[test]
+    fn game_mode_active_recovers_from_poisoned_mutex() {
+        use std::sync::Arc;
+        let gov = Arc::new(Governor {
+            mode: GovernorMode::Auto,
+            manage_priority: false,
+            active: AtomicBool::new(false),
+            priority_lowered: AtomicBool::new(false),
+            last_check: Mutex::new(None),
+        });
+
+        let gov_clone = Arc::clone(&gov);
+        let _ = std::thread::spawn(move || {
+            let _g = gov_clone.last_check.lock().unwrap();
+            panic!("mo phong mot panic xay ra khi dang giu last_check");
+        })
+        .join();
+
+        assert!(gov.last_check.is_poisoned());
+        // Khong duoc panic khi goi game_mode_active du mutex da bi poison
+        let _ = gov.game_mode_active();
     }
 }
 
@@ -805,5 +911,30 @@ mod governor_cpu_tests {
         } else {
             assert_eq!(first, None, "ngoai Windows luon None");
         }
+    }
+
+    #[test]
+    fn test_visual_governor_state_transitions() {
+        use super::VisualGovernor;
+        use std::time::Duration;
+
+        let gov = VisualGovernor::new(Duration::from_millis(50));
+        assert!(gov.is_dormant());
+        assert!(gov.should_unload_vlm());
+
+        // Acquire slot -> Active
+        gov.acquire_visual_slot();
+        assert!(gov.is_active());
+        assert!(!gov.should_unload_vlm());
+
+        // Release slot -> Cooldown
+        gov.release_visual_slot();
+        assert!(!gov.is_active());
+        assert!(!gov.should_unload_vlm()); // within cooldown window
+
+        // Wait for cooldown to expire
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(gov.should_unload_vlm()); // expired -> back to Dormant
+        assert!(gov.is_dormant());
     }
 }

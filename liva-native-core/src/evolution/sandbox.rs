@@ -43,7 +43,7 @@ impl Sandbox {
         let target_dir = project_path.join("target_sandbox");
 
         let mut cmd = Command::new("cargo");
-        cmd.arg("test")
+        cmd.args(["test", "-j", "2", "--", "--test-threads", "2"])
             .current_dir(project_path)
             .env("CARGO_TARGET_DIR", &target_dir)
             .stdout(Stdio::piped())
@@ -57,7 +57,16 @@ impl Sandbox {
                 {
                     let mut cmd_win = Command::new("cmd");
                     cmd_win
-                        .args(["/C", "cargo", "test"])
+                        .args([
+                            "/C",
+                            "cargo",
+                            "test",
+                            "-j",
+                            "2",
+                            "--",
+                            "--test-threads",
+                            "2",
+                        ])
                         .current_dir(project_path)
                         .env("CARGO_TARGET_DIR", &target_dir)
                         .stdout(Stdio::piped())

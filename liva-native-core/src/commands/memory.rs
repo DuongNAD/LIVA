@@ -213,9 +213,12 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .and_then(Value::as_u64)
                 .unwrap_or(25)
                 .clamp(1, 100) as usize;
-            let result =
-                crate::memory_consolidation::consume_pending_once(state.db.clone(), batch_size)
-                    .await?;
+            let result = crate::memory_consolidation::consume_pending_once(
+                &state.db,
+                &state.crypto,
+                batch_size,
+            )
+            .await?;
             Ok(serde_json::json!({
                 "processed": result.processed,
                 "consolidated": result.consolidated,
@@ -227,19 +230,15 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             let fact: db::Fact = serde_json::from_value(payload)
                 .map_err(|e| format!("Invalid fact payload: {}", e))?;
 
-            tokio::task::spawn_blocking(move || {
-                let conn = state
-                    .db
-                    .writer
-                    .get()
-                    .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
-
-                db::set_fact(&conn, &state.crypto, &fact)
-                    .map_err(|e| format!("Failed to set fact: {}", e))?;
-                Ok::<_, String>(())
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+            let crypto = state.crypto.clone();
+            state
+                .db
+                .writer_actor
+                .execute(move |conn| {
+                    db::set_fact(conn, &crypto, &fact)
+                        .map_err(|e| format!("Failed to set fact: {}", e))
+                })
+                .await?;
 
             Ok(serde_json::json!({ "success": true }))
         }
@@ -249,21 +248,44 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .ok_or_else(|| "Missing 'key' in payload".to_string())?
                 .to_string();
 
+            let state_clone = state.clone();
+            let key_clone = key.clone();
             let fact = tokio::task::spawn_blocking(move || {
-                let conn = state
+                let conn = state_clone
                     .db
                     .readers
                     .get()
                     .map_err(|e| format!("Failed to acquire read connection: {}", e))?;
 
-                db::get_fact(&conn, &state.crypto, &key)
-                    .map_err(|e| format!("Failed to get fact: {}", e))
+                let fact = db::get_fact(&conn, &state_clone.crypto, &key_clone)
+                    .map_err(|e| format!("Failed to get fact: {}", e))?;
+
+                // Drop reader connection before delegating touch update to prevent cross-pool starvation
+                drop(conn);
+
+                if fact.is_some() {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    if let Err(e) = state_clone.db.writer_actor.blocking_execute(move |w_conn| {
+                        if let Err(e) = db::touch_fact_access(w_conn, &key_clone, now) {
+                            tracing::warn!("touch_fact_access error for key '{key_clone}': {e}");
+                        }
+                        Ok(())
+                    }) {
+                        tracing::warn!("Failed to dispatch touch_fact_access to DbActor: {e}");
+                    }
+                }
+
+                Ok::<_, String>(fact)
             })
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
             match fact {
-                Some(f) => Ok(serde_json::to_value(f).unwrap()),
+                Some(f) => Ok(serde_json::to_value(f)
+                    .map_err(|e| format!("Failed to serialize fact: {e}"))?),
                 None => Ok(serde_json::Value::Null),
             }
         }
@@ -278,37 +300,34 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             // để biết nó là gì (có thể là dữ liệu quan trọng sau lưng khoá sai).
             // Guard đặt ở TẦNG LỆNH, không dựa vào confirm() của UI, nên caller
             // tự động (agent/pruning) cũng bị chặn.
-            tokio::task::spawn_blocking(move || {
-                use rusqlite::OptionalExtension;
-                let conn = state
-                    .db
-                    .writer
-                    .get()
-                    .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
+            let crypto = state.crypto.clone();
+            state
+                .db
+                .writer_actor
+                .execute(move |conn| {
+                    use rusqlite::OptionalExtension;
+                    let existing: Option<String> = conn
+                        .query_row("SELECT value FROM facts WHERE key = ?1", [&key], |r| {
+                            r.get(0)
+                        })
+                        .optional()
+                        .map_err(|e| format!("Query fact failed: {}", e))?;
 
-                let existing: Option<String> = conn
-                    .query_row("SELECT value FROM facts WHERE key = ?1", [&key], |r| {
-                        r.get(0)
-                    })
-                    .optional()
-                    .map_err(|e| format!("Query fact failed: {}", e))?;
-
-                match existing {
-                    None => Ok(serde_json::json!({ "success": true, "note": "không tồn tại" })),
-                    Some(v) if state.crypto.read_fact(&v).is_locked() => Err(format!(
-                        "Không xoá được ký ức '{key}' vì đang KHOÁ (không giải mã được bằng \
-                     khoá hiện tại). Đặt đúng LIVA_ENCRYPTION_KEY để đọc/xoá, hoặc dữ liệu \
-                     gốc vẫn còn nguyên."
-                    )),
-                    Some(_) => {
-                        conn.execute("DELETE FROM facts WHERE key = ?1", [&key])
-                            .map_err(|e| format!("Delete fact failed: {}", e))?;
-                        Ok(serde_json::json!({ "success": true }))
+                    match existing {
+                        None => Ok(serde_json::json!({ "success": true, "note": "không tồn tại" })),
+                        Some(v) if crypto.read_fact(&v).is_locked() => Err(format!(
+                            "Không xoá được ký ức '{key}' vì đang KHOÁ (không giải mã được bằng \
+                         khoá hiện tại). Đặt đúng LIVA_ENCRYPTION_KEY để đọc/xoá, hoặc dữ liệu \
+                         gốc vẫn còn nguyên."
+                        )),
+                        Some(_) => {
+                            conn.execute("DELETE FROM facts WHERE key = ?1", [&key])
+                                .map_err(|e| format!("Delete fact failed: {}", e))?;
+                            Ok(serde_json::json!({ "success": true }))
+                        }
                     }
-                }
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))?
+                })
+                .await
         }
         "memory:delete_conversation" => {
             let conversation_id = payload["conversationId"]
@@ -324,17 +343,14 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .get("dryRun")
                 .and_then(Value::as_bool)
                 .unwrap_or(true);
-            let report = tokio::task::spawn_blocking(move || {
-                let conn = state
-                    .db
-                    .writer
-                    .get()
-                    .map_err(|e| format!("Failed to acquire write connection: {e}"))?;
-                db::delete_conversation(&conn, "local", &conversation_id, dry_run)
-                    .map_err(|e| format!("Delete conversation failed: {e}"))
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {e}"))??;
+            let report = state
+                .db
+                .writer_actor
+                .execute(move |conn| {
+                    db::delete_conversation(conn, "local", &conversation_id, dry_run)
+                        .map_err(|e| format!("Delete conversation failed: {e}"))
+                })
+                .await?;
 
             Ok(serde_json::to_value(report)
                 .map_err(|e| format!("Serialize deletion report failed: {e}"))?)
@@ -344,17 +360,14 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .get("dryRun")
                 .and_then(Value::as_bool)
                 .unwrap_or(true);
-            let report = tokio::task::spawn_blocking(move || {
-                let conn = state
-                    .db
-                    .writer
-                    .get()
-                    .map_err(|e| format!("Failed to acquire write connection: {e}"))?;
-                db::delete_subject(&conn, "local", dry_run)
-                    .map_err(|e| format!("Delete subject failed: {e}"))
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {e}"))??;
+            let report = state
+                .db
+                .writer_actor
+                .execute(move |conn| {
+                    db::delete_subject(conn, "local", dry_run)
+                        .map_err(|e| format!("Delete subject failed: {e}"))
+                })
+                .await?;
 
             let success = !report.dry_run && report.wal_truncated;
             let warning = (!report.dry_run && !report.wal_truncated).then_some(
@@ -399,17 +412,14 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             let cutoff_ms = now_ms
                 .checked_sub(age_ms)
                 .ok_or_else(|| "Retention cutoff is before supported time range".to_string())?;
-            let report = tokio::task::spawn_blocking(move || {
-                let conn = state
-                    .db
-                    .writer
-                    .get()
-                    .map_err(|e| format!("Failed to acquire write connection: {e}"))?;
-                db::sweep_conversation_retention(&conn, "local", cutoff_ms, batch_limit, dry_run)
-                    .map_err(|e| format!("Retention sweep failed: {e}"))
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {e}"))??;
+            let report = state
+                .db
+                .writer_actor
+                .execute(move |conn| {
+                    db::sweep_conversation_retention(conn, "local", cutoff_ms, batch_limit, dry_run)
+                        .map_err(|e| format!("Retention sweep failed: {e}"))
+                })
+                .await?;
 
             serde_json::to_value(report)
                 .map_err(|e| format!("Serialize retention report failed: {e}"))
@@ -457,20 +467,19 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                     v
                 }
                 _ => {
-                    let state_embed = state.clone();
-                    let q = query_text.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let mut guard = state_embed.embedder.blocking_lock();
-                        let engine = guard.as_mut().ok_or_else(|| {
+                    let engine = {
+                        let guard = state.embedder.read().await;
+                        guard.as_ref().cloned().ok_or_else(|| {
                             "Thieu 'query_vector' va khong co model embedding de tu tinh. \
-                         Tai model vao models/embedding/ (node scripts/fetch-embedding-model.mjs) \
-                         hoac tu cap vector 384 chieu."
+                          Tai model vao models/embedding/ (node scripts/fetch-embedding-model.mjs) \
+                          hoac tu cap vector 384 chieu."
                                 .to_string()
-                        })?;
-                        engine.embed_query(&q)
-                    })
-                    .await
-                    .map_err(|e| format!("Embedding task panicked: {}", e))??
+                        })?
+                    };
+                    let q = query_text.clone();
+                    tokio::task::spawn_blocking(move || engine.embed_query(&q))
+                        .await
+                        .map_err(|e| format!("Embedding task panicked: {}", e))??
                 }
             };
 
@@ -501,7 +510,8 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
-            Ok(serde_json::to_value(results).unwrap())
+            Ok(serde_json::to_value(results)
+                .map_err(|e| format!("Failed to serialize hybrid search results: {e}"))?)
         }
         "memory:upsert_vector" => {
             let vec_id = payload["vecId"]
@@ -563,30 +573,34 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 }
             }
 
-            tokio::task::spawn_blocking(move || {
-                let conn = state
-                    .db
-                    .writer
-                    .get()
-                    .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
+            let crypto = state.crypto.clone();
+            state
+                .db
+                .writer_actor
+                .execute(move |conn| {
+                    let tx = conn
+                        .unchecked_transaction()
+                        .map_err(|e| format!("Failed to begin transaction: {e}"))?;
 
-                db::upsert_vector(
-                    &conn,
-                    &state.crypto,
-                    &vec_id,
-                    &r#type,
-                    &content,
-                    &vector,
-                    domain.as_deref(),
-                    category.as_deref(),
-                    Some(&trace_keywords),
-                    file_target.as_deref(),
-                    Some(&source_event_ids),
-                )
-                .map_err(|e| format!("Failed to upsert vector: {}", e))
-            })
-            .await
-            .map_err(|e| format!("Blocking task panicked: {}", e))??;
+                    db::upsert_vector(
+                        &tx,
+                        &crypto,
+                        &vec_id,
+                        &r#type,
+                        &content,
+                        &vector,
+                        domain.as_deref(),
+                        category.as_deref(),
+                        Some(&trace_keywords),
+                        file_target.as_deref(),
+                        Some(&source_event_ids),
+                    )
+                    .map_err(|e| format!("Failed to upsert vector: {e}"))?;
+
+                    tx.commit()
+                        .map_err(|e| format!("Failed to commit transaction: {e}"))
+                })
+                .await?;
 
             Ok(serde_json::json!({ "success": true }))
         }

@@ -43,6 +43,7 @@ pub mod config;
 pub mod consent;
 pub mod integrations;
 pub mod llm;
+pub mod mcp;
 pub mod memory;
 pub mod messaging;
 pub mod setup;

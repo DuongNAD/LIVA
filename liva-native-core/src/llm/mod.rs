@@ -1,6 +1,7 @@
 pub mod embed;
 pub mod embedder;
 pub mod engine;
+pub mod expert_governor;
 pub mod output_filter;
 pub mod prompt;
 pub mod sampler;
@@ -8,7 +9,8 @@ pub mod scoped_tool_registry;
 pub mod tool_calling;
 
 pub use embed::get_embedding;
-pub use engine::{CompletionOutput, LlamaEngine, LlamaRouterManager};
+pub use engine::{CompletionOutput, LlamaEngine, LlamaRouterManager, nen_sinh_tiep};
+pub use expert_governor::{ExpertSwapGovernor, ModelRole, SwapDecision};
 pub use output_filter::{
     CLOSE_TAGS, OPEN_TAGS, ReasoningStreamSplitter, StreamChunk, TauriIpcChunk, VisibleOutputFilter,
 };

@@ -22,11 +22,14 @@ const SETUP_COMMANDS: &[&str] = &["setup:status", "setup:paths", "setup:fetch"];
 const WIDGET_COMMANDS: &[&str] = &[
     "ping",
     "status",
+    "audio_play_started",
+    "audio_play_finished",
     "get_config",
     "get_ai_config",
     "get_voice_status",
     "get_voice_profiles",
     "get_system_status",
+    "get_memory_status",
     "get_user_profile",
     "get_avatar_models",
     "llm:health_check",
@@ -43,6 +46,7 @@ const WIDGET_COMMANDS: &[&str] = &[
     "message:cancel",
     "message:pending",
     "messenger:status",
+    "telemetry:summary",
 ];
 
 const DASHBOARD_COMMANDS: &[&str] = &[
@@ -56,6 +60,7 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "get_voice_profiles",
     "select_voice_profile",
     "get_system_status",
+    "get_memory_status",
     "get_preflight_status",
     "get_skills_list",
     "toggle_skill",
@@ -117,6 +122,7 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "skills:search",
     "skills:signals",
     "skills:history",
+    "telemetry:summary",
 ];
 
 const REMOTE_COMMANDS: &[&str] = &[

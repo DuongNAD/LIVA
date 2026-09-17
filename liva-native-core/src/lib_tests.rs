@@ -517,7 +517,8 @@ mod system_status_tests {
                 capturer,
                 vision::VisionConfig::default(),
             )),
-            embedder: tokio::sync::Mutex::new(None),
+            embedder: AppState::empty_embedder(),
+            active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
         })
     }
 

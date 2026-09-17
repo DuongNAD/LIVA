@@ -227,3 +227,119 @@ fn vault_chua_ton_tai_van_giai_duoc_duong_dan_hop_le() {
     assert!(s.resolve_path("a/b/c.md").is_ok());
     assert!(s.resolve_path("../.env").is_err(), "van phai chan `..`");
 }
+
+#[test]
+fn adversarial_stress_test_resolve_path() {
+    let goc = thu_muc_rieng("adv_stress");
+    let vault = goc.join("vault");
+    fs::create_dir_all(&vault).expect("tao vault");
+    let s = NativeMcpServer::new(vault.to_str().expect("vault path utf-8"));
+
+    // 1. Traversal and absolute path attacks - MUST BE REJECTED
+    let must_reject = [
+        "C:/foo",
+        "C:/foo/bar.md",
+        "c:/windows/system32",
+        r"C:\foo",
+        r"C:\Windows\System32\cmd.exe",
+        r"D:\bar",
+        "D:/bar",
+        "d:/something",
+        "C:foo.txt",
+        "c:test.md",
+        "Z:/secret",
+        "../foo",
+        "../../bar",
+        "a/b/../../c",
+        "a/b/../../../c",
+        "notes/../../../etc/passwd",
+        "foo/../bar",
+        "foo/./../../bar",
+        "..",
+        "a/..",
+        "a/b/..",
+        r"foo\bar",
+        r"..\secret",
+        r"sub\dir\note.md",
+        r"\Windows\System32",
+        r"\\server\share\file",
+        r"\\?\C:\secret",
+        "/etc/passwd",
+        "/var/log",
+        "/",
+        "/root",
+    ];
+
+    for attack in must_reject {
+        let res = s.resolve_path(attack);
+        assert!(
+            res.is_err(),
+            "Adversarial attack MUST be rejected: {attack}, got: {res:?}"
+        );
+    }
+
+    // 2. Normal valid relative paths - MUST SUCCEED
+    let valid_paths = [
+        "",
+        "note.md",
+        "folder/note.md",
+        "folder/subfolder/deep.md",
+        "a/b/c/d/e.txt",
+    ];
+    for valid in valid_paths {
+        let res = s.resolve_path(valid);
+        assert!(
+            res.is_ok(),
+            "Valid path MUST be accepted: {valid}, got: {res:?}"
+        );
+        let resolved = res.unwrap();
+        assert!(
+            resolved.starts_with(&vault),
+            "Resolved path must remain inside vault: {resolved:?} (vault: {vault:?})"
+        );
+    }
+
+    // 3. Empirical analysis of Windows reserved DOS device names (nul, con, prn, aux)
+    for dev in [
+        "nul", "con", "prn", "aux", "com1", "lpt1", "NUL", "CON", "nul.txt", "con.md",
+    ] {
+        let res = s.resolve_path(dev);
+        eprintln!("[EMPIRICAL OBSERVATION] DOS device '{dev}' resolve_path result: {res:?}");
+    }
+
+    // 4. Test actual tool execution with DOS devices
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        // Test write_markdown to nul
+        let r_write_nul = s
+            .call_tool(CallToolRequest {
+                name: "write_markdown".to_string(),
+                arguments: serde_json::json!({ "path": "nul", "content": "test" }),
+            })
+            .await;
+        eprintln!("[EMPIRICAL OBSERVATION] write_markdown to 'nul' result: {r_write_nul:?}");
+
+        // Test read_markdown on nul
+        let r_read_nul = s
+            .call_tool(CallToolRequest {
+                name: "read_markdown".to_string(),
+                arguments: serde_json::json!({ "path": "nul" }),
+            })
+            .await;
+        eprintln!("[EMPIRICAL OBSERVATION] read_markdown on 'nul' result: {r_read_nul:?}");
+
+        // Test NTFS alternate data stream (ADS)
+        let r_ads = s.resolve_path("note.md:stream");
+        eprintln!(
+            "[EMPIRICAL OBSERVATION] NTFS ADS 'note.md:stream' resolve_path result: {r_ads:?}"
+        );
+
+        // Test trailing dots and spaces
+        let r_dots = s.resolve_path("note.md...");
+        eprintln!(
+            "[EMPIRICAL OBSERVATION] Trailing dots 'note.md...' resolve_path result: {r_dots:?}"
+        );
+    });
+
+    let _ = fs::remove_dir_all(&goc);
+}

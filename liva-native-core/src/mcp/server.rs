@@ -257,37 +257,26 @@ impl NativeMcpServer {
     /// và Telegram `/ls` `/cat` cần đúng hàng rào này — trước đó chúng gọi
     /// thẳng `read_dir`/`read_to_string` không lọc gì, tức ai lọt allow-list
     /// đọc được `.env`, vault, khoá **qua Internet** (lộ trình mục 0.7).
-    ///
-    /// Ba lớp kiểm đều cần. Lớp một chặn tuyệt đối/`..`; lớp hai (`starts_with`
-    /// sau `join`) chặn cả đường dẫn kiểu Windows drive-relative (`C:foo`) —
-    /// `join` sẽ THAY THẾ path khi tham số mang prefix ổ đĩa, và chỉ lớp hai
-    /// bắt được ca đó.
-    ///
-    /// **Lớp ba hỏi FILESYSTEM, không chỉ hỏi chuỗi.** Hai lớp đầu thuần cú
-    /// pháp, nên một junction/symlink nằm TRONG vault mà trỏ ra ngoài đi lọt cả
-    /// hai: `thoat/bi-mat.txt` không có `..`, không tuyệt đối, và nằm dưới
-    /// vault — chỉ đĩa mới biết nó dẫn đi đâu. Trên Windows đường này rẻ đến mức
-    /// đáng lo: `mklink /J` **không cần quyền admin**.
-    ///
-    /// Ngữ nghĩa, cố ý khác nhau giữa "đã tồn tại" và "chưa tồn tại" để
-    /// `write_markdown` vẫn tạo được file mới:
-    /// - đích **đã tồn tại** → canonicalize trọn đích, bắt buộc nằm dưới gốc thật;
-    /// - đích **chưa tồn tại** → lần ngược lên tổ tiên tồn tại gần nhất,
-    ///   canonicalize tổ tiên đó, bắt buộc nó nằm dưới gốc thật, rồi cho phép
-    ///   phần đuôi chưa tồn tại (phần đuôi không thể chứa `..` — lớp một đã chặn).
-    ///
-    /// Trả về đường dẫn **ghép theo chữ**, KHÔNG phải bản canonical: canonical
-    /// trên Windows mang tiền tố verbatim `\\?\`, và `search_vault` còn
-    /// `strip_prefix(&self.vault_path)` trên kết quả. Canonical chỉ dùng để
-    /// *phán quyết*, không dùng để *trả về*.
     pub fn resolve_path(&self, rel_path: &str) -> Result<PathBuf, String> {
         let p = Path::new(rel_path);
+        // Windows drive prefix ("C:", "C:\...", "C:file"): trên Windows `join`
+        // sẽ THAY THẾ cả path vì mang prefix ổ đĩa; trên Unix nó trông như tên
+        // file bình thường nhưng là ý định thoát vault rõ ràng — chặn ở cả hai.
+        let b = rel_path.as_bytes();
+        let la_drive_prefix = b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic();
         if p.is_absolute()
             || p.has_root()
             || p.components().any(|c| c == std::path::Component::ParentDir)
+            || la_drive_prefix
+            // Nợ cross-platform: `\` là phân cách trên Windows nhưng là ký tự
+            // thường trên Unix, nên `..\env` lọt qua các kiểm tra bên dưới khi
+            // chạy trên macOS/Linux. Vault không có lý do chính đáng chứa tên
+            // file mang `\` — từ chối thẳng để hành vi nhất quán mọi nền.
+            || rel_path.contains('\\')
         {
             return Err("Invalid path (traversal detected)".to_string());
         }
+
         let full = self.vault_path.join(p);
         if !full.starts_with(&self.vault_path) {
             return Err("Invalid path (traversal detected)".to_string());
@@ -320,7 +309,7 @@ impl NativeMcpServer {
                     }),
                     Err(e) => Ok(CallToolResult {
                         content: vec![ToolContent::Text {
-                            text: format!("Error: {}", e),
+                            text: format!("Error reading file {}: {}", args.path, e),
                         }],
                         is_error: true,
                     }),
@@ -330,12 +319,17 @@ impl NativeMcpServer {
                 let args: WriteMarkdownArgs =
                     serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
                 let path = self.resolve_path(&args.path)?;
-                if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                if let Some(parent) = path.parent()
+                    && let Err(e) = tokio::fs::create_dir_all(parent).await
+                {
+                    return Ok(CallToolResult {
+                        content: vec![ToolContent::Text {
+                            text: format!("Error creating parent directories: {}", e),
+                        }],
+                        is_error: true,
+                    });
                 }
-                match tokio::fs::write(&path, args.content).await {
+                match tokio::fs::write(&path, &args.content).await {
                     Ok(_) => Ok(CallToolResult {
                         content: vec![ToolContent::Text {
                             text: "Success".to_string(),
@@ -344,7 +338,7 @@ impl NativeMcpServer {
                     }),
                     Err(e) => Ok(CallToolResult {
                         content: vec![ToolContent::Text {
-                            text: format!("Error: {}", e),
+                            text: format!("Error writing file {}: {}", args.path, e),
                         }],
                         is_error: true,
                     }),
@@ -354,76 +348,92 @@ impl NativeMcpServer {
                 let args: SearchVaultArgs =
                     serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
 
-                let mut matched_files = Vec::new();
-                let mut files_to_check = Vec::new();
+                let vault_path = self.vault_path.clone();
+                let query = args.query.clone();
 
-                // Cửa thứ hai của cùng lỗ hổng mà `resolve_path` vừa bịt: bản
-                // trước dùng `path.is_dir()`, vốn ĐI XUYÊN junction/symlink, nên
-                // bộ duyệt bò ra ngoài vault và đọc nội dung ở đó. Nó không trả
-                // nội dung về, nhưng vẫn trả TÊN FILE khớp — tức một máy tiên
-                // tri: hỏi nhiều lần là đoán được nội dung file ngoài vault.
-                //
-                // `entry.file_type()` KHÔNG đi xuyên liên kết (và trên Windows
-                // junction cũng tính là symlink), nên bỏ qua ở đây là fail-closed
-                // cho cả thư mục lẫn file được liên kết ra ngoài.
-                fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
-                    if dir.is_dir() {
-                        for entry in std::fs::read_dir(dir)? {
-                            let entry = entry?;
-                            let loai = entry.file_type()?;
-                            if loai.is_symlink() {
-                                continue;
-                            }
-                            let path = entry.path();
-                            if loai.is_dir() {
-                                walk_dir(&path, files)?;
-                            } else {
-                                files.push(path);
+                let text_res = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let mut files_to_check = Vec::new();
+
+                    fn walk_dir(
+                        dir: &Path,
+                        files: &mut Vec<PathBuf>,
+                        limit: usize,
+                    ) -> std::io::Result<()> {
+                        if files.len() >= limit {
+                            return Ok(());
+                        }
+                        if dir.is_dir() {
+                            for entry in std::fs::read_dir(dir)? {
+                                let entry = entry?;
+                                let loai = entry.file_type()?;
+                                if loai.is_symlink() {
+                                    continue;
+                                }
+                                let path = entry.path();
+                                if loai.is_dir() {
+                                    walk_dir(&path, files, limit)?;
+                                } else {
+                                    files.push(path);
+                                    if files.len() >= limit {
+                                        break;
+                                    }
+                                }
                             }
                         }
+                        Ok(())
                     }
-                    Ok(())
-                }
 
-                if let Err(e) = walk_dir(&self.vault_path, &mut files_to_check) {
-                    return Ok(CallToolResult {
-                        content: vec![ToolContent::Text {
-                            text: format!("Error reading vault directory: {}", e),
-                        }],
-                        is_error: true,
-                    });
-                }
-
-                for path in files_to_check {
-                    let ext = path
-                        .extension()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    if (ext == "md" || ext == "txt")
-                        && let Ok(content) = std::fs::read_to_string(&path)
-                        && content.contains(&args.query)
-                        && let Ok(rel_path) = path.strip_prefix(&self.vault_path)
-                    {
-                        let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-                        matched_files.push(rel_str);
+                    if let Err(e) = walk_dir(&vault_path, &mut files_to_check, 5000) {
+                        return Err(format!("Error reading vault directory: {}", e));
                     }
-                }
 
-                let text_res = if matched_files.is_empty() {
-                    format!("No matching files found for query '{}'", args.query)
-                } else {
-                    let mut res = format!("Search results for '{}':\n", args.query);
-                    for file in matched_files {
-                        res.push_str(&format!("- {}\n", file));
+                    let mut matched_files = Vec::new();
+                    const MAX_FILE_SIZE: u64 = 2 * 1024 * 1024; // 2MB cap
+
+                    for path in files_to_check {
+                        let ext = path
+                            .extension()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        if (ext == "md" || ext == "txt")
+                            && (if let Ok(meta) = std::fs::metadata(&path) {
+                                meta.len() <= MAX_FILE_SIZE
+                            } else {
+                                false
+                            })
+                            && let Ok(content) = std::fs::read_to_string(&path)
+                            && content.contains(&query)
+                            && let Ok(rel_path) = path.strip_prefix(&vault_path)
+                        {
+                            let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+                            matched_files.push(rel_str);
+                        }
                     }
-                    res
-                };
 
-                Ok(CallToolResult {
-                    content: vec![ToolContent::Text { text: text_res }],
-                    is_error: false,
+                    if matched_files.is_empty() {
+                        Ok(format!("No matching files found for query '{}'", query))
+                    } else {
+                        let mut res = format!("Search results for '{}':\n", query);
+                        for file in matched_files {
+                            res.push_str(&format!("- {}\n", file));
+                        }
+                        Ok(res)
+                    }
                 })
+                .await
+                .map_err(|e| format!("Blocking search task panicked: {e}"))?;
+
+                match text_res {
+                    Ok(text) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text { text }],
+                        is_error: false,
+                    }),
+                    Err(e) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text { text: e }],
+                        is_error: true,
+                    }),
+                }
             }
             "control_smarthome" => {
                 let args: ControlSmartHomeArgs =

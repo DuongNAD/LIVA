@@ -36,7 +36,13 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
     match command {
         "skills:sync" => {
             let root = skills_root();
-            let (skills, new_versions) = skills::SkillStore::new(&state.db).sync_tree(&root)?;
+            let root_clone = root.clone();
+            let db = state.db.clone();
+            let (skills, new_versions) = tokio::task::spawn_blocking(move || {
+                skills::SkillStore::new(&db).sync_tree(&root_clone)
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
             Ok(json!({
                 "root": root.display().to_string(),
                 "skills": skills,
@@ -84,19 +90,19 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .collect();
 
             let ranked = {
-                let mut embedder = state.embedder.lock().await;
-                match embedder.as_mut() {
-                    Some(engine) => skills::rank_skills_with_prior(
-                        &entries,
-                        query,
-                        Some(engine),
-                        top_k,
-                        &penalties,
-                    ),
-                    None => {
-                        skills::rank_skills_with_prior(&entries, query, None, top_k, &penalties)
-                    }
-                }
+                let engine_opt = {
+                    let guard = state.embedder.read().await;
+                    guard.as_ref().cloned()
+                };
+                skills::rank_skills_with_prior(
+                    &entries,
+                    query,
+                    engine_opt
+                        .as_deref()
+                        .map(|e| e as &dyn crate::llm::tool_calling::ToolEmbedder),
+                    top_k,
+                    &penalties,
+                )
             };
             Ok(json!({
                 "query": query,
@@ -135,7 +141,12 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 merge_key: get("mergeKey"),
                 detail: get("detail"),
             };
-            let id = skills::SkillStore::new(&state.db).record_signal(&signal)?;
+            let db = state.db.clone();
+            let id = tokio::task::spawn_blocking(move || {
+                skills::SkillStore::new(&db).record_signal(&signal)
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
             Ok(json!({ "signalId": id, "skillId": skill_id, "kind": kind }))
         }
 

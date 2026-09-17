@@ -82,36 +82,40 @@ pub struct RegionDiffResult {
 /// * `height` - Active height of the screen in pixels.
 /// * `stride` - Number of pixel elements per row (including alignment padding).
 #[inline]
+#[allow(clippy::collapsible_if)]
 fn search_left<T: Eq>(row_a: &[T], row_b: &[T], x_min_global: &mut usize) {
     if *x_min_global == 0 {
         return;
     }
     let left_slice_a = &row_a[0..*x_min_global];
     let left_slice_b = &row_b[0..*x_min_global];
-    if left_slice_a != left_slice_b
-        && let Some(pos) = left_slice_a
+    if left_slice_a != left_slice_b {
+        if let Some(pos) = left_slice_a
             .iter()
             .zip(left_slice_b.iter())
             .position(|(a, b)| a != b)
-    {
-        *x_min_global = pos;
+        {
+            *x_min_global = pos;
+        }
     }
 }
 
 #[inline]
+#[allow(clippy::collapsible_if)]
 fn search_right<T: Eq>(row_a: &[T], row_b: &[T], width: usize, x_max_global: &mut usize) {
     if *x_max_global >= width - 1 {
         return;
     }
     let right_slice_a = &row_a[*x_max_global + 1..width];
     let right_slice_b = &row_b[*x_max_global + 1..width];
-    if right_slice_a != right_slice_b
-        && let Some(pos) = right_slice_a
+    if right_slice_a != right_slice_b {
+        if let Some(pos) = right_slice_a
             .iter()
             .zip(right_slice_b.iter())
             .rposition(|(a, b)| a != b)
-    {
-        *x_max_global = (*x_max_global + 1) + pos;
+        {
+            *x_max_global = (*x_max_global + 1) + pos;
+        }
     }
 }
 
@@ -379,6 +383,151 @@ impl DiffEngine {
             difference,
             is_changed,
         })
+    }
+
+    /// Extracts the visual region-of-interest between two frames.
+    /// If changes exceed 35% of total screen area, flags for emergency Co-scale Fallback.
+    pub fn compute_roi_patch(
+        prev: &Frame,
+        curr: &Frame,
+        padding: usize,
+    ) -> Result<Option<VisualRoiPatch>, String> {
+        if prev.width != curr.width || prev.height != curr.height {
+            return Err("Frame dimension mismatch".to_string());
+        }
+        let w = curr.width as usize;
+        let h = curr.height as usize;
+
+        let bbox_opt = match curr.format {
+            crate::vision::capture::PixelFormat::Bgra
+            | crate::vision::capture::PixelFormat::Rgba => {
+                find_changes_u32(&prev.data, &curr.data, w, h, w * 4).map_err(|e| e.to_string())?
+            }
+            crate::vision::capture::PixelFormat::Rgb | crate::vision::capture::PixelFormat::Bgr => {
+                find_changes(&prev.data, &curr.data, w * 3, h, w * 3)
+                    .map_err(|e| e.to_string())?
+                    .map(|b| BoundingBox {
+                        x: b.x / 3,
+                        y: b.y,
+                        width: (b.width / 3).max(1),
+                        height: b.height,
+                    })
+            }
+        };
+
+        let Some(raw_box) = bbox_opt else {
+            return Ok(None);
+        };
+
+        let total_pixels = (w * h) as f32;
+        let area_ratio = (raw_box.width * raw_box.height) as f32 / total_pixels;
+        let is_co_scaled = should_co_scale(&raw_box, w, h);
+        let padded_box = apply_roi_padding(&raw_box, w, h, padding);
+
+        Ok(Some(VisualRoiPatch {
+            raw_bounding_box: raw_box,
+            padded_bounding_box: padded_box,
+            is_co_scaled,
+            width: if is_co_scaled {
+                1280.min(w)
+            } else {
+                padded_box.width
+            },
+            height: if is_co_scaled {
+                720.min(h)
+            } else {
+                padded_box.height
+            },
+            area_ratio,
+        }))
+    }
+}
+
+pub const CO_SCALE_AREA_THRESHOLD: f64 = 0.35;
+pub const DEFAULT_ROI_PADDING: usize = 16;
+
+/// Applies protective border padding around a bounding box without exceeding screen boundaries.
+pub fn apply_roi_padding(
+    bbox: &BoundingBox,
+    screen_w: usize,
+    screen_h: usize,
+    padding: usize,
+) -> BoundingBox {
+    let x = bbox.x.saturating_sub(padding);
+    let y = bbox.y.saturating_sub(padding);
+    let right = (bbox.x + bbox.width + padding).min(screen_w);
+    let bottom = (bbox.y + bbox.height + padding).min(screen_h);
+    BoundingBox {
+        x,
+        y,
+        width: right.saturating_sub(x).max(1),
+        height: bottom.saturating_sub(y).max(1),
+    }
+}
+
+/// Determines if the bounding box exceeds the 35% threshold of screen area, warranting a Co-scale Fallback.
+pub fn should_co_scale(bbox: &BoundingBox, screen_w: usize, screen_h: usize) -> bool {
+    if screen_w == 0 || screen_h == 0 {
+        return false;
+    }
+    let total_pixels = (screen_w * screen_h) as f64;
+    let bbox_pixels = (bbox.width * bbox.height) as f64;
+    (bbox_pixels / total_pixels) > CO_SCALE_AREA_THRESHOLD
+}
+
+/// Fast downsampling of RGB byte buffer to standard 720p resolution (max 1280x720).
+/// Keeps visual tokens <= 384 and TTFT inference within 250-380 ms.
+pub fn downsample_rgb_to_720p(data: &[u8], src_w: usize, src_h: usize) -> (usize, usize, Vec<u8>) {
+    if src_w <= 1280 && src_h <= 720 {
+        return (src_w, src_h, data.to_vec());
+    }
+    let scale_x = src_w as f32 / 1280.0;
+    let scale_y = src_h as f32 / 720.0;
+    let scale = scale_x.max(scale_y).max(1.0);
+
+    let dst_w = ((src_w as f32 / scale).round() as usize).max(1);
+    let dst_h = ((src_h as f32 / scale).round() as usize).max(1);
+
+    let mut dst_data = vec![0u8; dst_w * dst_h * 3];
+
+    for dy in 0..dst_h {
+        let sy = ((dy as f32 * scale) as usize).min(src_h - 1);
+        for dx in 0..dst_w {
+            let sx = ((dx as f32 * scale) as usize).min(src_w - 1);
+            let src_idx = (sy * src_w + sx) * 3;
+            let dst_idx = (dy * dst_w + dx) * 3;
+            if src_idx + 2 < data.len() && dst_idx + 2 < dst_data.len() {
+                dst_data[dst_idx] = data[src_idx];
+                dst_data[dst_idx + 1] = data[src_idx + 1];
+                dst_data[dst_idx + 2] = data[src_idx + 2];
+            }
+        }
+    }
+
+    (dst_w, dst_h, dst_data)
+}
+
+/// Information about a cropped or co-scaled Visual ROI patch prepared for VLM inference.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VisualRoiPatch {
+    pub raw_bounding_box: BoundingBox,
+    pub padded_bounding_box: BoundingBox,
+    pub is_co_scaled: bool,
+    pub width: usize,
+    pub height: usize,
+    pub area_ratio: f32,
+}
+
+impl VisualRoiPatch {
+    pub fn center_normalized(&self, screen_w: usize, screen_h: usize) -> (f32, f32) {
+        if screen_w == 0 || screen_h == 0 {
+            return (0.5, 0.5);
+        }
+        let cx = (self.raw_bounding_box.x as f32 + self.raw_bounding_box.width as f32 * 0.5)
+            / screen_w as f32;
+        let cy = (self.raw_bounding_box.y as f32 + self.raw_bounding_box.height as f32 * 0.5)
+            / screen_h as f32;
+        (cx.clamp(0.0, 1.0), cy.clamp(0.0, 1.0))
     }
 }
 
@@ -1022,5 +1171,72 @@ mod tests {
         let res = find_changes_u32(&frame_a, &frame_b, 5, 5, 17);
         assert!(res.is_err());
         assert_eq!(res.err().unwrap(), DiffError::InvalidStride);
+    }
+
+    #[test]
+    fn test_apply_roi_padding_clamps_to_screen_bounds() {
+        let bbox = BoundingBox {
+            x: 10,
+            y: 15,
+            width: 100,
+            height: 80,
+        };
+        // Screen 1920x1080, padding 20
+        let padded = apply_roi_padding(&bbox, 1920, 1080, 20);
+        assert_eq!(padded.x, 0); // 10.saturating_sub(20) = 0
+        assert_eq!(padded.y, 0); // 15.saturating_sub(20) = 0
+        assert_eq!(padded.width, 130); // right = 10 + 100 + 20 = 130, width = 130 - 0 = 130
+        assert_eq!(padded.height, 115); // bottom = 15 + 80 + 20 = 115, height = 115 - 0 = 115
+
+        // Check right/bottom clamping
+        let bbox_edge = BoundingBox {
+            x: 1900,
+            y: 1060,
+            width: 50,
+            height: 50,
+        };
+        let padded_edge = apply_roi_padding(&bbox_edge, 1920, 1080, 20);
+        assert_eq!(padded_edge.x, 1880);
+        assert_eq!(padded_edge.y, 1040);
+        assert_eq!(padded_edge.x + padded_edge.width, 1920);
+        assert_eq!(padded_edge.y + padded_edge.height, 1080);
+    }
+
+    #[test]
+    fn test_should_co_scale_threshold_at_35_percent() {
+        let screen_w = 1920;
+        let screen_h = 1080;
+
+        // 30% area -> should NOT co-scale
+        let bbox_30 = BoundingBox {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 324, // 30% of 1080
+        };
+        assert!(!should_co_scale(&bbox_30, screen_w, screen_h));
+
+        // 40% area -> SHOULD co-scale
+        let bbox_40 = BoundingBox {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 432, // 40% of 1080
+        };
+        assert!(should_co_scale(&bbox_40, screen_w, screen_h));
+    }
+
+    #[test]
+    fn test_downsample_rgb_to_720p() {
+        // 4K screen 3840x2160
+        let w = 3840;
+        let h = 2160;
+        let data = vec![128u8; w * h * 3];
+
+        let (dst_w, dst_h, dst_data) = downsample_rgb_to_720p(&data, w, h);
+        assert!(dst_w <= 1280, "Width {} should be <= 1280", dst_w);
+        assert!(dst_h <= 720, "Height {} should be <= 720", dst_h);
+        assert_eq!(dst_data.len(), dst_w * dst_h * 3);
+        assert_eq!(dst_data[0], 128);
     }
 }

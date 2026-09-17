@@ -145,7 +145,7 @@ async fn get_changed_regions(state: Arc<AppState>) -> Result<Value, String> {
         vision.update_last_frame(current_frame);
     }
 
-    Ok(serde_json::to_value(results).unwrap())
+    serde_json::to_value(results).map_err(|e| e.to_string())
 }
 
 async fn set_config(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
@@ -183,8 +183,18 @@ async fn ask(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
                 |_| true,
             )
         } else {
-            // Context-aware capture (mouse-guided crop while gaming).
-            let (width, height, rgb) = crate::vision::capture::capture_for_vision()?;
+            // Context-aware capture with SIMD Diff ROI & 720p co-scale fallback.
+            let (width, height, rgb, patch_opt) =
+                crate::vision::capture::capture_for_vision_with_meta()?;
+            if let Some(ref patch) = patch_opt {
+                tracing::debug!(
+                    "vision:ask captured ROI patch: raw={:?}, padded={:?}, co_scaled={}, area_ratio={:.2}%",
+                    patch.raw_bounding_box,
+                    patch.padded_bounding_box,
+                    patch.is_co_scaled,
+                    patch.area_ratio * 100.0
+                );
+            }
             llm_manager.answer_with_image(
                 &question,
                 llm::engine::VisionImage::Rgb {

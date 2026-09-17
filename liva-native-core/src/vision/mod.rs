@@ -1,8 +1,16 @@
 pub mod capture;
 pub mod diff;
 
-use capture::{Frame, ScreenCapturer};
-use diff::{DiffEngine, RegionDiffResult, ScreenRegion};
+pub use capture::{
+    CaptureError, Frame, MockScreenCapturer, PixelFormat, ScreenCapturer, capture_for_vision,
+    capture_for_vision_from, capture_for_vision_with_meta, clamp_to_visual_tokens,
+    clear_last_vision_frame, crop_frame_bbox_rgb, frame_to_rgb, process_vision_frame,
+    set_last_vision_frame,
+};
+pub use diff::{
+    BoundingBox, CO_SCALE_AREA_THRESHOLD, DEFAULT_ROI_PADDING, DiffEngine, RegionDiffResult,
+    ScreenRegion, VisualRoiPatch, downsample_rgb_to_720p,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

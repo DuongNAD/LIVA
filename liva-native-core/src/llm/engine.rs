@@ -74,6 +74,7 @@ pub struct LlamaRouterManager {
     /// Path to the vision projector (mmproj) GGUF for multimodal models; the
     /// `MtmdContext` is built lazily from it on the first vision request.
     pub mmproj_path: Option<PathBuf>,
+    pub governor: super::expert_governor::ExpertSwapGovernor,
 }
 
 unsafe impl Send for LlamaRouterManager {}
@@ -93,9 +94,15 @@ pub const RESERVE_FOR_COMPLETION: usize = 512;
 /// `n_ctx` nhỏ hơn hoặc bằng `RESERVE_FOR_COMPLETION` thì mọi prompt đều bị từ
 /// chối — đúng ý đồ: context nhỏ như vậy không sinh nổi câu trả lời tử tế.
 pub fn check_prompt_fits(prompt_tokens_len: usize, n_ctx: usize) -> Result<(), String> {
-    // saturating_add: cộng thẳng sẽ tràn và panic ở debug build khi
-    // prompt_tokens_len gần usize::MAX.
-    if prompt_tokens_len.saturating_add(RESERVE_FOR_COMPLETION) < n_ctx {
+    // Preserve the legacy empty-prompt boundary (n_ctx == reserve + 1), while
+    // nonempty prompts use the validated, overflow-safe context budget.
+    let fits = if prompt_tokens_len == 0 {
+        n_ctx > RESERVE_FOR_COMPLETION
+    } else {
+        super::prompt::dynamic_prompt::ContextTokenBudget::new(n_ctx, RESERVE_FOR_COMPLETION)
+            .is_ok_and(|budget| budget.can_fit(prompt_tokens_len))
+    };
+    if fits {
         return Ok(());
     }
     Err(format!(
@@ -103,6 +110,70 @@ pub fn check_prompt_fits(prompt_tokens_len: usize, n_ctx: usize) -> Result<(), S
          Hay cat bot lich su hoi thoai (LIVA_MAX_HISTORY_MESSAGES) hoac tang LIVA_LLM_N_CTX.",
         prompt_tokens_len, n_ctx, RESERVE_FOR_COMPLETION
     ))
+}
+
+/// Gửi một chunk qua kênh IPC/WebSocket đồng bộ và quyết định có nên tiếp tục sinh token không.
+///
+/// ## Vì sao hàm này tồn tại
+///
+/// Callback của `generate_completion` nhận `&str -> bool`:
+/// - `true`: tiếp tục sinh token tiếp theo.
+/// - `false`: ngắt vòng lặp sinh token trong engine ngay lập tức (`callback_active = false; break;`).
+///
+/// Khi client đóng kết nối (đóng tab trình duyệt, huỷ SSE, tắt ứng dụng), receiver của kênh mpsc bị drop,
+/// khiến `tx.blocking_send()` trả về `Err(SendError)`. Hàm này bắt `Err` đó và trả `false` để ngắt sớm,
+/// giải phóng khoá `AppState.llm` phục vụ request khác thay vì sinh tiếp vô ích tới `max_tokens`.
+///
+/// Nếu lỗi ở bước serialize JSON (`serde_json::to_string` trả Err), đây là lỗi định dạng nội bộ chứ không
+/// phải client bỏ đi, nên trả `true` để không làm đứt luồng vô cớ.
+pub fn nen_sinh_tiep<T: serde::Serialize>(
+    tx: &tokio::sync::mpsc::Sender<String>,
+    chunk: &T,
+) -> bool {
+    match serde_json::to_string(chunk) {
+        Ok(s) => tx.blocking_send(s).is_ok(),
+        Err(_) => true,
+    }
+}
+
+/// Tracks transport cancellation without exposing heartbeat chunks on the wire.
+/// A stopped stream must not be persisted or reported as a successful completion.
+pub struct CompletionStream<'a> {
+    tx: &'a tokio::sync::mpsc::Sender<String>,
+    cancelled: bool,
+}
+
+impl<'a> CompletionStream<'a> {
+    pub fn new(tx: &'a tokio::sync::mpsc::Sender<String>) -> Self {
+        Self {
+            tx,
+            cancelled: false,
+        }
+    }
+
+    pub fn forward<T: serde::Serialize>(&mut self, piece: &str, chunk: &T) -> bool {
+        if self.cancelled || self.tx.is_closed() {
+            self.cancelled = true;
+            return false;
+        }
+        // Hidden reasoning still checks cancellation without emitting an IPC chunk.
+        if piece.is_empty() {
+            return true;
+        }
+        self.cancelled = !nen_sinh_tiep(self.tx, chunk);
+        !self.cancelled
+    }
+
+    pub fn finish(
+        self,
+        completion: Result<CompletionOutput, String>,
+    ) -> Result<CompletionOutput, String> {
+        let output = completion?;
+        if self.cancelled || self.tx.is_closed() {
+            return Err("LLM stream cancelled: output channel closed".to_string());
+        }
+        Ok(output)
+    }
 }
 
 pub fn prune_kv_cache(
@@ -137,6 +208,7 @@ impl LlamaRouterManager {
             last_tokens: Vec::new(),
             vocab_only: false,
             mmproj_path: None,
+            governor: super::expert_governor::ExpertSwapGovernor::default(),
         })
     }
 
@@ -174,94 +246,175 @@ impl LlamaRouterManager {
         let target_n_ctx = n_ctx.unwrap_or(self.n_ctx);
         let target_vocab_only = vocab_only.unwrap_or(false);
 
-        let mut model_params = LlamaModelParams::default();
-        model_params = model_params.with_n_gpu_layers(target_n_gpu_layers);
-        model_params = model_params.with_use_mmap(true);
-        model_params = model_params.with_use_mlock(false);
-        model_params = model_params.with_vocab_only(target_vocab_only);
-
-        // 4. Load weights
-        let backend = get_backend();
-        let model = LlamaModel::load_from_file(backend, new_model_path, &model_params)
-            .map_err(|e| format!("Failed to load GGUF file: {:?}", e))?;
-
-        // Detect the model family from its embedded chat template so the prompt
-        // compiler emits the format the model was trained on: ChatML
-        // (`<|im_start|>`, Qwen3-VL), gemma-4 (`<|turn>`), or classic gemma
-        // (`<start_of_turn>`).
-        let chat_template = model
-            .meta_val_str("tokenizer.chat_template")
-            .unwrap_or_default();
-        let is_chatml = chat_template.contains("<|im_start|>");
-        let gemma4_markers = !is_chatml && chat_template.contains("<|turn>");
-        super::prompt::CHATML.store(is_chatml, std::sync::atomic::Ordering::Relaxed);
-        super::prompt::GEMMA4_MARKERS.store(gemma4_markers, std::sync::atomic::Ordering::Relaxed);
-        tracing::info!(
-            "Prompt format: {}",
-            if is_chatml {
-                "ChatML (<|im_start|>) — Qwen-style"
-            } else if gemma4_markers {
-                "gemma-4 (<|turn>)"
-            } else {
-                "classic gemma (<start_of_turn>)"
-            }
-        );
-
-        // 5. Setup context with Q8 KV Cache compression (type_k = 8, type_v = 8)
+        // 4. Load weights and setup context in blocking thread pool
+        let new_model_path_buf = new_model_path.to_path_buf();
         let threads = std::env::var("LIVA_LLM_THREADS")
             .unwrap_or_else(|_| "4".to_string())
             .parse::<i32>()
             .unwrap_or(4);
 
-        let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(
-                std::num::NonZeroU32::new(target_n_ctx as u32).ok_or("Invalid n_ctx")?,
-            ))
-            // n_batch PHẢI đặt tường minh, và phải đặt vì `with_embeddings(true)` ngay dưới.
-            //
-            // llama.cpp (`llama-context.cpp:193`):
-            //     cparams.n_batch = cparams.causal_attn
-            //         ? std::min(cparams.n_ctx, params.n_batch)
-            //         : params.n_batch;
-            //
-            // Với attention nhân quả, n_batch tự được kẹp theo n_ctx nên không ai phải nghĩ tới nó.
-            // Nhưng `with_embeddings(true)` + pooling `Mean` đặt `causal_attn = false`, và ở nhánh đó
-            // n_batch giữ NGUYÊN mặc định thô (2048) — không được nâng theo n_ctx. Hậu quả: prompt dài
-            // 2049..n_ctx token lọt qua `check_prompt_fits` (hàm này chắn theo n_ctx, xem :95) rồi mới
-            // chết ở `GGML_ASSERT(n_tokens_all <= cparams.n_batch)` — tức `abort()` cả tiến trình, không
-            // phải trả Err. Đo 16/08/2026: một lượt `user_voice_command` làm lõi tắt hẳn, client treo
-            // đủ 180 s timeout rồi bỏ cuộc, nên phía người dùng triệu chứng là "LIVA im lặng vĩnh viễn".
-            //
-            // Đặt n_batch = n_ctx khôi phục đúng bất biến mà nhánh nhân quả vốn có: thứ gì qua được
-            // `check_prompt_fits` thì vừa batch. Không hạ `with_embeddings` xuống được — `llm/embed.rs:32`
-            // đọc `context.embeddings_seq_ith(0)` từ chính context này.
-            .with_n_batch(target_n_ctx as u32)
-            .with_embeddings(true)
-            .with_pooling_type(LlamaPoolingType::Mean)
-            .with_type_k(KvCacheType::Q8_0)
-            .with_type_v(KvCacheType::Q8_0)
-            .with_n_threads(threads)
-            .with_n_threads_batch(threads);
+        let engine = tokio::task::spawn_blocking(move || -> Result<LlamaEngine, String> {
+            let mut model_params = LlamaModelParams::default();
+            model_params = model_params.with_n_gpu_layers(target_n_gpu_layers);
+            model_params = model_params.with_use_mmap(true);
+            model_params = model_params.with_use_mlock(false);
+            model_params = model_params.with_vocab_only(target_vocab_only);
 
-        let context = model
-            .new_context(backend, ctx_params)
-            .map_err(|e| format!("Failed to create llama context: {:?}", e))?;
+            let backend = get_backend();
+            let model = LlamaModel::load_from_file(backend, &new_model_path_buf, &model_params)
+                .map_err(|e| format!("Failed to load GGUF file: {:?}", e))?;
 
-        // Safely transmute LlamaContext to have 'static lifetime
-        let context_static =
-            unsafe { std::mem::transmute::<LlamaContext<'_>, LlamaContext<'static>>(context) };
+            // Detect the model family from its embedded chat template so the prompt
+            // compiler emits the format the model was trained on: ChatML
+            // (`<|im_start|>`, Qwen3-VL), gemma-4 (`<|turn>`), or classic gemma
+            // (`<start_of_turn>`).
+            let chat_template = model
+                .meta_val_str("tokenizer.chat_template")
+                .unwrap_or_default();
+            let is_chatml = chat_template.contains("<|im_start|>");
+            let gemma4_markers = !is_chatml && chat_template.contains("<|turn>");
+            super::prompt::CHATML.store(is_chatml, std::sync::atomic::Ordering::Relaxed);
+            super::prompt::GEMMA4_MARKERS
+                .store(gemma4_markers, std::sync::atomic::Ordering::Relaxed);
+            tracing::info!(
+                "Prompt format: {}",
+                if is_chatml {
+                    "ChatML (<|im_start|>) — Qwen-style"
+                } else if gemma4_markers {
+                    "gemma-4 (<|turn>)"
+                } else {
+                    "classic gemma (<start_of_turn>)"
+                }
+            );
 
-        self.engine = Some(LlamaEngine {
-            context: context_static,
-            mtmd: None,
-            model,
-        });
+            // 5. Setup context with Q8 KV Cache compression (type_k = 8, type_v = 8)
+            let ctx_params = LlamaContextParams::default()
+                .with_n_ctx(Some(
+                    std::num::NonZeroU32::new(target_n_ctx as u32).ok_or("Invalid n_ctx")?,
+                ))
+                .with_n_batch(target_n_ctx as u32)
+                .with_embeddings(true)
+                .with_pooling_type(LlamaPoolingType::Mean)
+                .with_type_k(KvCacheType::Q8_0)
+                .with_type_v(KvCacheType::Q8_0)
+                .with_n_threads(threads)
+                .with_n_threads_batch(threads);
+
+            let context = model
+                .new_context(backend, ctx_params)
+                .map_err(|e| format!("Failed to create llama context: {:?}", e))?;
+
+            // Safely transmute LlamaContext to have 'static lifetime
+            let context_static =
+                unsafe { std::mem::transmute::<LlamaContext<'_>, LlamaContext<'static>>(context) };
+
+            Ok(LlamaEngine {
+                context: context_static,
+                mtmd: None,
+                model,
+            })
+        })
+        .await
+        .map_err(|e| format!("Blocking model loading task panicked: {e}"))??;
+
+        self.engine = Some(engine);
         self.n_ctx = target_n_ctx;
         self.n_gpu_layers = target_n_gpu_layers;
         self.current_model_path = new_model_path.to_path_buf();
         self.vocab_only = target_vocab_only;
 
         Ok(())
+    }
+
+    /// Tự động đánh giá và tráo đổi Router <-> Expert model theo độ khó câu hỏi và chính sách chống dao động (U14).
+    pub async fn maybe_auto_swap(
+        &mut self,
+        do_kho: crate::agent::graph::DoKho,
+    ) -> Result<PathBuf, String> {
+        let expert_path_opt = crate::paths::configured_expert_model_path();
+        let co_expert = expert_path_opt.as_ref().is_some_and(|p| p.exists());
+
+        let decision = self.governor.evaluate_swap(do_kho, co_expert);
+        match decision {
+            super::expert_governor::SwapDecision::Stay(role) => {
+                self.governor.record_used(role);
+                Ok(self.current_model_path.clone())
+            }
+            super::expert_governor::SwapDecision::SwapToExpert => {
+                let expert_path = expert_path_opt
+                    .ok_or_else(|| "Expert model path not configured".to_string())?;
+                tracing::info!(
+                    "[AutoSwap U14] Độ khó={do_kho:?} -> Tự động chuyển sang Expert Model: {:?}",
+                    expert_path
+                );
+                self.swap_model(&expert_path, None, None, None).await?;
+                self.governor
+                    .record_used(super::expert_governor::ModelRole::Expert);
+                Ok(self.current_model_path.clone())
+            }
+            super::expert_governor::SwapDecision::SwapToRouter => {
+                let router_path = crate::paths::configured_router_model_path()
+                    .ok_or_else(|| "Router model path not configured".to_string())?;
+                tracing::info!(
+                    "[AutoSwap U14] Cooldown TTL đã hết -> Tự động hoàn trả tài nguyên về Router Model: {:?}",
+                    router_path
+                );
+                self.swap_model(&router_path, None, None, None).await?;
+                self.governor
+                    .record_used(super::expert_governor::ModelRole::Router);
+                Ok(self.current_model_path.clone())
+            }
+        }
+    }
+
+    /// Cập nhật thời gian Cooldown TTL của ExpertSwapGovernor (phục vụ test hoặc cấu hình động).
+    pub fn set_governor_cooldown(&mut self, duration: std::time::Duration) {
+        self.governor.cooldown_duration = duration;
+    }
+
+    /// Bật hoặc tắt cơ chế auto-swap của ExpertSwapGovernor.
+    pub fn set_auto_swap_enabled(&mut self, enabled: bool) {
+        self.governor.auto_swap_enabled = enabled;
+    }
+
+    /// Compile, measure and evict optional history with the loaded tokenizer.
+    /// The caller must hold the manager lock through this call so model swaps
+    /// cannot separate budgeting from inference. The final engine guard remains.
+    pub fn generate_budgeted_completion<F>(
+        &mut self,
+        messages: &[super::prompt::ChatMessage],
+        temperature: f32,
+        top_p: f32,
+        token_callback: F,
+    ) -> Result<CompletionOutput, String>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        use super::prompt::dynamic_prompt::{ContextTokenBudget, DynamicPromptAssembler};
+
+        if self.vocab_only {
+            return Err("Cannot generate completions on a vocab-only model".to_string());
+        }
+        let engine = self.engine.as_ref().ok_or(ERR_NO_MODEL)?;
+        let budget = ContextTokenBudget::new(self.n_ctx, RESERVE_FOR_COMPLETION)
+            .map_err(|error| error.to_string())?;
+        let (slices, selection) = DynamicPromptAssembler::select_chat_messages(messages)
+            .map_err(|error| error.to_string())?;
+        let compiled = DynamicPromptAssembler::compile_exact_budgeted_prompt(
+            &slices,
+            &selection,
+            &budget,
+            super::prompt::compile_prompt,
+            |prompt| {
+                engine
+                    .model
+                    .str_to_token(prompt, AddBos::Always)
+                    .map(|tokens| tokens.len())
+                    .map_err(|_| "Token measurement failed".to_string())
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        self.generate_completion(&compiled.prompt, temperature, top_p, token_callback)
     }
 
     /// Generate one assistant response.
@@ -510,7 +663,7 @@ impl LlamaRouterManager {
                 n_threads: threads,
                 media_marker: CString::new(mtmd_default_marker()).map_err(|e| e.to_string())?,
                 image_min_tokens: -1,
-                image_max_tokens: -1,
+                image_max_tokens: 2048,
             };
             let mtmd_path = mmproj_path.to_str().ok_or("mmproj path not UTF-8")?;
             let ctx = MtmdContext::init_from_file(mtmd_path, &engine.model, &params)
@@ -525,7 +678,9 @@ impl LlamaRouterManager {
             mtmd,
             model,
         } = engine;
-        let mtmd = mtmd.as_ref().unwrap();
+        let mtmd = mtmd
+            .as_ref()
+            .ok_or_else(|| "Multimodal context (mtmd) is not initialized".to_string())?;
 
         let bitmap = match image {
             VisionImage::Rgb {
@@ -552,7 +707,8 @@ impl LlamaRouterManager {
         //
         // Marker media để TRẦN: mtmd tự bọc nó bằng token thị giác của model —
         // đừng viết tay `<|vision_start|>…`.
-        let prompt = super::prompt::compile_prompt(&[
+        use super::prompt::dynamic_prompt::{ContextTokenBudget, DynamicPromptAssembler};
+        let messages = [
             super::ChatMessage {
                 role: "system".to_string(),
                 content: super::persona::PERSONA_LIVA.to_string(),
@@ -561,7 +717,33 @@ impl LlamaRouterManager {
                 role: "user".to_string(),
                 content: format!("{} {}", mtmd_default_marker(), question),
             },
-        ])?;
+        ];
+        let budget = ContextTokenBudget::new(self.n_ctx, RESERVE_FOR_COMPLETION)
+            .map_err(|error| error.to_string())?;
+        let (slices, selection) = DynamicPromptAssembler::select_chat_messages(&messages)
+            .map_err(|error| error.to_string())?;
+        // Both slices are mandatory. Never substitute a text-only measurement,
+        // remove the image marker, or trim the current question to make it fit.
+        let compiled = DynamicPromptAssembler::compile_exact_budgeted_prompt(
+            &slices,
+            &selection,
+            &budget,
+            super::prompt::compile_prompt,
+            |prompt| {
+                mtmd.tokenize(
+                    MtmdInputText {
+                        text: prompt.to_string(),
+                        add_special: true,
+                        parse_special: true,
+                    },
+                    &[&bitmap],
+                )
+                .map(|chunks| chunks.total_tokens())
+                .map_err(|_| "Multimodal token measurement failed".to_string())
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        let prompt = compiled.prompt;
         let mut output_filter =
             super::output_filter::VisibleOutputFilter::from_prompt_tail(&prompt);
         let input = MtmdInputText {
@@ -573,6 +755,7 @@ impl LlamaRouterManager {
             .tokenize(input, &[&bitmap])
             .map_err(|e| format!("mtmd tokenize: {}", e))?;
         let prompt_tokens = chunks.total_tokens();
+        check_prompt_fits(prompt_tokens, self.n_ctx)?;
         let mut n_past = chunks
             .eval_chunks(mtmd, &*context, 0, 0, 512, true)
             .map_err(|e| format!("mtmd eval: {}", e))?;
@@ -583,6 +766,14 @@ impl LlamaRouterManager {
         let mut callback_active = true;
         let mut completion_tokens = 0usize;
         loop {
+            if n_past as usize >= self.n_ctx {
+                tracing::warn!(
+                    "Vision generation reached context limit: n_past={} >= n_ctx={}",
+                    n_past,
+                    self.n_ctx
+                );
+                break;
+            }
             let token = sampler.sample(&*context, -1);
             sampler.accept(token);
             completion_tokens += 1;
@@ -613,7 +804,7 @@ impl LlamaRouterManager {
                 .decode(&mut batch)
                 .map_err(|e| format!("decode: {:?}", e))?;
             n_past += 1;
-            if completion_tokens >= 512 || text.len() > 100_000 {
+            if completion_tokens >= RESERVE_FOR_COMPLETION || text.len() > 100_000 {
                 break;
             }
         }

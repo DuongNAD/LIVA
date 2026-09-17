@@ -1,0 +1,26 @@
+interface:
+  display_name: "LIVA System Automation"
+  short_description: "Safe OS process management, sandboxed execution, and filesystem guardrails"
+  default_prompt: "Use $liva-system-automation to inspect system processes, safely execute sandboxed commands, or monitor OS resource metrics."
+dependencies:
+  tools:
+    - type: "native"
+      value: "os_process_list"
+      description: "List active processes with resource utilization metrics."
+    - type: "native"
+      value: "os_process_kill"
+      description: "Safely terminate a user-space process under two-phase confirmation."
+    - type: "native"
+      value: "os_execute_sandboxed_command"
+      description: "Run command with explicit arguments in a sandboxed subprocess."
+    - type: "native"
+      value: "os_filesystem_inspect"
+      description: "Safely read file metadata and contents within allowed roots."
+    - type: "native"
+      value: "os_system_metrics"
+      description: "Query real-time CPU, RAM, and GPU utilization metrics."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist sysops runbooks and incident notes into Obsidian vault."
+policy:
+  allow_implicit_invocation: true

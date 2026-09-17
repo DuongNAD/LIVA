@@ -370,6 +370,15 @@
     {
       "group": "wake",
       "profile": "full",
+      "dest": "models/wake_liva_en_v3.onnx",
+      "url": null,
+      "bytes": 956143,
+      "sha256": "459d3a803f199c6b228fe711b4a1eeb9dc0da2cd51ea36c5ff7e6a2c45cf0202",
+      "manual": "Tự train (2026-09-09), openWakeWord v3 personalized với 24 human positive và 20 negative audio clips từ data/wake-enrollment/ kết hợp FLEURS hard negatives. Holdout tại threshold 0.58: recall 100% (4/4), 1 false positive, FPPH 0.7685 trên 1.3013 giờ negative."
+    },
+    {
+      "group": "wake",
+      "profile": "full",
       "dest": "models/wake_liva_en_v2.onnx",
       "url": null,
       "bytes": 956143,

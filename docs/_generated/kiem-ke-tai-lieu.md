@@ -1,7 +1,7 @@
 ---
 title: "Kiểm kê và disposition tài liệu LIVA"
 updated: 2026-07-31
-commit: f35961c
+commit: 67eb98b
 status: index
 owns:
   - inventory-disposition-tai-lieu

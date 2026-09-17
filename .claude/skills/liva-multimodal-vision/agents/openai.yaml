@@ -1,0 +1,26 @@
+interface:
+  display_name: "LIVA Multimodal Vision"
+  short_description: "Real-time screen capture, mouse-guided visual ROI, and duplex voice processing"
+  default_prompt: "Use $liva-multimodal-vision to capture the screen, analyze UI changes, or inspect the voice/audio pipeline."
+dependencies:
+  tools:
+    - type: "native"
+      value: "vision:capture"
+      description: "Capture primary screen frame compressed as PNG."
+    - type: "native"
+      value: "vision:ask"
+      description: "Ask visual question to local multimodal VLM with current screen context."
+    - type: "native"
+      value: "vision:get_changed_regions"
+      description: "Compute pixel differences across registered desktop screen regions."
+    - type: "native"
+      value: "audio_stream_duplex"
+      description: "Stream microphone PCM audio through Sonora AEC3 and Parakeet STT."
+    - type: "native"
+      value: "avatar_sync_blendshapes"
+      description: "Emit synchronized 60 FPS VRM blendshape frames to Tauri UI."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Store vision session diagnostics into Obsidian vault."
+policy:
+  allow_implicit_invocation: true

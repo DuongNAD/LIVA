@@ -1,0 +1,287 @@
+{
+  "skill": "liva-code-refactor",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "coderef-01-impact-analysis-typical",
+      "name": "Assess Upstream Call Graph Impact for Symbol Refactoring",
+      "type": "typical",
+      "description": "Analyze blast radius of renaming internal helper function in src/skills/ranker.rs.",
+      "input": {
+        "tool": "refactor_impact_analysis",
+        "parameters": {
+          "symbol_name": "rank_skills_with_prior",
+          "direction": "upstream",
+          "mode": "pdg"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.risk_level === 'LOW' || result.risk_level === 'MEDIUM'",
+          "result.direct_callers.length > 0",
+          "result.affected_files.includes('src/skills/ranker.rs')"
+        ],
+        "expected_output_fields": ["symbol_name", "risk_level", "direct_callers", "affected_files", "blast_radius_score"]
+      }
+    },
+    {
+      "id": "coderef-02-safe-patch-apply-typical",
+      "name": "Apply AST-Safe Patch with Dry-Run Verification",
+      "type": "typical",
+      "description": "Apply a unified diff replacing .unwrap() with structured error propagation.",
+      "input": {
+        "tool": "refactor_apply_patch",
+        "parameters": {
+          "target_file": "liva-native-core/src/skills/helper.rs",
+          "patch_diff": "--- a/src/skills/helper.rs\n+++ b/src/skills/helper.rs\n@@ -10,1 +10,1 @@\n-let val = map.get(k).unwrap();\n+let val = map.get(k).ok_or(LivaError::NotFound)?;",
+          "confirm_token": "VALID_REFACTOR_TOKEN_99B"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.patch_applied == true",
+          "result.backup_created == true",
+          "result.syntax_valid == true"
+        ],
+        "expected_output_fields": ["target_file", "patch_applied", "lines_modified", "backup_path"]
+      }
+    },
+    {
+      "id": "coderef-03-pdg-control-guard-trace-typical",
+      "name": "Trace Control Dependency Guards via PDG",
+      "type": "typical",
+      "description": "Query conditions under which a database write statement executes.",
+      "input": {
+        "tool": "refactor_pdg_query",
+        "parameters": {
+          "mode": "controls",
+          "target": "liva-native-core/src/db/wal.rs",
+          "line": 42
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.guard_conditions.length > 0",
+          "result.target_statement.includes('write')",
+          "result.is_unconditional == false"
+        ],
+        "expected_output_fields": ["target", "line", "guard_conditions", "is_unconditional"]
+      }
+    },
+    {
+      "id": "coderef-04-symbol-rename-graph-sync-typical",
+      "name": "Propagate Function Rename Across All Callers",
+      "type": "typical",
+      "description": "Rename public helper function and calculate all AST references requiring updates.",
+      "input": {
+        "tool": "refactor_impact_analysis",
+        "parameters": {
+          "symbol_name": "calculate_rrf_score",
+          "direction": "upstream",
+          "mode": "call_graph"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.direct_callers.length >= 2",
+          "result.risk_level === 'MEDIUM'"
+        ],
+        "expected_output_fields": ["symbol_name", "risk_level", "direct_callers", "affected_files"]
+      }
+    },
+    {
+      "id": "coderef-05-dead-code-detection-typical",
+      "name": "Detect Unreferenced Private Functions in Module",
+      "type": "typical",
+      "description": "Scan internal module for dead uncalled private methods using dead code analysis.",
+      "input": {
+        "tool": "refactor_impact_analysis",
+        "parameters": {
+          "symbol_name": "legacy_unused_cleanup_helper",
+          "direction": "upstream"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.direct_callers.length === 0",
+          "result.is_dead_code_candidate == true",
+          "result.risk_level === 'LOW'"
+        ],
+        "expected_output_fields": ["symbol_name", "direct_callers", "is_dead_code_candidate", "risk_level"]
+      }
+    },
+    {
+      "id": "coderef-06-rollback-snapshot-typical",
+      "name": "Restore Source File from Backup Snapshot",
+      "type": "typical",
+      "description": "Restore target file to original state following manual rollback request.",
+      "input": {
+        "tool": "refactor_rollback",
+        "parameters": {
+          "target_file": "liva-native-core/src/skills/helper.rs",
+          "backup_path": "liva-native-core/src/skills/helper.rs.bak.12345"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.restored == true",
+          "result.target_file.endsWith('helper.rs')"
+        ],
+        "expected_output_fields": ["target_file", "restored", "restored_at"]
+      }
+    },
+    {
+      "id": "coderef-07-critical-risk-gate-edge",
+      "name": "Halt on CRITICAL Risk Symbol Modification",
+      "type": "edge_case",
+      "description": "Attempt to refactor database transaction kernel symbol with CRITICAL blast radius.",
+      "input": {
+        "tool": "refactor_impact_analysis",
+        "parameters": {
+          "symbol_name": "execute_wal_commit",
+          "direction": "upstream",
+          "mode": "pdg"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.risk_level === 'CRITICAL'",
+          "result.requires_operator_signoff == true",
+          "result.warning.includes('High-risk symbol modification requires explicit operator approval')"
+        ],
+        "expected_output_fields": ["symbol_name", "risk_level", "requires_operator_signoff", "direct_callers"]
+      }
+    },
+    {
+      "id": "coderef-08-compile-failure-auto-rollback",
+      "name": "Automatic Rollback on Compilation Failure",
+      "type": "error_recovery",
+      "description": "Proposed patch introduces a broken lifetime causing cargo check failure; auto-rollback kicks in.",
+      "input": {
+        "tool": "refactor_apply_patch",
+        "parameters": {
+          "target_file": "liva-native-core/src/skills/broken.rs",
+          "patch_diff": "--- a/src/skills/broken.rs\n+++ b/src/skills/broken.rs\n@@ -5,1 +5,1 @@\n-pub fn foo<'a>(x: &'a str) -> &'a str { x }\n+pub fn foo<'a>(x: &'a str) -> &'static str { x }",
+          "confirm_token": "VALID_REFACTOR_TOKEN_99C"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "COMPILATION_VERIFICATION_FAILED",
+        "validation_rules": [
+          "result.rollback_successful == true",
+          "result.file_restored == true",
+          "result.compiler_error.includes('lifetime')"
+        ],
+        "expected_output_fields": ["target_file", "rollback_successful", "compiler_error"]
+      }
+    },
+    {
+      "id": "coderef-09-unauthorized-patch-blocked",
+      "name": "Block Patch Application Without Confirmation Token",
+      "type": "adversarial_security",
+      "description": "Attempt to apply code patch without passing valid two-phase confirmation token.",
+      "input": {
+        "tool": "refactor_apply_patch",
+        "parameters": {
+          "target_file": "liva-native-core/src/auth/jwt.rs",
+          "patch_diff": "--- a/src/auth/jwt.rs\n+++ b/src/auth/jwt.rs\n@@ -1,1 +1,1 @@\n-verify();\n+// bypass",
+          "confirm_token": ""
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "MISSING_CONFIRMATION_TOKEN",
+        "validation_rules": [
+          "result.error.includes('Missing required confirmation token')",
+          "result.patch_applied == false"
+        ]
+      }
+    },
+    {
+      "id": "coderef-10-patch-conflict-rejection",
+      "name": "Reject Patch When Target File Has Conflicting Edits",
+      "type": "error_recovery",
+      "description": "Unified diff hunk cannot be cleanly matched against current file content.",
+      "input": {
+        "tool": "refactor_apply_patch",
+        "parameters": {
+          "target_file": "liva-native-core/src/config.rs",
+          "patch_diff": "--- a/src/config.rs\n+++ b/src/config.rs\n@@ -99,1 +99,1 @@\n-NON_EXISTENT_SOURCE_LINE\n+NEW_LINE",
+          "confirm_token": "VALID_REFACTOR_TOKEN_99D"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "PATCH_APPLICATION_CONFLICT",
+        "validation_rules": [
+          "result.error.includes('Failed to locate patch hunk in target file')",
+          "result.patch_applied == false"
+        ]
+      }
+    },
+    {
+      "id": "coderef-11-path-traversal-patch-blocked",
+      "name": "Block Patch Targeting Out-of-Sandbox Path",
+      "type": "adversarial_security",
+      "description": "Attempt to patch file residing outside project directory using relative path dots.",
+      "input": {
+        "tool": "refactor_apply_patch",
+        "parameters": {
+          "target_file": "E:\\Project\\LIVA\\..\\..\\Windows\\System32\\calc.exe",
+          "patch_diff": "malicious patch",
+          "confirm_token": "VALID_REFACTOR_TOKEN_99E"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "TARGET_FILE_OUTSIDE_WORKSPACE",
+        "validation_rules": [
+          "result.error.includes('Target file is outside the authorized repository root')",
+          "result.patch_applied == false"
+        ]
+      }
+    },
+    {
+      "id": "coderef-12-empty-diff-handling",
+      "name": "Reject Empty Patch Diff Payload",
+      "type": "edge_case",
+      "description": "Submit whitespace-only unified diff to patch application tool.",
+      "input": {
+        "tool": "refactor_apply_patch",
+        "parameters": {
+          "target_file": "liva-native-core/src/skills/helper.rs",
+          "patch_diff": "   \n\n",
+          "confirm_token": "VALID_REFACTOR_TOKEN_99F"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "EMPTY_DIFF_PAYLOAD",
+        "validation_rules": [
+          "result.error.includes('Diff payload is empty')",
+          "result.patch_applied == false"
+        ]
+      }
+    }
+  ]
+}

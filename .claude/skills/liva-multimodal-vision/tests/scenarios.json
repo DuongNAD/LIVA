@@ -1,0 +1,299 @@
+{
+  "skill": "liva-multimodal-vision",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "vision-01-screen-capture-typical",
+      "name": "Capture Primary Monitor Compressed PNG Frame",
+      "type": "typical",
+      "description": "Capture the primary display screen buffer and compress to PNG in background worker.",
+      "input": {
+        "tool": "vision:capture",
+        "parameters": {
+          "monitor_index": 0,
+          "format": "png",
+          "compression_level": 6
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.width > 0 && result.height > 0",
+          "result.image_b64.length > 1000",
+          "result.format === 'png'",
+          "result.encoding_time_ms < 50"
+        ],
+        "expected_output_fields": ["width", "height", "format", "image_b64", "encoding_time_ms"]
+      }
+    },
+    {
+      "id": "vision-02-mouse-roi-vlm-qa-typical",
+      "name": "Mouse-Guided ROI Visual Question Answering",
+      "type": "typical",
+      "description": "Crop a 512x512 region centered around mouse cursor and query Qwen3-VL for error explanation.",
+      "input": {
+        "tool": "vision:ask",
+        "parameters": {
+          "question": "What is the compiler error shown in this IDE window?",
+          "crop_region": {
+            "x": 400,
+            "y": 300,
+            "width": 512,
+            "height": 512
+          },
+          "temperature": 0.2
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "typeof result.answer === 'string'",
+          "result.answer.length > 20",
+          "result.tokens_used < 800"
+        ],
+        "expected_output_fields": ["question", "answer", "tokens_used", "inference_latency_ms"]
+      }
+    },
+    {
+      "id": "vision-03-screen-diff-typical",
+      "name": "Detect Pixel Changes in Registered Screen Regions",
+      "type": "typical",
+      "description": "Compute pixel difference across active IDE editor region when text changes.",
+      "input": {
+        "tool": "vision:get_changed_regions",
+        "parameters": {
+          "regions": [
+            { "id": "code_editor", "x": 100, "y": 100, "width": 800, "height": 600 }
+          ],
+          "color_tolerance": 0.05
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.is_changed == true",
+          "result.changed_regions.length >= 1",
+          "result.changed_regions[0].id === 'code_editor'"
+        ],
+        "expected_output_fields": ["is_changed", "diff_ratio", "changed_regions"]
+      }
+    },
+    {
+      "id": "vision-04-audio-duplex-stream-typical",
+      "name": "Stream Mic PCM Audio Through WebRTC AEC3 and Parakeet STT",
+      "type": "typical",
+      "description": "Process 16kHz PCM audio frame, run through AEC3 filter and transcribe to text.",
+      "input": {
+        "tool": "audio_stream_duplex",
+        "parameters": {
+          "sample_rate": 16000,
+          "channels": 1,
+          "frame_size_ms": 20,
+          "enable_aec3": true
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.echo_suppressed == true",
+          "result.vad_active == true",
+          "result.stream_state === 'STREAMING'"
+        ],
+        "expected_output_fields": ["stream_state", "echo_suppressed", "vad_active", "frame_latency_ms"]
+      }
+    },
+    {
+      "id": "vision-05-avatar-blendshape-sync-typical",
+      "name": "Emit 60 FPS VRM Blendshape Coordinates",
+      "type": "typical",
+      "description": "Compute facial blendshapes from phoneme stream and emit to UI avatar renderer.",
+      "input": {
+        "tool": "avatar_sync_blendshapes",
+        "parameters": {
+          "phoneme": "AA",
+          "intensity": 0.85,
+          "fps_target": 60
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.blendshapes.mouthOpen >= 0.8",
+          "result.frame_interval_ms <= 16.7"
+        ],
+        "expected_output_fields": ["blendshapes", "frame_interval_ms", "synced_timestamp"]
+      }
+    },
+    {
+      "id": "vision-06-multi-monitor-capture-typical",
+      "name": "Capture Secondary Display Buffer",
+      "type": "typical",
+      "description": "Capture screen frame from secondary monitor index 1.",
+      "input": {
+        "tool": "vision:capture",
+        "parameters": {
+          "monitor_index": 1,
+          "format": "jpeg",
+          "compression_level": 80
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.monitor_index === 1",
+          "result.image_b64.length > 500"
+        ],
+        "expected_output_fields": ["width", "height", "format", "image_b64", "monitor_index"]
+      }
+    },
+    {
+      "id": "vision-07-static-screen-diff-edge",
+      "name": "Suppress VLM Inference on Unchanged Screen State",
+      "type": "edge_case",
+      "description": "Compute pixel difference on static display where screen has not changed.",
+      "input": {
+        "tool": "vision:get_changed_regions",
+        "parameters": {
+          "regions": [
+            { "id": "code_editor", "x": 0, "y": 0, "width": 1920, "height": 1080 }
+          ],
+          "color_tolerance": 0.05
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.changed_regions.length === 0",
+          "result.is_changed == false",
+          "result.diff_ratio < 0.001"
+        ],
+        "expected_output_fields": ["is_changed", "diff_ratio", "changed_regions"]
+      }
+    },
+    {
+      "id": "vision-08-display-disconnect-fallback",
+      "name": "Display Disconnect Graceful Fallback to Monitor 0",
+      "type": "error_recovery",
+      "description": "Request capture on disconnected monitor index 2; fallback to primary monitor index 0.",
+      "input": {
+        "tool": "vision:capture",
+        "parameters": {
+          "monitor_index": 2
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.fallback_monitor == 0",
+          "result.warning.includes('Display 2 not found; fell back to primary monitor 0')",
+          "result.image_b64.length > 0"
+        ],
+        "expected_output_fields": ["monitor_index", "fallback_monitor", "image_b64", "warning"]
+      }
+    },
+    {
+      "id": "vision-09-corrupted-b64-rejected",
+      "name": "Reject Malformed Image Payload in VLM Query",
+      "type": "adversarial_security",
+      "description": "Send corrupted non-image string in image_b64 parameter to vision:ask.",
+      "input": {
+        "tool": "vision:ask",
+        "parameters": {
+          "question": "Explain this diagram",
+          "image_b64": "NOT_A_VALID_BASE64_IMAGE_DATA_CORRUPTED"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "INVALID_IMAGE_PAYLOAD",
+        "validation_rules": [
+          "result.error.includes('Failed to decode image payload')",
+          "result.vlm_invoked == false"
+        ]
+      }
+    },
+    {
+      "id": "vision-10-out-of-bounds-crop-clamp",
+      "name": "Clamp Out-of-Bounds ROI Coordinates to Screen Dimensions",
+      "type": "edge_case",
+      "description": "Provide crop region bounding box extending beyond physical monitor resolution.",
+      "input": {
+        "tool": "vision:ask",
+        "parameters": {
+          "question": "Describe this corner",
+          "crop_region": {
+            "x": 1900,
+            "y": 1050,
+            "width": 500,
+            "height": 500
+          }
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.clamped_region.x + result.clamped_region.width <= 1920",
+          "result.clamped_region.y + result.clamped_region.height <= 1080"
+        ],
+        "expected_output_fields": ["question", "answer", "clamped_region"]
+      }
+    },
+    {
+      "id": "vision-11-audio-echo-self-wake-suppressed",
+      "name": "Suppress Echo Self-Wake Feedback Loop",
+      "type": "error_recovery",
+      "description": "Detect synthesized TTS output bleeding into mic capture and suppress self-wake trigger.",
+      "input": {
+        "tool": "audio_stream_duplex",
+        "parameters": {
+          "incoming_audio_level": 0.7,
+          "tts_playback_active": true,
+          "enable_aec3": true
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.self_wake_filtered == true",
+          "result.vad_triggered == false"
+        ],
+        "expected_output_fields": ["self_wake_filtered", "vad_triggered", "suppression_gain_db"]
+      }
+    },
+    {
+      "id": "vision-12-extreme-resolution-downscale",
+      "name": "Downscale 8K Screen Frame Before VLM Inference",
+      "type": "edge_case",
+      "description": "Capture on 7680x4320 8K monitor; automatically downscale to max 1920x1080 for VLM efficiency.",
+      "input": {
+        "tool": "vision:capture",
+        "parameters": {
+          "source_width": 7680,
+          "source_height": 4320,
+          "max_dimension": 1920
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.width <= 1920",
+          "result.height <= 1080",
+          "result.downscaled == true"
+        ],
+        "expected_output_fields": ["width", "height", "downscaled", "source_dimensions"]
+      }
+    }
+  ]
+}

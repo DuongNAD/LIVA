@@ -1,0 +1,23 @@
+interface:
+  display_name: "LIVA Deep Research"
+  short_description: "Autonomous multi-source web intelligence, scraping, and deep research synthesis"
+  default_prompt: "Use $liva-deep-research to conduct a comprehensive multi-source investigation and synthesize a cited research report on this topic."
+dependencies:
+  tools:
+    - type: "native"
+      value: "research_multi_search"
+      description: "Dispatch parallel search queries across multi-engine web providers."
+    - type: "native"
+      value: "research_fetch_page_content"
+      description: "Fetch and extract clean markdown content from a target URL."
+    - type: "native"
+      value: "research_extract_structured_claims"
+      description: "Extract verified claims and citation links from ingested documents."
+    - type: "native"
+      value: "research_compile_dossier"
+      description: "Assemble structured research dossier with executive summary and comparison tables."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Save structured research dossiers into the Obsidian vault."
+policy:
+  allow_implicit_invocation: true

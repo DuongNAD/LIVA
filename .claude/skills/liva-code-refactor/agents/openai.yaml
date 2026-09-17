@@ -1,0 +1,26 @@
+interface:
+  display_name: "LIVA Code Refactor"
+  short_description: "Safe automated code refactoring, dead code pruning, and PDG blast radius analysis"
+  default_prompt: "Use $liva-code-refactor to analyze the call graph, check upstream impact, and safely refactor this symbol or module."
+dependencies:
+  tools:
+    - type: "native"
+      value: "refactor_impact_analysis"
+      description: "Analyze upstream callers and calculate refactoring blast radius."
+    - type: "native"
+      value: "refactor_pdg_query"
+      description: "Trace Program Dependence Graph control guards and data flows."
+    - type: "native"
+      value: "refactor_apply_patch"
+      description: "Apply unified diff patch under two-phase confirmation with backup guard."
+    - type: "native"
+      value: "refactor_rollback"
+      description: "Restore original source state from backup guard snapshot."
+    - type: "mcp"
+      value: "gitnexus"
+      description: "Query call graphs, trace PDG taint/control flows, and calculate blast radius."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Persist refactoring dossiers and architectural change logs in Obsidian."
+policy:
+  allow_implicit_invocation: true

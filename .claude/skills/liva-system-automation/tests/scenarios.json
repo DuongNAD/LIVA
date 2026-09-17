@@ -1,0 +1,280 @@
+{
+  "skill": "liva-system-automation",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "sysauto-01-process-list-typical",
+      "name": "List High-Memory Processes",
+      "type": "typical",
+      "description": "Query active system processes filtered by memory usage threshold greater than 100MB.",
+      "input": {
+        "tool": "os_process_list",
+        "parameters": {
+          "min_memory_mb": 100,
+          "name_filter": ""
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.is_array == true",
+          "result.every(p => p.memory_rss_bytes >= 104857600)",
+          "result.every(p => typeof p.pid === 'number' && typeof p.name === 'string')"
+        ],
+        "expected_output_fields": ["pid", "name", "cpu_usage", "memory_rss_bytes", "status"]
+      }
+    },
+    {
+      "id": "sysauto-02-process-kill-twophase",
+      "name": "Kill User-Space Process with Confirmation Token",
+      "type": "typical",
+      "description": "Terminate a stale dev server process in user-space using an authorized two-phase confirmation token.",
+      "input": {
+        "tool": "os_process_kill",
+        "parameters": {
+          "pid": 19420,
+          "confirm_token": "AUTH_TOKEN_TEST_VALID_77A",
+          "graceful_timeout_ms": 3000
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.terminated == true",
+          "result.pid == 19420",
+          "result.signal == 'SIGTERM'"
+        ],
+        "expected_output_fields": ["pid", "terminated", "exit_code", "duration_ms"]
+      }
+    },
+    {
+      "id": "sysauto-03-fs-inspect-sandbox",
+      "name": "Inspect Workspace File in Authorized Sandbox",
+      "type": "typical",
+      "description": "Safely read metadata and text content from a configuration file inside authorized workspace root.",
+      "input": {
+        "tool": "os_filesystem_inspect",
+        "parameters": {
+          "target_path": "E:\\Project\\LIVA\\package.json",
+          "max_bytes": 8192
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.within_sandbox == true",
+          "result.canonical_path.endsWith('package.json')",
+          "typeof result.content === 'string'",
+          "result.size_bytes > 0"
+        ],
+        "expected_output_fields": ["canonical_path", "size_bytes", "modified_at", "content", "within_sandbox"]
+      }
+    },
+    {
+      "id": "sysauto-04-safe-exec-whitelisted",
+      "name": "Execute Whitelisted Git Status Diagnostic",
+      "type": "typical",
+      "description": "Execute whitelisted diagnostic command in isolated sandbox environment.",
+      "input": {
+        "tool": "os_execute_sandboxed_command",
+        "parameters": {
+          "program": "git",
+          "args": ["status", "--short"],
+          "timeout_ms": 5000
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.exit_code === 0",
+          "typeof result.stdout === 'string'",
+          "result.sandboxed == true"
+        ],
+        "expected_output_fields": ["exit_code", "stdout", "stderr", "duration_ms", "sandboxed"]
+      }
+    },
+    {
+      "id": "sysauto-05-system-metrics-query",
+      "name": "Query Real-Time Host System Telemetry",
+      "type": "typical",
+      "description": "Gather live host telemetry including CPU load, RAM usage percentage, and disk capacity.",
+      "input": {
+        "tool": "os_system_metrics",
+        "parameters": {
+          "include_disk": true,
+          "include_memory": true
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.cpu_percent >= 0 && result.cpu_percent <= 100",
+          "result.memory_used_bytes > 0",
+          "result.memory_total_bytes > result.memory_used_bytes",
+          "result.disk_free_bytes > 0"
+        ],
+        "expected_output_fields": ["cpu_percent", "memory_used_bytes", "memory_total_bytes", "disk_free_bytes", "timestamp"]
+      }
+    },
+    {
+      "id": "sysauto-06-fs-inspect-unicode-edge",
+      "name": "Inspect Workspace File with Spaces and Unicode",
+      "type": "edge_case",
+      "description": "Inspect a file located inside the authorized workspace directory with UTF-8 Vietnamese diacritics and spaces.",
+      "input": {
+        "tool": "os_filesystem_inspect",
+        "parameters": {
+          "target_path": "E:\\Project\\LIVA\\docs\\tài liệu hướng dẫn\\kiến trúc.md",
+          "max_bytes": 4096
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.within_sandbox == true",
+          "result.canonical_path.startsWith('E:\\\\Project\\\\LIVA')",
+          "typeof result.content === 'string'"
+        ],
+        "expected_output_fields": ["canonical_path", "size_bytes", "modified_at", "content"]
+      }
+    },
+    {
+      "id": "sysauto-07-kill-system-pid-blocked",
+      "name": "Block Termination of Critical OS Process (PID 4)",
+      "type": "adversarial_security",
+      "description": "Attempt to terminate kernel system process PID 4 (System) without authorization.",
+      "input": {
+        "tool": "os_process_kill",
+        "parameters": {
+          "pid": 4,
+          "confirm_token": "FORGED_TOKEN_ATTEMPT"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "PERMISSION_DENIED_SYSTEM_PID",
+        "validation_rules": [
+          "result.error.includes('Termination of core system process is blocked')",
+          "result.process_alive == true"
+        ]
+      }
+    },
+    {
+      "id": "sysauto-08-fs-traversal-blocked",
+      "name": "Block Directory Traversal Escape to System Directory",
+      "type": "adversarial_security",
+      "description": "Attempt to read sensitive system file using path traversal dots.",
+      "input": {
+        "tool": "os_filesystem_inspect",
+        "parameters": {
+          "target_path": "E:\\Project\\LIVA\\..\\..\\Windows\\System32\\drivers\\etc\\hosts"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "CONTAINMENT_VIOLATION",
+        "validation_rules": [
+          "result.error.includes('Target path escapes authorized workspace root')",
+          "result.access_granted == false"
+        ]
+      }
+    },
+    {
+      "id": "sysauto-09-command-injection-blocked",
+      "name": "Block Shell Chaining and Command Injection",
+      "type": "adversarial_security",
+      "description": "Attempt to pass concatenated shell command string to execute in background.",
+      "input": {
+        "tool": "os_execute_sandboxed_command",
+        "parameters": {
+          "program": "cmd.exe /c calc.exe",
+          "args": ["&&", "whoami"]
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "SHELL_CHAINING_DISALLOWED",
+        "validation_rules": [
+          "result.error.includes('Raw shell interpreters and operators are prohibited')",
+          "result.executed == false"
+        ]
+      }
+    },
+    {
+      "id": "sysauto-10-kill-missing-token",
+      "name": "Reject Process Termination When Missing Token",
+      "type": "adversarial_security",
+      "description": "Attempt to kill process without providing required confirmation token.",
+      "input": {
+        "tool": "os_process_kill",
+        "parameters": {
+          "pid": 5512,
+          "confirm_token": ""
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "MISSING_CONFIRMATION_TOKEN",
+        "validation_rules": [
+          "result.error.includes('Missing required confirmation token')",
+          "result.terminated == false"
+        ]
+      }
+    },
+    {
+      "id": "sysauto-11-process-not-found-recovery",
+      "name": "Handle Non-Existent PID Termination Gracefully",
+      "type": "error_recovery",
+      "description": "Attempt to terminate a non-existent process PID 999999 with valid token; handle cleanly without crash.",
+      "input": {
+        "tool": "os_process_kill",
+        "parameters": {
+          "pid": 999999,
+          "confirm_token": "VALID_CONFIRM_TOKEN_88B"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "PROCESS_NOT_FOUND",
+        "validation_rules": [
+          "result.error.includes('Process with PID 999999 not found')",
+          "result.terminated == false"
+        ]
+      }
+    },
+    {
+      "id": "sysauto-12-command-timeout-recovery",
+      "name": "Enforce Strict Command Execution Timeout",
+      "type": "error_recovery",
+      "description": "Handle hanging command exceeding timeout threshold with graceful kill.",
+      "input": {
+        "tool": "os_execute_sandboxed_command",
+        "parameters": {
+          "program": "ping",
+          "args": ["-n", "100", "127.0.0.1"],
+          "timeout_ms": 1000
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "EXECUTION_TIMEOUT",
+        "validation_rules": [
+          "result.error.includes('Command timed out after 1000ms')",
+          "result.timed_out == true"
+        ]
+      }
+    }
+  ]
+}

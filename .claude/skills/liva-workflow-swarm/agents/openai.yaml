@@ -1,0 +1,26 @@
+interface:
+  display_name: "LIVA Workflow Swarm"
+  short_description: "Multi-agent DAG task orchestration, voting consensus, and HITL checkpoints"
+  default_prompt: "Use $liva-workflow-swarm to decompose this objective into a multi-agent DAG, execute parallel workstreams, and manage voting consensus."
+dependencies:
+  tools:
+    - type: "native"
+      value: "swarm_decompose_dag"
+      description: "Decompose mission into a topological Directed Acyclic Graph."
+    - type: "native"
+      value: "swarm_dispatch_task"
+      description: "Dispatch tasks to specialized subagents with correlation tracking."
+    - type: "native"
+      value: "swarm_vote_consensus"
+      description: "Convene multi-agent voting panel for high-impact decision gates."
+    - type: "native"
+      value: "swarm_isolate_dlq"
+      description: "Isolate failed tasks into Dead Letter Queue with exponential backoff."
+    - type: "native"
+      value: "swarm_enforce_hitl_gate"
+      description: "Enforce human-in-the-loop approval checkpoint before mutations."
+    - type: "mcp"
+      value: "obsidian"
+      description: "Save swarm execution dossiers and consensus tallies into Obsidian vault."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,317 @@
+{
+  "skill": "liva-workflow-swarm",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "swarm-01-dag-decompose-typical",
+      "name": "Decompose 4-Stage Software Migration into Topological DAG",
+      "type": "typical",
+      "description": "Decompose mission (Survey -> Blueprint -> Implement -> Verify) into a valid acyclic task graph.",
+      "input": {
+        "tool": "swarm_decompose_dag",
+        "parameters": {
+          "objective": "Migrate LIVA skills architecture to standard multi-dialect format",
+          "max_parallel_agents": 4,
+          "require_hitl_gates": true
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.is_acyclic == true",
+          "result.nodes.length === 4",
+          "result.topological_order[0] === 'task_survey'",
+          "result.topological_order[3] === 'task_verify'"
+        ],
+        "expected_output_fields": ["workflow_id", "is_acyclic", "nodes", "edges", "topological_order"]
+      }
+    },
+    {
+      "id": "swarm-02-voting-consensus-supermajority",
+      "name": "Execute 3-Agent Voting Consensus Panel Meeting Quorum",
+      "type": "typical",
+      "description": "Convene 3 subagents (Implementer, Reviewer, Auditor) to vote on pull request merge approval.",
+      "input": {
+        "tool": "swarm_vote_consensus",
+        "parameters": {
+          "topic": "Approve M2 Skills Ecosystem Blueprint PR",
+          "ballots": [
+            { "agent": "implementer_1", "vote": "APPROVE", "rationale": "All schemas conform to spec" },
+            { "agent": "reviewer_1", "vote": "APPROVE", "rationale": "Unit tests pass 100%" },
+            { "agent": "auditor_1", "vote": "APPROVE", "rationale": "Git boundary preserved" }
+          ],
+          "quorum_min": 3,
+          "supermajority_threshold": 0.66
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.quorum_reached == true",
+          "result.supermajority_reached == true",
+          "result.approved_decision === 'APPROVE'",
+          "result.approval_percentage === 1.0"
+        ],
+        "expected_output_fields": ["topic", "quorum_reached", "supermajority_reached", "approved_decision", "tally"]
+      }
+    },
+    {
+      "id": "swarm-03-parallel-fanout-dispatch-typical",
+      "name": "Dispatch Parallel Independent Workstream Tasks",
+      "type": "typical",
+      "description": "Dispatch 3 independent exploration subagents concurrently across worker pool.",
+      "input": {
+        "tool": "swarm_dispatch_task",
+        "parameters": {
+          "tasks": [
+            { "task_id": "explore_core", "assigned_archetype": "explorer", "dependencies": [] },
+            { "task_id": "explore_skills", "assigned_archetype": "explorer", "dependencies": [] },
+            { "task_id": "explore_ui", "assigned_archetype": "explorer", "dependencies": [] }
+          ]
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.dispatched_count === 3",
+          "result.parallel_threads >= 3",
+          "result.active_tasks.includes('explore_core')"
+        ],
+        "expected_output_fields": ["dispatched_count", "parallel_threads", "active_tasks", "trace_id"]
+      }
+    },
+    {
+      "id": "swarm-04-hitl-checkpoint-approval-typical",
+      "name": "Enforce and Resume Human-in-the-Loop Checkpoint",
+      "type": "typical",
+      "description": "Enforce HITL approval gate for production database schema migration; resume upon token verification.",
+      "input": {
+        "tool": "swarm_enforce_hitl_gate",
+        "parameters": {
+          "action_description": "Apply destructive schema migration to SQLite WAL tables",
+          "risk_tier": "Tier4_Critical",
+          "confirm_token": "OPERATOR_HITL_AUTH_9901"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.approved == true",
+          "result.gate_passed == true",
+          "result.audit_logged == true"
+        ],
+        "expected_output_fields": ["approved", "gate_passed", "audit_logged", "token_verified_at"]
+      }
+    },
+    {
+      "id": "swarm-05-obsidian-swarm-report-export-typical",
+      "name": "Persist Swarm Execution Report to Obsidian",
+      "type": "typical",
+      "description": "Generate summary trace of multi-agent swarm run and save into Obsidian Vault knowledge folder.",
+      "input": {
+        "tool": "swarm_decompose_dag",
+        "parameters": {
+          "objective": "Build M5 E2E Testing Framework",
+          "export_vault_dossier": true
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.vault_note_path.includes('vault/Knowledge/Swarm')",
+          "result.dossier_saved == true"
+        ],
+        "expected_output_fields": ["workflow_id", "vault_note_path", "dossier_saved"]
+      }
+    },
+    {
+      "id": "swarm-06-kahn-topological-order-typical",
+      "name": "Verify Linear Ordering for Serial Dependency Chain",
+      "type": "typical",
+      "description": "Verify topological ordering for linear dependency graph (A -> B -> C -> D).",
+      "input": {
+        "tool": "swarm_decompose_dag",
+        "parameters": {
+          "custom_graph": {
+            "nodes": ["step_1", "step_2", "step_3"],
+            "edges": [
+              { "from": "step_1", "to": "step_2" },
+              { "from": "step_2", "to": "step_3" }
+            ]
+          }
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.is_acyclic == true",
+          "result.topological_order.join('->') === 'step_1->step_2->step_3'"
+        ],
+        "expected_output_fields": ["is_acyclic", "topological_order", "parallel_stages"]
+      }
+    },
+    {
+      "id": "swarm-07-consensus-split-dissent-edge",
+      "name": "Handle Split Vote Meeting Exact 66.7% Supermajority",
+      "type": "edge_case",
+      "description": "3 agents vote (2 Approve, 1 Reject with caveats); consensus is approved with dissent recorded.",
+      "input": {
+        "tool": "swarm_vote_consensus",
+        "parameters": {
+          "topic": "Allow optional VRAM fallback to CPU",
+          "ballots": [
+            { "agent": "implementer_1", "vote": "APPROVE" },
+            { "agent": "reviewer_1", "vote": "APPROVE" },
+            { "agent": "challenger_1", "vote": "REJECT", "rationale": "CPU latency exceeds 500ms" }
+          ],
+          "quorum_min": 3,
+          "supermajority_threshold": 0.66
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.supermajority_reached == true",
+          "result.approved_decision === 'APPROVE'",
+          "result.dissenting_opinions.length === 1",
+          "result.dissenting_opinions[0].agent === 'challenger_1'"
+        ],
+        "expected_output_fields": ["topic", "approved_decision", "approval_percentage", "dissenting_opinions"]
+      }
+    },
+    {
+      "id": "swarm-08-circular-dag-rejection",
+      "name": "Detect and Reject Circular Task Dependency",
+      "type": "adversarial_security",
+      "description": "Attempt to submit a task graph with a cyclic edge (Task A -> Task B -> Task A).",
+      "input": {
+        "tool": "swarm_decompose_dag",
+        "parameters": {
+          "custom_graph": {
+            "nodes": ["task_a", "task_b"],
+            "edges": [
+              { "from": "task_a", "to": "task_b" },
+              { "from": "task_b", "to": "task_a" }
+            ]
+          }
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "CYCLIC_DEPENDENCY_DETECTED",
+        "validation_rules": [
+          "result.error.includes('Kahn topological sort failed: cycle detected in task graph')",
+          "result.is_acyclic == false"
+        ]
+      }
+    },
+    {
+      "id": "swarm-09-dlq-isolation-resilience",
+      "name": "Isolate Persistent Task Failure to DLQ After 3 Retries",
+      "type": "error_recovery",
+      "description": "Subagent task fails 3 consecutive attempts; isolate to Dead Letter Queue without halting parallel branches.",
+      "input": {
+        "tool": "swarm_isolate_dlq",
+        "parameters": {
+          "task_id": "task_flaky_scrape_44",
+          "failed_attempts": 3,
+          "last_error": "ConnectionResetByPeer"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.task_state === 'DLQ_ISOLATED'",
+          "result.workflow_halted == false",
+          "result.incident_report_generated == true"
+        ],
+        "expected_output_fields": ["task_id", "task_state", "workflow_halted", "incident_id"]
+      }
+    },
+    {
+      "id": "swarm-10-hitl-rejection-abort-workflow",
+      "name": "Abort Workflow and Rollback on HITL Rejection",
+      "type": "error_recovery",
+      "description": "Operator explicitly rejects destructive action at HITL checkpoint; workflow gracefully rolls back.",
+      "input": {
+        "tool": "swarm_enforce_hitl_gate",
+        "parameters": {
+          "action_description": "Purge all historical audit logs",
+          "risk_tier": "Tier4_Critical",
+          "confirm_token": "OPERATOR_REJECT_ACTION"
+        }
+      },
+      "execution_policy": "TwoPhaseConfirmation",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "HITL_OPERATOR_REJECTED",
+        "validation_rules": [
+          "result.error.includes('Action rejected by operator')",
+          "result.workflow_state === 'ABORTED'",
+          "result.changes_committed == false"
+        ]
+      }
+    },
+    {
+      "id": "swarm-11-subagent-privilege-escalation-blocked",
+      "name": "Block Subagent Privilege Escalation Attempt",
+      "type": "adversarial_security",
+      "description": "Sandboxed Reviewer agent attempts to invoke ProposeOnly Kernel Execution tool.",
+      "input": {
+        "tool": "swarm_dispatch_task",
+        "parameters": {
+          "subagent_id": "reviewer_2",
+          "attempted_tool": "os_execute_raw_kernel_command",
+          "subagent_role": "reviewer"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "PRIVILEGE_ESCALATION_BLOCKED",
+        "validation_rules": [
+          "result.error.includes('Tool not permitted for agent role reviewer')",
+          "result.tool_invoked == false"
+        ]
+      }
+    },
+    {
+      "id": "swarm-12-max-task-limit-exceeded-guard",
+      "name": "Reject Task Graph Exceeding Maximum Capacity",
+      "type": "edge_case",
+      "description": "Attempt to decompose DAG with 35 tasks exceeding system limit of 30 tasks.",
+      "input": {
+        "tool": "swarm_decompose_dag",
+        "parameters": {
+          "custom_graph": {
+            "nodes": [
+              "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10",
+              "t11", "t12", "t13", "t14", "t15", "t16", "t17", "t18", "t19", "t20",
+              "t21", "t22", "t23", "t24", "t25", "t26", "t27", "t28", "t29", "t30",
+              "t31", "t32", "t33", "t34", "t35"
+            ],
+            "edges": []
+          }
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "GRAPH_TASK_LIMIT_EXCEEDED",
+        "validation_rules": [
+          "result.error.includes('Task count exceeds maximum allowed threshold of 30')",
+          "result.is_acyclic == false"
+        ]
+      }
+    }
+  ]
+}

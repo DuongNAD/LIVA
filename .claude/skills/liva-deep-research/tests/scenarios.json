@@ -1,0 +1,292 @@
+{
+  "skill": "liva-deep-research",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "id": "deepres-01-multisearch-typical",
+      "name": "Multi-Engine Technical Search and Claim Extraction",
+      "type": "typical",
+      "description": "Execute deep research query on Rust WebRTC echo cancellation implementations across SearXNG, GitHub, and ArXiv.",
+      "input": {
+        "tool": "research_multi_search",
+        "parameters": {
+          "query": "Rust WebRTC AEC3 echo cancellation implementations",
+          "providers": ["searxng", "brave", "github", "arxiv"],
+          "max_results_per_source": 5
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.total_sources >= 5",
+          "result.sources.some(s => s.provider === 'github')",
+          "result.sources.every(s => s.url && s.title && s.snippet)"
+        ],
+        "expected_output_fields": ["query", "total_sources", "sources", "cached_at"]
+      }
+    },
+    {
+      "id": "deepres-02-page-fetch-clean-typical",
+      "name": "Fetch Webpage and Clean HTML to Structured Markdown",
+      "type": "typical",
+      "description": "Fetch a technical documentation page, stripping ads and converting code blocks cleanly.",
+      "input": {
+        "tool": "research_fetch_page_content",
+        "parameters": {
+          "url": "https://github.com/webrtc-rs/webrtc",
+          "timeout_sec": 10,
+          "max_bytes": 1048576
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.content_type === 'text/markdown'",
+          "result.markdown_body.length > 500",
+          "!result.markdown_body.includes('<script>')",
+          "!result.markdown_body.includes('<nav>')"
+        ],
+        "expected_output_fields": ["url", "title", "markdown_body", "extracted_links", "fetch_latency_ms"]
+      }
+    },
+    {
+      "id": "deepres-03-claim-extraction-typical",
+      "name": "Extract Structured Factual Assertions and Cross-References",
+      "type": "typical",
+      "description": "Extract structured technical assertions and benchmark numbers from ingested markdown text.",
+      "input": {
+        "tool": "research_extract_structured_claims",
+        "parameters": {
+          "documents": [
+            { "url": "https://webrtc.org/aec3", "text": "AEC3 achieves 45dB echo suppression with 12ms filter latency." }
+          ],
+          "focus_topic": "Echo Suppression Metrics"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.claims.length > 0",
+          "result.claims[0].topic.includes('Echo')",
+          "result.confidence_score >= 0.8"
+        ],
+        "expected_output_fields": ["claims", "contradictions", "confidence_score", "dossier_markdown"]
+      }
+    },
+    {
+      "id": "deepres-04-compile-dossier-typical",
+      "name": "Assemble Research Dossier with Executive Summary",
+      "type": "typical",
+      "description": "Synthesize multiple claims into a cohesive Markdown dossier with citation footnotes and comparison table.",
+      "input": {
+        "tool": "research_compile_dossier",
+        "parameters": {
+          "topic": "Rust High-Performance Audio Engines",
+          "claims": [
+            { "source": "https://github.com/webrtc-rs", "assertion": "Zero-copy buffer pipeline supported", "verified": true }
+          ],
+          "target_audience": "Technical Architect"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.markdown_report.includes('# Executive Summary')",
+          "result.citation_count >= 1",
+          "result.status === 'COMPILED'"
+        ],
+        "expected_output_fields": ["topic", "markdown_report", "citation_count", "status", "word_count"]
+      }
+    },
+    {
+      "id": "deepres-05-multi-engine-dedup-typical",
+      "name": "Deduplicate Multi-Engine Search Results",
+      "type": "typical",
+      "description": "Execute parallel queries across Brave and DuckDuckGo and deduplicate matching canonical URLs.",
+      "input": {
+        "tool": "research_multi_search",
+        "parameters": {
+          "query": "Rust Tokio async worker pool best practices",
+          "providers": ["brave", "duckduckgo"],
+          "deduplicate": true
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.sources.every((s, i, arr) => arr.findIndex(x => x.url === s.url) === i)",
+          "result.duplicates_removed >= 0"
+        ],
+        "expected_output_fields": ["query", "total_sources", "sources", "duplicates_removed"]
+      }
+    },
+    {
+      "id": "deepres-06-citation-graph-resolution-typical",
+      "name": "Resolve and Verify Domain Trust Scores",
+      "type": "typical",
+      "description": "Verify domains against reputation ledger and calculate composite source credibility index.",
+      "input": {
+        "tool": "research_extract_structured_claims",
+        "parameters": {
+          "documents": [
+            { "url": "https://crates.io/crates/cpal", "text": "CPAL is a low-level cross-platform audio library." },
+            { "url": "https://docs.rs/webrtc/latest", "text": "Pure Rust implementation of WebRTC stack." }
+          ],
+          "focus_topic": "Audio Architecture"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.claims.length >= 2",
+          "result.confidence_score > 0.85"
+        ],
+        "expected_output_fields": ["claims", "contradictions", "confidence_score", "dossier_markdown"]
+      }
+    },
+    {
+      "id": "deepres-07-contradiction-detection-edge",
+      "name": "Detect and Flag Contradictory Information Across Sources",
+      "type": "edge_case",
+      "description": "Synthesize claims from two articles with contradictory benchmark claims (e.g. 5ms vs 50ms latency).",
+      "input": {
+        "tool": "research_extract_structured_claims",
+        "parameters": {
+          "documents": [
+            { "url": "https://source1.org/bench", "text": "Engine latency measured at 5ms under load." },
+            { "url": "https://source2.org/bench", "text": "Engine latency measured at 50ms under load." }
+          ],
+          "focus_topic": "Engine Latency"
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.contradictions.length > 0",
+          "result.contradictions[0].topic === 'Engine Latency'",
+          "result.dossier_markdown.includes('[Contradiction Detected]')"
+        ],
+        "expected_output_fields": ["claims", "contradictions", "confidence_score", "dossier_markdown"]
+      }
+    },
+    {
+      "id": "deepres-08-rate-limit-failover-resilience",
+      "name": "Provider Rate-Limit Failover to Secondary Engine",
+      "type": "error_recovery",
+      "description": "Primary search provider returns HTTP 429; failover to secondary engine without crashing pipeline.",
+      "input": {
+        "tool": "research_multi_search",
+        "parameters": {
+          "query": "LIVA Native Engine Architecture",
+          "providers": ["mock_rate_limited_searxng", "brave"],
+          "max_results_per_source": 3
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "success",
+        "validation_rules": [
+          "result.fallback_triggered == true",
+          "result.active_provider === 'brave'",
+          "result.sources.length > 0"
+        ],
+        "expected_output_fields": ["sources", "fallback_triggered", "warnings"]
+      }
+    },
+    {
+      "id": "deepres-09-oversized-payload-blocked",
+      "name": "Block Oversized Binary File Fetch",
+      "type": "adversarial_security",
+      "description": "Attempt to crawl a 100MB ISO/binary file through page fetch tool.",
+      "input": {
+        "tool": "research_fetch_page_content",
+        "parameters": {
+          "url": "https://example.org/large_dataset.iso",
+          "max_bytes": 1048576
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "PAYLOAD_TOO_LARGE",
+        "validation_rules": [
+          "result.error.includes('Content size exceeds maximum allowed threshold')",
+          "result.bytes_downloaded <= 1048576"
+        ]
+      }
+    },
+    {
+      "id": "deepres-10-malformed-url-handling",
+      "name": "Reject Non-HTTP/HTTPS URLs in Page Fetch",
+      "type": "adversarial_security",
+      "description": "Attempt to fetch local filesystem URI or javascript scheme via page fetcher.",
+      "input": {
+        "tool": "research_fetch_page_content",
+        "parameters": {
+          "url": "file:///C:/Windows/System32/config/SAM",
+          "timeout_sec": 5
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "DISALLOWED_URL_SCHEME",
+        "validation_rules": [
+          "result.error.includes('Only http:// and https:// URL schemes are allowed')",
+          "result.fetched == false"
+        ]
+      }
+    },
+    {
+      "id": "deepres-11-infinite-redirect-loop-break",
+      "name": "Detect and Break Cyclic HTTP Redirects",
+      "type": "error_recovery",
+      "description": "Halt crawl loop when server emits recursive 301/302 redirects.",
+      "input": {
+        "tool": "research_fetch_page_content",
+        "parameters": {
+          "url": "https://example.org/cyclic-redirect-1",
+          "max_redirects": 3
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "TOO_MANY_REDIRECTS",
+        "validation_rules": [
+          "result.error.includes('Maximum redirect depth exceeded')",
+          "result.redirect_count >= 3"
+        ]
+      }
+    },
+    {
+      "id": "deepres-12-empty-query-graceful-handling",
+      "name": "Handle Blank Search Query Gracefully",
+      "type": "edge_case",
+      "description": "Submit empty string query to search multi-search tool; return clean empty list without exception.",
+      "input": {
+        "tool": "research_multi_search",
+        "parameters": {
+          "query": "   ",
+          "providers": ["brave"]
+        }
+      },
+      "execution_policy": "AutoExec",
+      "expected_behavior": {
+        "status": "error",
+        "error_code": "EMPTY_QUERY_STRING",
+        "validation_rules": [
+          "result.error.includes('Search query cannot be empty')",
+          "result.sources.length === 0"
+        ]
+      }
+    }
+  ]
+}

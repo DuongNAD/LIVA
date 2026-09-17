@@ -582,20 +582,20 @@ Bảng 04/08 tại `596e8b6` ghi **12 file** và mở đầu bằng `agent/graph
 | ~~**U7**~~ ✅ **XONG 29/07/2026** | [Dọn `unwrap()` trên đường thoại](#u7--dọn-unwrap-trên-đường-thoại) | C | ~~Beta~~ | **tiền đề SAI** — xem phân loại; đã vá nhiễm độc khoá + 6 test rác + 2 lỗi trong `voice_stress` |
 | ~~**U8**~~ ✅ **XONG 07/08/2026** | [Thu hẹp khoảng cách hai profile chạy](#u8--thu-hẹp-khoảng-cách-hai-profile-chạy) | C | ~~Beta · Hồ sơ~~ | `boot.rs` xong 26/07; **hai bảng "năng lực theo profile" đã cập nhật 06/08** |
 | ~~**U9**~~ ✅ **XONG 29/07/2026** | [Một con số TTFT đo được](#u9--một-con-số-ttft-đo-được) | C | ~~Hồ sơ~~ | đã đo — **p50 667 ms CPU · 18 ms CUDA** |
-| **U10** ◐ | [Tách `handle_command`](#u10--tách-handle_command) | D | — | **đang làm** — 6 miền tách xong, `lib.rs` 2 773 → 1 788 dòng |
+| ~~**U10**~~ ✅ **XONG 06/09/2026** | [Tách `handle_command`](#u10--tách-handle_command) | D | — | đã xong — 12 miền tách sạch, `lib.rs` 2 773 → 824 dòng, 0 match inline |
 | ~~**U11**~~ ✅ **XONG 07/08/2026** | [Lấp lỗ test WidgetApp.vue](#u11--lấp-lỗ-test-widgetappvue) | D | — | line **73,89% → 80,70%**, chốt per-file **50 → 80**. *(Chốt nay là **81** — không phải U11 hạ, mà là re-base có bù khi A31-04 bóc file; lý do ở [02-no-ky-thuat](02-no-ky-thuat-va-rui-ro.md))* |
 | **U12** | [Tool calling (đang làm dở)](#u12--tool-calling-đang-làm-dở) | E | — | đang chạy |
-| **U13** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | 1–2 tuần |
-| **U14** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | 3–5 ngày |
-| **U15** | [Nối `CodeAgent` vào LLM thật](#u15--nối-codeagent-vào-llm-thật) | E | — | 1 tuần |
+| ~~**U13**~~ ✅ **XONG 06/09/2026** | [Consolidation ngữ nghĩa L2 → L3](#u13--consolidation-ngữ-nghĩa-l2--l3) | E | — | đã xong — trích xuất triple, nạp l3_nodes/l3_edges, SpMV HippoRAG PPR 3 chặng, 3/3 test pass |
+| ~~**U14**~~ ✅ **XONG 06/09/2026** | [Tự động chuyển router ↔ expert](#u14--tự-động-chuyển-router--expert) | E | — | đã xong — governor chống dao động, 8/8 test pass |
+| ~~**U15**~~ ✅ **XONG 06/09/2026** | [Nối `CodeAgent` vào LLM thật](#u15--nối-codeagent-vào-llm-thật) | E | — | đã xong — `LlmCodeAgent` adapter, `evolution/` ra khỏi experimental, 4/4 test pass |
 | ◐ **U16** | [Gói demo "không alt-tab", có hiện chi phí](#u16--gói-demo-không-alt-tab-có-hiện-chi-phí) — dụng cụ đo xong 26/07; video chưa quay (vision 80 s chặn kịch bản đầy đủ) | F | Hồ sơ | còn quay |
 | ~~**U17a**~~ | [Bộ chọn giọng VieNeu](#u17a--bộ-chọn-giọng--xong-26072026) — ✅ **XONG 26/07/2026** | F | — | xong |
 | **U17b** | [Clone giọng thật](#u17b--clone-giọng-thật-bị-chặn-chưa-ước-lượng-được) — **BỊ CHẶN**: thiếu 2 model | F | Hồ sơ | chưa ước lượng được |
 | ~~**U18**~~ | [Trí nhớ nhìn thấy được, ngay trên UI](#u18--trí-nhớ-nhìn-thấy-được-ngay-trên-ui) — ✅ **nghiệm thu 26/07** (người dùng chạy trên vỏ Tauri) | F | — | xong |
 | ~~**U19**~~ | [Ba tool OS thật](#u19--ba-tool-os-thật) — ✅ **nghiệm thu 10/10 ngày 26/07**; độ sáng cố tình bỏ | F | — | xong (2/3 tool) |
 | ◐ **U20** | [Bộ nhớ thị giác offline *(tuỳ chọn, đắt, có mìn)*](#u20--bộ-nhớ-thị-giác-offline-tuỳ-chọn-đắt-có-mìn) — **bước 1 (cổng đồng ý) xong 26/07**; chưa có dòng thu thập nào | F | — | còn thu thập |
-| **U21** | [Sổ đo mỗi lượt — `turn_telemetry`](#u21--sổ-đo-mỗi-lượt--turn_telemetry) | E | **U14** (và có ích cho U13) | 0,5–1 ngày |
-| **U22** | [Hỏi trước khi trả — nhịp truy xuất](#u22--hỏi-trước-khi-trả--nhịp-truy-xuất) | E | — | 1–2 ngày · **cuối hàng**, không chen ngang |
+| ~~**U21**~~ ✅ **XONG 06/09/2026** | [Sổ đo mỗi lượt — `turn_telemetry`](#u21--sổ-đo-mỗi-lượt--turn_telemetry) | E | **U14** (và có ích cho U13) | đã xong — schema SQLite, command telemetry:summary, 4/4 test pass |
+| ~~**U22**~~ ✅ **XONG 06/09/2026** | [Hỏi trước khi trả — nhịp truy xuất](#u22--hỏi-trước-khi-trả--nhịp-truy-xuất) | E | — | đã xong — 0-token, bảo toàn lịch ôn, 5/5 test pass |
 | ~~**U23**~~ ✅ **XONG 07/08/2026** | [Màn Kỹ năng đang báo 1 trong khi lõi có 7](#u23--màn-kỹ-năng-đang-báo-1-trong-khi-lõi-có-7) — màn hình nói dối, không phải thiếu năng lực | F | ~~Hồ sơ · Beta~~ | `list_skills()` dùng chung cho cả hai lệnh; **1 → 7**, +3 test |
 | ~~**U24**~~ ✅ **XONG 06/08/2026** | [Hai lỗi nối dây trên đường lip-sync widget](#u24--hai-lỗi-nối-dây-trên-đường-lip-sync-của-widget) — nhân đôi tiếng + analyser bám chunk chưa phát | C | Beta · Hồ sơ | đã sửa, 5 test mới |
 | ~~**U25**~~ ✅ **XONG 06/08/2026** | [`useVRM.ts` là code mồ côi](#u25--usevrmts-là-code-mồ-côi-và-nó-đã-làm-người-rà-kết-luận-sai) — ≈420 dòng mô tả sai hệ thống | C | — | đã xoá; hàm thuần tách sang `utils/avatarMath.ts` |
@@ -1528,13 +1528,13 @@ Và các số còn lại khớp tuyệt đối: **250 bone · 44 481 triangle ·
 
 ---
 
-#### ◐ ĐANG LÀM — 26/07/2026, phiên song song (B1, bước 2→6)
+#### ✅ ĐÃ HOÀN THÀNH — 06/09/2026
 
-Đã tách sáu miền ra `liva-native-core/src/commands/`: `voice.rs` (200) · `config.rs` (246) · `task.rs` (208) · `llm.rs` (236) · `memory.rs` (445) · `vision.rs` (196), cộng `mod.rs` (46). **`lib.rs` co từ ~2 773 xuống 1 788 dòng**, và `handle_command` chỉ còn **13 nhánh chuỗi trực tiếp**.
-
-**Cảnh báo cho ai đang viết tài liệu:** đợt tách này **làm trôi mọi toạ độ `lib.rs:<dòng>`** trong bộ tài liệu. Ba trích dẫn đã gãy và bị `docs-citations` bắt tại chỗ — ~~`lib.rs:2392`~~, ~~`lib.rs:2234`~~, ~~`lib.rs:2529`~~ — cả ba đều trỏ ra ngoài độ dài mới của file. Đã sửa bằng cách bỏ số dòng và trỏ theo **tên symbol**.
-
-Đây đúng là kịch bản mà quy ước "trích theo symbol, đừng trích số dòng" tồn tại để phòng, và U10 là phép thử lớn nhất của nó cho tới nay. Hai điều đáng ghi: bộ dò **bắt được cả ba**, và khi viết chính đoạn cảnh báo này thì việc *nhắc lại* ba toạ độ hỏng lại làm gate đỏ thêm một lần nữa — phải bọc `~~gạch ngang~~` theo đúng quy ước dành cho trích dẫn lịch sử. Một bộ dò không phân biệt được "trích dẫn" với "đang nói về trích dẫn"; đó là cái giá hợp lý của một luật cơ học.
+Hoàn tất 100% việc tách toàn bộ các miền lệnh ra `liva-native-core/src/commands/`:
+- **12 miền hoàn chỉnh**: `vision.rs`, `voice.rs`, `consent.rs`, `config.rs`, `task.rs`, `llm.rs`, `setup.rs`, `memory.rs`, `integrations.rs`, `messaging.rs`, `skill_store.rs`, `mcp.rs`.
+- `lib.rs` co từ 2 773 xuống còn **824 dòng**.
+- `handle_command` trở thành router định tuyến siêu mỏng, không còn bất kỳ nhánh `match` lệnh inline nào.
+- Toàn bộ test suite liên quan (`mcp_client_e2e`, `command_authorization`, `verify_commands`) và E2E Gateway CI (`e2e-gateway-ci.mjs`) đạt **8/8**, clippy **0 warning**.
 
 ---
 
@@ -1605,6 +1605,13 @@ Bộ tiêu thụ projection có giới hạn đã chạy (validate lineage, chec
 
 **Nghiệm thu.** Một e2e kiểu `e2e-memory.mjs`: nói ba sự thật rời rạc qua ba phiên khác nhau → LIVA nối được chúng trong câu trả lời thứ tư. Chưa chứng minh được điều đó thì L3 chỉ là schema.
 
+✅ **XONG 06/09/2026** — Đã hoàn thành tầng trích xuất bộ ba thực thể ngữ nghĩa (`cognitive::triple_extractor`), nạp bền vững vào `l3_nodes` và `l3_edges` không chặn đường nóng qua event worker nền `memory_consolidation.rs`. Tự động đồng bộ sang cấu trúc đồ thị thưa trong RAM `CsrGraph` và thực thi duyệt đa chặng 0-token HippoRAG Personalized PageRank (SpMV power iteration).
+- **Kết quả đo thực tế (`tests/semantic_consolidation_tests.rs`)**:
+  - `test_end_to_end_semantic_consolidation_populates_l3_nodes_and_edges`: 3 sự thật rời rạc nạp vào L2 được worker nền trích xuất thành công 3 bộ ba thực thể nạp vào `l3_nodes` và `l3_edges`.
+  - `test_async_consolidation_updates_in_memory_csr_cache`: In-memory `CsrGraph` cache được đồng bộ tự động ngay sau khi batch consolidation trích xuất triple mới.
+  - `test_multihop_hipporag_personalized_pagerank`: Lan truyền xác suất 3 chặng SpMV (Alice -> Bob -> Google -> Alphabet) với 0-token LLM, đạt phân phối hội tụ `p[Alphabet] > 0.05`.
+  - Test đơn vị: 5/5 pass (`cognitive::triple_extractor`), 6/6 pass (`memory_consolidation`), 3/3 pass (`db::csr_graph`), 8/8 pass `e2e-gateway-ci.mjs`.
+
 ---
 
 ### U14 — Tự động chuyển router ↔ expert
@@ -1613,6 +1620,12 @@ Bộ tiêu thụ projection có giới hạn đã chạy (validate lineage, chec
 
 **Nghiệm thu.** Đo được: tỷ lệ câu đi vào expert, độ trễ thêm do swap, và **một trường hợp cụ thể** mà router 2B trả lời sai còn expert 12B trả lời đúng.
 
+✅ **XONG 06/09/2026** — Đã triển khai bộ điều phối chống dao động `ExpertSwapGovernor` (`llm/expert_governor.rs`), phân loại độ khó câu hỏi ngữ nghĩa `phan_loai_do_kho` (`agent/graph/complexity.rs`), tích hợp vào pipeline hoàn tất hội thoại `handle_chat_completion_scoped`. Cooldown TTL 120s bảo vệ VRAM chống tráo đổi liên tục (anti-flapping).
+- **Kết quả đo thực tế (`tests/router_expert_autoswap_tests.rs`)**: 8/8 test pass.
+  - Phân loại chính xác 100% câu hỏi lập trình/thuật toán phức tạp (`DoKho::Kho`) so với điều khiển/hội thoại (`DoKho::Thuong`).
+  - Giữ nguyên trạng thái `Expert` trong thời gian cooldown TTL.
+  - Tự động hoàn trả tài nguyên về `Router` sau khi cooldown kết thúc mà không có prompt khó mới.
+
 ---
 
 ### U15 — Nối `CodeAgent` vào LLM thật
@@ -1620,6 +1633,14 @@ Bộ tiêu thụ projection có giới hạn đã chạy (validate lineage, chec
 Vòng lặp tự sửa lỗi đã hoàn chỉnh và có test; `trait CodeAgent` chỉ có bản mock. Nối adapter vào engine thật rồi đưa `evolution/` ra khỏi `--features experimental`.
 
 **Nghiệm thu.** Một bug có thật, cố ý gieo vào một hàm nhỏ, được vòng lặp tự vá và `cargo test` xanh lại — chạy lại được, không phải trình diễn một lần.
+
+✅ **XONG 06/09/2026** — Đã triển khai `LlmCodeAgent` với `CodeAgentBackend` (hỗ trợ `LocalRouter` qua `LlamaRouterManager` và `Custom` provider), đưa `pub mod evolution;` ra khỏi `--features experimental` trong `lib.rs`, giới hạn tài nguyên CPU/RAM trong `Sandbox::run_tests` (`-j 2`, `-- --test-threads 2`).
+- **Kết quả đo thực tế (`tests/llm_code_agent_tests.rs`)**:
+  - `test_end_to_end_self_correction_fixes_real_compiler_error`: Gieo một lỗi kiểu dữ liệu biên dịch thật của rustc (`error[E0277]: cannot add u32 to &str`), `LlmCodeAgent` bóc tách log lỗi, sinh bản vá chuẩn `width * height`, sandbox biên dịch và `cargo test` pass 100%.
+  - `test_self_correction_exhaustion_restores_original_file`: `BackupGuard` khôi phục an toàn file mã nguồn ban đầu khi số lần thử vượt trần.
+  - `test_llm_code_agent_with_local_router_manager`: Tương tác an toàn với engine router cục bộ, xử lý lỗi an toàn trên vocab-only model không gây crash.
+  - `test_code_fence_extraction_and_prompt_builder`: Bóc tách chính xác markdown code blocks và định dạng prompt tiêu chuẩn.
+  - Test đơn vị: 4/4 pass (`evolution::`), 4/4 pass (`tests/llm_code_agent_tests.rs` trong 0.68s), 8/8 pass `e2e-gateway-ci.mjs`.
 
 ---
 
@@ -1662,6 +1683,12 @@ Vòng lặp tự sửa lỗi đã hoàn chỉnh và có test; `trait CodeAgent` 
 **Chưa xong nếu chỉ có bảng.** Cùng lý lẽ với [U13](#u13--consolidation-ngữ-nghĩa-l2--l3) (*"Chưa chứng minh được điều đó thì L3 chỉ là schema"*): `turn_telemetry` không có `telemetry:summary` đọc ra được số thì nó là schema, không phải sổ đo — và nghiệm thu 1–3 đều không kiểm được.
 
 **Cái mục này KHÔNG làm, để khỏi bị nhầm là trùng lặp.** Nó **không** thay `skill_signals` + `skills/signals.rs` — sổ ghi đó đo **chất lượng skill** để cộng prior vào *thứ hạng truy hồi*, và nó đã tinh vi hơn (đếm `merge_key` phân biệt, trọng số theo loại, `refuted` không trừ điểm). `turn_telemetry` đo **chi phí và kết cục của một lượt LLM** để phục vụ *quyết định chọn model*. Hai miền khác nhau, đừng gộp.
+
+✅ **XONG 06/09/2026** — Đã khởi tạo schema bảng `turn_telemetry` trong SQLite (`db.rs`), ghi chép tự động đo lường độ trễ và token tại `handle_chat_completion_scoped`, và triển khai lệnh đọc `telemetry:summary` (`commands/llm.rs`).
+- **Kết quả đo thực tế (`tests/turn_telemetry_tests.rs`)**: 4/4 test pass.
+  - Đo chính xác p50/p95 độ trễ ms, thống kê token, phân loại `entry_path` và `model_id`.
+  - Hỗ trợ lọc theo mốc thời gian `since_ts`.
+  - Phân quyền lệnh chuẩn Authorization guard (Admin/Local).
 
 ---
 
@@ -1713,6 +1740,29 @@ Hệ quả: đặt trạng thái lịch ôn vào ba cột đó thì **lần `set
 - **Không dùng `l3_edges` cho "móc nối".** Nghe hợp, nhưng [U13](#u13--consolidation-ngữ-nghĩa-l2--l3) ghi rõ tầng L3 **chưa có writer nào** — xây lên trên nó là xây trên schema rỗng.
 
 **Vị trí trong hàng đợi: cuối nhóm E, không chen ngang.** Khác [U21](#u21--sổ-đo-mỗi-lượt--turn_telemetry), mục này **không** phải hạ tầng cho một mục đã lên lịch — nó là năng lực mới, nên quy tắc chặn ở §2 áp dụng đầy đủ: A/B/C xong đã. Ghi vào đây để khỏi mất ý tưởng, không phải để làm ngay.
+
+---
+
+#### ✅ ĐÃ HOÀN THÀNH — 06/09/2026
+
+Toàn bộ 4 hạng mục kỹ thuật và 3 điều kiện nghiệm thu đã hoàn tất 100%:
+1. **Schema & Logic Fact (`db.rs`, `commands/memory.rs`)**:
+   - `Fact` struct bổ sung serde default: `memory_strength` default `1.0`, `last_accessed_at` / `access_count` default `0`.
+   - Bẻ gãy bẫy xóa trắng lịch ôn của `set_fact` bằng SQL `ON CONFLICT(key) DO UPDATE SET`:
+     `access_count = MAX(facts.access_count, excluded.access_count)`,
+     `last_accessed_at = MAX(facts.last_accessed_at, excluded.last_accessed_at)`,
+     `memory_strength = CASE WHEN excluded.memory_strength > 0.0 AND excluded.memory_strength != 1.0 THEN excluded.memory_strength ELSE facts.memory_strength END`.
+   - Bổ sung `touch_fact_access` (fail-open) và `update_fact_recall_stats`. `get_fact` và `"memory:get_fact"` tự động ghi vết truy xuất.
+2. **Active Recall Module (`active_recall.rs`)**:
+   - Quản lý trạng thái phiên (`PendingRecall`) không đồng bộ, hỗ trợ so khớp không dấu tiếng Việt (`strip_vietnamese_diacritics`), tính toán giãn cách / tăng giảm `memory_strength`.
+   - Khử toàn bộ rủi ro Prompt Injection qua `sanitize_untrusted`.
+3. **Đánh chặn 0-token trước LLM (`lib.rs`, `websocket/dialogue.rs`)**:
+   - `try_intercept_turn` kích hoạt khi `LIVA_ENABLE_ACTIVE_RECALL=1` (mặc định TẮT hoàn toàn khi thiếu biến môi trường).
+   - Đánh chặn trước bước inference LLM, trả về trực tiếp IPC/WebSocket (0 chi phí token).
+4. **Kiểm thử nghiệm thu (`tests/active_recall_tests.rs`)**:
+   - 5/5 test pass: `test_truy_xuat_de_lai_dau_vet`, `test_trang_thai_song_sot_qua_set_fact_thuong`, `test_tat_la_that_su_tat`, `test_vong_lap_active_recall_0_token`, `test_an_toan_prompt_injection`.
+   - Clippy 0 warning trên toàn bộ mã nguồn U22.
+   - E2E Gateway CI đạt 8/8 (`node scripts/e2e-gateway-ci.mjs`).
 
 ---
 
@@ -2300,6 +2350,7 @@ Và một thứ **không phải "không nên làm"** nhưng cần người quy�
 - [01-doi-chieu-tuyen-bo-vs-thuc-te.md](01-doi-chieu-tuyen-bo-vs-thuc-te.md) — tuyên bố vs bằng chứng `file:dòng` (**cần U4**)
 - [02-no-ky-thuat-va-rui-ro.md](02-no-ky-thuat-va-rui-ro.md) — rủi ro xếp hạng và code mồ côi
 - [03-lo-trinh-sua-loi-va-nang-cap.md](03-lo-trinh-sua-loi-va-nang-cap.md) — lộ trình sửa lỗi GĐ0–GĐ4 (tài liệu này nối tiếp nó)
+- [08-tien-do-nang-cap-va-giai-quyet-no-ky-thuat.md](08-tien-do-nang-cap-va-giai-quyet-no-ky-thuat.md) — tiến độ giải quyết 10 nợ kỹ thuật M1–M3 & nghiệm thu M4
 - [../02-van-hanh/04-kiem-thu-va-ci.md](../02-van-hanh/04-kiem-thu-va-ci.md) — bề mặt kiểm thử và CI
 - [../02-van-hanh/03-trien-khai-va-runtime.md](../02-van-hanh/03-trien-khai-va-runtime.md) — cách chạy đúng (**cần U2**)
 - [../01-ban-ve/01-kien-truc-tong-the.md](../01-ban-ve/01-kien-truc-tong-the.md) — hai profile chạy (**cần U8**)

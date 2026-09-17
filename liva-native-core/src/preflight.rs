@@ -147,7 +147,7 @@ fn muc_vision(la_debug: bool, co_cuda: bool, co_gpu: bool, n_gpu_layers: u32) ->
                  `Model chat` bên dưới, không phải vấn đề GPU. Phép tự chọn cần \
                  kích thước model + projector để biết nhét được bao nhiêu lớp; \
                  không có file thì nó trả 0. Tải model xong dòng này tự xanh; \
-                 đừng đi chỉnh VRAM."
+                 đừng đi chỉnh VRAM (hoặc ép qua LIVA_LLM_N_GPU_LAYERS)."
             } else {
                 "Vẫn ~80 s mỗi lượt: `use_gpu` của bộ nạp ảnh bằng \
                  `n_gpu_layers > 0` ⇒ GPU đứng không. Dòng này KHÔNG còn nghĩa là \

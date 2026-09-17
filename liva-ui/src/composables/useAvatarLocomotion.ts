@@ -156,8 +156,8 @@ export function useAvatarLocomotion(options: LocomotionOptions = {}): AvatarLoco
 
   function pickWanderTarget() {
     const nextX = bounds.minX + random() * (bounds.maxX - bounds.minX);
-    // Phần lớn thời gian đứng dưới đất; thỉnh thoảng mới lên cao
-    const nextY = random() < 0.75 ? bounds.maxY : bounds.minY + random() * (bounds.maxY - bounds.minY);
+    // Luôn giữ nhân vật bám sát mặt phẳng sàn khi đi lại tự do
+    const nextY = bounds.maxY;
     moveTo(nextX, nextY, { run: random() < 0.25 });
   }
 

@@ -562,5 +562,38 @@ describe('useGateway — Tauri Streaming Lifecycle & Cleanup', () => {
       vi.resetModules();
     }
   });
+
+  it('handles ai_expert_suggestion event via WebSocket and invokes registered callback', () => {
+    const gw = useGateway();
+    gw.init();
+    const socket = gw.getRawWs() as MockWebSocket;
+
+    const expertCb = vi.fn();
+    gw.onExpertSuggestion(expertCb);
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        event: 'ai_expert_suggestion',
+        payload: {
+          goi_y_expert: true,
+          do_kho: 'kho',
+          user_text: 'Viết quicksort và phân tích độ phức tạp',
+        },
+      }),
+    } as MessageEvent);
+
+    expect(expertCb).toHaveBeenCalledWith({
+      goi_y_expert: true,
+      do_kho: 'kho',
+      user_text: 'Viết quicksort và phân tích độ phức tạp',
+    });
+    expect(gw.expertSuggestion.value?.goi_y_expert).toBe(true);
+
+    gw.clearExpertSuggestion();
+    expect(gw.expertSuggestion.value).toBeNull();
+
+    gw.offExpertSuggestion();
+    gw.destroy();
+  });
 });
 

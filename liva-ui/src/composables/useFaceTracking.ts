@@ -60,7 +60,7 @@ export interface UseFaceTrackingReturn {
 //  Default (no face detected)
 // ═══════════════════════════════════════════════════════
 
-function defaultFaceData(): FaceTrackingData {
+export function defaultFaceData(): FaceTrackingData {
   return {
     isDetected: false,
     head: { yaw: 0, pitch: 0, roll: 0 },
@@ -84,7 +84,7 @@ function defaultFaceData(): FaceTrackingData {
  * Simple geometric estimation — NOT a full PnP solve but
  * sufficiently accurate for avatar driving at ~30fps.
  */
-function estimateHeadPose(landmarks: { x: number; y: number; z: number }[]): HeadPose {
+export function estimateHeadPose(landmarks: { x: number; y: number; z: number }[]): HeadPose {
   if (landmarks.length < 468) {
     return { yaw: 0, pitch: 0, roll: 0 };
   }
@@ -115,7 +115,7 @@ function estimateHeadPose(landmarks: { x: number; y: number; z: number }[]): Hea
   };
 }
 
-function clamp(val: number, min: number, max: number): number {
+export function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
 }
 
@@ -127,7 +127,7 @@ function clamp(val: number, min: number, max: number): number {
  * Map MediaPipe blendshapes → our simplified expression set.
  * MediaPipe outputs ~52 ARKit-compatible blendshapes.
  */
-function extractExpressions(blendshapes: { categoryName: string; score: number }[]): FaceExpressions {
+export function extractExpressions(blendshapes: { categoryName: string; score: number }[]): FaceExpressions {
   const result: FaceExpressions = {
     happy: 0, sad: 0, surprised: 0, angry: 0,
     blink: 0, blinkLeft: 0, blinkRight: 0,
@@ -186,6 +186,8 @@ export function useFaceTracking(): UseFaceTrackingReturn {
   const isCameraReady = ref(false);
 
   let faceLandmarker: FaceLandmarker | null = null;
+  let worker: Worker | null = null;
+  let workerBusy = false;
   let videoStream: MediaStream | null = null;
   let videoElement: HTMLVideoElement | null = null;
   let animFrameId: number | null = null;
@@ -195,7 +197,40 @@ export function useFaceTracking(): UseFaceTrackingReturn {
   let captureCanvas: HTMLCanvasElement | null = null;
   let captureCtx: CanvasRenderingContext2D | null = null;
 
-  // ─── Init MediaPipe ───
+  function initWorker(): boolean {
+    if (typeof Worker === "undefined" || typeof createImageBitmap === "undefined") {
+      return false;
+    }
+    try {
+      worker = new Worker(
+        new URL("../workers/faceTrackingWorker.ts", import.meta.url),
+        { type: "module" }
+      );
+      worker.onmessage = (
+        e: MessageEvent<{ type?: string; data?: FaceTrackingData; error?: string }>
+      ) => {
+        workerBusy = false;
+        const msg = e.data;
+        if (!msg) return;
+        if (msg.type === "result" && msg.data) {
+          faceData.value = msg.data;
+        } else if (msg.type === "error") {
+          logger.warn("[FaceTracking]", "Worker error:", msg.error);
+        }
+      };
+      worker.onerror = (err) => {
+        logger.warn("[FaceTracking]", "Worker runtime error:", err.message);
+        workerBusy = false;
+      };
+      worker.postMessage({ type: "init" });
+      return true;
+    } catch {
+      worker = null;
+      return false;
+    }
+  }
+
+  // ─── Init MediaPipe (Fallback) ───
   async function initFaceLandmarker() {
     const vision = await FilesetResolver.forVisionTasks(
       "/assets/wasm"
@@ -218,8 +253,9 @@ export function useFaceTracking(): UseFaceTrackingReturn {
     if (isTracking.value) return;
 
     try {
-      // 1. Init MediaPipe (lazy, only once)
-      if (!faceLandmarker) {
+      // 1. Try to init Web Worker first; fallback to inline MediaPipe if unavailable
+      const workerStarted = initWorker();
+      if (!workerStarted && !faceLandmarker) {
         await initFaceLandmarker();
       }
 
@@ -261,7 +297,7 @@ export function useFaceTracking(): UseFaceTrackingReturn {
 
   // ─── Detection Loop ───
   function detectLoop() {
-    if (!isTracking.value || !faceLandmarker || !videoElement) {
+    if (!isTracking.value || !videoElement) {
       if (animFrameId !== null) {
         cancelAnimationFrame(animFrameId);
         animFrameId = null;
@@ -278,6 +314,28 @@ export function useFaceTracking(): UseFaceTrackingReturn {
     const now = performance.now();
     if (now === lastTimestamp) return;
     lastTimestamp = now;
+
+    // Path A: Web Worker detection (zero main-thread blocking)
+    if (worker) {
+      if (workerBusy) return;
+      workerBusy = true;
+      createImageBitmap(videoElement)
+        .then((bitmap) => {
+          if (!worker || !isTracking.value) {
+            if (typeof bitmap.close === "function") bitmap.close();
+            workerBusy = false;
+            return;
+          }
+          worker.postMessage({ type: "detect", bitmap, timestamp: now }, [bitmap]);
+        })
+        .catch(() => {
+          workerBusy = false;
+        });
+      return;
+    }
+
+    // Path B: Fallback inline detection (Node/Vitest, legacy environments)
+    if (!faceLandmarker) return;
 
     try {
       const result: FaceLandmarkerResult = faceLandmarker.detectForVideo(
@@ -338,8 +396,16 @@ export function useFaceTracking(): UseFaceTrackingReturn {
       videoElement = null;
     }
 
-    captureCanvas = null;
-    captureCtx = null;
+    if (worker) {
+      try {
+        worker.postMessage({ type: "dispose" });
+        worker.terminate();
+      } catch {
+        // ignore
+      }
+      worker = null;
+      workerBusy = false;
+    }
 
     faceData.value = defaultFaceData();
   }

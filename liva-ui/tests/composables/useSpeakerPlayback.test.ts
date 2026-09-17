@@ -262,4 +262,36 @@ describe("useSpeakerPlayback", () => {
     await pending;
     expect(sources).toHaveLength(1);
   });
+
+  it("applies default 150ms pre-roll jitter buffer to first chunk and gapless back-to-back to second chunk", async () => {
+    const scheduledChunks: { startTimeSec: number; durationSec: number }[] = [];
+    const speaker = useSpeakerPlayback({
+      onChunkScheduled: (info) => scheduledChunks.push(info),
+    });
+
+    await speaker.enqueueSpeakerPayload(pcmChunk());
+    await speaker.enqueueSpeakerPayload(pcmChunk());
+
+    expect(sources).toHaveLength(2);
+    // First chunk starts at currentTime (0) + 0.150s pre-roll
+    expect(sources[0].start).toHaveBeenCalledWith(0.15);
+    expect(scheduledChunks[0].startTimeSec).toBeCloseTo(0.15);
+
+    // Second chunk starts immediately after first chunk ends: 0.15 + duration (1/16000)
+    const expectedSecondStart = 0.15 + (1 / 16000);
+    expect(sources[1].start).toHaveBeenCalledWith(expectedSecondStart);
+    expect(scheduledChunks[1].startTimeSec).toBeCloseTo(expectedSecondStart);
+  });
+
+  it("respects custom preRollBufferSec configuration", async () => {
+    const speakerCustom = useSpeakerPlayback({ preRollBufferSec: 0.25 });
+    await speakerCustom.enqueueSpeakerPayload(pcmChunk());
+    expect(sources[0].start).toHaveBeenCalledWith(0.25);
+
+    sources.length = 0;
+    const speakerZero = useSpeakerPlayback({ preRollBufferSec: 0 });
+    await speakerZero.enqueueSpeakerPayload(pcmChunk());
+    expect(sources[0].start).toHaveBeenCalledWith(0);
+  });
 });
+

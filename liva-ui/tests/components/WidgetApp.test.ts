@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { defineComponent, h, nextTick, ref } from 'vue';
+import {
+  pendingVisemeCues,
+  currentViseme,
+  resetVisemes,
+} from '../../src/utils/phonemeLipSync';
 
 // Mock Node url to prevent JSDOM path resolution crashes
 vi.mock('url', async (importOriginal) => {
@@ -100,6 +105,8 @@ const speakerMock = {
   setMasterVolume: vi.fn(),
   enqueueSpeakerPayload: vi.fn(),
   enqueueEncodedAudio: vi.fn().mockResolvedValue(undefined),
+  getContext: vi.fn(() => ({ currentTime: 0 })),
+  __options: null as any,
 };
 
 const avatarEngineMock = {
@@ -112,6 +119,7 @@ const avatarEngineMock = {
   stopMoving: vi.fn(),
   setWander: vi.fn(),
   setThinking: vi.fn(),
+  onBargeIn: vi.fn(),
   triggerMotion: vi.fn(),
   getScreenBounds: vi.fn(() => null),
 };
@@ -125,7 +133,10 @@ const AvatarEngineStub = defineComponent({
 });
 
 vi.mock('../../src/composables/useSpeakerPlayback', () => ({
-  useSpeakerPlayback: () => speakerMock,
+  useSpeakerPlayback: (options?: any) => {
+    speakerMock.__options = options;
+    return speakerMock;
+  },
 }));
 
 // Mock use3DModel
@@ -855,6 +866,48 @@ describe('WidgetApp.vue', () => {
     wrapper.unmount();
   });
 
+  it('kích hoạt onBargeIn và vision_inspect trên avatar engine qua websocket events', async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(WidgetApp, {
+      global: {
+        provide: {
+          platform: { platformName: 'web', invokeBackend: vi.fn().mockResolvedValue(null) },
+        },
+        stubs: {
+          Live2DEngine: true,
+          VRMEngine: AvatarEngineStub,
+          VisionSensor: true,
+          ResourceMeter: true,
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = mockSockets[0];
+    socket.readyState = MockWebSocket.OPEN;
+    socket.onopen?.(new Event('open'));
+
+    const emit = async (event: string, payload: any = {}) => {
+      await socket.onmessage?.({
+        data: JSON.stringify({ event, payload }),
+      } as MessageEvent);
+      await nextTick();
+    };
+
+    // 1. Audio ducking (< 0.6) kích hoạt barge-in
+    await emit('audio_ducking', { volume: 0.25 });
+    expect(avatarEngineMock.onBargeIn).toHaveBeenCalled();
+
+    // 2. Vision inspect hướng avatar tới toạ độ màn hình
+    await emit('vision_inspect', { x: 0.35, y: 0.75 });
+    expect(avatarEngineMock.inspectScreenPoint).toHaveBeenCalledWith(0.35, 0.75);
+
+    // 3. Vision inspect clear xoá điểm nhìn
+    await emit('vision_inspect_clear', {});
+    expect(avatarEngineMock.clearInspection).toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
   it('phát phản hồi wake word và force trigger qua pipeline đang mở', async () => {
     const oscillator = {
       connect: vi.fn(),
@@ -922,8 +975,6 @@ describe('WidgetApp.vue', () => {
 
   it('xử lý phím sensory capture và dọn timer khi unmount', async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
-    vi.stubGlobal('fetch', fetchMock);
     const wrapper = mount(WidgetApp, {
       global: {
         provide: {
@@ -942,10 +993,6 @@ describe('WidgetApp.vue', () => {
       new KeyboardEvent('keydown', { key: 'S', ctrlKey: true, shiftKey: true })
     );
     await vi.advanceTimersByTimeAsync(0);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:3000/api/sensory-capture',
-      expect.objectContaining({ method: 'POST' })
-    );
     expect((wrapper.vm as any).isSensing).toBe(true);
 
     wrapper.unmount();
@@ -1095,6 +1142,123 @@ describe('WidgetApp.vue', () => {
       });
       await nextTick();
       await wrapper.setData({ show: false });
+      wrapper.unmount();
+    });
+  });
+
+  describe('OP_VISME & LipSync Timeline (VC-8)', () => {
+    it('nhận frame binary OP_VISME đăng ký timeline vào phonemeLipSync', async () => {
+      resetVisemes();
+      const wrapper = mount(WidgetApp, {
+        global: {
+          provide: {
+            platform: {
+              platformName: 'web',
+              getWindowSize: () => Promise.resolve({ width: 800, height: 600 }),
+              toggleGhostMode: vi.fn(),
+              minimizeToTray: vi.fn(),
+              quitApp: vi.fn(),
+              hasVaultSecret: vi.fn(),
+              storeVaultSecret: vi.fn(),
+              deleteVaultSecret: vi.fn(),
+              invokeBackend: vi.fn(() => Promise.resolve()),
+            },
+          },
+        },
+      });
+      await nextTick();
+      const socket = mockSockets[mockSockets.length - 1];
+      expect(socket).toBeDefined();
+
+      // Giả lập frame OP_VISME chuẩn wire format:
+      // [opcode u8: 0x06][seqId u32 LE][payloadSize u32 LE][JSON UTF-8]
+      const jsonPayload = JSON.stringify({
+        turn_epoch: 0,
+        base_seq_id: 1,
+        visemes: [
+          { v: 'nil', t_ms: 0 },
+          { v: 'aa', t_ms: 100 },
+        ],
+      });
+      const encoded = new TextEncoder().encode(jsonPayload);
+      const frameBuffer = new Uint8Array(9 + encoded.length);
+      const view = new DataView(frameBuffer.buffer);
+      view.setUint8(0, 0x06); // OP_VISME
+      view.setUint32(1, 1, true); // seqId
+      view.setUint32(5, encoded.length, true); // payloadSize
+      frameBuffer.set(encoded, 9);
+
+      // Phát dispatch qua WebSocket
+      socket.onmessage?.(new MessageEvent('message', { data: frameBuffer.buffer }));
+      await nextTick();
+
+      // Kiểm tra pendingVisemeCues đã nhận được cues
+      const pending = pendingVisemeCues();
+      expect(pending).toHaveLength(2);
+      expect(pending[0]).toEqual({ v: 'nil', tMs: 0 });
+      expect(pending[1]).toEqual({ v: 'aa', tMs: 100 });
+
+      // Giả lập chunk được xếp lịch phát
+      speakerMock.__options?.onChunkScheduled?.({ startTimeSec: 10.0, durationSec: 0.5 });
+      expect(currentViseme(10.05)).toBe('nil');
+      expect(currentViseme(10.15)).toBe('aa');
+
+      wrapper.unmount();
+    });
+
+    it('barge-in / onFlushBinary xoá sạch timeline viseme', async () => {
+      resetVisemes();
+      const wrapper = mount(WidgetApp, {
+        global: {
+          provide: {
+            platform: {
+              platformName: 'web',
+              getWindowSize: () => Promise.resolve({ width: 800, height: 600 }),
+              toggleGhostMode: vi.fn(),
+              minimizeToTray: vi.fn(),
+              quitApp: vi.fn(),
+              hasVaultSecret: vi.fn(),
+              storeVaultSecret: vi.fn(),
+              deleteVaultSecret: vi.fn(),
+              invokeBackend: vi.fn(() => Promise.resolve()),
+            },
+          },
+        },
+      });
+      await nextTick();
+      const socket = mockSockets[mockSockets.length - 1];
+
+      // Đăng ký timeline hợp lệ
+      const jsonPayload = JSON.stringify({
+        turn_epoch: 0,
+        base_seq_id: 1,
+        visemes: [{ v: 'aa', t_ms: 0 }],
+      });
+      const encoded = new TextEncoder().encode(jsonPayload);
+      const frameBuffer = new Uint8Array(9 + encoded.length);
+      const view = new DataView(frameBuffer.buffer);
+      view.setUint8(0, 0x06); // OP_VISME
+      view.setUint32(1, 1, true);
+      view.setUint32(5, encoded.length, true);
+      frameBuffer.set(encoded, 9);
+      socket.onmessage?.(new MessageEvent('message', { data: frameBuffer.buffer }));
+      await nextTick();
+      expect(pendingVisemeCues()).toHaveLength(1);
+
+      // Giả lập flush binary frame (opcode 0x03 [OP_FLUSH] + header)
+      const flushBuffer = new Uint8Array(9 + 4);
+      const dv = new DataView(flushBuffer.buffer);
+      dv.setUint8(0, 0x03); // OP_FLUSH
+      dv.setUint32(1, 1, true); // epoch
+      dv.setUint32(5, 4, true); // payloadSize
+      dv.setUint32(9, 1, true); // payload epoch
+      socket.onmessage?.(new MessageEvent('message', { data: flushBuffer.buffer }));
+      await nextTick();
+
+      // Timeline phải bị reset sạch sẽ
+      expect(pendingVisemeCues()).toHaveLength(0);
+      expect(currentViseme(1.0)).toBeNull();
+
       wrapper.unmount();
     });
   });

@@ -26,7 +26,7 @@ const statusMessage = ref("");
 const isBusy = ref(false);
 const testingVoice = ref("");
 
-const voice = computed(() => gateway.voiceStatus.value || gateway.configData.value?.voice || {});
+const voice = computed(() => gateway.configData.value?.voice || {});
 const profiles = computed(() => gateway.voiceProfiles.value || []);
 
 // ── Giọng VieNeu (U17a) ───────────────────────────────────────────────────

@@ -155,8 +155,23 @@ export function useWidgetWindow(options: UseWidgetWindowOptions) {
     }
 
     const avatarBounds = engineRef.value?.getScreenBounds?.();
-    if (avatarBounds && avatarBounds.width > 0 && avatarBounds.height > 0) {
-      zones.push(avatarBounds);
+    const isDraggingAvatar = (engineRef.value as { isDragging?: { value?: boolean } } | null)?.isDragging?.value;
+
+    if (isDraggingAvatar) {
+      zones.push({
+        x: 0,
+        y: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    } else if (avatarBounds && avatarBounds.width > 0 && avatarBounds.height > 0) {
+      const pad = 12;
+      zones.push({
+        x: Math.max(avatarBounds.x - pad, 0),
+        y: Math.max(avatarBounds.y - pad, 0),
+        width: avatarBounds.width + pad * 2,
+        height: avatarBounds.height + pad * 2,
+      });
     }
 
     platform.invokeBackend('update_interactive_zones', { zones }).catch((err) => {

@@ -87,6 +87,7 @@ const speaker = useSpeakerPlayback({
   },
 });
 
+
 // ⚡ [PERF P0-D] Pre-recorded filler audio state
 let fillerBuffers: AudioBuffer[] = [];
 let currentFillerSource: AudioBufferSourceNode | null = null;
@@ -94,10 +95,8 @@ let currentFillerGain: GainNode | null = null;
 let fillerDebounceTimer: ReturnType<typeof setTimeout> | null = null; // [Upgrade D] Anti-stuttering debounce
 
 watch(isThinking, (val) => {
-  if (avatarModel) {
-    if (val) {
-      avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
-    }
+  if (avatarModel && val) {
+    avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
   }
 });
 
@@ -114,7 +113,9 @@ const handleKeydown = async (e: KeyboardEvent) => {
     if (sensingTimer) clearTimeout(sensingTimer);
     sensingTimer = setTimeout(() => { isSensing.value = false; sensingTimer = null; }, 30000);
     try {
-      await safeFetch("http://127.0.0.1:3000/api/sensory-capture", { method: "POST" });
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ event: "vision:capture" }));
+      }
     } catch {
       // sensing flag resets via timer
     }

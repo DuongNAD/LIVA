@@ -56,6 +56,7 @@ const {
   setInspecting,
   setThinking,
   setLocomotionState,
+  setDangleState,
   playGesture,
   getScreenBounds,
   loadModel,
@@ -67,6 +68,7 @@ const {
   stopLipSync,
   startAudioDrivenLipSync,
   stopAudioDrivenLipSync,
+  onBargeIn,
   triggerMotion,
   updateLookAt,
   updateExpressions,
@@ -107,6 +109,12 @@ function onPointerMove(e: PointerEvent) {
 }
 
 let mouseLookAtInterval: ReturnType<typeof setInterval> | null = null;
+let isThinkingActive = false;
+
+function handleSetThinking(active: boolean) {
+  isThinkingActive = active;
+  setThinking(active);
+}
 
 function startMouseLookAt() {
   if (mouseLookAtInterval) return;
@@ -114,6 +122,12 @@ function startMouseLookAt() {
   // Poll every 100ms (10fps is enough for smooth eye tracking)
   mouseLookAtInterval = setInterval(() => {
     if (isCameraOn.value) return; // Face tracking takes priority
+    if (inspectionPoint) return; // Screen inspection takes priority over mouse cursor
+    if (isThinkingActive) {
+      // Khi đang tập trung suy nghĩ, mắt nhìn thẳng về phía người dùng/camera
+      updateLookAt(0, 4);
+      return;
+    }
     // Map normalized -1..1 → VRM yaw/pitch degrees
     const yaw = mouseNormX * 25; // ±25° max
     const pitch = -mouseNormY * 15; // ±15° max (invert Y: cursor up = look up)
@@ -458,12 +472,135 @@ const initEngine = async () => {
   }
 };
 
+// ═══════════════════════════════════════════════════════
+//  Avatar Grab, Drag & Fling-to-Corner
+// ═══════════════════════════════════════════════════════
+const isAvatarDragging = ref(false);
+let dragStartPos = { x: 0, y: 0 };
+let lastPointerTime = 0;
+let lastPointerPos = { x: 0, y: 0 };
+let pointerVelocityX = 0;
+let wasWanderingBeforeDrag = false;
+let wanderCooldownTimer: ReturnType<typeof setTimeout> | null = null;
+
+function suppressWanderTemporarily(durationMs = 30000) {
+  if (wanderCooldownTimer) clearTimeout(wanderCooldownTimer);
+  locomotion.setWander(false);
+  wanderCooldownTimer = setTimeout(() => {
+    wanderCooldownTimer = null;
+    if (wasWanderingBeforeDrag) {
+      locomotion.setWander(true);
+    }
+  }, durationMs);
+}
+
+function dockToCorner(corner: 'left' | 'right' | 'auto' = 'auto') {
+  const current = locomotion.snapshot();
+  const targetX = corner === 'left' ? 0.08 : corner === 'right' ? 0.90 : current.x < 0.5 ? 0.08 : 0.90;
+  suppressWanderTemporarily(30000);
+  locomotion.moveTo(targetX, 1.0, { run: true });
+  triggerMotion();
+}
+
+function onAvatarPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return; // Chỉ nhận click chuột trái
+  dragStartPos = { x: e.clientX, y: e.clientY };
+  lastPointerPos = { x: e.clientX, y: e.clientY };
+  lastPointerTime = performance.now();
+  pointerVelocityX = 0;
+  isAvatarDragging.value = false;
+
+  window.addEventListener('pointermove', onAvatarPointerMove);
+  window.addEventListener('pointerup', onAvatarPointerUp);
+  window.addEventListener('pointercancel', onAvatarPointerUp);
+}
+
+function onAvatarPointerMove(e: PointerEvent) {
+  const dx = e.clientX - dragStartPos.x;
+  const dy = e.clientY - dragStartPos.y;
+  const distance = Math.hypot(dx, dy);
+
+  if (!isAvatarDragging.value && distance > 6) {
+    isAvatarDragging.value = true;
+    wasWanderingBeforeDrag = locomotion.isWandering();
+    locomotion.setWander(false);
+  }
+
+  if (isAvatarDragging.value) {
+    const now = performance.now();
+    const dt = Math.max((now - lastPointerTime) / 1000, 0.001);
+    pointerVelocityX = (e.clientX - lastPointerPos.x) / dt;
+    lastPointerPos = { x: e.clientX, y: e.clientY };
+    lastPointerTime = now;
+
+    // Chuyển đổi toạ độ chuột thành toạ độ chuẩn hoá màn hình
+    const width = window.innerWidth || 1280;
+    const height = window.innerHeight || 720;
+    const nx = Math.min(Math.max(e.clientX / width, 0.06), 0.94);
+    // Điểm neo tại Gáy (nape of neck): gáy nhân vật gắn sát ngay dưới con trỏ chuột.
+    // Chân nhân vật nằm phía dưới gáy khoảng 0.38 đơn vị màn hình.
+    const ny = Math.min(Math.max(e.clientY / height + 0.38, 0.40), 1.0);
+
+    // Kích hoạt tư thế nhấc gáy, biểu cảm bất lực ngơ ngác & đung đưa con lắc theo vận tốc rê chuột
+    setDangleState(true, pointerVelocityX);
+    lookAtScreenPoint(nx, Math.max(0, ny - 0.45));
+
+    locomotion.teleport(nx, ny);
+    setScreenPosition(nx, ny);
+  }
+}
+
+function onAvatarPointerUp() {
+  window.removeEventListener('pointermove', onAvatarPointerMove);
+  window.removeEventListener('pointerup', onAvatarPointerUp);
+  window.removeEventListener('pointercancel', onAvatarPointerUp);
+
+  if (isAvatarDragging.value) {
+    isAvatarDragging.value = false;
+    setDangleState(false, 0);
+    const current = locomotion.snapshot();
+
+    // Ném theo quán tính hoặc vị trí thả
+    const targetX = pointerVelocityX < -250
+      ? 0.08
+      : pointerVelocityX > 250
+        ? 0.90
+        : current.x < 0.5
+          ? 0.08
+          : 0.90;
+
+    // Hạ cánh êm ái xuống mặt sàn góc màn hình
+    suppressWanderTemporarily(30000);
+    locomotion.moveTo(targetX, 1.0, { run: true });
+    playGesture('nod');
+  } else {
+    // Click thông thường mà không kéo: kích hoạt tương tác
+    triggerMotion();
+  }
+}
+
+function onAvatarDoubleClick() {
+  // Click đúp: nhanh chóng né sang góc đối diện
+  const current = locomotion.snapshot();
+  const oppositeCorner = current.x < 0.5 ? 'right' : 'left';
+  dockToCorner(oppositeCorner);
+}
+
 const cleanupEngine = () => {
   globalThis.removeEventListener('resize', handleResize);
   unobserveContainer();
   stopLocomotion();
   stopMouseLookAt();
   stopAudioLipSync();
+
+  window.removeEventListener('pointermove', onAvatarPointerMove);
+  window.removeEventListener('pointerup', onAvatarPointerUp);
+  window.removeEventListener('pointercancel', onAvatarPointerUp);
+
+  if (wanderCooldownTimer) {
+    clearTimeout(wanderCooldownTimer);
+    wanderCooldownTimer = null;
+  }
 
   if (isCameraOn.value) {
     stopTracking();
@@ -524,27 +661,38 @@ defineExpose({
   stopMoving: locomotion.stop,
   setWander: locomotion.setWander,
   locomotionSnapshot: locomotion.snapshot,
+  isDragging: isAvatarDragging,
+  dockToCorner,
   playGesture,
-  setThinking,
+  setThinking: handleSetThinking,
+  onBargeIn,
   inspectScreenPoint,
   clearInspection,
 });
 </script>
 
 <template>
-  <div class="vrm-container" :class="{ 'full-screen': props.fullScreen !== false }">
+  <div
+    class="vrm-container"
+    :class="{ 'full-screen': props.fullScreen !== false }"
+    style="pointer-events: none;"
+  >
     <canvas
       ref="canvas"
       width="400"
       height="700"
-      style="
-        cursor: pointer;
-        position: relative;
-        z-index: 2;
-        width: 100%;
-        height: 100%;
-        display: block;
-      "
+      :style="{
+        cursor: isAvatarDragging ? 'grabbing' : 'grab',
+        position: 'relative',
+        zIndex: 2,
+        width: '100%',
+        height: '100%',
+        display: 'block',
+        pointerEvents: 'auto',
+        touchAction: 'none',
+      }"
+      @pointerdown="onAvatarPointerDown"
+      @dblclick="onAvatarDoubleClick"
     ></canvas>
 
     <!-- Hidden webcam video (no display, only for MediaPipe) -->

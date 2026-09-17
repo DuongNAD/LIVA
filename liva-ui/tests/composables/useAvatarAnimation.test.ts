@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import * as THREE from "three";
-import { useAvatarAnimation, type ControlledBone } from "../../src/composables/useAvatarAnimation";
+import {
+  useAvatarAnimation,
+  type ControlledBone,
+  WALK_SPEED,
+  RUN_SPEED,
+  STRIDE_LENGTH,
+  STRIDE_HZ,
+} from "../../src/composables/useAvatarAnimation";
 
 /** VRM giả: ghi lại góc xoay đã áp lên từng xương humanoid */
 function makeVRM() {
@@ -581,5 +588,265 @@ describe("useAvatarAnimation", () => {
     for (const call of getNormalizedBoneNode.mock.calls) {
       expect(allowed).toContain(call[0] as ControlledBone);
     }
+  });
+
+  describe("Distance-Based Stride Phase Calibration (Slice A2)", () => {
+    it("độ dài bước walk được chuẩn hoá đúng WALK_SPEED / 1.05", () => {
+      expect(STRIDE_LENGTH.walk).toBeCloseTo(WALK_SPEED / 1.05, 6);
+      expect(STRIDE_LENGTH.run).toBeCloseTo(RUN_SPEED / 1.9, 6);
+      expect(STRIDE_HZ.walk).toBe(1.05);
+      expect(STRIDE_HZ.run).toBe(1.9);
+    });
+
+    it("stridePhase đóng băng khi currentSpeed == 0 (motionWeight == 0) dù state là walk", () => {
+      const anim = useAvatarAnimation();
+      anim.setState("walk");
+      anim.setMotionWeight(0);
+      expect(anim.getStridePhase()).toBe(0);
+
+      anim.update(null, 0.5);
+      expect(anim.getStridePhase()).toBe(0);
+      expect(anim.stridePhase).toBe(0);
+    });
+
+    it("tần số bước ở steady-state WALK_SPEED (motionWeight = 1) khớp chính xác baseline 1.05 Hz", () => {
+      const anim = useAvatarAnimation();
+      anim.setState("walk");
+      anim.setMotionWeight(1);
+
+      // 1 giây ở 1.05 Hz = 1.05 * 2π = 2.1π radians = 0.1π mod 2π
+      const dt = 1 / 60;
+      for (let i = 0; i < 60; i++) {
+        anim.update(null, dt);
+      }
+      const expectedPhase = (1.05 * Math.PI * 2) % (Math.PI * 2);
+      expect(anim.getStridePhase()).toBeCloseTo(expectedPhase, 4);
+    });
+
+    it("stridePhase tăng tỉ lệ thuận với quãng đường di chuyển và motionWeight", () => {
+      const animHalf = useAvatarAnimation();
+      const animFull = useAvatarAnimation();
+      animHalf.setState("walk");
+      animHalf.setMotionWeight(0.5);
+      animFull.setState("walk");
+      animFull.setMotionWeight(1.0);
+
+      animHalf.update(null, 0.1);
+      animFull.update(null, 0.1);
+
+      expect(animHalf.getStridePhase()).toBeCloseTo(animFull.getStridePhase() * 0.5, 5);
+      expect(animHalf.getMotionWeight()).toBe(0.5);
+      expect(animHalf.motionWeight).toBe(0.5);
+      expect(animFull.getMotionWeight()).toBe(1.0);
+    });
+
+    it("reset() trả stridePhase về 0", () => {
+      const anim = useAvatarAnimation();
+      anim.setState("walk");
+      anim.setMotionWeight(1);
+      anim.update(null, 0.5);
+      expect(anim.getStridePhase()).toBeGreaterThan(0);
+
+      anim.reset();
+      expect(anim.getStridePhase()).toBe(0);
+      expect(anim.getMotionWeight()).toBe(1);
+    });
+
+    it("stridePhase KHÔNG tăng khi ở idle sau khi đã kết thúc crossfade dù motionWeight > 0", () => {
+      const anim = useAvatarAnimation();
+      anim.setState("run");
+      anim.setMotionWeight(1);
+      anim.update(null, 0.5);
+      const phaseAfterRun = anim.getStridePhase();
+      expect(phaseAfterRun).toBeGreaterThan(0);
+
+      // Chuyển sang idle và cho trôi qua toàn bộ thời gian crossfade (0.28s)
+      anim.setState("idle");
+      anim.update(null, 0.5);
+      const phaseAfterIdle = anim.getStridePhase();
+
+      // Đặt motionWeight > 0 khi đang ở idle và cập nhật tiếp
+      anim.setMotionWeight(0.8);
+      anim.update(null, 0.5);
+      // stridePhase phải giữ nguyên, không được tiếp tục quay theo previousState (run)
+      expect(anim.getStridePhase()).toBe(phaseAfterIdle);
+    });
+
+    it("stridePhase KHÔNG tăng khi ở trạng thái jump", () => {
+      const anim = useAvatarAnimation();
+      anim.setState("walk");
+      anim.setMotionWeight(1);
+      anim.update(null, 0.2);
+      const phaseBeforeJump = anim.getStridePhase();
+
+      anim.setState("jump");
+      // Trôi qua crossfade
+      anim.update(null, 0.3);
+      const phaseInJump = anim.getStridePhase();
+
+      anim.update(null, 0.5);
+      expect(anim.getStridePhase()).toBe(phaseInJump);
+    });
+
+    it("setMotionWeight xử lý an toàn các giá trị biên và NaN/Infinity", () => {
+      const anim = useAvatarAnimation();
+
+      anim.setMotionWeight(NaN);
+      expect(anim.getMotionWeight()).toBe(0);
+
+      anim.setMotionWeight(-0.5);
+      expect(anim.getMotionWeight()).toBe(0);
+
+      anim.setMotionWeight(1.5);
+      expect(anim.getMotionWeight()).toBe(1);
+
+      anim.setMotionWeight(Infinity);
+      expect(anim.getMotionWeight()).toBe(0);
+    });
+
+    it("update() với delta âm hoặc NaN không làm hỏng đồng hồ nội bộ", () => {
+      const anim = useAvatarAnimation();
+      anim.setState("walk");
+      anim.setMotionWeight(1);
+
+      expect(() => {
+        anim.update(null, -0.1);
+        anim.update(null, NaN);
+        anim.update(null, 5.0); // very large jump
+      }).not.toThrow();
+
+      expect(Number.isFinite(anim.getStridePhase())).toBe(true);
+      expect(Number.isFinite(anim.getMotionWeight())).toBe(true);
+    });
+
+    it("chuyển tiếp run <-> walk duy trì tần số bước mượt mà không bị gián đoạn", () => {
+      const anim = useAvatarAnimation();
+      anim.setState("run");
+      anim.setMotionWeight(1);
+      anim.update(null, 1.0); // ổn định ở run
+
+      // Đổi sang walk và đo tốc độ tăng stridePhase trong suốt crossfade
+      anim.setState("walk");
+      let prevPhase = anim.getStridePhase();
+      const dt = 1 / 60;
+      for (let step = 0; step < 20; step++) {
+        anim.update(null, dt);
+        const curPhase = anim.getStridePhase();
+        const diff = (curPhase - prevPhase + Math.PI * 2) % (Math.PI * 2);
+        // Tần số tương đương = diff / (dt * 2π). Phải nằm trong khoảng [1.0, 2.0] Hz
+        const freqHz = diff / (dt * Math.PI * 2);
+        expect(freqHz).toBeGreaterThanOrEqual(1.0);
+        expect(freqHz).toBeLessThanOrEqual(2.0);
+        prevPhase = curPhase;
+      }
+    });
+
+    it("chuyển từ walk sang idle trả lại vị trí hips gốc cho footPlant", () => {
+      const scene = new THREE.Group();
+      const hips = new THREE.Object3D();
+      const leftFoot = new THREE.Object3D();
+      const rightFoot = new THREE.Object3D();
+      leftFoot.position.set(-0.1, 0, 0);
+      rightFoot.position.set(0.1, 0.08, 0);
+      scene.add(hips);
+      hips.add(leftFoot, rightFoot);
+      const nodes = { hips, leftFoot, rightFoot };
+      const vrm = {
+        scene,
+        humanoid: {
+          getNormalizedBoneNode: (bone: keyof typeof nodes) => nodes[bone] ?? null,
+        },
+      } as never;
+
+      const anim = useAvatarAnimation();
+      anim.registerClip("walk", {
+        name: "walk",
+        duration: 1,
+        tracks: { leftFoot: { times: [0], values: [0, 0, 0, 1] } },
+      });
+
+      anim.setState("walk");
+      anim.update(vrm, 1 / 60);
+      scene.position.x += 0.05;
+      for (let frame = 0; frame < 10; frame++) anim.update(vrm, 1 / 60);
+
+      // Chuyển sang idle
+      anim.setState("idle");
+      anim.update(vrm, 1 / 60);
+
+      // Hips position phải được trả về rest position (0, 0, 0)
+      expect(hips.position.x).toBeCloseTo(0, 5);
+      expect(hips.position.y).toBeCloseTo(0, 5);
+      expect(hips.position.z).toBeCloseTo(0, 5);
+    });
+
+    it("tự nhiên gập cẳng tay khi vung tay ra trước và ngửa/duỗi mắt cá chân khi bước", () => {
+      const anim = useAvatarAnimation();
+      const { vrm, nodes } = makeVRM();
+      anim.setState("walk");
+      advance(anim, vrm, 0.5); // qua crossfade
+
+      let sawElbowFlex = false;
+      let sawAnklePitchUp = false;
+      let sawAnklePitchDown = false;
+
+      for (let i = 0; i < 120; i++) {
+        anim.update(vrm, 1 / 60);
+        const leftElbow = nodes.get("leftLowerArm")!.rotation.x;
+        const rightElbow = nodes.get("rightLowerArm")!.rotation.x;
+        const leftFoot = nodes.get("leftFoot")!.rotation.x;
+
+        if (leftElbow < -0.1 || rightElbow < -0.1) sawElbowFlex = true;
+        if (leftFoot > 0.05) sawAnklePitchUp = true;
+        if (leftFoot < -0.05) sawAnklePitchDown = true;
+      }
+
+      expect(sawElbowFlex).toBe(true);
+      expect(sawAnklePitchUp).toBe(true);
+      expect(sawAnklePitchDown).toBe(true);
+    });
+
+    it("nhấp nhô trọng tâm hông (pelvis vertical bobbing) 2x theo nhịp bước trong procedural walk", () => {
+      const scene = new THREE.Group();
+      const hips = new THREE.Object3D();
+      scene.add(hips);
+      const nodes = { hips };
+      const vrm = {
+        scene,
+        humanoid: {
+          getNormalizedBoneNode: (bone: keyof typeof nodes) => nodes[bone] ?? null,
+        },
+      } as never;
+
+      const anim = useAvatarAnimation();
+      anim.setState("walk");
+
+      const yPositions: number[] = [];
+      for (let i = 0; i < 120; i++) {
+        anim.update(vrm, 1 / 60);
+        yPositions.push(hips.position.y);
+      }
+
+      const minY = Math.min(...yPositions);
+      const maxY = Math.max(...yPositions);
+      expect(minY).toBeLessThan(0); // Có nhấp nhô trọng tâm xuống
+      expect(maxY).toBeCloseTo(0, 3); // Đỉnh nhịp chạm lại rest Y
+    });
+
+    it("áp tư thế xách gáy (dangle) co chân và quắp tay khi nhấc bổng", () => {
+      const anim = useAvatarAnimation();
+      const { vrm, nodes } = makeVRM();
+
+      anim.setState("dangle");
+      advance(anim, vrm, 0.5);
+
+      const leftUpperLeg = nodes.get("leftUpperLeg")!.rotation.x;
+      const leftLowerLeg = nodes.get("leftLowerLeg")!.rotation.x;
+      const leftLowerArm = nodes.get("leftLowerArm")!.rotation.x;
+
+      expect(leftUpperLeg).toBeLessThan(-0.2); // Đùi co về trước
+      expect(leftLowerLeg).toBeGreaterThan(0.5); // Gối gập tự nhiên
+      expect(leftLowerArm).toBeLessThan(-0.2); // Tay quắp trước ngực
+    });
   });
 });

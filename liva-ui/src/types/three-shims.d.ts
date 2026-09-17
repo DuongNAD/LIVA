@@ -116,7 +116,34 @@ declare module "three" {
     constructor(color: number, intensity?: number);
   }
 
+  export class Texture {
+    dispose: () => void;
+    needsUpdate: boolean;
+  }
+
+  export class CanvasTexture extends Texture {
+    constructor(canvas: HTMLCanvasElement);
+  }
+
+  export class PlaneGeometry {
+    constructor(width?: number, height?: number);
+    dispose: () => void;
+  }
+
+  export class MeshBasicMaterial extends Material {
+    constructor(parameters?: {
+      color?: number;
+      wireframe?: boolean;
+      map?: Texture | null;
+      transparent?: boolean;
+      opacity?: number;
+      depthWrite?: boolean;
+    });
+    map?: Texture;
+  }
+
   export class Mesh extends Object3D {
+    constructor(geometry?: unknown, material?: unknown);
     geometry: { dispose: () => void };
     material: Material | Material[];
   }

@@ -26,7 +26,6 @@ import { computed } from 'vue';
 import { useVoicePipeline } from './composables/useVoicePipeline';
 import { useSpeakerPlayback } from './composables/useSpeakerPlayback';
 import { logger } from './utils/logger';
-import { safeFetch } from './utils/fetch';
 import { readRichTextChannel, renderSafeRichText } from './utils/richText';
 import ToolPanel from './components/ToolPanel.vue';
 import {
@@ -34,7 +33,14 @@ import {
 } from './utils/avatarControlTags';
 import {
   SpeakerEpochGate,
+  parseVisemePayload,
 } from './utils/speakerFrame';
+import {
+  noteChunkScheduled,
+  resetVisemes,
+  setVisemeClock,
+  setVisemeTimeline,
+} from './utils/phonemeLipSync';
 import { useWidgetAvatarControl, type AvatarEngineApi } from './composables/useWidgetAvatarControl';
 import { useWidgetTransport } from './composables/useWidgetTransport';
 import type {
@@ -223,7 +229,7 @@ const pushAssistantLine = (text: string) => {
 // ═══════════════════════════════════════════════════════
 //  Voice Input (Microphone → STT)
 // ═══════════════════════════════════════════════════════
-const voice = useVoicePipeline();
+const voice = useVoicePipeline({ bypassSoftwareMute: true });
 const volumeLevel = voice.volumeLevel;
 const wakeWordThreshold = voice.wakeWordThreshold;
 const wakeProbeFeedback = voice.wakeProbeFeedback;
@@ -337,13 +343,21 @@ const forceTriggerWakeWord = async () => {
 // ═══════════════════════════════════════════════════════
 const speaker = useSpeakerPlayback({
   channel: '[Widget]',
+  preRollBufferSec: 0.08,
   useMasterGain: true, // required for audio_ducking volume control
   enableAnalyser: true, // analyser nằm TRONG chuỗi ra, để dẫn khẩu hình
+  // VC-8: mỗi chunk PCM được xếp lịch là mốc neo timeline viseme vào đồng hồ
+  // AudioContext — đúng thời điểm audio thật bắt đầu, không phải lúc nhận frame.
+  onChunkScheduled: ({ startTimeSec, durationSec }) => {
+    noteChunkScheduled(startTimeSec, durationSec);
+  },
   onPlaybackStarted: () => {
     // Mic đang mở nghe wake-word; giọng TTS vọng vào nó là nguồn dương-tính-giả
     // số một (xem khối "Chống tự nghe" trong useVoicePipeline.ts).
     voice.muteWakeWord();
-    sendMsg('audio_play_started');
+    // VC-8: cắm đồng hồ AudioContext cho registry viseme (một lần đủ — context
+    // sống suốt phiên).
+    setVisemeClock(() => speaker.getContext()?.currentTime ?? null);
     // Bám vào analyser MỘT lần cho cả lượt nói. Trước đây việc này nằm ở
     // onSourceStarted, tức chạy lại mỗi chunk — mà chunk được xếp lịch trước
     // khi kêu, nên analyser đọc nhầm nguồn còn im và miệng đóng giữa câu.
@@ -354,7 +368,6 @@ const speaker = useSpeakerPlayback({
   },
   onPlaybackFinished: () => {
     voice.unmuteWakeWord();
-    sendMsg('audio_play_finished');
   },
   onQueueDrained: () => {
     if (engineRef.value?.stopAudioLipSync) {
@@ -434,6 +447,9 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
     } else if (data.event === 'tool_result') {
       finishToolPresentation(data.payload);
     } else if (data.event === 'ai_thinking_start') {
+      if (speaker.isPlaying()) {
+        engineRef.value?.onBargeIn?.();
+      }
       isThinking.value = true;
       speaker.stop();
       scrollToBottom();
@@ -441,6 +457,9 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
     } else if (data.event === 'ai_thinking_end') {
       isThinking.value = false;
     } else if (data.event === 'ai_stream_reset') {
+      if (speaker.isPlaying()) {
+        engineRef.value?.onBargeIn?.();
+      }
       avatarControlStream.reset();
       if (
         messages.value.length > 0 &&
@@ -646,10 +665,26 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
       data.event === 'message:pending_error'
     ) {
       draftBusy.value = false;
+    } else if (data.event === 'ai_expert_suggestion') {
+      const expertPayload = data.payload as { goi_y_expert?: boolean } | undefined;
+      if (expertPayload?.goi_y_expert) {
+        logger.info('[Widget] AI Expert model suggestion received for complex query');
+        pushAssistantLine('💡 ' + (t('ai_expert_recommended') || 'Câu hỏi này có độ phức tạp cao, bạn có thể chuyển sang Expert Model để có kết quả phân tích chuyên sâu nhất.'));
+      }
     } else if (data.event === 'audio_ducking') {
       // [v26] Stage 1 Barge-in: backend reduces TTS volume when user starts speaking
       const vol = typeof data.payload?.volume === 'number' ? data.payload.volume : 1.0;
       speaker.setMasterVolume(vol);
+      if (vol < 0.6) {
+        engineRef.value?.onBargeIn?.();
+      }
+    } else if (data.event === 'vision_inspect') {
+      const payload = data.payload as { x?: number; y?: number } | undefined;
+      if (typeof payload?.x === 'number' && typeof payload?.y === 'number') {
+        engineRef.value?.inspectScreenPoint?.(payload.x, payload.y);
+      }
+    } else if (data.event === 'vision_inspect_clear') {
+      engineRef.value?.clearInspection?.();
     } else if (data.event === 'ai_audio_chunk') {
       if (speaker.isBlocked()) return;
       try {
@@ -723,8 +758,15 @@ const {
       speaker.enqueueSpeakerPayload(payload);
     }
   },
+  onVisemeBinary: (payload) => {
+    const tl = parseVisemePayload(payload);
+    if (tl && speakerEpochGate.accepts(tl.turnEpoch)) {
+      setVisemeTimeline(tl.cues);
+    }
+  },
   onFlushBinary: (turnEpoch) => {
     speakerEpochGate.observeFlush(turnEpoch);
+    resetVisemes(); // VC-8: barge-in xoá cả timeline viseme đang treo
     speaker.flush();
   },
   onJsonMessage: (data) => {
@@ -913,7 +955,9 @@ const handleKeydown = async (e: KeyboardEvent) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
     isSensing.value = true;
     try {
-      await safeFetch('http://127.0.0.1:3000/api/sensory-capture', { method: 'POST' });
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify({ event: 'vision:capture' }));
+      }
     } catch {
       // ignore
     }
@@ -1075,7 +1119,7 @@ onDeactivated(() => {
       :fullScreen="true"
       :screenPos="avatarScreenPos"
       :avatarScale="avatarScale"
-      style="pointer-events: none; position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%"
+      style="position: fixed; inset: 0; z-index: 0; width: 100%; height: 100%"
     />
     <!-- U16: đồng hồ chi phí. `pointer-events: none` để không phá Ghost Mode
          (widget phải click xuyên qua được). -->

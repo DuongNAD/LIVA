@@ -27,6 +27,15 @@ export interface WakeProbeFeedback {
   transcript: string;
 }
 
+export interface UseVoicePipelineOptions {
+  /**
+   * Bỏ qua cơ chế ngắt mic phần mềm (isWakeWordMuted & 400ms echo tail) khi
+   * Native Core đã bật WASAPI Loopback AEC3.
+   * Mặc định: true (Full-Duplex chuẩn Blueprint 2026).
+   */
+  bypassSoftwareMute?: boolean;
+}
+
 export interface UseVoicePipelineReturn {
   state: Ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>;
   volumeLevel: Ref<number>;
@@ -100,7 +109,8 @@ const WAKE_WORD_ECHO_TAIL_MS = 400;
  * Dùng mốc thời gian thay vì refcount: một lần `unmute` bị bỏ sót sẽ tự hết hạn,
  * chứ không khoá chết bộ wake-word tới lần reload sau.
  */
-function isWakeWordMuted(): boolean {
+function isWakeWordMuted(bypass = false): boolean {
+  if (bypass) return false;
   return speakerActive || Date.now() < wakeWordMutedUntil;
 }
 const diagnosticsPanelRef = ref<HTMLElement | null>(null);
@@ -211,7 +221,9 @@ function initWorker(): Promise<boolean> {
       if (type === 'loaded') {
         const saved =
           typeof localStorage !== 'undefined' ? localStorage.getItem(WAKE_FLOOR_STORAGE_KEY) : null;
-        const initConfig = saved ? { speechFloor: parseFloat(saved) } : undefined;
+        const initConfig = saved
+          ? { speechFloor: parseFloat(saved), onsetFrames: 4, hangoverFrames: 16, prerollFrames: 16 }
+          : { onsetFrames: 4, hangoverFrames: 16, prerollFrames: 16 };
         wakeWordWorker?.postMessage({ type: 'init', data: { config: initConfig } });
       } else if (type === 'ready') {
         complete(Boolean(success));
@@ -279,7 +291,8 @@ interface SpeechRecognitionInstance {
   stop: () => void;
 }
 
-export function useVoicePipeline(): UseVoicePipelineReturn {
+export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoicePipelineReturn {
+  const bypassSoftwareMute = options.bypassSoftwareMute ?? false;
   const state = ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>('OFF');
   const volumeLevel = shallowRef<number>(0);
   const isReady = ref(false);
@@ -642,7 +655,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         numberOfOutputs: 1,
         outputChannelCount: [1],
         processorOptions: {
-          frameSize: 512, // 32 ms at 16 kHz
+          frameSize: 256, // 16 ms at 16 kHz (2 Web Audio render quanta)
         },
       });
       if (generation !== lifecycleGeneration) {
@@ -673,7 +686,7 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
         //    bộ đếm đó không bao giờ chạy, câu không bao giờ đóng, và không một
         //    cụm ứng viên nào được phát ra. Bản cũ lọc được vì nó suy luận trên
         //    từng khung độc lập, không có khái niệm biên câu.
-        if (state.value === 'PASSIVE' && !isWakeWordMuted()) {
+        if (state.value === 'PASSIVE' && !isWakeWordMuted(bypassSoftwareMute)) {
           // Sao chép rồi chuyển quyền sở hữu bản sao: `inputData` là buffer của
           // worklet, transfer thẳng nó sẽ tháo mất buffer khỏi nhánh OP_MIC_IN
           // bên dưới.
@@ -927,7 +940,9 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
 
   /** Loa bắt đầu phát TTS — ngưng nạp mic cho bộ wake-word. */
   function muteWakeWord() {
-    speakerActive = true;
+    if (!bypassSoftwareMute) {
+      speakerActive = true;
+    }
   }
 
   /**
@@ -937,14 +952,18 @@ export function useVoicePipeline(): UseVoicePipelineReturn {
    */
   function unmuteWakeWord() {
     speakerActive = false;
-    wakeWordMutedUntil = Date.now() + WAKE_WORD_ECHO_TAIL_MS;
-    sendToWorker('reset');
+    if (!bypassSoftwareMute) {
+      wakeWordMutedUntil = Date.now() + WAKE_WORD_ECHO_TAIL_MS;
+      sendToWorker('reset');
+    }
   }
 
   /** Chặn bộ wake-word trong `ms` tới; chỉ nới dài, không bao giờ rút ngắn. */
   function muteWakeWordFor(ms: number) {
-    wakeWordMutedUntil = Math.max(wakeWordMutedUntil, Date.now() + ms);
-    sendToWorker('reset');
+    if (!bypassSoftwareMute) {
+      wakeWordMutedUntil = Math.max(wakeWordMutedUntil, Date.now() + ms);
+      sendToWorker('reset');
+    }
   }
 
   /** Đặt sàn RMS của bộ cắt câu (xem `WAKE_FLOOR_STORAGE_KEY`). */

@@ -329,4 +329,48 @@ describe("useFaceTracking — startTracking and detectLoop integration", () => {
     expect(isTracking.value).toBe(false);
     expect(isCameraReady.value).toBe(false);
   });
+
+  it("should spawn Web Worker and transfer ImageBitmap when Worker and createImageBitmap are available", async () => {
+    const mockStream = {
+      getTracks: vi.fn().mockReturnValue([{ stop: vi.fn() }]),
+    };
+    mockGetUserMedia.mockResolvedValue(mockStream);
+
+    const videoEl = {
+      play: vi.fn().mockResolvedValue(true),
+      srcObject: null,
+      muted: false,
+      readyState: 3,
+    } as any;
+
+    let postedMessages: any[] = [];
+    class MockWorker {
+      onmessage: ((e: any) => void) | null = null;
+      onerror: ((e: any) => void) | null = null;
+      postMessage = vi.fn((data: any) => {
+        postedMessages.push(data);
+      });
+      terminate = vi.fn();
+    }
+
+    const mockBitmap = { close: vi.fn() };
+    const mockCreateImageBitmap = vi.fn().mockResolvedValue(mockBitmap);
+
+    vi.stubGlobal("Worker", MockWorker);
+    vi.stubGlobal("createImageBitmap", mockCreateImageBitmap);
+
+    const { startTracking, stopTracking, faceData } = useFaceTracking();
+    const trackingPromise = startTracking(videoEl);
+    await vi.advanceTimersByTimeAsync(20);
+    await trackingPromise;
+
+    // Check that init was posted to the worker
+    expect(postedMessages.some(m => m.type === "init")).toBe(true);
+    // Check that createImageBitmap was called to transfer frame
+    expect(mockCreateImageBitmap).toHaveBeenCalledWith(videoEl);
+
+    stopTracking();
+    expect(faceData.value.isDetected).toBe(false);
+  });
 });
+

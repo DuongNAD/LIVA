@@ -8,6 +8,10 @@ const {
   animationSetMotionWeightMock,
   animationSetThinkingMock,
   animationUpdateMock,
+  animationGetStateMock,
+  animationGetMotionWeightMock,
+  animationGetStridePhaseMock,
+  animationGetThinkingWeightMock,
   animationClips,
   rendererInstances,
 } = vi.hoisted(() => ({
@@ -16,6 +20,10 @@ const {
   animationSetMotionWeightMock: vi.fn(),
   animationSetThinkingMock: vi.fn(),
   animationUpdateMock: vi.fn(),
+  animationGetStateMock: vi.fn(() => 'idle'),
+  animationGetMotionWeightMock: vi.fn(() => 0),
+  animationGetStridePhaseMock: vi.fn(() => 0),
+  animationGetThinkingWeightMock: vi.fn(() => 0),
   animationClips: new Set<string>(),
   rendererInstances: [] as Array<{ setPixelRatio: ReturnType<typeof vi.fn> }>,
 }));
@@ -27,9 +35,27 @@ vi.mock('../../src/composables/mixamoClipLoader', () => ({
 
 vi.mock('../../src/composables/useAvatarAnimation', () => ({
   useAvatarAnimation: () => ({
-    setState: animationSetStateMock,
-    setMotionWeight: animationSetMotionWeightMock,
-    getState: vi.fn(() => 'idle'),
+    setState: (st: string) => {
+      animationSetStateMock(st);
+      animationGetStateMock.mockReturnValue(st as any);
+    },
+    setMotionWeight: (w: number) => {
+      animationSetMotionWeightMock(w);
+      animationGetMotionWeightMock.mockReturnValue(w);
+    },
+    getState: animationGetStateMock,
+    getMotionWeight: animationGetMotionWeightMock,
+    getStridePhase: animationGetStridePhaseMock,
+    getThinkingWeight: animationGetThinkingWeightMock,
+    get motionWeight() {
+      return animationGetMotionWeightMock();
+    },
+    get stridePhase() {
+      return animationGetStridePhaseMock();
+    },
+    get thinkingWeight() {
+      return animationGetThinkingWeightMock();
+    },
     playGesture: vi.fn(),
     setInspecting: vi.fn(),
     setThinking: animationSetThinkingMock,
@@ -291,6 +317,35 @@ describe('use3DModel', () => {
     expect(animationSetThinkingMock).toHaveBeenNthCalledWith(2, false);
   });
 
+  it('triggers barge-in reaction: stops lip-sync, flashes surprised and zeros mouth', async () => {
+    const scene = new THREE.Object3D();
+    const setExpressionValueMock = vi.fn();
+    const vrmInstance = {
+      scene,
+      humanoid: {},
+      expressionManager: { setValue: setExpressionValueMock, getValue: vi.fn(), update: vi.fn() },
+      lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+      update: vi.fn(),
+    };
+    mockLoadGLTF.mockImplementation((_url, onLoad) => {
+      onLoad({ userData: { vrm: vrmInstance }, scene });
+    });
+
+    const model = use3DModel();
+    await model.loadModel('models/avatar.vrm');
+
+    model.onBargeIn();
+
+    expect(setExpressionValueMock).toHaveBeenCalledWith('surprised', 0.45);
+    expect(setExpressionValueMock).toHaveBeenCalledWith('aa', 0);
+    expect(setExpressionValueMock).toHaveBeenCalledWith('ih', 0);
+    expect(setExpressionValueMock).toHaveBeenCalledWith('ou', 0);
+    expect(setExpressionValueMock).toHaveBeenCalledWith('ee', 0);
+    expect(setExpressionValueMock).toHaveBeenCalledWith('oh', 0);
+
+    model.dispose();
+  });
+
   it('registers each successfully retargeted Mixamo clip and keeps missing states on fallback', async () => {
     const scene = new THREE.Object3D();
     const vrmInstance = { scene, humanoid: {}, update: vi.fn() };
@@ -545,4 +600,609 @@ describe('use3DModel', () => {
       model.dispose();
     });
   });
+
+  // ═══════════════════════════════════════════════════════
+  //  Rim Lighting (Slice A4) & 6-Step Humanoid Pose Pipeline (Slice A1)
+  // ═══════════════════════════════════════════════════════
+  describe('Rim Lighting & Humanoid Upper-Body Kinematics Pipeline', () => {
+    it('gắn rim light DirectionalLight ở vị trí rear-top chiếu về camera', () => {
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+
+      const dirLights = model.scene.children.filter(
+        (child): child is THREE.DirectionalLight => child instanceof THREE.DirectionalLight
+      );
+      // Main dirLight, fillLight, rimLight
+      expect(dirLights.length).toBeGreaterThanOrEqual(3);
+
+      const rimLight = dirLights.find((light) => light.position.z < 0 && light.position.y > 1.5);
+      expect(rimLight).toBeDefined();
+      expect(rimLight!.intensity).toBeGreaterThan(0);
+      expect(rimLight!.position.z).toBeLessThan(0); // phía sau avatar
+      expect(rimLight!.position.y).toBeGreaterThan(1.0); // phía trên đỉnh đầu avatar
+
+      model.dispose();
+    });
+
+    it('thực thi đúng quy trình 6 bước: motionWeight = 0 chỉ có idle breathing, motionWeight = 1 kết hợp additively', async () => {
+      const scene = new THREE.Object3D();
+      const bones = new Map<string, THREE.Object3D>();
+      const spineNode = new THREE.Object3D();
+      const headNode = new THREE.Object3D();
+      const neckNode = new THREE.Object3D();
+      const chestNode = new THREE.Object3D();
+      bones.set('spine', spineNode);
+      bones.set('head', headNode);
+      bones.set('neck', neckNode);
+      bones.set('chest', chestNode);
+
+      const getNormalizedBoneNode = vi.fn((name: string) => {
+        if (!bones.has(name)) {
+          const obj = new THREE.Object3D();
+          bones.set(name, obj);
+        }
+        return bones.get(name)!;
+      });
+
+      const vrmUpdateMock = vi.fn();
+      const vrmInstance = {
+        scene,
+        humanoid: { getNormalizedBoneNode },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vrmUpdateMock,
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      // ── Test 1: motionWeight = 0 (đứng yên) ──
+      animationGetMotionWeightMock.mockReturnValue(0);
+      animationGetStridePhaseMock.mockReturnValue(0);
+      animationGetStateMock.mockReturnValue('idle');
+
+      model.startRenderLoop();
+
+      // Tại motionWeight = 0: spine.rotation.y = 0 (không counter-rotation),
+      // spine.rotation.x chỉ có breathing oscillation
+      expect(spineNode.rotation.y).toBe(0);
+      expect(spineNode.rotation.x).toBeCloseTo(0, 4);
+
+      model.stopRenderLoop();
+
+      // ── Test 1b: motionWeight = 0, thinkingWeight = 1 (nghiêng đầu trước token đầu tiên) ──
+      animationGetThinkingWeightMock.mockReturnValue(1);
+      model.startRenderLoop();
+      expect(headNode.rotation.z).toBeCloseTo(0.10, 4);
+      expect(headNode.rotation.x).toBeGreaterThan(0.03);
+      model.stopRenderLoop();
+      animationGetThinkingWeightMock.mockReturnValue(0);
+
+      // ── Test 2: motionWeight = 1, state = 'walk' ──
+      animationGetMotionWeightMock.mockReturnValue(1);
+      const phase = Math.PI / 2; // sin(phase) = 1
+      animationGetStridePhaseMock.mockReturnValue(phase);
+      animationGetStateMock.mockReturnValue('walk');
+
+      model.startRenderLoop();
+
+      // Spine yaw counter-rotation: -Math.sin(π/2) * 0.08 * 1 = -0.08
+      expect(spineNode.rotation.y).toBeCloseTo(-0.08, 4);
+      // Spine pitch forward lean: 0.06 * 1 + breathCycle (additive)
+      expect(spineNode.rotation.x).toBeCloseTo(0.06, 2);
+
+      // Head pitch stabilization (-spine.rotation.x * 0.6 = -0.036) combined additively with OpenSimplex swayX
+      expect(headNode.rotation.x).toBeLessThan(0);
+      expect(headNode.rotation.y).toBeGreaterThan(0);
+
+      model.stopRenderLoop();
+
+      // ── Test 2b: Khi faceTrackingActive = true, micro-sway tắt và head.rotation.x thuần là stabilization ──
+      model.setFaceTrackingActive(true);
+      model.startRenderLoop();
+      expect(headNode.rotation.x).toBeCloseTo(-0.06 * 0.6, 4);
+      model.stopRenderLoop();
+      model.setFaceTrackingActive(false);
+
+      // ── Test 3: motionWeight = 1, state = 'run' ──
+      animationGetMotionWeightMock.mockReturnValue(1);
+      animationGetStridePhaseMock.mockReturnValue(0);
+      animationGetStateMock.mockReturnValue('run');
+
+      model.startRenderLoop();
+
+      // Run lean = 0.2 * 1 = 0.2 (+ breathCycle)
+      expect(spineNode.rotation.x).toBeCloseTo(0.2, 2);
+      expect(headNode.rotation.x).toBeLessThan(-0.08);
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it('reset rest pose trước mỗi khung hình ngăn tích luỹ rotation không kiểm soát', async () => {
+      const scene = new THREE.Object3D();
+      const bones = new Map<string, THREE.Object3D>();
+      const spineNode = new THREE.Object3D();
+      const headNode = new THREE.Object3D();
+      const neckNode = new THREE.Object3D();
+      const chestNode = new THREE.Object3D();
+      bones.set('spine', spineNode);
+      bones.set('head', headNode);
+      bones.set('neck', neckNode);
+      bones.set('chest', chestNode);
+
+      const getNormalizedBoneNode = vi.fn((name: string) => {
+        if (!bones.has(name)) {
+          const obj = new THREE.Object3D();
+          bones.set(name, obj);
+        }
+        return bones.get(name)!;
+      });
+
+      const vrmInstance = {
+        scene,
+        humanoid: { getNormalizedBoneNode },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      // Giả lập frame trước bị bẩn rotation x, y, z trên cả 4 xương
+      spineNode.rotation.set(1.5, 2.0, 2.5);
+      headNode.rotation.set(0.5, 0.6, 0.7);
+      neckNode.rotation.set(0.2, 0.3, 0.4);
+      chestNode.rotation.set(0.8, 0.9, 1.1);
+
+      animationGetMotionWeightMock.mockReturnValue(0);
+      animationGetStateMock.mockReturnValue('idle');
+
+      // Tắt sway và breathing để kiểm tra rest pose thuần
+      model.setFaceTrackingActive(true);
+      model.startRenderLoop();
+
+      // Rest pose reset đã xoá toàn bộ góc xoay về 0
+      expect(spineNode.rotation.y).toBe(0);
+      expect(spineNode.rotation.z).toBe(0);
+      expect(headNode.rotation.x).toBe(0);
+      expect(headNode.rotation.y).toBe(0);
+      expect(headNode.rotation.z).toBe(0);
+      expect(neckNode.rotation.x).toBe(0);
+      expect(neckNode.rotation.y).toBe(0);
+      expect(neckNode.rotation.z).toBe(0);
+      expect(chestNode.rotation.x).toBe(0);
+      expect(chestNode.rotation.y).toBe(0);
+      expect(chestNode.rotation.z).toBe(0);
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it('an toàn khi model VRM thiếu node spine hoặc head', async () => {
+      const scene = new THREE.Object3D();
+      const vrmInstance = {
+        scene,
+        humanoid: {
+          getNormalizedBoneNode: (_name: string) => null,
+        },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      animationGetMotionWeightMock.mockReturnValue(1);
+      animationGetStateMock.mockReturnValue('walk');
+      animationGetStridePhaseMock.mockReturnValue(Math.PI / 2);
+
+      expect(() => {
+        model.startRenderLoop();
+      }).not.toThrow();
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it('chuyển động thân trên không làm xê dịch root.position.y hoặc pelvis translation', async () => {
+      const scene = new THREE.Object3D();
+      const bones = new Map<string, THREE.Object3D>();
+      const spineNode = new THREE.Object3D();
+      const headNode = new THREE.Object3D();
+      const neckNode = new THREE.Object3D();
+      const chestNode = new THREE.Object3D();
+      bones.set('spine', spineNode);
+      bones.set('head', headNode);
+      bones.set('neck', neckNode);
+      bones.set('chest', chestNode);
+
+      const getNormalizedBoneNode = vi.fn((name: string) => {
+        if (!bones.has(name)) {
+          const obj = new THREE.Object3D();
+          bones.set(name, obj);
+        }
+        return bones.get(name)!;
+      });
+
+      const vrmInstance = {
+        scene,
+        humanoid: { getNormalizedBoneNode },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      model.setScreenPosition(0.5, 1.0);
+      const initialPos = model.getScreenPosition();
+
+      animationGetMotionWeightMock.mockReturnValue(1);
+      animationGetStateMock.mockReturnValue('run');
+      animationGetStridePhaseMock.mockReturnValue(Math.PI / 4);
+
+      model.startRenderLoop();
+
+      // Screen position không bị thay đổi bởi upper-body procedurals
+      expect(model.getScreenPosition()).toEqual(initialPos);
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it('gọi initRenderer() nhiều lần không sinh ra đèn trùng lặp trong scene', () => {
+      const model = use3DModel();
+      const canvas1 = document.createElement('canvas');
+      const canvas2 = document.createElement('canvas');
+
+      model.initRenderer(canvas1, 800, 600);
+      const initialLightCount = model.scene.children.filter(
+        (child) => child instanceof THREE.Light
+      ).length;
+
+      // Gọi lại initRenderer lần 2 (ví dụ khi canvas re-mount)
+      model.initRenderer(canvas2, 800, 600);
+      const secondLightCount = model.scene.children.filter(
+        (child) => child instanceof THREE.Light
+      ).length;
+
+      expect(secondLightCount).toBe(initialLightCount);
+
+      const dirLights = model.scene.children.filter(
+        (c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight
+      );
+      const rimLights = dirLights.filter((l) => l.position.z < 0 && l.position.y > 1.5);
+      expect(rimLights.length).toBe(1);
+
+      model.dispose();
+    });
+
+    it('updateLocomotionUpperBody miễn nhiễm với giá trị NaN hoặc không hợp lệ từ animation', async () => {
+      const scene = new THREE.Object3D();
+      const spineNode = new THREE.Object3D();
+      const headNode = new THREE.Object3D();
+      const bones = new Map<string, THREE.Object3D>([
+        ['spine', spineNode],
+        ['head', headNode],
+      ]);
+
+      const vrmInstance = {
+        scene,
+        humanoid: {
+          getNormalizedBoneNode: (name: string) => bones.get(name) || null,
+        },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      animationGetMotionWeightMock.mockReturnValue(NaN as any);
+      animationGetStridePhaseMock.mockReturnValue(NaN as any);
+
+      model.startRenderLoop();
+
+      expect(Number.isFinite(spineNode.rotation.x)).toBe(true);
+      expect(Number.isFinite(spineNode.rotation.y)).toBe(true);
+      expect(Number.isFinite(headNode.rotation.x)).toBe(true);
+      expect(Number.isFinite(headNode.rotation.y)).toBe(true);
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it('upper-body kinematics tỉ lệ thuận mượt mà với intermediate motionWeight (0.5, 0.25)', async () => {
+      const scene = new THREE.Object3D();
+      const spineNode = new THREE.Object3D();
+      const headNode = new THREE.Object3D();
+      const bones = new Map<string, THREE.Object3D>([
+        ['spine', spineNode],
+        ['head', headNode],
+      ]);
+
+      const vrmInstance = {
+        scene,
+        humanoid: {
+          getNormalizedBoneNode: (name: string) => bones.get(name) || null,
+        },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      const phase = Math.PI / 2;
+      animationGetStridePhaseMock.mockReturnValue(phase);
+      animationGetStateMock.mockReturnValue('walk');
+
+      // Tắt sway để đo độ thuần của kinematics
+      model.setFaceTrackingActive(true);
+
+      // Tại motionWeight = 0.5
+      animationGetMotionWeightMock.mockReturnValue(0.5);
+      model.startRenderLoop();
+
+      // counter-rotation: -sin(π/2) * 0.08 * 0.5 = -0.04
+      expect(spineNode.rotation.y).toBeCloseTo(-0.04, 4);
+      // lean: 0.06 * 0.5 = 0.03 (+ breathCycle)
+      expect(spineNode.rotation.x).toBeCloseTo(0.03, 2);
+      // head leveling: -0.03 * 0.6 = -0.018
+      expect(headNode.rotation.x).toBeCloseTo(-0.018, 4);
+
+      model.stopRenderLoop();
+
+      // Tại motionWeight = 0.25
+      animationGetMotionWeightMock.mockReturnValue(0.25);
+      model.startRenderLoop();
+
+      // counter-rotation: -sin(π/2) * 0.08 * 0.25 = -0.02
+      expect(spineNode.rotation.y).toBeCloseTo(-0.02, 4);
+      // lean: 0.06 * 0.25 = 0.015 (+ breathCycle)
+      expect(spineNode.rotation.x).toBeCloseTo(0.015, 2);
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it("khởi tạo contact shadow mesh dưới chân avatar và giải phóng sạch sẽ khi dispose", () => {
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+
+      // Tìm mesh đổ bóng trong scene hierarchy của avatarRoot
+      const avatarRoot = model.scene.children.find((c) => c instanceof THREE.Group);
+      expect(avatarRoot).toBeDefined();
+
+      const shadowMesh = avatarRoot?.children.find(
+        (c) => c instanceof THREE.Mesh && c.position.y === 0.002
+      );
+      expect(shadowMesh).toBeDefined();
+
+      model.dispose();
+      const shadowAfterDispose = avatarRoot?.children.find(
+        (c) => c instanceof THREE.Mesh && c.position.y === 0.002
+      );
+      expect(shadowAfterDispose).toBeUndefined();
+    });
+
+    it("lookAtScreenPoint tính toán góc yaw, pitch chuẩn và kẹp góc an toàn", () => {
+      const model = use3DModel();
+      // Mặc định avatarScreenX = 0.5, avatarScreenY = 1.0
+      // Nhìn điểm giữa (0.5, 0.5): dx = 0, dy = -0.5
+      const resCenter = model.lookAtScreenPoint(0.5, 0.5);
+      expect(resCenter.direction).toBe(1);
+      expect(resCenter.yaw).toBe(0);
+      expect(resCenter.pitch).toBe(-35); // -0.5 * 70 = -35 (clamped)
+
+      // Nhìn điểm lệch phải (0.7, 0.8): dx = 0.2, dy = -0.2
+      const resRight = model.lookAtScreenPoint(0.7, 0.8);
+      expect(resRight.direction).toBe(1);
+      expect(resRight.yaw).toBe(18); // 0.2 * 90 = 18
+      expect(resRight.pitch).toBe(-14); // -0.2 * 70 = -14
+
+      // Điểm cực biên vượt quá màn hình: yaw và pitch phải được kẹp an toàn [-45, 45] và [-35, 35]
+      const resExtreme = model.lookAtScreenPoint(1.5, -0.5);
+      expect(resExtreme.yaw).toBeLessThanOrEqual(45);
+      expect(resExtreme.yaw).toBeGreaterThanOrEqual(-45);
+      expect(resExtreme.pitch).toBeLessThanOrEqual(35);
+      expect(resExtreme.pitch).toBeGreaterThanOrEqual(-35);
+
+      model.dispose();
+    });
+
+    it("lookAtScreenPoint bù trừ toạ độ windowOffset chính xác khi chạy trên multi-monitor desktop", () => {
+      const model = use3DModel();
+      // Giả lập cửa sổ widget đặt tại offset (0.2, 0.1) trên màn hình desktop ảo
+      const windowOffset = { x: 0.2, y: 0.1 };
+      // Phần tử màn hình desktop tại (0.8, 0.6)
+      // Tọa độ mục tiêu hiệu dụng = (0.8 - 0.2, 0.6 - 0.1) = (0.6, 0.5)
+      // dx = 0.6 - 0.5 = 0.1, dy = 0.5 - 1.0 = -0.5
+      const res = model.lookAtScreenPoint(0.8, 0.6, windowOffset);
+      expect(res.direction).toBe(1);
+      expect(res.yaw).toBe(9); // 0.1 * 90 = 9
+      expect(res.pitch).toBe(-35); // -0.5 * 70 = -35 (clamped)
+
+      model.dispose();
+    });
+
+    it('setThinking kích hoạt animation và hướng ánh nhìn lên camera', () => {
+      const model = use3DModel();
+      model.setThinking(true);
+      expect(animationSetThinkingMock).toHaveBeenCalledWith(true);
+
+      model.setThinking(false);
+      expect(animationSetThinkingMock).toHaveBeenCalledWith(false);
+      model.dispose();
+    });
+
+    it('onBargeIn dập tắt lip sync và thiết lập biểu cảm ngạc nhiên phản xạ', async () => {
+      mockLoadGLTF.mockImplementation((_path, onLoad) => {
+        const scene = new THREE.Group();
+        const mockVRMInstance = {
+          scene,
+          humanoid: null,
+          update: vi.fn(),
+          expressionManager: {
+            setValue: vi.fn(),
+            getValue: vi.fn(),
+            update: vi.fn(),
+          },
+          lookAt: {
+            applier: {
+              lookAt: vi.fn(),
+              applyYawPitch: vi.fn(),
+            },
+          },
+        };
+        onLoad({ userData: { vrm: mockVRMInstance }, scene });
+      });
+
+      const model = use3DModel();
+      const canvas = document.createElement('canvas');
+      model.initRenderer(canvas);
+      await model.loadModel('models/avatar.vrm');
+
+      const vrmInst = model.vrm.value!;
+      const em = vrmInst.expressionManager;
+
+      model.onBargeIn();
+
+      expect(em.setValue).toHaveBeenCalledWith('surprised', 0.45);
+      expect(em.setValue).toHaveBeenCalledWith('aa', 0);
+      expect(em.setValue).toHaveBeenCalledWith('oh', 0);
+      expect(em.setValue).toHaveBeenCalledWith('ee', 0);
+      expect(em.setValue).toHaveBeenCalledWith('ih', 0);
+      expect(em.setValue).toHaveBeenCalledWith('ou', 0);
+
+      model.dispose();
+    });
+  });
+
+  describe('Fixational Eye Micro-Saccades Integration (Step 5 Pose Pipeline)', () => {
+    it('tích hợp vi dao động mắt cộng dồn vào applyYawPitch mà không làm trôi base gaze', async () => {
+      const scene = new THREE.Object3D();
+      const applyYawPitchMock = vi.fn();
+      const vrmInstance = {
+        scene,
+        humanoid: null,
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: applyYawPitchMock } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      // 1. Trạng thái ban đầu: offset bằng 0
+      expect(model.getSaccadeOffset()).toEqual({ yaw: 0, pitch: 0 });
+
+      // 2. Kích hoạt bước nhảy saccade có chủ đích (+0.60°, -0.35°)
+      model.triggerSaccade(0.60, -0.35);
+
+      model.startRenderLoop();
+
+      expect(applyYawPitchMock).toHaveBeenCalled();
+      const lastCall = applyYawPitchMock.mock.calls[applyYawPitchMock.mock.calls.length - 1];
+      const appliedYaw = lastCall[0];
+      const appliedPitch = lastCall[1];
+
+      // Biên độ không vượt trần ±0.85°
+      expect(Math.abs(appliedYaw)).toBeLessThanOrEqual(0.85);
+      expect(Math.abs(appliedPitch)).toBeLessThanOrEqual(0.85);
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it('bảo toàn tính độc lập của xương thân trên, không làm biến đổi spine hay head rotation.z', async () => {
+      const scene = new THREE.Object3D();
+      const spineNode = new THREE.Object3D();
+      const headNode = new THREE.Object3D();
+      const bones = new Map<string, THREE.Object3D>([
+        ['spine', spineNode],
+        ['head', headNode],
+      ]);
+
+      const vrmInstance = {
+        scene,
+        humanoid: {
+          getNormalizedBoneNode: (name: string) => bones.get(name) ?? null,
+        },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      // Kích hoạt chu kỳ saccade
+      model.triggerSaccade(0.80, 0.50);
+      model.startRenderLoop();
+
+      // Khẳng định spine và head rotation.z không bị ảnh hưởng bởi saccade
+      expect(spineNode.rotation.z).toBe(0);
+      expect(headNode.rotation.z).toBe(0);
+
+      model.stopRenderLoop();
+      model.dispose();
+    });
+
+    it('setSaccadesEnabled(false) triệt tiêu hoàn toàn vi dao động mắt về 0', async () => {
+      const model = use3DModel();
+      model.triggerSaccade(0.70, -0.40);
+      model.setSaccadesEnabled(false);
+
+      expect(model.getSaccadeOffset()).toEqual({ yaw: 0, pitch: 0 });
+      model.dispose();
+    });
+  });
 });
+

@@ -21,6 +21,12 @@ import {
   easeInQuad,
   randomBlinkInterval,
   weightedRandom,
+  MAX_SACCADE_AMPLITUDE_DEG,
+  SACCADE_JUMP_DURATION_S,
+  SACCADE_DRIFT_HALF_LIFE_S,
+  randomSaccadeInterval,
+  randomSaccadeDisplacement,
+  smoothstep,
 } from "../../src/utils/avatarMath";
 
 describe("avatarMath — lerp", () => {
@@ -153,5 +159,49 @@ describe("avatarMath — weightedRandom", () => {
     // Không có câu trả lời "đúng" cho đầu vào này, nhưng nó tất định — đáng
     // khoá lại để một lần đổi sang `r < 0` không âm thầm làm lệch phân phối.
     expect(weightedRandom(["a", "b", "c"], [0, 0, 0])).toBe("a");
+  });
+});
+
+describe("avatarMath — Fixational Eye Micro-Saccades Math", () => {
+  it("randomSaccadeInterval tuân thủ nghiêm ngặt dải tần số 2-4 Hz (0.25s - 0.50s)", () => {
+    const intervals: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      const interval = randomSaccadeInterval();
+      expect(interval).toBeGreaterThanOrEqual(0.25);
+      expect(interval).toBeLessThanOrEqual(0.50);
+      intervals.push(interval);
+    }
+    // Giá trị trung bình phải nằm quanh 0.28s - 0.38s (tương đương ~3 Hz)
+    const avg = intervals.reduce((s, v) => s + v, 0) / intervals.length;
+    expect(avg).toBeGreaterThanOrEqual(0.28);
+    expect(avg).toBeLessThanOrEqual(0.38);
+  });
+
+  it("randomSaccadeDisplacement kẹp chặt biên độ trong phạm vi ±0.85° (±0.0148 rad)", () => {
+    for (let i = 0; i < 200; i++) {
+      const disp = randomSaccadeDisplacement(MAX_SACCADE_AMPLITUDE_DEG);
+      expect(Math.abs(disp.yaw)).toBeLessThanOrEqual(0.85);
+      expect(Math.abs(disp.pitch)).toBeLessThanOrEqual(0.85 * 0.70 + 0.001);
+      // Khoảng cách Euclidean không vượt quá bán kính tối đa
+      const radius = Math.sqrt(disp.yaw * disp.yaw + disp.pitch * disp.pitch);
+      expect(radius).toBeLessThanOrEqual(0.8501);
+      // Kiểm tra giá trị radian tương ứng: 0.85° ≈ 0.014835 rad
+      const rad = radius * (Math.PI / 180);
+      expect(rad).toBeLessThanOrEqual(0.01484);
+    }
+  });
+
+  it("smoothstep tạo đường cong nội suy Hermite mượt mà với vận tốc đầu cuối bằng 0", () => {
+    expect(smoothstep(0, 1, 0)).toBe(0);
+    expect(smoothstep(0, 1, 1)).toBe(1);
+    expect(smoothstep(0, 1, 0.5)).toBe(0.5); // 0.25 * (3 - 1) = 0.5
+    // Đạo hàm d/dt(3t^2 - 2t^3) = 6t(1 - t) > 0 với t trong (0, 1)
+    expect(smoothstep(0, 1, 0.1)).toBeCloseTo(0.028, 3);
+    expect(smoothstep(0, 1, 0.9)).toBeCloseTo(0.972, 3);
+  });
+
+  it("hằng số SACCADE_JUMP_DURATION_S và SACCADE_DRIFT_HALF_LIFE_S đạt chuẩn sinh học", () => {
+    expect(SACCADE_JUMP_DURATION_S).toBe(0.025); // 25ms
+    expect(SACCADE_DRIFT_HALF_LIFE_S).toBe(0.20); // 200ms
   });
 });

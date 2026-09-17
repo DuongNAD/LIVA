@@ -11,7 +11,7 @@ import {
 } from "./mixamoRetarget";
 import type { AvatarClipState, ControlledBone } from "./useAvatarAnimation";
 
-export const DEFAULT_MIXAMO_CLIP_PATHS: Record<AvatarClipState, string> = {
+export const DEFAULT_MIXAMO_CLIP_PATHS: Partial<Record<AvatarClipState, string>> = {
   idle: "/animations/mixamo/idle.fbx",
   walk: "/animations/mixamo/walk.fbx",
   run: "/animations/mixamo/run.fbx",
@@ -83,7 +83,7 @@ export function loadMixamoClip(path: string, targetVrm: VRM): Promise<Retargeted
 
 export async function loadMixamoAnimationSet(
   targetVrm: VRM,
-  paths: Record<AvatarClipState, string> = DEFAULT_MIXAMO_CLIP_PATHS,
+  paths: Partial<Record<AvatarClipState, string>> = DEFAULT_MIXAMO_CLIP_PATHS,
   loader: (path: string, vrm: VRM) => Promise<RetargetedClip> = loadMixamoClip,
 ): Promise<{
   clips: Partial<Record<AvatarClipState, RetargetedClip>>;

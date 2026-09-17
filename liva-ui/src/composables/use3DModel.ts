@@ -25,8 +25,14 @@ import {
   lerp,
   randomBlinkInterval,
   weightedRandom,
+  MAX_SACCADE_AMPLITUDE_DEG,
+  SACCADE_JUMP_DURATION_S,
+  SACCADE_DRIFT_HALF_LIFE_S,
+  randomSaccadeInterval,
+  randomSaccadeDisplacement,
 } from '../utils/avatarMath';
 import { logger } from '../utils/logger';
+import { currentVisemeFromClock } from '../utils/phonemeLipSync';
 
 // ═══════════════════════════════════════════
 //  OpenSimplex 2D Noise (inline, zero-dep)
@@ -143,7 +149,7 @@ export interface Use3DModelReturn {
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer | null;
   loadModel: (path: string, onProgress?: (pct: number) => void) => Promise<void>;
-  loadAnimationClips: (paths?: Record<AvatarClipState, string>) => Promise<{
+  loadAnimationClips: (paths?: Partial<Record<AvatarClipState, string>>) => Promise<{
     loaded: AvatarClipState[];
     failures: Partial<Record<AvatarClipState, string>>;
   }>;
@@ -154,12 +160,14 @@ export interface Use3DModelReturn {
   setScale: (scale: number) => void;
   setFacing: (direction: 1 | -1, turned: boolean) => void;
   setLocomotionState: (state: LocomotionState, motionWeight?: number) => void;
+  setDangleState: (active: boolean, velocityX?: number) => void;
   playGesture: (name: 'wave' | 'nod' | 'shake') => void;
   setInspecting: (active: boolean) => void;
   setThinking: (active: boolean) => void;
   lookAtScreenPoint: (
     nx: number,
-    ny: number
+    ny: number,
+    windowOffset?: { x: number; y: number }
   ) => {
     direction: 1 | -1;
     yaw: number;
@@ -176,10 +184,14 @@ export interface Use3DModelReturn {
   /** Read lip-sync from an analyser owned and wired by the playback composable. */
   startAudioDrivenLipSync: (analyser: AnalyserNode) => void;
   stopAudioDrivenLipSync: () => void;
+  onBargeIn: () => void;
   triggerMotion: () => void;
   updateLookAt: (yaw: number, pitch: number) => void;
   updateExpressions: (expressions: FaceExpressions) => void;
   setFaceTrackingActive: (active: boolean) => void;
+  getSaccadeOffset: () => { yaw: number; pitch: number };
+  setSaccadesEnabled: (enabled: boolean) => void;
+  triggerSaccade: (targetYaw?: number, targetPitch?: number) => void;
   dispose: () => void;
 }
 
@@ -226,6 +238,29 @@ function deepDispose(root: THREE.Object3D) {
   });
 }
 
+/** Tạo texture gradient tròn mềm để làm bóng đổ chân thực dưới chân avatar trên desktop */
+function createRadialShadowTexture(): THREE.Texture {
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx && typeof ctx.createRadialGradient === 'function') {
+      const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      gradient.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+      gradient.addColorStop(0.35, 'rgba(0, 0, 0, 0.26)');
+      gradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.06)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 128, 128);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
+    }
+  }
+  return new THREE.Texture();
+}
+
 export function use3DModel(): Use3DModelReturn {
   const vrm = shallowRef<VRM | null>(null);
   const currentModelFormat = ref<ModelFormat>(null);
@@ -235,6 +270,24 @@ export function use3DModel(): Use3DModelReturn {
   let animFrameId: number | null = null;
   const clock = new THREE.Clock();
   let frameUpdate: ((delta: number) => void) | null = null;
+
+  // Contact Shadow Mesh (Soft radial shadow blob beneath the feet)
+  let contactShadowMesh: THREE.Mesh | null = null;
+
+  function ensureContactShadow() {
+    if (contactShadowMesh) return;
+    const shadowGeo = new THREE.PlaneGeometry(0.85, 0.85);
+    const shadowMat = new THREE.MeshBasicMaterial({
+      map: createRadialShadowTexture(),
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+    });
+    contactShadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+    contactShadowMesh.rotation.x = -Math.PI / 2;
+    contactShadowMesh.position.set(0, 0.002, 0);
+    avatarRoot.add(contactShadowMesh);
+  }
 
   const MAX_RENDER_PIXELS = 1920 * 1080;
 
@@ -276,6 +329,10 @@ export function use3DModel(): Use3DModelReturn {
   let facingTarget = 0;
   let facingCurrent = 0;
 
+  // Trạng thái bị xách gáy (scruff grab dangle)
+  let dangleActive = false;
+  let dangleVelocityX = 0;
+
   // Tư thế thân thể (đi/chạy/nhảy/vẫy) — xem useAvatarAnimation.ts
   const animation: AvatarAnimationApi = useAvatarAnimation();
 
@@ -283,6 +340,7 @@ export function use3DModel(): Use3DModelReturn {
   let fbxModel: THREE.Group | null = null;
   let mixer: THREE.AnimationMixer | null = null;
   let debugProbe: THREE.Mesh | null = null;
+  let lightsInitialized = false;
 
   // Blink state
   let blinkTimer = 0;
@@ -321,6 +379,19 @@ export function use3DModel(): Use3DModelReturn {
   let currentPitch = 0;
   let targetYaw = 0;
   let targetPitch = 0;
+
+  // Fixational eye micro-saccades state (2-4 Hz, ±0.85°)
+  let saccadesEnabled = true;
+  let saccadeTimer = 0;
+  let nextSaccadeInterval = randomSaccadeInterval();
+  let saccadePhase: 'jump' | 'drift' = 'drift';
+  let saccadePhaseTimer = 0;
+  let saccadeStartX = 0;
+  let saccadeStartY = 0;
+  let saccadeTargetX = 0;
+  let saccadeTargetY = 0;
+  let saccadeYaw = 0;
+  let saccadePitch = 0;
 
   // Face tracking state — when active, disables auto-blink (real blinks take over)
   let faceTrackingActive = false;
@@ -374,21 +445,31 @@ export function use3DModel(): Use3DModelReturn {
     camera.updateProjectionMatrix();
 
     // Lighting — Enhanced for BOTH MToon (VRM) and PBR (FBX)
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambientLight);
+    if (!lightsInitialized) {
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-    scene.add(hemiLight);
+      const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+      scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(1, 1.5, 1);
-    scene.add(dirLight);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+      dirLight.position.set(1, 1.5, 1);
+      scene.add(dirLight);
 
-    // Subtle fill light from below (prevents dark underside on FBX PBR)
-    const fillLight = new THREE.DirectionalLight(0x8888ff, 0.4);
-    fillLight.position.set(-1, -0.5, 0.5);
-    scene.add(fillLight);
+      // Subtle fill light from below (prevents dark underside on FBX PBR)
+      const fillLight = new THREE.DirectionalLight(0x8888ff, 0.4);
+      fillLight.position.set(-1, -0.5, 0.5);
+      scene.add(fillLight);
 
+      // Subtle rim light from rear-top pointing toward camera (silhouettes avatar against desktop)
+      const rimLight = new THREE.DirectionalLight(0xffffff, 0.6);
+      rimLight.position.set(0, 2.5, -2.0);
+      scene.add(rimLight);
+
+      lightsInitialized = true;
+    }
+
+    ensureContactShadow();
     applyScreenPosition();
   }
 
@@ -435,9 +516,15 @@ export function use3DModel(): Use3DModelReturn {
     facingTarget = turned ? direction * MAX_TURN : 0;
   }
 
-  function lookAtScreenPoint(nx: number, ny: number) {
-    const targetX = Math.min(Math.max(nx, 0), 1);
-    const targetY = Math.min(Math.max(ny, 0), 1);
+  function lookAtScreenPoint(
+    nx: number,
+    ny: number,
+    windowOffset?: { x: number; y: number }
+  ) {
+    const offsetX = windowOffset?.x ?? 0;
+    const offsetY = windowOffset?.y ?? 0;
+    const targetX = windowOffset ? (nx - offsetX) : Math.min(Math.max(nx, 0), 1);
+    const targetY = windowOffset ? (ny - offsetY) : Math.min(Math.max(ny, 0), 1);
     const dx = targetX - avatarScreenX;
     const dy = targetY - avatarScreenY;
     const direction: 1 | -1 = dx >= 0 ? 1 : -1;
@@ -827,24 +914,39 @@ export function use3DModel(): Use3DModelReturn {
 
       frameUpdate?.(delta);
 
-      // Quay người mượt về hướng đang đi
-      if (facingCurrent !== facingTarget) {
+      // Quay người mượt về hướng đang đi + nghiêng thân ly tâm (turn banking / pendulum dangle)
+      if (dangleActive) {
+        // Con lắc quán tính khi bị xách gáy: thân đung đưa tự nhiên theo gia tốc rê chuột
+        const targetBank = Math.max(-0.35, Math.min(0.35, -dangleVelocityX * 0.0006));
+        avatarRoot.rotation.z = lerp(avatarRoot.rotation.z, targetBank, 1 - Math.pow(0.005, delta));
+      } else if (facingCurrent !== facingTarget) {
         const turnFactor = 1 - Math.pow(0.005, delta);
+        const prevFacing = facingCurrent;
         facingCurrent = lerp(facingCurrent, facingTarget, turnFactor);
         if (Math.abs(facingCurrent - facingTarget) < 0.001) facingCurrent = facingTarget;
         avatarRoot.rotation.y = facingCurrent;
+        // Dynamic turn banking: nghiêng nhẹ thân theo lực ly tâm khi xoay người đổi hướng
+        const turnVelocity = (facingCurrent - prevFacing) / (delta || 0.016);
+        const targetBank = Math.max(-0.08, Math.min(0.08, -turnVelocity * 0.015));
+        avatarRoot.rotation.z = lerp(avatarRoot.rotation.z, targetBank, turnFactor);
+      } else {
+        avatarRoot.rotation.z = lerp(avatarRoot.rotation.z, 0, 1 - Math.pow(0.01, delta));
       }
 
       if (vrm.value) {
-        // Tư thế thân thể — phải chạy TRƯỚC vrm.update() để spring bone (tóc,
-        // váy) phản ứng với chuyển động của khung xương trong chính khung hình
-        // này, thay vì trễ một nhịp.
+        // ── 1. Base pose evaluation (11-bone retargeted clip + base procedural) ──
         animation.update(vrm.value, delta);
 
-        // Procedural idle animation (VRM only)
+        // ── 2. Rest pose reset for unmapped upper-body nodes (spine, head, neck, chest) ──
+        resetUpperBodyRestPose(vrm.value);
+
+        // ── 3. Locomotion upper-body procedural layer (active when motionWeight > 0) ──
+        updateLocomotionUpperBody(vrm.value);
+
+        // ── 4. Idle procedural layer (breathing sine oscillation + OpenSimplex micro-sway, additive) ──
         updateIdle(delta);
 
-        // Organic auto-blink (only when face tracking is OFF)
+        // ── 5. Gaze (lookAt), blink, and lip-sync facial blend shapes ──
         if (!faceTrackingActive) {
           updateBlink(delta);
         }
@@ -856,13 +958,19 @@ export function use3DModel(): Use3DModelReturn {
           updateProceduralLipSync(delta);
         }
 
+        // Fixational eye micro-saccades (2-4 Hz, ±0.85°)
+        updateEyeSaccades(delta);
+
         // Spring-damped lookAt
         updateSpringLookAt(delta);
 
         // Micro-expressions
         updateMicroExpressions(delta);
 
-        // Keep spring physics stable without slowing the pose/locomotion timeline.
+        // Barge-in physical feedback (zero-mouth clamp + surprised expression flash)
+        updateBargeIn(delta);
+
+        // ── 6. VRM secondary animation / spring bone physics update ──
         const physicsSteps = Math.max(1, Math.ceil(delta / (1 / 60)));
         const physicsDelta = delta / physicsSteps;
         for (let step = 0; step < physicsSteps; step += 1) {
@@ -894,21 +1002,94 @@ export function use3DModel(): Use3DModelReturn {
   }
 
   // ═══════════════════════════════════════════
-  //  Procedural Idle — Breathing + Micro-Sway
+  //  Upper-Body Humanoid Pose Layers (Slice A1)
+  // ═══════════════════════════════════════════
+  const UPPER_BODY_BONES = ['spine', 'chest', 'neck', 'head'] as const;
+
+  /** Đặt lại tư thế chuẩn cho các xương thân trên chưa được clip/animation bao phủ */
+  function resetUpperBodyRestPose(vrmInstance: VRM) {
+    const humanoid = vrmInstance.humanoid;
+    if (!humanoid) return;
+    for (const bone of UPPER_BODY_BONES) {
+      const node = humanoid.getNormalizedBoneNode(bone);
+      if (node) {
+        node.rotation.x = 0;
+        node.rotation.y = 0;
+        node.rotation.z = 0;
+      }
+    }
+  }
+
+  /** Lớp chuyển động thân trên khi di chuyển (spine counter-rotation, forward lean, head leveling) */
+  function updateLocomotionUpperBody(vrmInstance: VRM) {
+    const humanoid = vrmInstance.humanoid;
+    if (!humanoid) return;
+
+    const rawMotionWeight =
+      typeof animation.getMotionWeight === 'function'
+        ? animation.getMotionWeight()
+        : (animation.motionWeight ?? 0);
+    const motionWeight =
+      Number.isFinite(rawMotionWeight) && rawMotionWeight > 0
+        ? Math.min(1, rawMotionWeight)
+        : 0;
+    if (motionWeight <= 0) return;
+
+    const rawStridePhase =
+      typeof animation.getStridePhase === 'function'
+        ? animation.getStridePhase()
+        : (animation.stridePhase ?? 0);
+    const stridePhase = Number.isFinite(rawStridePhase) ? rawStridePhase : 0;
+    const currentState = animation.getState();
+    const isRunning = currentState === 'run';
+    const isDangling = currentState === 'dangle';
+
+    const spine = humanoid.getNormalizedBoneNode('spine');
+    if (spine) {
+      if (isDangling) {
+        // Spine hơi uốn cong tự nhiên khi bị xách gáy
+        spine.rotation.x += 0.16;
+      } else {
+        // Spine yaw counter-rotation: -Math.sin(stridePhase) * 0.08 * motionWeight
+        spine.rotation.y += -Math.sin(stridePhase) * 0.08 * motionWeight;
+        // Spine pitch forward lean: (isRunning ? 0.2 : 0.06) * motionWeight
+        spine.rotation.x += (isRunning ? 0.2 : 0.06) * motionWeight;
+      }
+    }
+
+    const head = humanoid.getNormalizedBoneNode('head');
+    if (head) {
+      if (isDangling) {
+        // Đầu hơi chúc xuống ngơ ngác khi bị nhấc gáy
+        head.rotation.x -= 0.12;
+      } else {
+        if (spine) {
+          // Head pitch stabilization: levels gaze horizon during forward lean
+          head.rotation.x += -spine.rotation.x * 0.6;
+        }
+        // Head yaw subtle balance: Math.sin(stridePhase * 0.5) * 0.03 * motionWeight
+        head.rotation.y += Math.sin(stridePhase * 0.5) * 0.03 * motionWeight;
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════
+  //  Procedural Idle — Breathing + Micro-Sway (Additive Offsets)
   // ═══════════════════════════════════════════
   function updateIdle(delta: number) {
     if (!vrm.value) return;
-    idleTime += delta;
+    const safeDelta = Number.isFinite(delta) && delta > 0 ? delta : 0;
+    idleTime += safeDelta;
 
-    // 1. Breathing — subtle spine/chest oscillation
+    // 1. Breathing — subtle spine/chest oscillation (additive offset)
     const spine = vrm.value.humanoid?.getNormalizedBoneNode('spine');
     if (spine) {
       // Slow sine wave: 4-second cycle (15 breaths/min, natural resting rate)
       const breathCycle = Math.sin(idleTime * Math.PI * 0.5) * 0.008;
-      spine.rotation.x = breathCycle;
+      spine.rotation.x += breathCycle;
     }
 
-    // 2. OpenSimplex head micro-sway (natural, never repeats)
+    // 2. OpenSimplex head micro-sway (natural, never repeats, additive offset)
     if (!faceTrackingActive) {
       const head = vrm.value.humanoid?.getNormalizedBoneNode('head');
       if (head) {
@@ -917,8 +1098,23 @@ export function use3DModel(): Use3DModelReturn {
           simplex2D(idleTime * 0.15, 0) * 0.005 + simplex2D(idleTime * 0.4, 1.7) * 0.002;
         const swayY =
           simplex2D(0, idleTime * 0.12) * 0.004 + simplex2D(2.3, idleTime * 0.35) * 0.002;
-        head.rotation.x = swayX;
-        head.rotation.y = swayY;
+        head.rotation.x += swayX;
+        head.rotation.y += swayY;
+
+        // 3. Pre-TTFT Anticipation: Nghiêng đầu nhẹ và chú ý lắng nghe khi đang suy nghĩ
+        const rawThinkingWeight =
+          typeof animation.getThinkingWeight === 'function'
+            ? animation.getThinkingWeight()
+            : (animation.thinkingWeight ?? 0);
+        const thinkingWeight =
+          Number.isFinite(rawThinkingWeight) && rawThinkingWeight > 0
+            ? Math.min(1, rawThinkingWeight)
+            : 0;
+        if (thinkingWeight > 0) {
+          head.rotation.z += 0.10 * thinkingWeight; // Nghiêng đầu sang phải ~5.7°
+          head.rotation.x += 0.04 * thinkingWeight; // Hơi ngước nhẹ ~2.3°
+          head.rotation.y += -0.03 * thinkingWeight; // Xoay nhẹ góc tò mò
+        }
       }
     }
   }
@@ -1127,13 +1323,23 @@ export function use3DModel(): Use3DModelReturn {
   /**
    * Per-frame audio lip-sync update — called from the render loop.
    * Reads frequency data, computes RMS per band, maps to VRM expressions.
+   *
+   * VC-8: khi có timeline phoneme đang hiệu lực (`OP_VISME` từ core) thì RMS
+   * chỉ giữ vai trò BIÊN ĐỘ — HÌNH miệng do phoneme quyết: nhóm môi (m/b/p/f/v)
+   * ép gần khép dù âm vẫn to (chỗ RMS không bao giờ phân biệt được), nguyên âm
+   * tăng biểu cảm tương ứng và hạ các cái còn lại. Không có timeline ⇒ hành vi
+   * RMS thuần cũ giữ nguyên.
    */
   function updateAudioLipSync() {
+    if (bargeInTimer > 0) return;
     if (!audioAnalyserNode || !audioFreqData || !vrm.value?.expressionManager) return;
     const em = vrm.value.expressionManager;
 
     // Read current frequency spectrum
     audioAnalyserNode.getByteFrequencyData(audioFreqData as unknown as Uint8Array<ArrayBuffer>);
+
+    const viseme = currentVisemeFromClock();
+    const values: number[] = new Array(BAND_EXPRESSIONS.length).fill(0);
 
     for (let band = 0; band < BAND_RANGES.length; band++) {
       const [startBin, endBin] = BAND_RANGES[band];
@@ -1154,8 +1360,25 @@ export function use3DModel(): Use3DModelReturn {
       smoothedBandRMS[band] = lerp(smoothedBandRMS[band], rms, RMS_SMOOTH_FACTOR);
 
       // Map to VRM expression with sensitivity scaling, clamped to [0, 1]
-      const value = Math.min(smoothedBandRMS[band] * BAND_SENSITIVITY[band], 1.0);
-      em.setValue(BAND_EXPRESSIONS[band], value);
+      values[band] = Math.min(smoothedBandRMS[band] * BAND_SENSITIVITY[band], 1.0);
+    }
+
+    if (viseme !== null) {
+      const matchedBand = BAND_EXPRESSIONS.indexOf(viseme);
+      for (let band = 0; band < values.length; band++) {
+        if (viseme === 'nil') {
+          // Âm môi/không phát — miệng gần khép bất kể năng lượng.
+          values[band] *= 0.12;
+        } else if (band === matchedBand) {
+          values[band] = Math.min(values[band] * 1.35 + 0.25, 1.0);
+        } else {
+          values[band] *= 0.55;
+        }
+      }
+    }
+
+    for (let band = 0; band < BAND_EXPRESSIONS.length; band++) {
+      em.setValue(BAND_EXPRESSIONS[band], values[band]);
     }
   }
 
@@ -1182,10 +1405,53 @@ export function use3DModel(): Use3DModelReturn {
   }
 
   // ═══════════════════════════════════════════
+  //  Barge-In Physical Feedback
+  // ═══════════════════════════════════════════
+  let bargeInTimer = 0;
+  const BARGE_IN_DURATION_S = 0.35;
+
+  /**
+   * Phản xạ thân thể khi người dùng cướp lời (Barge-in):
+   * Lập tức ngậm miệng (zero visemes), quay mắt nhìn thẳng người dùng,
+   * và nhướng mắt ngạc nhiên/chú ý trong ~350ms.
+   */
+  function onBargeIn() {
+    stopAudioDrivenLipSync();
+    stopLipSync();
+    bargeInTimer = BARGE_IN_DURATION_S;
+    updateLookAt(0, 0);
+    if (vrm.value?.expressionManager) {
+      const em = vrm.value.expressionManager;
+      em.setValue('surprised', 0.45);
+      for (const expr of BAND_EXPRESSIONS) {
+        em.setValue(expr, 0);
+      }
+    }
+  }
+
+  function updateBargeIn(delta: number) {
+    if (bargeInTimer <= 0) return;
+    bargeInTimer -= delta;
+    if (vrm.value?.expressionManager) {
+      const em = vrm.value.expressionManager;
+      for (const expr of BAND_EXPRESSIONS) {
+        em.setValue(expr, 0);
+      }
+      if (bargeInTimer <= 0) {
+        bargeInTimer = 0;
+        em.setValue('surprised', 0);
+      } else {
+        const progress = Math.max(0, bargeInTimer / BARGE_IN_DURATION_S);
+        em.setValue('surprised', 0.45 * progress);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════
   //  Micro-Expressions (Idle Personality)
   // ═══════════════════════════════════════════
   function updateMicroExpressions(delta: number) {
-    if (!vrm.value?.expressionManager || faceTrackingActive || lipSyncActive) return;
+    if (!vrm.value?.expressionManager || faceTrackingActive || lipSyncActive || bargeInTimer > 0) return;
     const em = vrm.value.expressionManager;
 
     microExprTimer += delta;
@@ -1311,22 +1577,77 @@ export function use3DModel(): Use3DModelReturn {
   }
 
   /**
+   * Procedural fixational eye micro-saccades (2-4 Hz, ±0.85° / ±0.0148 rad).
+   * Ballistic quick jump (~20-30ms) followed by fixational drift back toward primary gaze.
+   * Anchored to base gaze vector with zero cumulative drift.
+   */
+  function updateEyeSaccades(delta: number) {
+    if (!saccadesEnabled) {
+      saccadeYaw = 0;
+      saccadePitch = 0;
+      return;
+    }
+
+    const safeDelta = Number.isFinite(delta) && delta > 0 ? Math.min(delta, 0.1) : 0;
+    if (safeDelta === 0) return;
+
+    saccadeTimer += safeDelta;
+    saccadePhaseTimer += safeDelta;
+
+    if (saccadeTimer >= nextSaccadeInterval) {
+      saccadeTimer = 0;
+      nextSaccadeInterval = randomSaccadeInterval();
+      saccadePhase = 'jump';
+      saccadePhaseTimer = 0;
+      saccadeStartX = saccadeYaw;
+      saccadeStartY = saccadePitch;
+      const disp = randomSaccadeDisplacement(MAX_SACCADE_AMPLITUDE_DEG);
+      saccadeTargetX = disp.yaw;
+      saccadeTargetY = disp.pitch;
+    }
+
+    if (saccadePhase === 'jump') {
+      const progress = Math.min(saccadePhaseTimer / SACCADE_JUMP_DURATION_S, 1.0);
+      const ease = progress * progress * (3 - 2 * progress);
+      saccadeYaw = saccadeStartX + (saccadeTargetX - saccadeStartX) * ease;
+      saccadePitch = saccadeStartY + (saccadeTargetY - saccadeStartY) * ease;
+
+      if (progress >= 1.0) {
+        saccadePhase = 'drift';
+        saccadePhaseTimer = 0;
+        saccadeYaw = saccadeTargetX;
+        saccadePitch = saccadeTargetY;
+      }
+    } else {
+      const driftDecay = Math.exp(-safeDelta / SACCADE_DRIFT_HALF_LIFE_S);
+      saccadeYaw *= driftDecay;
+      saccadePitch *= driftDecay;
+      if (Math.abs(saccadeYaw) < 0.0001) saccadeYaw = 0;
+      if (Math.abs(saccadePitch) < 0.0001) saccadePitch = 0;
+    }
+  }
+
+  /**
    * Spring-damped LookAt update — called every frame.
    * Prevents robotic snap-to-target by exponentially decaying toward target.
    */
   function updateSpringLookAt(delta: number) {
     if (!vrm.value?.lookAt) return;
 
+    const safeDelta = Number.isFinite(delta) && delta > 0 ? delta : 0;
     // Exponential decay spring: 90% toward target per 100ms
     // This creates a smooth, natural "drag" feeling
-    const springFactor = 1 - Math.pow(0.001, delta); // ~0.1-0.15 per frame at 60fps
+    const springFactor = 1 - Math.pow(0.001, safeDelta); // ~0.1-0.15 per frame at 60fps
 
     currentYaw = lerp(currentYaw, targetYaw, springFactor);
     currentPitch = lerp(currentPitch, targetPitch, springFactor);
 
     const la = vrm.value.lookAt;
     if (la.applier) {
-      la.applier.applyYawPitch(currentYaw, currentPitch);
+      // Additive fixational micro-saccades on top of primary gaze vector
+      const finalYaw = currentYaw + saccadeYaw;
+      const finalPitch = currentPitch + saccadePitch;
+      la.applier.applyYawPitch(finalYaw, finalPitch);
     }
   }
 
@@ -1420,6 +1741,11 @@ export function use3DModel(): Use3DModelReturn {
     facingCurrent = 0;
     faceTrackingActive = false;
     activeMicroExpr = null;
+    saccadesEnabled = true;
+    saccadeYaw = 0;
+    saccadePitch = 0;
+    saccadeTimer = 0;
+    saccadePhase = 'drift';
     if (isBlinking) {
       isBlinking = false;
       blinkPhase = 'idle';
@@ -1431,6 +1757,15 @@ export function use3DModel(): Use3DModelReturn {
 
     // Dispose all models (VRM + FBX)
     disposePreviousModel();
+
+    if (contactShadowMesh) {
+      avatarRoot.remove(contactShadowMesh);
+      contactShadowMesh.geometry.dispose();
+      const mat = contactShadowMesh.material as THREE.MeshBasicMaterial;
+      mat.map?.dispose();
+      mat.dispose();
+      contactShadowMesh = null;
+    }
 
     if (renderer) {
       renderer.dispose();
@@ -1449,6 +1784,40 @@ export function use3DModel(): Use3DModelReturn {
     animation.setState(state);
   }
 
+  function setDangleState(active: boolean, velocityX = 0) {
+    dangleActive = active;
+    dangleVelocityX = velocityX;
+    if (active) {
+      animation.setMotionWeight(1);
+      animation.setState('dangle');
+      if (vrm.value?.expressionManager) {
+        const em = vrm.value.expressionManager;
+        em.setValue('surprised', 0.85);
+        em.setValue('oh', 0.4);
+        em.setValue('aa', 0.15);
+      }
+    } else {
+      if (animation.getState() === 'dangle') {
+        animation.setState('idle');
+        animation.setMotionWeight(0);
+      }
+      if (vrm.value?.expressionManager) {
+        const em = vrm.value.expressionManager;
+        em.setValue('surprised', 0);
+        em.setValue('oh', 0);
+        em.setValue('aa', 0);
+      }
+    }
+  }
+
+  function setThinking(active: boolean) {
+    animation.setThinking(active);
+    if (active && !faceTrackingActive) {
+      // Pre-TTFT Anticipation: Hướng tầm mắt về phía người dùng/camera ngay lập tức
+      updateLookAt(0, 4);
+    }
+  }
+
   return {
     vrm,
     currentModelFormat,
@@ -1464,9 +1833,10 @@ export function use3DModel(): Use3DModelReturn {
     setScale,
     setFacing,
     setLocomotionState,
+    setDangleState,
     playGesture: animation.playGesture,
     setInspecting: animation.setInspecting,
-    setThinking: animation.setThinking,
+    setThinking,
     lookAtScreenPoint,
     getScreenPosition,
     getScreenBounds,
@@ -1478,10 +1848,37 @@ export function use3DModel(): Use3DModelReturn {
     stopLipSync,
     startAudioDrivenLipSync,
     stopAudioDrivenLipSync,
+    onBargeIn,
     triggerMotion,
     updateLookAt,
     updateExpressions,
     setFaceTrackingActive,
+    getSaccadeOffset: () => ({ yaw: saccadeYaw, pitch: saccadePitch }),
+    setSaccadesEnabled: (enabled: boolean) => {
+      saccadesEnabled = enabled;
+      if (!enabled) {
+        saccadeYaw = 0;
+        saccadePitch = 0;
+        saccadePhase = 'drift';
+        saccadeTimer = 0;
+      }
+    },
+    triggerSaccade: (targetYaw?: number, targetPitch?: number) => {
+      saccadeTimer = 0;
+      nextSaccadeInterval = randomSaccadeInterval();
+      saccadePhase = 'jump';
+      saccadePhaseTimer = 0;
+      saccadeStartX = saccadeYaw;
+      saccadeStartY = saccadePitch;
+      if (targetYaw !== undefined && targetPitch !== undefined) {
+        saccadeTargetX = Math.max(-MAX_SACCADE_AMPLITUDE_DEG, Math.min(MAX_SACCADE_AMPLITUDE_DEG, targetYaw));
+        saccadeTargetY = Math.max(-MAX_SACCADE_AMPLITUDE_DEG, Math.min(MAX_SACCADE_AMPLITUDE_DEG, targetPitch));
+      } else {
+        const disp = randomSaccadeDisplacement(MAX_SACCADE_AMPLITUDE_DEG);
+        saccadeTargetX = disp.yaw;
+        saccadeTargetY = disp.pitch;
+      }
+    },
     dispose,
   };
 }

@@ -42,11 +42,33 @@ export {
 
 
 /** Tần số bước mỗi giây cho từng trạng thái */
-const STRIDE_HZ: Record<LocomotionState, number> = {
+export const STRIDE_HZ: Record<LocomotionState, number> = {
   idle: 0,
   walk: 1.05,
   run: 1.9,
   jump: 0,
+  dangle: 0,
+};
+
+/** Tốc độ tịnh tiến tiêu chuẩn (phần chiều rộng màn hình / giây) */
+export const WALK_SPEED = 0.085;
+export const RUN_SPEED = 0.24;
+
+export const LOCOMOTION_SPEED: Record<LocomotionState, number> = {
+  idle: 0,
+  walk: WALK_SPEED,
+  run: RUN_SPEED,
+  jump: 0,
+  dangle: 0,
+};
+
+/** Độ dài bước chuẩn hoá cho từng trạng thái (quãng đường di chuyển / chu kỳ bước 2π) */
+export const STRIDE_LENGTH: Record<LocomotionState, number> = {
+  idle: 0,
+  walk: WALK_SPEED / 1.05,
+  run: RUN_SPEED / 1.9,
+  jump: 0,
+  dangle: 0,
 };
 
 /** Thời gian chuyển mượt giữa hai trạng thái (giây) */
@@ -68,6 +90,12 @@ export interface AvatarAnimationApi {
   setState: (state: LocomotionState) => void;
   /** Tốc độ hiện tại / tốc độ cực đại, dùng để đồng bộ nhịp và độ rộng bước. */
   setMotionWeight: (weight: number) => void;
+  getMotionWeight: () => number;
+  getStridePhase: () => number;
+  getThinkingWeight?: () => number;
+  motionWeight?: number;
+  stridePhase?: number;
+  thinkingWeight?: number;
   getState: () => LocomotionState;
   playGesture: (name: GestureName) => void;
   setInspecting: (active: boolean) => void;
@@ -135,6 +163,14 @@ function poseStride(phase: number, intensity: number): Pose {
   const kneeLeft = (Math.max(0, -s) * 1.15 + 0.05) * intensity;
   const kneeRight = (Math.max(0, -sOpposite) * 1.15 + 0.05) * intensity;
 
+  // Ankle contact roll: ngửa mũi chân khi chạm gót (s > 0), duỗi gót khi đẩy sau (s < 0)
+  const footLeft = (s > 0 ? s * 0.22 : s * 0.28) * intensity;
+  const footRight = (sOpposite > 0 ? sOpposite * 0.22 : sOpposite * 0.28) * intensity;
+
+  // Cẳng tay gập tự nhiên quanh trục X khi vung tay ra trước
+  const elbowLeft = -Math.max(0, -sOpposite) * 0.45 * intensity;
+  const elbowRight = -Math.max(0, -s) * 0.45 * intensity;
+
   const lean = 0.22 * intensity; // chạy thì chúi về trước nhiều hơn
 
   return {
@@ -144,13 +180,13 @@ function poseStride(phase: number, intensity: number): Pose {
     rightUpperLeg: [-sOpposite * 0.72 * intensity, 0, -0.02],
     leftLowerLeg: [kneeLeft, 0, 0],
     rightLowerLeg: [kneeRight, 0, 0],
-    leftFoot: [s * 0.22 * intensity, 0, 0],
-    rightFoot: [sOpposite * 0.22 * intensity, 0, 0],
+    leftFoot: [footLeft, 0, 0],
+    rightFoot: [footRight, 0, 0],
     // Tay ngược pha chân cùng bên; đi càng nhanh tay càng hơi rời thân
     leftUpperArm: [-sOpposite * 0.55 * intensity, 0, ARM_DOWN_LEFT + 0.22 * intensity],
     rightUpperArm: [-s * 0.55 * intensity, 0, ARM_DOWN_RIGHT - 0.22 * intensity],
-    leftLowerArm: [0, 0, -0.25 - 0.45 * intensity],
-    rightLowerArm: [0, 0, 0.25 + 0.45 * intensity],
+    leftLowerArm: [elbowLeft, 0, -0.22 - 0.4 * intensity],
+    rightLowerArm: [elbowRight, 0, 0.22 + 0.4 * intensity],
   };
 }
 
@@ -172,6 +208,32 @@ function poseJump(): Pose {
   };
 }
 
+/**
+ * Tư thế bị xách gáy (Kitten Scruff-Grab Dangle Pose):
+ * Chân co gập rủ xuống đung đưa nhẹ, hai tay quắp về phía trước ngực chới với,
+ * lưng uốn cong nhẹ tự nhiên theo trọng lực.
+ */
+function poseDangle(t: number): Pose {
+  const legFlutter = Math.sin(t * 3.6) * 0.08;
+  const legFlutterAlt = Math.sin(t * 3.6 + Math.PI) * 0.08;
+  const armWiggle = Math.sin(t * 4.2) * 0.06;
+  const bodySway = Math.sin(t * 1.8) * 0.03;
+
+  return {
+    hips: [-0.20, 0, bodySway],
+    leftUpperLeg: [-0.42 + legFlutter, 0, 0.04],
+    rightUpperLeg: [-0.42 + legFlutterAlt, 0, -0.04],
+    leftLowerLeg: [0.78 + legFlutter * 0.5, 0, 0],
+    rightLowerLeg: [0.78 + legFlutterAlt * 0.5, 0, 0],
+    leftFoot: [-0.38, 0, 0],
+    rightFoot: [-0.38, 0, 0],
+    leftUpperArm: [-0.38 + armWiggle, 0, -0.65],
+    rightUpperArm: [-0.38 - armWiggle, 0, 0.65],
+    leftLowerArm: [-0.48, 0, -0.42],
+    rightLowerArm: [-0.48, 0, 0.42],
+  };
+}
+
 function smoothstep01(value: number): number {
   const clamped = Math.min(1, Math.max(0, value));
   return clamped * clamped * (3 - 2 * clamped);
@@ -186,6 +248,8 @@ function basePose(state: LocomotionState, t: number, phase: number, motionWeight
       return poseStride(phase, motionEnvelope);
     case "jump":
       return poseJump();
+    case "dangle":
+      return poseDangle(t);
     default:
       return poseIdle(t);
   }
@@ -298,7 +362,8 @@ export function useAvatarAnimation(): AvatarAnimationApi {
   }
 
   function setMotionWeight(weight: number) {
-    motionWeight = Math.min(1, Math.max(0, weight));
+    const safe = Number.isFinite(weight) ? weight : 0;
+    motionWeight = Math.min(1, Math.max(0, safe));
   }
 
   function playGesture(name: GestureName) {
@@ -327,10 +392,8 @@ export function useAvatarAnimation(): AvatarAnimationApi {
     // Mặc định BẬT, nên không đặt gì thì hành vi y như trước.
     if (!footPlantEnabled()) {
       footPlantIk.reset();
-      // Phải TRẢ `hips` về tư thế gốc. Chỉ `return` thôi thì nó đứng nguyên ở
-      // lượt bù cuối cùng, và cái lệch đó đóng băng vĩnh viễn — trông như một
-      // lỗi khác hẳn, đủ để làm hỏng chính phép A/B này.
-      if (footPlantVrm === vrm && hipsRestPosition) {
+      // Phải TRẢ `hips` về tư thế gốc khi không ở trạng thái di chuyển
+      if (footPlantVrm === vrm && hipsRestPosition && (state !== "walk" && state !== "run")) {
         humanoid?.getNormalizedBoneNode("hips")?.position.set(...hipsRestPosition);
       }
       return;
@@ -338,6 +401,9 @@ export function useAvatarAnimation(): AvatarAnimationApi {
 
     if (!humanoid || !scene || !clips.has(state) || (state !== "walk" && state !== "run")) {
       footPlantIk.reset();
+      if (footPlantVrm === vrm && hipsRestPosition && (state !== "walk" && state !== "run")) {
+        humanoid?.getNormalizedBoneNode("hips")?.position.set(...hipsRestPosition);
+      }
       return;
     }
     const hips = humanoid.getNormalizedBoneNode("hips");
@@ -391,31 +457,53 @@ export function useAvatarAnimation(): AvatarAnimationApi {
   }
 
   function update(vrm: VRM | null, delta: number) {
-    clock += delta;
+    const safeDelta = Number.isFinite(delta) && delta > 0 ? Math.min(delta, 1.0) : 0;
+    clock += safeDelta;
     const currentPlaybackRate = state === "walk" || state === "run" ? motionWeight : 1;
     const previousPlaybackRate = previousState === "walk" || previousState === "run"
       ? motionWeight
       : 1;
-    stateTime += delta * currentPlaybackRate;
-    previousStateTime += delta * previousPlaybackRate;
+    stateTime += safeDelta * currentPlaybackRate;
+    previousStateTime += safeDelta * previousPlaybackRate;
 
-    // Nhịp bước tiến theo trạng thái ĐANG chuyển tới, nhưng vẫn chạy trong lúc
-    // crossfade để chân không khựng giữa chừng khi đổi walk ↔ run.
-    const hz = STRIDE_HZ[state] || STRIDE_HZ[previousState];
-    if (hz > 0 && motionWeight > 0) {
-      stridePhase = (stridePhase + delta * hz * motionWeight * Math.PI * 2) % (Math.PI * 2);
+    // Nhịp bước tiến theo quãng đường di chuyển thực tế (currentSpeed * delta / STRIDE_LENGTH)
+    // thay vì trôi theo thời gian thực (wall-clock time), để triệt tiêu hiện tượng trượt chân.
+    const isCurrentLocomotion = state === "walk" || state === "run";
+    const isPrevLocomotion = previousState === "walk" || previousState === "run";
+
+    const activeStrideLength = isCurrentLocomotion
+      ? crossfade < 1 && isPrevLocomotion
+        ? lerp(STRIDE_LENGTH[previousState], STRIDE_LENGTH[state], crossfade)
+        : STRIDE_LENGTH[state]
+      : crossfade < 1 && isPrevLocomotion
+        ? STRIDE_LENGTH[previousState]
+        : 0;
+
+    const nominalSpeed = isCurrentLocomotion
+      ? crossfade < 1 && isPrevLocomotion
+        ? lerp(LOCOMOTION_SPEED[previousState], LOCOMOTION_SPEED[state], crossfade)
+        : LOCOMOTION_SPEED[state]
+      : crossfade < 1 && isPrevLocomotion
+        ? (1 - crossfade) * LOCOMOTION_SPEED[previousState]
+        : 0;
+
+    const currentSpeed = nominalSpeed * motionWeight;
+
+    if (activeStrideLength > 0 && currentSpeed > 0 && safeDelta > 0) {
+      const deltaDistance = currentSpeed * safeDelta;
+      stridePhase = (stridePhase + (deltaDistance / activeStrideLength) * Math.PI * 2) % (Math.PI * 2);
     }
 
     if (crossfade < 1) {
-      crossfade = Math.min(1, crossfade + delta / CROSSFADE_SECONDS);
+      crossfade = Math.min(1, crossfade + safeDelta / CROSSFADE_SECONDS);
     }
     const thinkingTarget = thinking ? 1 : 0;
     if (thinkingWeight < thinkingTarget) {
-      thinkingWeight = Math.min(thinkingTarget, thinkingWeight + delta / CROSSFADE_SECONDS);
+      thinkingWeight = Math.min(thinkingTarget, thinkingWeight + safeDelta / CROSSFADE_SECONDS);
     } else if (thinkingWeight > thinkingTarget) {
-      thinkingWeight = Math.max(thinkingTarget, thinkingWeight - delta / CROSSFADE_SECONDS);
+      thinkingWeight = Math.max(thinkingTarget, thinkingWeight - safeDelta / CROSSFADE_SECONDS);
     }
-    if (thinking || thinkingWeight > 0) thinkingTime += delta;
+    if (thinking || thinkingWeight > 0) thinkingTime += safeDelta;
 
     const poseForState = (poseState: LocomotionState, time: number): Pose => {
       const procedural = basePose(poseState, clock, stridePhase, motionWeight);
@@ -445,7 +533,7 @@ export function useAvatarAnimation(): AvatarAnimationApi {
     }
 
     if (gesture) {
-      gestureTime += delta;
+      gestureTime += safeDelta;
       const gestureClip = gesture === "wave" ? clips.get("wave") : undefined;
       const gestureDuration = Math.max(gestureClip?.duration ?? GESTURE_SECONDS, Number.EPSILON);
       const progress = gestureTime / gestureDuration;
@@ -472,7 +560,25 @@ export function useAvatarAnimation(): AvatarAnimationApi {
       node.rotation.y = angles[1];
       node.rotation.z = angles[2];
     }
-    applyFootPlant(vrm, delta);
+
+    // Procedural pelvis vertical bobbing (nhấp nhô trọng tâm 2x theo chu kỳ bước)
+    const hipsNode = humanoid.getNormalizedBoneNode("hips");
+    if (hipsNode?.position && !clips.has(state)) {
+      if (footPlantVrm !== vrm || !hipsRestPosition) {
+        footPlantVrm = vrm;
+        hipsRestPosition = [hipsNode.position.x, hipsNode.position.y, hipsNode.position.z];
+      }
+      const isLocomotion = state === "walk" || state === "run";
+      const motionEnvelope = smoothstep01(motionWeight);
+      if (isLocomotion && hipsRestPosition) {
+        const pelvisBob = -Math.abs(Math.sin(stridePhase * 2)) * (state === "run" ? 0.035 : 0.02) * motionEnvelope;
+        hipsNode.position.y = hipsRestPosition[1] + pelvisBob;
+      } else if (hipsRestPosition) {
+        hipsNode.position.y = hipsRestPosition[1];
+      }
+    }
+
+    applyFootPlant(vrm, safeDelta);
   }
 
   function reset() {
@@ -499,6 +605,18 @@ export function useAvatarAnimation(): AvatarAnimationApi {
   return {
     setState,
     setMotionWeight,
+    getMotionWeight: () => motionWeight,
+    getStridePhase: () => stridePhase,
+    getThinkingWeight: () => thinkingWeight,
+    get motionWeight() {
+      return motionWeight;
+    },
+    get stridePhase() {
+      return stridePhase;
+    },
+    get thinkingWeight() {
+      return thinkingWeight;
+    },
     getState: () => state,
     playGesture,
     setInspecting: (active) => { inspecting = active; },

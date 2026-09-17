@@ -20,8 +20,11 @@ const setThinkingMock = vi.fn();
 const setFacingMock = vi.fn();
 const setScreenPositionMock = vi.fn();
 const setLocomotionStateMock = vi.fn();
+const setDangleStateMock = vi.fn();
 const updateExpressionsMock = vi.fn();
 const setFaceTrackingActiveMock = vi.fn();
+const playGestureMock = vi.fn();
+const onBargeInMock = vi.fn();
 const disposeVRMMock = vi.fn();
 
 vi.mock('../../src/composables/use3DModel', () => ({
@@ -37,6 +40,7 @@ vi.mock('../../src/composables/use3DModel', () => ({
     stopLipSync: stopLipSyncMock,
     startAudioDrivenLipSync: startAudioDrivenLipSyncMock,
     stopAudioDrivenLipSync: stopAudioDrivenLipSyncMock,
+    onBargeIn: onBargeInMock,
     triggerMotion: triggerMotionMock,
     updateLookAt: updateLookAtMock,
     lookAtScreenPoint: lookAtScreenPointMock,
@@ -45,8 +49,10 @@ vi.mock('../../src/composables/use3DModel', () => ({
     setFacing: setFacingMock,
     setScreenPosition: setScreenPositionMock,
     setLocomotionState: setLocomotionStateMock,
+    setDangleState: setDangleStateMock,
     updateExpressions: updateExpressionsMock,
     setFaceTrackingActive: setFaceTrackingActiveMock,
+    playGesture: playGestureMock,
     dispose: disposeVRMMock,
   }),
 }));
@@ -157,6 +163,15 @@ describe('VRMEngine.vue', () => {
     expect(stopAudioDrivenLipSyncMock).toHaveBeenCalled();
   });
 
+  it('should expose onBargeIn and forward to use3DModel', () => {
+    const wrapper = mount(VRMEngine, {
+      props: { modelConfig: { filename: 'avatar.vrm' } },
+    });
+
+    wrapper.vm.onBargeIn();
+    expect(onBargeInMock).toHaveBeenCalled();
+  });
+
   it('should expose persistent inspection focus and clear it back to the user', () => {
     const wrapper = mount(VRMEngine, {
       props: { modelConfig: { filename: 'avatar.vrm' } },
@@ -244,5 +259,40 @@ describe('VRMEngine.vue', () => {
     wrapper.unmount();
     expect(setFrameUpdateMock).toHaveBeenLastCalledWith(null);
     expect(disposeVRMMock).toHaveBeenCalled();
+  });
+
+  it('hỗ trợ tóm kéo avatar và quăng né sang góc màn hình (Avatar Grab & Fling)', async () => {
+    const wrapper = mount(VRMEngine, {
+      props: { modelConfig: { filename: 'avatar.vrm' } },
+    });
+
+    const canvas = wrapper.find('canvas');
+
+    // 1. Nhấn chuột và rê > 6px để bắt đầu kéo
+    canvas.element.dispatchEvent(new PointerEvent('pointerdown', { clientX: 500, clientY: 500, button: 0 }));
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 520, clientY: 480 }));
+
+    expect(setDangleStateMock).toHaveBeenCalledWith(true, expect.any(Number));
+
+    // 2. Thả chuột để ném avatar về góc
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 520, clientY: 480 }));
+    expect(setDangleStateMock).toHaveBeenCalledWith(false, 0);
+    expect(playGestureMock).toHaveBeenCalledWith('nod');
+
+    // 3. Gọi dockToCorner() trực tiếp
+    expect((wrapper.vm as any).dockToCorner).toBeDefined();
+    (wrapper.vm as any).dockToCorner('left');
+    (wrapper.vm as any).dockToCorner('right');
+    expect(triggerMotionMock).toHaveBeenCalled();
+  });
+
+  it('hỗ trợ click đúp (dblclick) để né tức thời sang góc đối diện', async () => {
+    const wrapper = mount(VRMEngine, {
+      props: { modelConfig: { filename: 'avatar.vrm' } },
+    });
+
+    const canvas = wrapper.find('canvas');
+    await canvas.trigger('dblclick');
+    expect(triggerMotionMock).toHaveBeenCalled();
   });
 });

@@ -2,7 +2,8 @@
 # Run: .\scripts\start_all.ps1
 
 param(
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    [switch]$NoCuda
 )
 
 # UTF-8 Encoding Fix for Vietnamese
@@ -74,7 +75,7 @@ function Wait-LocalPort {
         [int]$Port,
         [Parameter(Mandatory = $true)]
         [System.Diagnostics.Process]$Process,
-        [int]$TimeoutSeconds = 15
+        [int]$TimeoutSeconds = 30
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -216,11 +217,11 @@ Push-Location -Path $TauriPath
 # Ep tay: LIVA_DEV_CUDA=0 de tat, =1 de bat du khong tim thay nvcc.
 $CudaArgs = @()
 $WantCuda = $env:LIVA_DEV_CUDA
-if ($WantCuda -eq '0') {
-    Write-Host "      CUDA: TAT theo LIVA_DEV_CUDA=0. LLM se chay tren CPU." -ForegroundColor DarkGray
+if ($NoCuda -or $WantCuda -eq '0') {
+    Write-Host "      CUDA: TAT theo NoCuda / LIVA_DEV_CUDA=0. LLM se chay tren CPU." -ForegroundColor DarkGray
 } elseif ($WantCuda -eq '1' -or (Get-Command nvcc -ErrorAction SilentlyContinue)) {
     $CudaArgs = @('--features', 'cuda')
-    Write-Host "      CUDA: BAT. Lan build dau lau khoang 6 phut." -ForegroundColor Green
+    Write-Host "      CUDA: BAT. Lan build dau co the lau khoang 10-16 phut tuy may (cac lan sau chi ~10s)." -ForegroundColor Green
 } else {
     Write-Host "      CUDA: khong thay nvcc. LLM chay tren CPU; dat LIVA_DEV_CUDA=1 de ep bat." -ForegroundColor DarkGray
 }

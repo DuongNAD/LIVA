@@ -19,8 +19,10 @@ export interface AvatarEngineApi {
   setWander?: (enabled: boolean) => void;
   playGesture?: (name: 'wave' | 'nod' | 'shake') => void;
   setThinking?: (active: boolean) => void;
+  onBargeIn?: () => void;
   inspectScreenPoint?: (x: number, y: number) => void;
   clearInspection?: () => void;
+  dockToCorner?: (corner?: 'left' | 'right' | 'auto') => void;
 }
 
 export interface UseWidgetAvatarControlOptions {

@@ -1,4 +1,4 @@
-export type LocomotionState = "idle" | "walk" | "run" | "jump";
+export type LocomotionState = "idle" | "walk" | "run" | "jump" | "dangle";
 
 export interface Point3 {
   x: number;

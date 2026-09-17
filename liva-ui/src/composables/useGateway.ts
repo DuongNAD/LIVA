@@ -255,6 +255,14 @@ let _memoryResetResultCallback: ((payload: unknown) => void) | null = null;
 // Memory Updated — callback registry
 let _memoryUpdatedCallback: (() => void) | null = null;
 
+// AI Expert Suggestion — callback registry
+export interface ExpertSuggestionPayload {
+  goi_y_expert: boolean;
+  do_kho: string;
+  user_text?: string;
+}
+const expertSuggestion = ref<ExpertSuggestionPayload | null>(null);
+let _expertSuggestionCallback: ((payload: ExpertSuggestionPayload) => void) | null = null;
 
 // User Profile & Onboarding State
 const userProfile = ref<Record<string, unknown> | null>(null);
@@ -278,9 +286,16 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
     case 'get_voice_status':
       applyVoiceStatusPayload(res);
       break;
-    case 'get_voice_profiles':
-      voiceProfiles.value = ((res as { profiles?: VoiceProfile[] })?.profiles || (res as VoiceProfile[]) || []) as VoiceProfile[];
+    case 'get_voice_profiles': {
+      const raw = ((res as { profiles?: unknown[] })?.profiles || (Array.isArray(res) ? res : [])) as unknown[];
+      voiceProfiles.value = raw.map((p) => {
+        if (typeof p === 'string') {
+          return { id: p, name: p, language: 'vi-VN', isActive: false };
+        }
+        return p as VoiceProfile;
+      });
       break;
+    }
     case 'voice:list_vieneu_voices':
     case 'voice:set_vieneu_voice':
       applyVieneuPayload(res);
@@ -328,12 +343,6 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
         _taskPlanReplyCallback(res as TaskPlanReplyPayload);
       }
       break;
-    case 'test_skill':
-      if (_skillCheckResultCallback) _skillCheckResultCallback(res);
-      break;
-    case 'test_all_skills':
-      if (_allSkillsCheckCompleteCallback) _allSkillsCheckCompleteCallback(res);
-      break;
     case 'reset_memory':
     case 'memory:delete_subject':
       if (_memoryResetResultCallback) _memoryResetResultCallback(res);
@@ -343,6 +352,10 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       break;
     case 'vision:ask':
       finishVision((res as { text?: string })?.text ?? '');
+      break;
+    case 'ai_expert_suggestion':
+      expertSuggestion.value = (res as ExpertSuggestionPayload) ?? { goi_y_expert: true, do_kho: 'kho' };
+      if (_expertSuggestionCallback) _expertSuggestionCallback(expertSuggestion.value);
       break;
   }
 };
@@ -417,15 +430,19 @@ const handleTauriStream = async (
         event?: string;
         payload?: TaskPlanReplyPayload;
         token?: string;
+        message?: string;
+        taskId?: string;
+        task_id?: string;
         done?: boolean;
       } | null;
       logger.debug(`[useGateway] Stream chunk for ${reqId}:`, data);
       if (data) {
-        if (data.token !== undefined) {
+        const token = data.token !== undefined ? data.token : (data.message !== undefined ? data.message : undefined);
+        if (token !== undefined) {
           if (_taskPlanReplyCallback) {
             _taskPlanReplyCallback({
-              taskId: (payload.taskId as string) || '',
-              message: data.token,
+              taskId: (data.taskId || data.task_id || payload.taskId || '') as string,
+              message: token,
               done: data.done || false,
             });
           }
@@ -701,6 +718,10 @@ const connect = () => {
         case 'memory_updated':
           if (_memoryUpdatedCallback) _memoryUpdatedCallback();
           break;
+        case 'ai_expert_suggestion':
+          expertSuggestion.value = (data.payload as ExpertSuggestionPayload) ?? { goi_y_expert: true, do_kho: 'kho' };
+          if (_expertSuggestionCallback) _expertSuggestionCallback(expertSuggestion.value);
+          break;
         case 'vision:ask_response':
           finishVision(data.payload?.text ?? '');
           break;
@@ -965,6 +986,16 @@ export function useGateway() {
     onMemoryResetResult,
     offMemoryResetResult,
     onMemoryUpdated,
-    offMemoryUpdated
+    offMemoryUpdated,
+    expertSuggestion,
+    onExpertSuggestion: (cb: (payload: ExpertSuggestionPayload) => void) => {
+      _expertSuggestionCallback = cb;
+    },
+    offExpertSuggestion: () => {
+      _expertSuggestionCallback = null;
+    },
+    clearExpertSuggestion: () => {
+      expertSuggestion.value = null;
+    },
   };
 }

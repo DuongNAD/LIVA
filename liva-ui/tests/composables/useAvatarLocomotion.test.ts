@@ -165,6 +165,21 @@ describe("useAvatarLocomotion", () => {
     expect(stopped.state).toBe("idle");
   });
 
+  it("đi lang thang luôn bám sát mặt phẳng sàn thay vì bay lơ lửng giữa trời", () => {
+    let seed = 42;
+    const random = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    const loco = useAvatarLocomotion({ start: { x: 0.5, y: 1 }, random });
+    loco.setWander(true);
+
+    for (let i = 0; i < 60 * 60; i++) {
+      const snap = loco.update(1 / 60);
+      expect(snap.y).toBeCloseTo(1.0, 5); // Không bao giờ trôi lơ lửng
+    }
+  });
+
   it("bỏ qua tick có delta bằng 0 mà không nhích vị trí", () => {
     const loco = useAvatarLocomotion({ start: { x: 0.4, y: 1 } });
     loco.moveTo(0.9, 1);

@@ -31,6 +31,16 @@ import fs from 'node:fs';
 const OP_WAKE_PROBE = 0x05;
 const wavPath = process.argv[2];
 const port = process.argv[3] || process.env.PORT || '8099';
+const timeoutMs = parseInt(process.env.PROBE_TIMEOUT_MS || '15000', 10);
+
+if (!wavPath) {
+  console.error('Cách dùng: node scripts/e2e-wake-probe.mjs <wav-path> [port]');
+  process.exit(1);
+}
+if (!fs.existsSync(wavPath)) {
+  console.error(`  ✗ LỖI: Không tìm thấy file WAV: ${wavPath}`);
+  process.exit(1);
+}
 
 function readWavMono16k(path) {
   const buf = fs.readFileSync(path);
@@ -93,26 +103,65 @@ const { samples: raw, rate } = readWavMono16k(wavPath);
 let samples = resampleTo16k(raw, rate);
 if (rate !== 16000) console.log(`  Hạ mẫu ${rate} → 16000 Hz`);
 
-// Widget luôn gửi kèm pre-roll im lặng; mô phỏng để giống đường thật.
-const pad = new Float32Array(16000 * 0.25);
-const padded = new Float32Array(pad.length + samples.length + pad.length);
-padded.set(samples, pad.length);
+// Calibrate audio padding to match real client widget (LivaWakeWorker pre-roll ring buffer)
+// and satisfy openWakeWord minimum receptive window (>= 16 embeddings / 1.96s).
+const SAMPLE_RATE = 16000;
+const MIN_TOTAL_SAMPLES = Math.floor(SAMPLE_RATE * 2.5); // 2.5s (40,000 samples)
+const MAX_TOTAL_SAMPLES = Math.floor(SAMPLE_RATE * 3.5); // 3.5s (56,000 samples)
+const TRAILING_PAD_SAMPLES = Math.floor(SAMPLE_RATE * 0.30); // 0.30s trailing hangover
+
+// Default nominal leading silence: 1.75s (28,000 samples)
+// Ensures short clips (0.8s - 1.2s) receive 1.5s - 2.0s leading silence,
+// placing the wake word utterance at the activation tail of the 2.5s - 3.25s receptive field.
+let leadingPadSamples = Math.floor(SAMPLE_RATE * 1.75);
+
+// 1. Ensure total clip length is at least 2.5s (WAKE_PAD_TARGET_SAMPLES)
+if (leadingPadSamples + samples.length + TRAILING_PAD_SAMPLES < MIN_TOTAL_SAMPLES) {
+  leadingPadSamples = MIN_TOTAL_SAMPLES - samples.length - TRAILING_PAD_SAMPLES;
+}
+
+// 2. Bound leading pad so total clip does not exceed MAX_TOTAL_SAMPLES (3.5s)
+// This prevents truncating speech audio at the end of longer clips.
+if (leadingPadSamples + samples.length + TRAILING_PAD_SAMPLES > MAX_TOTAL_SAMPLES) {
+  leadingPadSamples = MAX_TOTAL_SAMPLES - samples.length - TRAILING_PAD_SAMPLES;
+}
+
+// 3. Keep at least 0.25s leading silence to protect initial consonant ("h" in "hey")
+leadingPadSamples = Math.max(Math.floor(SAMPLE_RATE * 0.25), leadingPadSamples);
+
+const leadingPad = new Float32Array(leadingPadSamples);
+const trailingPad = new Float32Array(TRAILING_PAD_SAMPLES);
+const padded = new Float32Array(leadingPad.length + samples.length + trailingPad.length);
+padded.set(leadingPad, 0);
+padded.set(samples, leadingPad.length);
+padded.set(trailingPad, leadingPad.length + samples.length);
 samples = padded;
 
-// Core từ chối probe > 4 s trước khi chạy STT — cắt cho lọt cửa.
-const MAX = 16000 * 3.5;
+// Core will silently drop frames if duration is outside [0.3s, 4.0s] (WAKE_PROBE_MIN_SECS..=WAKE_PROBE_MAX_SECS)
+const MAX = Math.floor(SAMPLE_RATE * 3.5);
 const clip = samples.length > MAX ? samples.subarray(0, MAX) : samples;
-console.log(`  Gửi ${(clip.length / 16000).toFixed(2)} s audio (${clip.length} mẫu)`);
+const clipDuration = clip.length / SAMPLE_RATE;
+if (clipDuration < 0.3 || clipDuration > 4.0) {
+  console.error(`  ✗ LỖI: Độ dài clip (${clipDuration.toFixed(2)}s) ngoài phạm vi hợp lệ [0.3s, 4.0s]. Core sẽ bỏ qua.`);
+  process.exit(1);
+}
+console.log(
+  `  Gửi ${clipDuration.toFixed(2)} s audio (${clip.length} mẫu: ` +
+  `${(leadingPad.length / SAMPLE_RATE).toFixed(2)}s pre-roll + ` +
+  `${(raw.length / rate).toFixed(2)}s speech + ` +
+  `${(trailingPad.length / SAMPLE_RATE).toFixed(2)}s post-roll)`
+);
 
 const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
 let done = false;
 
 const timer = setTimeout(() => {
   if (!done) {
-    console.log('  ✗ HẾT GIỜ — core không trả lời trong 90 s');
+    console.log(`  ✗ HẾT GIỜ — core không trả lời trong ${(timeoutMs / 1000).toFixed(0)} s`);
+    try { ws.close(); } catch {}
     process.exit(1);
   }
-}, 90000);
+}, timeoutMs);
 
 ws.addEventListener('open', () => {
   const bytes = Buffer.from(clip.buffer, clip.byteOffset, clip.byteLength);
@@ -132,9 +181,23 @@ ws.addEventListener('message', (ev) => {
   done = true;
   clearTimeout(timer);
   const woke = msg.event === 'wake_word_triggered';
+  const tier = msg.payload?.tier ?? 'unknown';
+  const score = msg.payload?.score !== null && msg.payload?.score !== undefined
+    ? Number(msg.payload.score).toFixed(3)
+    : 'N/A';
+  const transcript = msg.payload?.transcript ?? '';
+
   console.log(`  → ${woke ? '✓ ĐÁNH THỨC' : '✗ TỪ CHỐI'}  (${msg.event})`);
-  console.log(`  → core nghe ra: ${JSON.stringify(msg.payload?.transcript ?? '')}`);
-  ws.close();
+  console.log(`  → tầng quyết định : ${tier} | điểm classifier: ${score}`);
+  if (transcript) {
+    console.log(`  → STT nghe ra     : ${JSON.stringify(transcript)}`);
+  } else if (tier === 'classifier' && woke) {
+    console.log(`  → STT nghe ra     : (bỏ qua STT vì classifier tầng 1 đã xác nhận)`);
+  } else {
+    console.log(`  → STT nghe ra     : "" (không nhận dạng được từ khóa)`);
+  }
+
+  try { ws.close(); } catch {}
   process.exit(woke ? 0 : 2);
 });
 

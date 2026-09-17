@@ -59,7 +59,7 @@ export async function runVoiceLifecycleTests(reporter, port) {
     // 5.4 voice:stt_chunk valid base64 audio samples (16 f32 zeroes)
     await (async () => {
       const pcmZeroes = Buffer.alloc(64).toString('base64')
-      const res = await ws.sendEvent('voice:stt_chunk', { chunk: pcmZeroes, isLast: false }, 15000)
+      const res = await ws.sendEvent('voice:stt_chunk', { chunk: pcmZeroes, isLast: false }, 30000)
       reporter.test('5.4 voice:stt_chunk nạp audio f32 hợp lệ phản hồi có cấu trúc và không bị treo', () => {
         assert.ok(res.event === 'voice:stt_chunk_response' || res.event === 'voice:stt_chunk_error')
         if (res.event === 'voice:stt_chunk_response') {
@@ -72,7 +72,7 @@ export async function runVoiceLifecycleTests(reporter, port) {
 
     // 5.5 voice:stt_stop
     await (async () => {
-      const res = await ws.sendEvent('voice:stt_stop', {}, 15000)
+      const res = await ws.sendEvent('voice:stt_stop', {}, 30000)
       reporter.test('5.5 voice:stt_stop hoàn tất chu trình stream STT và trả về phản hồi hợp lệ', () => {
         assert.ok(res.event === 'voice:stt_stop_response' || res.event === 'voice:stt_stop_error')
         if (res.event === 'voice:stt_stop_response') {

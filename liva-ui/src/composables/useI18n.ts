@@ -123,6 +123,7 @@ const enUS = {
   wg_draft_failed: 'Could not send.',
 
   welcome_liva: "Hello! I'm LIVA. The system is ready to serve you!",
+  ai_expert_recommended: "This query involves deep complexity. Consider switching to the Expert Model for in-depth reasoning.",
   welcome_liva_turbo: "Hello! I'm LIVA. The TurboQuant QJL reasoning model and memory are successfully activated. How can I help you?",
   ob_title: 'Welcome to LIVA',
   ob_subtitle: 'Set up your personal profile',
@@ -401,6 +402,7 @@ const viVN = {
   wg_draft_failed: 'Không gửi được.',
 
   welcome_liva: "Xin chào! Mình là LIVA. Hệ thống đã sẵn sàng phục vụ bạn!",
+  ai_expert_recommended: "Câu hỏi này có độ phức tạp cao, bạn có thể chuyển sang Expert Model để có kết quả phân tích chuyên sâu nhất.",
   welcome_liva_turbo: "Xin chào! Mình là LIVA. Mô hình suy luận và bộ nhớ TurboQuant QJL đã được kích hoạt thành công. Anh cần hỗ trợ gì ạ?",
   ob_title: 'Chào mừng đến với LIVA',
   ob_subtitle: 'Thiết lập cấu hình cá nhân của bạn',

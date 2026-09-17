@@ -1,9 +1,9 @@
-const DEFAULT_FRAME_SIZE = 512;
+const DEFAULT_FRAME_SIZE = 256;
 
 class LivaMicCaptureProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    this.frameSize = options.processorOptions?.frameSize ?? DEFAULT_FRAME_SIZE;
+    this.frameSize = options?.processorOptions?.frameSize ?? DEFAULT_FRAME_SIZE;
     this.frame = new Float32Array(this.frameSize);
     this.offset = 0;
   }

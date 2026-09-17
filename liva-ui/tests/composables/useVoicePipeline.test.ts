@@ -595,13 +595,13 @@ describe('useVoicePipeline — Composable State & Lifecycle', () => {
       expect(mockAudioContext.createScriptProcessor).not.toHaveBeenCalled();
       expect(mockProcessor.name).toBe('liva-mic-capture');
       expect(mockProcessor.options?.processorOptions).toEqual({
-        frameSize: 512,
+        frameSize: 256,
       });
       expect(mockProcessor.port.onmessage).toBeTypeOf('function');
 
       // 1. Passive state with audio (rms > 0.002) -> should post to worker
       state.value = 'PASSIVE';
-      const noisyFrame = new Float32Array(512);
+      const noisyFrame = new Float32Array(256);
       noisyFrame.fill(0.1); // High RMS
       mockProcessor.port.onmessage?.({ data: noisyFrame } as MessageEvent<Float32Array>);
 
@@ -642,7 +642,7 @@ describe('useVoicePipeline — Composable State & Lifecycle', () => {
       await vi.advanceTimersByTimeAsync(10);
       await startPromise;
 
-      const loudFrame = new Float32Array(512);
+      const loudFrame = new Float32Array(256);
       loudFrame.fill(0.2); // rms 0,2 — vượt xa cổng 0,002
 
       return {

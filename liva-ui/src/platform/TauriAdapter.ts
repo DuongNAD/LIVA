@@ -48,13 +48,23 @@ export class TauriAdapter implements IPlatformAdapter {
   }
 
   async storeVaultSecret(key: string, value: string) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('store_vault_secret', { key, value });
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('store_vault_secret', { key, value });
+    } catch (e) {
+      logger.error('[TauriAdapter] storeVaultSecret failed', e);
+      throw e;
+    }
   }
 
   async deleteVaultSecret(key: string) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('delete_vault_secret', { key });
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('delete_vault_secret', { key });
+    } catch (e) {
+      logger.error('[TauriAdapter] deleteVaultSecret failed', e);
+      throw e;
+    }
   }
 
   onGatewayReady(callback: (port: number, token: string | null) => void) {

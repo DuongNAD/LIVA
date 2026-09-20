@@ -722,7 +722,19 @@ export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoic
 
       source.connect(analyser);
       analyser.connect(processor);
-      processor.connect(audioContext.destination);
+      // Route microphone capture through a muted gain node to prevent acoustic feedback loop to speakers
+      if (typeof audioContext.createGain === 'function') {
+        const silentGain = audioContext.createGain();
+        if (silentGain && silentGain.gain) {
+          silentGain.gain.value = 0;
+        }
+        processor.connect(silentGain);
+        if (audioContext.destination && typeof silentGain.connect === 'function') {
+          silentGain.connect(audioContext.destination);
+        }
+      } else if (audioContext.destination) {
+        processor.connect(audioContext.destination);
+      }
 
       if (audioContext.state === 'suspended') {
         audioContext.resume().catch(() => {});

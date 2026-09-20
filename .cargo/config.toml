@@ -1,0 +1,7 @@
+# LIVA Workspace Cargo Configuration
+# Optimized for Windows development and linker acceleration
+
+
+[build]
+# Default build flags for developer iteration
+# Concurrency limits are bounded via -j 2 at command line per RAM guardrails

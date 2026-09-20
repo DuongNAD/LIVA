@@ -241,9 +241,6 @@ pub(super) async fn handle_user_voice_text(
         content: user_text.clone(),
     });
 
-    // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
-    let _ = state.llm.lock().await.maybe_auto_swap(do_kho).await;
-
     let start_instant = std::time::Instant::now();
     let (model_tx, model_rx) = tokio::sync::oneshot::channel();
 
@@ -251,6 +248,9 @@ pub(super) async fn handle_user_voice_text(
     let text_tx_inner = text_tx.clone();
     let completion_res = tokio::task::spawn_blocking(move || {
         let mut llm_manager = state.llm.blocking_lock();
+        // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
+        // Thực hiện NGAY trong khi đang giữ lock, loại bỏ hoàn toàn race condition check-then-act.
+        let _ = llm_manager.maybe_auto_swap_blocking(do_kho);
         let _ = model_tx.send(llm_manager.current_model_path.to_string_lossy().to_string());
         let mut stream_state = crate::llm::engine::CompletionStream::new(&text_tx_inner);
         let completion = llm_manager.generate_budgeted_completion(

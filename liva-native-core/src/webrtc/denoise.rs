@@ -8,7 +8,7 @@
 //! n_fft=512, hop=256, sqrt-Hann analysis+synthesis window, mono 16kHz.
 //! Recurrent state (`conv_cache`/`tra_cache`/`inter_cache`) threads across
 //! hops exactly like `VadEngine`'s `state`/`stateN`.
-use ort::{session::Session, value::Value};
+use ort::{session::Session, value::TensorRef};
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -55,6 +55,7 @@ pub struct GtcrnDenoiser {
     conv_cache: Vec<f32>,
     tra_cache: Vec<f32>,
     inter_cache: Vec<f32>,
+    mix_buf: Vec<f32>,
 }
 
 impl GtcrnDenoiser {
@@ -93,6 +94,7 @@ impl GtcrnDenoiser {
             conv_cache: vec![0.0; CONV_CACHE_LEN],
             tra_cache: vec![0.0; TRA_CACHE_LEN],
             inter_cache: vec![0.0; INTER_CACHE_LEN],
+            mix_buf: vec![0.0; FREQ_BINS * 2],
         })
     }
 
@@ -111,6 +113,7 @@ impl GtcrnDenoiser {
             conv_cache: vec![0.0; CONV_CACHE_LEN],
             tra_cache: vec![0.0; TRA_CACHE_LEN],
             inter_cache: vec![0.0; INTER_CACHE_LEN],
+            mix_buf: vec![0.0; FREQ_BINS * 2],
         }
     }
 
@@ -133,14 +136,22 @@ impl GtcrnDenoiser {
         let mut out = Vec::new();
 
         while self.pending_in.len() >= HOP {
-            let new_hop: Vec<f32> = self.pending_in.drain(0..HOP).collect();
             self.primed = true;
 
             // Slide the analysis window: drop oldest HOP, append newest HOP.
             self.analysis_hist.copy_within(HOP..WIN, 0);
-            self.analysis_hist[WIN - HOP..].copy_from_slice(&new_hop);
+            self.analysis_hist[WIN - HOP..].copy_from_slice(&self.pending_in[..HOP]);
+            self.pending_in.drain(..HOP);
 
             let enh_bins = self.run_frame()?;
+
+            if enh_bins.len() < FREQ_BINS {
+                return Err(format!(
+                    "GTCRN run_frame returned insufficient frequency bins: expected at least {}, got {}",
+                    FREQ_BINS,
+                    enh_bins.len()
+                ));
+            }
 
             // ISTFT: rebuild the full conjugate-symmetric spectrum, inverse
             // FFT, re-window (sqrt-Hann synthesis side), overlap-add.
@@ -174,18 +185,71 @@ impl GtcrnDenoiser {
             .collect();
         self.fft.process(&mut buf);
 
-        // Arrange as ONNX tensor layout (1, 257, 1, 2): [freq][re, im].
-        let mut mix_data = Vec::with_capacity(FREQ_BINS * 2);
-        for c in &buf[..FREQ_BINS] {
-            mix_data.push(c.re);
-            mix_data.push(c.im);
+        if buf.len() < FREQ_BINS {
+            return Err(format!(
+                "GTCRN STFT buffer underflow: expected at least {} bins, got {}",
+                FREQ_BINS,
+                buf.len()
+            ));
+        }
+        if self.mix_buf.len() < FREQ_BINS * 2 {
+            return Err(format!(
+                "GTCRN mix_buf underflow: expected at least {} floats, got {}",
+                FREQ_BINS * 2,
+                self.mix_buf.len()
+            ));
         }
 
+        // Arrange as ONNX tensor layout (1, 257, 1, 2): [freq][re, im].
+        // Reuses pre-allocated mix_buf to prevent real-time heap allocation.
+        for (k, c) in buf[..FREQ_BINS].iter().enumerate() {
+            self.mix_buf[k * 2] = c.re;
+            self.mix_buf[k * 2 + 1] = c.im;
+        }
+
+        // Verify cache dimensions before creating TensorRef views
+        if self.conv_cache.len() != CONV_CACHE_LEN {
+            return Err(format!(
+                "GTCRN conv_cache length invalid: expected {}, got {}",
+                CONV_CACHE_LEN,
+                self.conv_cache.len()
+            ));
+        }
+        if self.tra_cache.len() != TRA_CACHE_LEN {
+            return Err(format!(
+                "GTCRN tra_cache length invalid: expected {}, got {}",
+                TRA_CACHE_LEN,
+                self.tra_cache.len()
+            ));
+        }
+        if self.inter_cache.len() != INTER_CACHE_LEN {
+            return Err(format!(
+                "GTCRN inter_cache length invalid: expected {}, got {}",
+                INTER_CACHE_LEN,
+                self.inter_cache.len()
+            ));
+        }
+
+        // Borrow recurrent state and spectrum tensors directly via TensorRef views,
+        // eliminating 67.5KB heap allocation churn (self.conv_cache.clone()) per hop.
+        let mix_ref =
+            TensorRef::from_array_view(([1usize, FREQ_BINS, 1, 2], self.mix_buf.as_slice()))
+                .map_err(|e| e.to_string())?;
+        let conv_ref =
+            TensorRef::from_array_view(([2usize, 1, 16, 16, 33], self.conv_cache.as_slice()))
+                .map_err(|e| e.to_string())?;
+        let tra_ref =
+            TensorRef::from_array_view(([2usize, 3, 1, 1, 16], self.tra_cache.as_slice()))
+                .map_err(|e| e.to_string())?;
+        let inter_ref =
+            TensorRef::from_array_view(([2usize, 1, 33, 16], self.inter_cache.as_slice()))
+                .map_err(|e| e.to_string())?;
+
         let inputs = ort::inputs![
-            "mix" => Value::from_array((vec![1usize, FREQ_BINS, 1, 2], mix_data)).map_err(|e| e.to_string())?,
-            "conv_cache" => Value::from_array((vec![2usize, 1, 16, 16, 33], self.conv_cache.clone())).map_err(|e| e.to_string())?,
-            "tra_cache" => Value::from_array((vec![2usize, 3, 1, 1, 16], self.tra_cache.clone())).map_err(|e| e.to_string())?,
-            "inter_cache" => Value::from_array((vec![2usize, 1, 33, 16], self.inter_cache.clone())).map_err(|e| e.to_string())?,
+            "mix" => mix_ref,
+            "conv_cache" => conv_ref,
+            "tra_cache" => tra_ref,
+            "inter_cache" => inter_ref,
         ];
 
         let mut session = self
@@ -217,6 +281,36 @@ impl GtcrnDenoiser {
             .ok_or_else(|| "Missing 'inter_cache_out' output".to_string())?
             .try_extract_tensor::<f32>()
             .map_err(|e| e.to_string())?;
+
+        // Zero-panic bounds validation on ONNX tensor output slices before copying
+        if conv_out.len() != self.conv_cache.len() {
+            return Err(format!(
+                "GTCRN conv_cache_out slice length mismatch: expected {}, got {}",
+                self.conv_cache.len(),
+                conv_out.len()
+            ));
+        }
+        if tra_out.len() != self.tra_cache.len() {
+            return Err(format!(
+                "GTCRN tra_cache_out slice length mismatch: expected {}, got {}",
+                self.tra_cache.len(),
+                tra_out.len()
+            ));
+        }
+        if inter_out.len() != self.inter_cache.len() {
+            return Err(format!(
+                "GTCRN inter_cache_out slice length mismatch: expected {}, got {}",
+                self.inter_cache.len(),
+                inter_out.len()
+            ));
+        }
+        if enh_data.len() < FREQ_BINS * 2 {
+            return Err(format!(
+                "GTCRN enh output slice length insufficient: expected at least {}, got {}",
+                FREQ_BINS * 2,
+                enh_data.len()
+            ));
+        }
 
         self.conv_cache.copy_from_slice(conv_out);
         self.tra_cache.copy_from_slice(tra_out);
@@ -320,5 +414,108 @@ mod tests {
         assert!(fork.conv_cache.iter().all(|&value| value == 0.0));
         assert!(fork.tra_cache.iter().all(|&value| value == 0.0));
         assert!(fork.inter_cache.iter().all(|&value| value == 0.0));
+    }
+
+    #[test]
+    fn denoiser_zero_copy_cache_evolution() {
+        let Some(path) = model_path_for_test() else {
+            eprintln!("skip: gtcrn_simple.onnx not present");
+            return;
+        };
+        let mut denoiser = GtcrnDenoiser::new(&path).expect("load GTCRN model");
+
+        // Verify initial cache capacities and zero-filled states
+        assert_eq!(denoiser.conv_cache.len(), CONV_CACHE_LEN);
+        assert_eq!(denoiser.tra_cache.len(), TRA_CACHE_LEN);
+        assert_eq!(denoiser.inter_cache.len(), INTER_CACHE_LEN);
+        assert_eq!(denoiser.mix_buf.len(), FREQ_BINS * 2);
+
+        let initial_conv_ptr = denoiser.conv_cache.as_ptr();
+        let initial_tra_ptr = denoiser.tra_cache.as_ptr();
+        let initial_inter_ptr = denoiser.inter_cache.as_ptr();
+        let initial_mix_ptr = denoiser.mix_buf.as_ptr();
+
+        // Feed multiple hops of non-zero signal
+        let signal: Vec<f32> = (0..HOP * 4)
+            .map(|i| (i as f32 * 0.05).sin() * 0.4)
+            .collect();
+        let out = denoiser.process_audio(&signal).expect("process_audio");
+        assert!(!out.is_empty());
+
+        // Assert memory buffer pointers remained stable (zero re-allocations)
+        assert_eq!(
+            denoiser.conv_cache.as_ptr(),
+            initial_conv_ptr,
+            "conv_cache must not reallocate"
+        );
+        assert_eq!(
+            denoiser.tra_cache.as_ptr(),
+            initial_tra_ptr,
+            "tra_cache must not reallocate"
+        );
+        assert_eq!(
+            denoiser.inter_cache.as_ptr(),
+            initial_inter_ptr,
+            "inter_cache must not reallocate"
+        );
+        assert_eq!(
+            denoiser.mix_buf.as_ptr(),
+            initial_mix_ptr,
+            "mix_buf must not reallocate"
+        );
+
+        // Verify recurrent states evolved and contain non-zero weights from audio
+        let conv_has_signal = denoiser.conv_cache.iter().any(|&v| v != 0.0);
+        let tra_has_signal = denoiser.tra_cache.iter().any(|&v| v != 0.0);
+        assert!(
+            conv_has_signal,
+            "conv_cache should accumulate recurrent state"
+        );
+        assert!(
+            tra_has_signal,
+            "tra_cache should accumulate recurrent state"
+        );
+    }
+
+    #[test]
+    fn denoiser_handles_abnormal_and_adversarial_inputs_zero_panic() {
+        let Some(path) = model_path_for_test() else {
+            eprintln!("skip: gtcrn_simple.onnx not present");
+            return;
+        };
+        let mut denoiser = GtcrnDenoiser::new(&path).expect("load GTCRN model");
+
+        // 1. Empty input slice
+        let out_empty = denoiser.process_audio(&[]).expect("empty input");
+        assert!(out_empty.is_empty());
+
+        // 2. Partial input slice (< HOP)
+        let out_partial = denoiser
+            .process_audio(&[0.1f32; 100])
+            .expect("partial input");
+        assert!(out_partial.is_empty());
+
+        // 3. Sub-hop chunks streaming incrementally
+        for _ in 0..50 {
+            let res = denoiser.process_audio(&[0.05f32; 7]);
+            assert!(res.is_ok());
+        }
+
+        // 4. Large burst chunk (e.g. 16000 samples = 1s)
+        let burst = vec![0.02f32; 16000];
+        let res_burst = denoiser.process_audio(&burst);
+        assert!(res_burst.is_ok());
+
+        // 5. Corrupted floats (NaN, Inf, -Inf)
+        let mut weird_samples = vec![0.0f32; HOP * 2];
+        weird_samples[10] = f32::NAN;
+        weird_samples[20] = f32::INFINITY;
+        weird_samples[30] = f32::NEG_INFINITY;
+        weird_samples[40] = f32::MIN_POSITIVE;
+        let res_weird = denoiser.process_audio(&weird_samples);
+        assert!(
+            res_weird.is_ok(),
+            "Denoiser must not panic on NaN or Inf samples"
+        );
     }
 }

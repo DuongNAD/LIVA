@@ -1,0 +1,1 @@
+Normal text with tabs and carriage returns

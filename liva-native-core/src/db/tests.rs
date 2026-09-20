@@ -1224,6 +1224,66 @@ mod tests {
         assert!(node_ids.contains(&"hipporag_engine".to_string()));
     }
 
+    #[tokio::test]
+    async fn test_insert_l3_triples_batch_and_wal_pragmas() {
+        let pool = DatabasePool::new_in_memory().expect("create in-memory db");
+        let conn = pool.readers.get().expect("get reader connection");
+
+        // Verify cache_size PRAGMA is tuned (-2000) and page_size is 4096
+        let cache_size: i64 = conn
+            .query_row("PRAGMA cache_size", [], |r| r.get(0))
+            .expect("query cache_size");
+        assert_eq!(cache_size, -2000, "cache_size should be tuned to -2000");
+
+        let page_size: i64 = conn
+            .query_row("PRAGMA page_size", [], |r| r.get(0))
+            .expect("query page_size");
+        assert_eq!(page_size, 4096, "page_size should be tuned to 4096");
+
+        let triples = vec![
+            (
+                "alice".to_string(),
+                "knows".to_string(),
+                "bob".to_string(),
+                0.9f32,
+            ),
+            (
+                "bob".to_string(),
+                "works_at".to_string(),
+                "company".to_string(),
+                0.8f32,
+            ),
+            (
+                "alice".to_string(),
+                "founded".to_string(),
+                "company".to_string(),
+                1.0f32,
+            ),
+        ];
+
+        pool.insert_l3_triples_batch(&triples)
+            .await
+            .expect("insert_l3_triples_batch should succeed");
+
+        let node_count: i64 = conn
+            .query_row("SELECT count(*) FROM l3_nodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(node_count, 3);
+
+        let edge_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM l3_edges WHERE obsolete = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(edge_count, 3);
+
+        let graph = pool.csr_graph.read().unwrap();
+        assert_eq!(graph.node_count(), 3);
+        assert_eq!(graph.edge_count(), 6); // Bidirectional in CSR
+    }
+
     #[test]
     fn test_turn_telemetry_schema_and_migration_10() {
         let pool = DatabasePool::new_in_memory().expect("create in-memory db");
@@ -1354,6 +1414,100 @@ mod tests {
             ancient_hit.score >= 0.049,
             "Ancient memory score {} must not vanish below the 0.05 floor",
             ancient_hit.score
+        );
+    }
+
+    #[test]
+    fn test_calibrated_schema_secondary_indexes() {
+        let pool = DatabasePool::new_in_memory().expect("create in-memory db");
+        let conn = pool.readers.get().expect("get reader connection");
+
+        let check_index = |table: &str, index_name: &str| -> bool {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA index_list('{}')", table))
+                .expect("prepare index_list");
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .expect("query index_list");
+            for idx in rows.flatten() {
+                if idx == index_name {
+                    return true;
+                }
+            }
+            false
+        };
+
+        assert!(
+            check_index("events", "idx_events_timestamp"),
+            "idx_events_timestamp must exist"
+        );
+        assert!(
+            check_index("facts", "idx_facts_last_accessed"),
+            "idx_facts_last_accessed must exist"
+        );
+        assert!(
+            check_index("tasks", "idx_tasks_status_created"),
+            "idx_tasks_status_created must exist"
+        );
+        assert!(
+            check_index("l3_edges", "idx_l3_edges_subject"),
+            "idx_l3_edges_subject must exist"
+        );
+        assert!(
+            check_index("l3_edges", "idx_l3_edges_object"),
+            "idx_l3_edges_object must exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_db_actor_micro_batch_coalesce_and_atomic_rollback() {
+        let pool = DatabasePool::new_in_memory().expect("create in-memory db");
+
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let pool_clone = pool.writer_actor.clone();
+            let h = tokio::spawn(async move {
+                pool_clone
+                    .execute(move |conn| {
+                        conn.execute(
+                            "INSERT INTO tasks (id, title, created_at, updated_at) VALUES (?1, ?2, 1000, 1000)",
+                            rusqlite::params![format!("task_{}", i), format!("Title {}", i)],
+                        )
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                    })
+                    .await
+            });
+            handles.push(h);
+        }
+
+        for h in handles {
+            let res = h.await.expect("join handle");
+            assert!(res.is_ok(), "task write should succeed: {:?}", res);
+        }
+
+        pool.writer_actor.flush().await.expect("flush actor");
+
+        {
+            let conn = pool.readers.get().expect("reader conn");
+            let count: i64 = conn
+                .query_row("SELECT count(*) FROM tasks", [], |r| r.get(0))
+                .expect("count tasks");
+            assert_eq!(count, 10, "all 10 batched tasks should be persisted");
+        }
+
+        let fail_res = pool
+            .writer_actor
+            .execute(|conn| {
+                conn.execute("INSERT INTO non_existent_table_xyz VALUES (1)", [])
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            })
+            .await;
+
+        assert!(
+            fail_res.is_err(),
+            "operation on non-existent table must fail and trigger rollback"
         );
     }
 }

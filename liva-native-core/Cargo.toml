@@ -248,7 +248,6 @@ name = "router_gate_probe"
 path = "src/bin/router_gate_probe.rs"
 test = false
 
-[lints.clippy]
-chunks_exact_to_as_chunks = "allow"
-result_large_err = "allow"
+[lints]
+workspace = true
 

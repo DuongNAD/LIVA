@@ -424,13 +424,22 @@ watch(
 // ═══════════════════════════════════════════════════════
 //  Lifecycle
 // ═══════════════════════════════════════════════════════
+let isEngineInitializing = false;
+let isEngineInitialized = false;
+
 const initEngine = async () => {
+  if (isEngineInitializing || isEngineInitialized) {
+    logger.info('[VRMEngine]', 'Engine already initializing or initialized, skipping redundant mount');
+    return;
+  }
+
   if (!canvas.value) {
     logger.error('[VRMEngine]', 'Canvas ref is null on mount');
     loadError.value = 'Canvas ref is null';
     return;
   }
 
+  isEngineInitializing = true;
   try {
     logger.info('[VRMEngine]', 'Engine initializing...', {
       width: canvas.value.width,
@@ -465,10 +474,14 @@ const initEngine = async () => {
 
     // 6. Start locomotion
     startLocomotion();
+
+    isEngineInitialized = true;
   } catch (e: unknown) {
     logger.error('[VRMEngine]', 'Init failed:', e instanceof Error ? e.message : String(e), e);
     // Ép kiểu thuần biên dịch (bị xoá khi build) để giữ nguyên hành vi runtime cũ
     loadError.value = (e as Error).message;
+  } finally {
+    isEngineInitializing = false;
   }
 };
 
@@ -587,6 +600,8 @@ function onAvatarDoubleClick() {
 }
 
 const cleanupEngine = () => {
+  isEngineInitialized = false;
+  isEngineInitializing = false;
   globalThis.removeEventListener('resize', handleResize);
   unobserveContainer();
   stopLocomotion();

@@ -690,3 +690,47 @@ fn test_raii_scope_drop_lifecycle() {
     assert_eq!(tools_after.len(), 1);
     assert_eq!(tools_after[0].name, "persistent_tool");
 }
+
+#[test]
+fn test_scoped_tool_registry_poison_recovery() {
+    let registry = ScopedToolRegistry::new();
+    let reg_clone = registry.clone();
+
+    // Spawn thread that panics to verify poison recovery
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let handle = std::thread::spawn(move || {
+            let _guard = reg_clone.register_scoped(
+                "scope:panicking",
+                CatalogTool {
+                    server: "native".into(),
+                    name: "boom".into(),
+                    description: "panics".into(),
+                    input_schema: json!({}),
+                    embed_extra: "".into(),
+                },
+            );
+            panic!("Intentional thread panic to poison locks");
+        });
+        let _ = handle.join();
+    }));
+
+    // Registry operations must NOT panic with PoisonError
+    let scope = ToolScope::new("scope:after_poison", CommandPrincipal::LocalCli);
+    registry.register_scope(scope.clone());
+    let fetched = registry.get_scope("scope:after_poison");
+    assert!(fetched.is_some());
+
+    let tool = CatalogTool {
+        server: "native".into(),
+        name: "resilient_tool".into(),
+        description: "Survives poison".into(),
+        input_schema: json!({}),
+        embed_extra: "".into(),
+    };
+    let guard = registry.register_scoped("scope:after_poison", tool);
+    assert!(guard.is_ok());
+
+    let resolved = registry.resolve_tools_for_scope("scope:after_poison");
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].name, "resilient_tool");
+}

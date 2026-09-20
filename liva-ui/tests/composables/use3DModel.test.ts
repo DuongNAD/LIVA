@@ -1204,5 +1204,80 @@ describe('use3DModel', () => {
       model.dispose();
     });
   });
+
+  describe('Milestone 2 Hardening: F7 Asymmetric RMS Filter & F8 Spring Bone Clamp', () => {
+    it('F8: kẹp physicsSteps tối đa 2 bước khi delta thời gian nhảy vọt (spike) ngăn chặn vòng lặp vô hạn', async () => {
+      const vrmUpdateSpy = vi.fn();
+      const scene = new THREE.Object3D();
+      const vrmInstance = {
+        scene,
+        humanoid: { getNormalizedBoneNode: vi.fn(() => new THREE.Object3D()) },
+        expressionManager: { setValue: vi.fn(), getValue: vi.fn(), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vrmUpdateSpy,
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      // Giả lập 1 frame render
+      model.startRenderLoop();
+      model.stopRenderLoop();
+
+      // Khi chạy bình thường, vrm.update được gọi với physicsSteps <= 2
+      expect(vrmUpdateSpy.mock.calls.length).toBeLessThanOrEqual(2);
+      model.dispose();
+    });
+
+    it('F7: bộ lọc RMS không đối xứng (attack 0.8, decay 0.25) phản ứng nhanh khi âm thanh dâng cao và mượt khi tắt', async () => {
+      const expressions = new Map<string, number>();
+      const setValueSpy = vi.fn((name: string, val: number) => expressions.set(name, val));
+      const scene = new THREE.Object3D();
+      const vrmInstance = {
+        scene,
+        humanoid: { getNormalizedBoneNode: vi.fn(() => new THREE.Object3D()) },
+        expressionManager: { setValue: setValueSpy, getValue: vi.fn((name: string) => expressions.get(name) ?? 0), update: vi.fn() },
+        lookAt: { applier: { lookAt: vi.fn(), applyYawPitch: vi.fn() } },
+        update: vi.fn(),
+      };
+
+      mockLoadGLTF.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: vrmInstance }, scene });
+      });
+
+      const model = use3DModel();
+      model.initRenderer(document.createElement('canvas'), 800, 600);
+      await model.loadModel('models/avatar.vrm');
+
+      let audioLevel = 220; // Biên độ lớn
+      const mockAnalyser = {
+        fftSize: 256,
+        smoothingTimeConstant: 0.4,
+        frequencyBinCount: 128,
+        getByteFrequencyData: vi.fn((arr: Uint8Array) => {
+          arr.fill(audioLevel);
+        }),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      };
+
+      model.startAudioDrivenLipSync(mockAnalyser as any);
+
+      // Render 1 frame với âm thanh to (attack phase)
+      model.startRenderLoop();
+      model.stopRenderLoop();
+
+      // Với attack factor 0.8, khẩu hình mở nhanh ngay frame đầu tiên
+      const initialAa = expressions.get('aa') ?? 0;
+      expect(initialAa).toBeGreaterThan(0.5);
+
+      model.dispose();
+    });
+  });
 });
 

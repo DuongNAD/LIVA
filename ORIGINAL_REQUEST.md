@@ -854,4 +854,148 @@ Nội dung đặc tả giao diện cần áp dụng vào Milestone 2 (2D Banking
 
 Yêu cầu chuyển tiếp ngay lập tức chỉ thị này cho Project Orchestrator và Worker phụ trách Milestone 2 để đảm bảo giao diện được hiện thực hóa chuẩn xác 1:1 theo thiết kế này.
 
+## 2026-09-18T03:57:44Z
+
+Thực hiện rà soát toàn diện hệ thống LIVA (Backend Rust liva-native-core, Tauri IPC, Frontend liva-ui), phát hiện và khắc phục các lỗi tiềm ẩn, tối ưu hóa hiệu năng & tài nguyên, đồng thời xuất báo cáo audit và đề xuất lộ trình phát triển.
+
+Working directory: e:/Project/01_AI_Agents/LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Rà soát & Khắc phục Lỗi Toàn Diện (System Audit & Bug Remediation)
+Rà soát toàn bộ mã nguồn hệ thống để phát hiện các rủi ro:
+- **liva-native-core (Rust)**: Bắt các trường hợp `unwrap()` / `expect()` có thể gây panic ngoài ý muốn, rủi ro race condition trong đa luồng, xử lý kết nối SQLite WAL pool, và an toàn bộ nhớ.
+- **Tauri IPC Bridge & Data Flow**: Đảm bảo an toàn kiểu dữ liệu truyền qua lại giữa Rust backend và Frontend webview, ngăn chặn memory leak hoặc nghẽn luồng IPC.
+- **liva-ui (Frontend)**: Rà soát xử lý ngoại lệ, đồng bộ state, và xử lý ngắt kết nối/lỗi mạng hoặc crash ứng dụng.
+Triển khai các bản vá (code patches) khắc phục các lỗi nghiêm trọng được phát hiện.
+
+### R2. Tối Ưu Hóa Hiệu Năng & Tài Nguyên (Performance & Resource Optimization)
+Tối ưu hóa các điểm nghẽn (bottlenecks) quan trọng:
+- Tối ưu truy vấn và tái sử dụng connection pool trong SQLite WAL.
+- Giảm độ trễ xử lý (latency) của AI router và voice/multimodal pipeline trong native core.
+- Tối ưu hóa bundle và thời gian render của Frontend UI, giảm thiểu lượng tiêu thụ RAM và CPU lúc nhàn rỗi (idle).
+
+### R3. Kiểm Thử Tự Động & Đảm Bảo Tính Toàn Vẹn (Automated Verification & Zero-Regression)
+Xây dựng và thực thi các bộ kiểm thử tự động để bảo đảm các bản sửa đổi không gây hồi quy (regression):
+- Chạy kiểm tra tĩnh và test suite tuần tự với giới hạn tài nguyên an toàn (`-j 2`, `--test-threads 2`).
+- Đảm bảo các test case hiện tại và test case mới bổ sung đều vượt qua (pass 100%).
+
+### R4. Tổng Hợp Báo Cáo Audit & Đề Xuất Lộ Trình (Audit Report & Roadmap)
+Tổng kết kết quả kiểm tra thành báo cáo hoàn chỉnh:
+- Bảng tổng hợp các lỗi đã phát hiện (phân loại mức độ nghiêm trọng) và giải pháp đã vá.
+- Số liệu đo lường hiệu năng trước và sau tối ưu.
+- Đề xuất lộ trình nâng cấp kiến trúc và tính năng tiếp theo cho dự án (ghi nhận vào tài liệu/Obsidian Vault).
+
+### R5. Tuân Thủ Ràng Buộc An Toàn Hệ Thống (Infrastructure & Safety Constraints)
+- **RAM Guardrails**: Luôn kiểm tra bộ nhớ RAM khả dụng >= 4GB trước khi chạy test suites nặng.
+- **Tài nguyên biên dịch**: Luôn truyền cờ `-j 2` cho `cargo check`, `cargo build`, `cargo test` và `--test-threads 2` cho test runner. Thực thi các lệnh tuần tự, tuyệt đối không chạy đồng thời nhiều tiến trình build.
+- **Git Safety**: Tuyệt đối không tự động thực hiện các thao tác Git từ xa hoặc commit (`git commit`, `git push`, `git checkout -b` là quyền của USER). Ranh giới tối đa của agent dừng ở staging (`git add`).
+
+## Acceptance Criteria
+
+### Tính Đúng Đắn & Ổn Định (Correctness & Stability)
+- [ ] Tất cả các điểm panic không an toàn hoặc lỗi tiềm ẩn nghiêm trọng được định vị và sửa chữa.
+- [ ] `cargo check -j 2` và `cargo test -j 2 -- --test-threads 2` trong `liva-native-core` vượt qua hoàn toàn (0 failures).
+- [ ] `cargo clippy -j 2` không còn cảnh báo lỗi nghiêm trọng về an toàn hoặc tài nguyên.
+- [ ] Quy trình build và lint của Frontend (`liva-ui` / `liva-desktop`) hoàn tất thành công mà không phát sinh lỗi.
+
+### Hiệu Năng & Tối Ưu (Performance)
+- [ ] Đo lường được số liệu cụ thể chứng minh việc tối ưu hóa (hoặc chí ít không làm suy giảm hiệu năng hiện tại).
+- [ ] Không xuất hiện tình trạng rò rỉ tài nguyên (file handles, database connections, background worker threads).
+
+### Báo Cáo & Tài Liệu (Documentation)
+- [ ] Báo cáo tổng kết Audit chi tiết được tạo lập rõ ràng (bao gồm: lỗi tìm thấy, cách khắc phục, benchmark so sánh).
+- [ ] Các lưu ý kiến trúc hoặc khuyến nghị tương lai được đồng bộ vào kho tài liệu (`docs/` hoặc Obsidian Vault).
+
+## 2026-09-18T08:40:39Z
+
+Conduct a comprehensive architectural evaluation and optimization of the Liva project. The focus includes profiling the `liva-native-core` (Rust) performance, refactoring AI agents/skills, reducing technical debt, and analyzing production scalability.
+
+Working directory: E:\Project\01_AI_Agents\LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Rust Core Performance Audit
+Produce an architectural audit of the `liva-native-core` Rust codebase, identifying performance bottlenecks and proposing native optimizations.
+
+### R2. Agent & Skill Refactoring Analysis
+Analyze the current AI agents, skills, and prompts to identify technical debt, security risks, and areas for structural refactoring.
+
+### R3. Production Scalability Plan
+Evaluate the system's readiness for production traffic and generate an actionable upgrade plan focusing on concurrency and stability.
+
+## Acceptance Criteria
+
+### Audit Report Quality (Agent-as-judge Rubric)
+- [ ] The report includes theoretical performance analysis or profiling metrics for at least two major Rust core components.
+- [ ] Identifies at least 3 concrete instances of technical debt in the agents/skills directory with exact file references.
+- [ ] The production scalability section explicitly addresses database connection pooling and concurrent request handling.
+- [ ] The final output is a structured Markdown document covering all requirements comprehensively.
+
+## 2026-09-18T12:14:57Z
+
+Use a very large team of agents.
+
+Research, develop, and optimize the LIVA Voice Pipeline (STT, TTS, GTCRN noise filtering, streaming) and 3D Avatar interaction (viseme lip-sync, procedural animation, blendshapes) to production-ready grade, delivering minimal latency, rock-solid stability, and comprehensive automated verification.
+
+Working directory: e:\Project\01_AI_Agents\LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Low-Latency Voice Processing & Audio Streaming
+The voice interaction pipeline must process incoming audio, noise suppression (GTCRN), speech recognition, and streaming speech synthesis (Piper TTS) with minimal end-to-end latency and no audio clipping or frame drops under continuous operation.
+
+### R2. High-Fidelity 3D Avatar Lip-Sync & Expressive Motion
+The 3D avatar visual engine must compute and apply natural viseme blendshapes in real-time synchronization with streaming audio chunks, while maintaining a smooth procedural animation frame rate without freezing or dropping UI rendering threads.
+
+### R3. Safe System Resource Guardrails & Zero-Panic Reliability
+All native components and IPC message handlers must adhere to strict bounded resource execution, zero panic behavior under adversarial inputs, and clean memory deallocation across extended sessions.
+
+### R4. Comprehensive Verification & Stress Harness
+The system must provide an automated test and benchmark harness that validates voice SLAs (P95/P99 latency), audio jitter tolerance, and 3D animation frame rates under simulated multi-turn load.
+
+## Acceptance Criteria
+
+### Voice Pipeline Performance & SLAs
+- [ ] End-to-end voice chunk latency and synthesis time meet designated low-latency targets (audio pipeline processing overhead < 100ms P95).
+- [ ] Streaming audio buffers handle variable chunk arrivals and simulated jitter without buffer underflow or audio stutter.
+
+### 3D Avatar Synchronization & Visual Quality
+- [ ] Avatar lip-sync visemes match spoken audio timestamps with synchronization drift within 30ms.
+- [ ] 3D avatar render loop consistently achieves >= 60 FPS under normal desktop display execution without CPU/GPU spikes.
+
+### Stability & Stress Testing
+- [ ] Automated stress benchmark executes >= 1,000 continuous synthetic conversation rounds with zero runtime panics, zero unhandled errors, and stable RAM footprint (< 4GB, no memory leaks).
+- [ ] All existing and new Rust tests pass sequentially via `cargo test -j 2 -- --test-threads 2`.
+
+## 2026-09-19T15:27:46Z
+
+Thực hiện nghiên cứu, phân tích toàn diện kiến trúc của dự án LIVA hiện tại, sau đó trực tiếp tiến hành triển khai (implement) nâng cấp và "remake" dự án. Đánh giá và nâng cấp bao gồm cấu trúc mã nguồn, hiệu năng, cơ sở dữ liệu và quy trình CI/CD.
+
+Working directory: e:\Project\01_AI_Agents\LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Phân tích hiện trạng dự án LIVA
+Đánh giá toàn diện mã nguồn hiện tại để xác định các điểm nghẽn hiệu năng (bottlenecks), nợ kỹ thuật và các điểm yếu trong kiến trúc.
+
+### R2. Báo cáo đề xuất kiến trúc Remake
+Đề xuất kiến trúc mới (tự do lựa chọn công nghệ) nhằm giải quyết các vấn đề trên, tối ưu hóa quy trình phát triển và CI/CD. Lưu đề xuất vào file `architecture_remake_proposal.md`.
+
+### R3. Triển khai nâng cấp (Implementation)
+Tiến hành cập nhật, refactor và viết lại mã nguồn theo kiến trúc đã đề xuất. Đảm bảo mã nguồn mới thay thế/tích hợp hoàn chỉnh vào dự án.
+
+## Acceptance Criteria
+
+### Báo cáo và Đánh giá
+- [ ] Báo cáo `architecture_remake_proposal.md` phải chỉ ra ít nhất 3 điểm nghẽn trong mã nguồn cũ và so sánh ưu/nhược điểm với giải pháp mới.
+
+### Triển khai Mã nguồn
+- [ ] Mã nguồn mới phải được viết và cấu trúc đúng theo kiến trúc đã đề xuất.
+- [ ] Phải có các file README hoặc tài liệu cập nhật hướng dẫn cách chạy dự án theo cấu trúc mới.
+- [ ] Code mới phải biên dịch/chạy được mà không bị lỗi syntax cơ bản.
 

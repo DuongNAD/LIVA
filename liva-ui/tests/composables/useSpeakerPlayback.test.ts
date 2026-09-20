@@ -129,6 +129,7 @@ describe("useSpeakerPlayback", () => {
     const onSourceStarted = vi.fn();
     const speaker = useSpeakerPlayback({
       useMasterGain: true,
+      graceTimeoutMs: 0,
       onPlaybackStarted,
       onPlaybackFinished,
       onQueueDrained,
@@ -263,7 +264,7 @@ describe("useSpeakerPlayback", () => {
     expect(sources).toHaveLength(1);
   });
 
-  it("applies default 150ms pre-roll jitter buffer to first chunk and gapless back-to-back to second chunk", async () => {
+  it("applies default 40ms pre-roll jitter buffer to first chunk and gapless back-to-back to second chunk", async () => {
     const scheduledChunks: { startTimeSec: number; durationSec: number }[] = [];
     const speaker = useSpeakerPlayback({
       onChunkScheduled: (info) => scheduledChunks.push(info),
@@ -273,12 +274,12 @@ describe("useSpeakerPlayback", () => {
     await speaker.enqueueSpeakerPayload(pcmChunk());
 
     expect(sources).toHaveLength(2);
-    // First chunk starts at currentTime (0) + 0.150s pre-roll
-    expect(sources[0].start).toHaveBeenCalledWith(0.15);
-    expect(scheduledChunks[0].startTimeSec).toBeCloseTo(0.15);
+    // First chunk starts at currentTime (0) + 0.040s calibrated pre-roll
+    expect(sources[0].start).toHaveBeenCalledWith(0.04);
+    expect(scheduledChunks[0].startTimeSec).toBeCloseTo(0.04);
 
-    // Second chunk starts immediately after first chunk ends: 0.15 + duration (1/16000)
-    const expectedSecondStart = 0.15 + (1 / 16000);
+    // Second chunk starts immediately after first chunk ends: 0.04 + duration (1/16000)
+    const expectedSecondStart = 0.04 + 1 / 16000;
     expect(sources[1].start).toHaveBeenCalledWith(expectedSecondStart);
     expect(scheduledChunks[1].startTimeSec).toBeCloseTo(expectedSecondStart);
   });
@@ -292,6 +293,44 @@ describe("useSpeakerPlayback", () => {
     const speakerZero = useSpeakerPlayback({ preRollBufferSec: 0 });
     await speakerZero.enqueueSpeakerPayload(pcmChunk());
     expect(sources[0].start).toHaveBeenCalledWith(0);
+  });
+
+  it("holds playing state across 350ms grace period and eliminates second pre-roll on next clause", async () => {
+    vi.useFakeTimers();
+    try {
+      const onPlaybackFinished = vi.fn();
+      const speaker = useSpeakerPlayback({ onPlaybackFinished });
+
+      await speaker.enqueueSpeakerPayload(pcmChunk());
+      expect(speaker.isPlaying()).toBe(true);
+      expect(sources[0].start).toHaveBeenCalledWith(0.04);
+
+      // Chunk 1 finishes playing
+      sources[0].onended?.();
+
+      // During 350ms grace period: playing remains true
+      expect(speaker.isPlaying()).toBe(true);
+      expect(onPlaybackFinished).not.toHaveBeenCalled();
+
+      // Advance 200ms (within grace window): Chunk 2 arrives
+      vi.advanceTimersByTime(200);
+      await speaker.enqueueSpeakerPayload(pcmChunk());
+
+      // Chunk 2 must NOT add another 40ms pre-roll because playing was kept true
+      // It starts immediately after Chunk 1's end: 0.04 + 1/16000
+      expect(sources[1].start).toHaveBeenCalledWith(0.04 + 1 / 16000);
+
+      // Chunk 2 ends
+      sources[1].onended?.();
+      expect(speaker.isPlaying()).toBe(true);
+
+      // Now advance 350ms past the grace timeout
+      vi.advanceTimersByTime(350);
+      expect(speaker.isPlaying()).toBe(false);
+      expect(onPlaybackFinished).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

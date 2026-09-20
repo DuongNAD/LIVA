@@ -631,25 +631,40 @@ impl MemoryDeleteCoordinator {
         domain: &str,
     ) -> Result<FactDeletionCounts, rusqlite::Error> {
         conn.execute_batch("PRAGMA secure_delete = ON;")?;
-        let tx = conn.unchecked_transaction()?;
+        if conn.is_autocommit() {
+            let tx = conn.unchecked_transaction()?;
+            let counts = Self::delete_fact_cascade_inner(&tx, key, domain)?;
+            tx.commit()?;
+            // Truncate WAL
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+            Ok(counts)
+        } else {
+            Self::delete_fact_cascade_inner(conn, key, domain)
+        }
+    }
 
-        let facts_deleted = tx.execute("DELETE FROM facts WHERE key = ?1", params![key])? as i64;
-        let backups_deleted = tx.execute(
+    fn delete_fact_cascade_inner(
+        conn: &Connection,
+        key: &str,
+        domain: &str,
+    ) -> Result<FactDeletionCounts, rusqlite::Error> {
+        let facts_deleted = conn.execute("DELETE FROM facts WHERE key = ?1", params![key])? as i64;
+        let backups_deleted = conn.execute(
             "DELETE FROM facts_locked_backup WHERE key = ?1",
             params![key],
         )? as i64;
-        let history_deleted = tx.execute(
+        let history_deleted = conn.execute(
             "DELETE FROM facts_history WHERE key = ?1 AND domain = ?2",
             params![key, domain],
         )? as i64;
-        let conflicts_deleted = tx.execute(
+        let conflicts_deleted = conn.execute(
             "DELETE FROM memory_conflict_queue WHERE fact_key = ?1 AND domain = ?2",
             params![key, domain],
         )? as i64;
 
         // Vector projections matching key
         let target_vec_ids: Vec<i64> = {
-            let mut stmt = tx.prepare(
+            let mut stmt = conn.prepare(
                 "SELECT id FROM vectors_meta WHERE type = 'fact' AND (vec_id = ?1 OR content LIKE ?2)",
             )?;
             let pattern = format!("%{}%", key);
@@ -667,20 +682,20 @@ impl MemoryDeleteCoordinator {
 
         for vid in &target_vec_ids {
             vec_idx_deleted +=
-                tx.execute("DELETE FROM vec_idx WHERE rowid = ?1", params![vid])? as i64;
+                conn.execute("DELETE FROM vec_idx WHERE rowid = ?1", params![vid])? as i64;
             vectors_fts_deleted +=
-                tx.execute("DELETE FROM vectors_fts WHERE rowid = ?1", params![vid])? as i64;
+                conn.execute("DELETE FROM vectors_fts WHERE rowid = ?1", params![vid])? as i64;
             vectors_meta_deleted +=
-                tx.execute("DELETE FROM vectors_meta WHERE id = ?1", params![vid])? as i64;
+                conn.execute("DELETE FROM vectors_meta WHERE id = ?1", params![vid])? as i64;
         }
 
         // L3 Knowledge Graph
-        let l3_edges_deleted = tx.execute(
+        let l3_edges_deleted = conn.execute(
             "DELETE FROM l3_edges WHERE source = ?1 OR target = ?1",
             params![key],
         )? as i64;
         let l3_nodes_deleted =
-            tx.execute("DELETE FROM l3_nodes WHERE id = ?1", params![key])? as i64;
+            conn.execute("DELETE FROM l3_nodes WHERE id = ?1", params![key])? as i64;
 
         // Record audit trace
         let audit_id = format!("factdel_{}", uuid::Uuid::new_v4());
@@ -704,16 +719,11 @@ impl MemoryDeleteCoordinator {
         };
 
         let counts_json = serde_json::to_string(&counts).unwrap_or_default();
-        tx.execute(
+        conn.execute(
             "INSERT INTO deletion_audit (audit_id, scope_hash, dry_run, counts_json, created_at)
              VALUES (?1, ?2, 0, ?3, ?4)",
             params![audit_id, scope_hash, counts_json, now_ms],
         )?;
-
-        tx.commit()?;
-
-        // Truncate WAL
-        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
 
         Ok(counts)
     }

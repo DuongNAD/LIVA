@@ -22,11 +22,16 @@ export interface UseSpeakerPlaybackOptions {
   /** Route playback through a master GainNode (required for audio ducking). */
   useMasterGain?: boolean;
   /**
-   * Pre-roll jitter buffer duration in seconds (default 0.150s = 150ms).
+   * Pre-roll jitter buffer duration in seconds (default 0.040s = 40ms calibrated for local streaming).
    * Delays the start of the very first chunk in a playback run slightly
    * to absorb network/generation jitter and prevent initial underruns/clicks.
    */
   preRollBufferSec?: number;
+  /**
+   * Grace period in milliseconds before resetting playing to false after active sources empty (default 350ms).
+   * Prevents inter-clause stutter and repeated pre-roll hold when the LLM pauses briefly between clauses.
+   */
+  graceTimeoutMs?: number;
   /**
    * Insert a persistent AnalyserNode at the head of the output chain so a
    * consumer can drive lip-sync from the audio that is actually audible.
@@ -87,10 +92,17 @@ export interface UseSpeakerPlaybackReturn {
  */
 const LEGACY_MP3_OVERLAP_S = 0.1;
 
+/** Default calibrated pre-roll buffer for local streaming: 40ms (0.040s) */
+const DEFAULT_PRE_ROLL_BUFFER_SEC = 0.04;
+/** Default grace period: 350ms to absorb inter-clause LLM generation pauses */
+const DEFAULT_GRACE_TIMEOUT_MS = 350;
+
 export function useSpeakerPlayback(
   options: UseSpeakerPlaybackOptions = {}
 ): UseSpeakerPlaybackReturn {
   const channel = options.channel ?? "[SpeakerPlayback]";
+  const graceTimeoutMs = options.graceTimeoutMs ?? DEFAULT_GRACE_TIMEOUT_MS;
+  const configuredPreRoll = options.preRollBufferSec ?? DEFAULT_PRE_ROLL_BUFFER_SEC;
 
   let audioCtx: AudioContext | null = null;
   let masterGain: GainNode | null = null;
@@ -98,6 +110,7 @@ export function useSpeakerPlayback(
   /** Gapless scheduling cursor: earliest time the next chunk may start. */
   let nextStartTime = 0;
   let activeSources: AudioBufferSourceNode[] = [];
+  let graceTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped on stop/flush so in-flight async decodes drop their stale chunk. */
   let queueEpoch = 0;
   let blocked = false;
@@ -151,11 +164,30 @@ export function useSpeakerPlayback(
   function handleSourceEnded(source: AudioBufferSourceNode): void {
     activeSources = activeSources.filter((item) => item !== source);
     if (activeSources.length > 0) return;
-    if (options.onQueueDrained) options.onQueueDrained();
-    if (playing) {
-      playing = false;
-      if (options.onPlaybackFinished) options.onPlaybackFinished();
+
+    if (graceTimeoutMs <= 0) {
+      if (options.onQueueDrained) options.onQueueDrained();
+      if (playing) {
+        playing = false;
+        if (options.onPlaybackFinished) options.onPlaybackFinished();
+      }
+      return;
     }
+
+    // Start 350ms grace timeout before dropping playing state
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+    }
+    graceTimer = setTimeout(() => {
+      graceTimer = null;
+      if (activeSources.length === 0) {
+        if (options.onQueueDrained) options.onQueueDrained();
+        if (playing) {
+          playing = false;
+          if (options.onPlaybackFinished) options.onPlaybackFinished();
+        }
+      }
+    }, graceTimeoutMs);
   }
 
   function scheduleBuffer(
@@ -163,13 +195,19 @@ export function useSpeakerPlayback(
     audioBuffer: AudioBuffer,
     overlap: number,
   ): { startTimeSec: number; durationSec: number } {
+    // Clear pending grace timer since new audio is being scheduled
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+      graceTimer = null;
+    }
+
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(outputNode(ctx));
     source.onended = () => handleSourceEnded(source);
 
     const isFirstInRun = !playing && activeSources.length === 0;
-    const preRoll = isFirstInRun ? (options.preRollBufferSec ?? 0.15) : 0;
+    const preRoll = isFirstInRun ? configuredPreRoll : 0;
     if (nextStartTime < ctx.currentTime + preRoll) {
       nextStartTime = ctx.currentTime + preRoll;
     }
@@ -241,6 +279,11 @@ export function useSpeakerPlayback(
   function stop(blockIncomingChunks = true): void {
     if (blockIncomingChunks) {
       blocked = true;
+    }
+
+    if (graceTimer) {
+      clearTimeout(graceTimer);
+      graceTimer = null;
     }
 
     queueEpoch++;

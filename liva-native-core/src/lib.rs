@@ -45,6 +45,7 @@ pub use artifact_trust::{
 pub use authorization::{CommandPrincipal, authorize_command};
 pub use crypto::EncryptionEngine;
 pub use db::DatabasePool;
+pub use db_actor::{DbActorError, DbActorHandle};
 pub use llm::LlamaRouterManager;
 pub(crate) use paths::update_config_file_at;
 pub use paths::{
@@ -577,9 +578,6 @@ pub async fn handle_chat_completion_scoped(
 
     let do_kho = crate::agent::graph::phan_loai_do_kho(last_user_text);
 
-    // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
-    let _ = state.llm.lock().await.maybe_auto_swap(do_kho).await;
-
     let start_instant = std::time::Instant::now();
     let (model_tx, model_rx) = tokio::sync::oneshot::channel();
 
@@ -588,6 +586,9 @@ pub async fn handle_chat_completion_scoped(
     let completion_res = tokio::task::spawn_blocking(move || {
         let messages = inference_messages;
         let mut llm_manager = state_clone.llm.blocking_lock();
+        // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
+        // Thực hiện NGAY trong khi đang giữ lock, loại bỏ hoàn toàn race condition check-then-act.
+        let _ = llm_manager.maybe_auto_swap_blocking(do_kho);
         let _ = model_tx.send(llm_manager.current_model_path.to_string_lossy().to_string());
         if stream {
             let tx_inner =
@@ -609,7 +610,9 @@ pub async fn handle_chat_completion_scoped(
                 });
             stream_state.finish(completion)
         } else {
-            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| true)
+            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| {
+                !llm::engine::is_cancel_requested()
+            })
         }
     })
     .await;

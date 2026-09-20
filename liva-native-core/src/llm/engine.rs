@@ -44,6 +44,112 @@ pub fn get_backend() -> &'static LlamaBackend {
         .get_or_init(|| LlamaBackend::init().expect("Failed to initialize llama.cpp backend"))
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static GLOBAL_LLM_IS_GENERATING: AtomicBool = AtomicBool::new(false);
+static GLOBAL_LLM_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LlmActiveMetadata {
+    pub model_path: String,
+    pub model_loaded: bool,
+    pub n_ctx: usize,
+    pub n_gpu_layers: u32,
+    pub is_generating: bool,
+}
+
+impl Default for LlmActiveMetadata {
+    fn default() -> Self {
+        Self {
+            model_path: String::new(),
+            model_loaded: false,
+            n_ctx: 4096,
+            n_gpu_layers: 0,
+            is_generating: false,
+        }
+    }
+}
+
+static GLOBAL_ACTIVE_METADATA: std::sync::RwLock<Option<LlmActiveMetadata>> =
+    std::sync::RwLock::new(None);
+
+pub fn is_generating() -> bool {
+    GLOBAL_LLM_IS_GENERATING.load(Ordering::Relaxed)
+}
+
+pub fn set_generating(val: bool) {
+    GLOBAL_LLM_IS_GENERATING.store(val, Ordering::SeqCst);
+    if let Ok(mut guard) = GLOBAL_ACTIVE_METADATA.write() {
+        if let Some(meta) = guard.as_mut() {
+            meta.is_generating = val;
+        }
+    }
+}
+
+pub fn is_cancel_requested() -> bool {
+    GLOBAL_LLM_CANCEL_REQUESTED.load(Ordering::Relaxed)
+}
+
+pub fn request_cancel() {
+    GLOBAL_LLM_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+pub fn reset_cancel() {
+    GLOBAL_LLM_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
+}
+
+pub fn update_active_metadata(
+    model_path: &str,
+    model_loaded: bool,
+    n_ctx: usize,
+    n_gpu_layers: u32,
+) {
+    if let Ok(mut guard) = GLOBAL_ACTIVE_METADATA.write() {
+        *guard = Some(LlmActiveMetadata {
+            model_path: model_path.to_string(),
+            model_loaded,
+            n_ctx,
+            n_gpu_layers,
+            is_generating: is_generating(),
+        });
+    }
+}
+
+pub fn get_active_metadata() -> LlmActiveMetadata {
+    if let Ok(guard) = GLOBAL_ACTIVE_METADATA.read() {
+        if let Some(meta) = guard.as_ref() {
+            let mut res = meta.clone();
+            res.is_generating = is_generating();
+            return res;
+        }
+    }
+    LlmActiveMetadata {
+        model_path: crate::paths::configured_router_model_path()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        model_loaded: false,
+        n_ctx: 4096,
+        n_gpu_layers: 0,
+        is_generating: is_generating(),
+    }
+}
+
+pub struct GeneratingGuard;
+
+impl GeneratingGuard {
+    pub fn enter() -> Self {
+        set_generating(true);
+        reset_cancel();
+        Self
+    }
+}
+
+impl Drop for GeneratingGuard {
+    fn drop(&mut self) {
+        set_generating(false);
+    }
+}
+
 pub struct LlamaEngine {
     // Declaring context (and the multimodal ctx) before model ensures they are
     // dropped first, preventing dangling references into the model.
@@ -152,7 +258,7 @@ impl<'a> CompletionStream<'a> {
     }
 
     pub fn forward<T: serde::Serialize>(&mut self, piece: &str, chunk: &T) -> bool {
-        if self.cancelled || self.tx.is_closed() {
+        if self.cancelled || self.tx.is_closed() || is_cancel_requested() {
             self.cancelled = true;
             return false;
         }
@@ -169,8 +275,8 @@ impl<'a> CompletionStream<'a> {
         completion: Result<CompletionOutput, String>,
     ) -> Result<CompletionOutput, String> {
         let output = completion?;
-        if self.cancelled || self.tx.is_closed() {
-            return Err("LLM stream cancelled: output channel closed".to_string());
+        if self.cancelled || self.tx.is_closed() || is_cancel_requested() {
+            return Err("LLM stream cancelled: output channel closed or cancelled".to_string());
         }
         Ok(output)
     }
@@ -322,12 +428,113 @@ impl LlamaRouterManager {
         self.n_gpu_layers = target_n_gpu_layers;
         self.current_model_path = new_model_path.to_path_buf();
         self.vocab_only = target_vocab_only;
+        update_active_metadata(
+            &new_model_path.to_string_lossy(),
+            true,
+            target_n_ctx,
+            target_n_gpu_layers,
+        );
 
         Ok(())
     }
 
-    /// Tự động đánh giá và tráo đổi Router <-> Expert model theo độ khó câu hỏi và chính sách chống dao động (U14).
-    pub async fn maybe_auto_swap(
+    /// Tráo đổi model một cách đồng bộ trên luồng hiện tại (dùng trong spawn_blocking hoặc khi đã giữ lock).
+    pub fn swap_model_blocking(
+        &mut self,
+        new_model_path: &Path,
+        n_ctx: Option<usize>,
+        n_gpu_layers: Option<u32>,
+        vocab_only: Option<bool>,
+    ) -> Result<(), String> {
+        // 1. Release active model/context to drop VRAM instantly
+        if self.engine.is_some() {
+            self.engine = None;
+            self.last_tokens.clear();
+        }
+
+        // 2. Yield briefly to let GPU drivers settle VRAM allocations
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // 3. Load parameters (enforce use_mmap=true, use_mlock=false)
+        let target_n_gpu_layers = n_gpu_layers.unwrap_or(self.n_gpu_layers);
+        let target_n_ctx = n_ctx.unwrap_or(self.n_ctx);
+        let target_vocab_only = vocab_only.unwrap_or(false);
+
+        // 4. Load weights and setup context
+        let new_model_path_buf = new_model_path.to_path_buf();
+        let threads = std::env::var("LIVA_LLM_THREADS")
+            .unwrap_or_else(|_| "4".to_string())
+            .parse::<i32>()
+            .unwrap_or(4);
+
+        let mut model_params = LlamaModelParams::default();
+        model_params = model_params.with_n_gpu_layers(target_n_gpu_layers);
+        model_params = model_params.with_use_mmap(true);
+        model_params = model_params.with_use_mlock(false);
+        model_params = model_params.with_vocab_only(target_vocab_only);
+
+        let backend = get_backend();
+        let model = LlamaModel::load_from_file(backend, &new_model_path_buf, &model_params)
+            .map_err(|e| format!("Failed to load GGUF file: {:?}", e))?;
+
+        let chat_template = model
+            .meta_val_str("tokenizer.chat_template")
+            .unwrap_or_default();
+        let is_chatml = chat_template.contains("<|im_start|>");
+        let gemma4_markers = !is_chatml && chat_template.contains("<|turn>");
+        super::prompt::CHATML.store(is_chatml, std::sync::atomic::Ordering::Relaxed);
+        super::prompt::GEMMA4_MARKERS.store(gemma4_markers, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!(
+            "Prompt format: {}",
+            if is_chatml {
+                "ChatML (<|im_start|>) — Qwen-style"
+            } else if gemma4_markers {
+                "gemma-4 (<|turn>)"
+            } else {
+                "classic gemma (<start_of_turn>)"
+            }
+        );
+
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(Some(
+                std::num::NonZeroU32::new(target_n_ctx as u32).ok_or("Invalid n_ctx")?,
+            ))
+            .with_n_batch(target_n_ctx as u32)
+            .with_embeddings(true)
+            .with_pooling_type(LlamaPoolingType::Mean)
+            .with_type_k(KvCacheType::Q8_0)
+            .with_type_v(KvCacheType::Q8_0)
+            .with_n_threads(threads)
+            .with_n_threads_batch(threads);
+
+        let context = model
+            .new_context(backend, ctx_params)
+            .map_err(|e| format!("Failed to create llama context: {:?}", e))?;
+
+        let context_static =
+            unsafe { std::mem::transmute::<LlamaContext<'_>, LlamaContext<'static>>(context) };
+
+        self.engine = Some(LlamaEngine {
+            context: context_static,
+            mtmd: None,
+            model,
+        });
+        self.n_ctx = target_n_ctx;
+        self.n_gpu_layers = target_n_gpu_layers;
+        self.current_model_path = new_model_path.to_path_buf();
+        self.vocab_only = target_vocab_only;
+        update_active_metadata(
+            &new_model_path.to_string_lossy(),
+            true,
+            target_n_ctx,
+            target_n_gpu_layers,
+        );
+
+        Ok(())
+    }
+
+    /// Tự động đánh giá và tráo đổi Router <-> Expert model một cách đồng bộ trong ngữ cảnh đã giữ lock.
+    pub fn maybe_auto_swap_blocking(
         &mut self,
         do_kho: crate::agent::graph::DoKho,
     ) -> Result<PathBuf, String> {
@@ -347,7 +554,7 @@ impl LlamaRouterManager {
                     "[AutoSwap U14] Độ khó={do_kho:?} -> Tự động chuyển sang Expert Model: {:?}",
                     expert_path
                 );
-                self.swap_model(&expert_path, None, None, None).await?;
+                self.swap_model_blocking(&expert_path, None, None, None)?;
                 self.governor
                     .record_used(super::expert_governor::ModelRole::Expert);
                 Ok(self.current_model_path.clone())
@@ -359,12 +566,20 @@ impl LlamaRouterManager {
                     "[AutoSwap U14] Cooldown TTL đã hết -> Tự động hoàn trả tài nguyên về Router Model: {:?}",
                     router_path
                 );
-                self.swap_model(&router_path, None, None, None).await?;
+                self.swap_model_blocking(&router_path, None, None, None)?;
                 self.governor
                     .record_used(super::expert_governor::ModelRole::Router);
                 Ok(self.current_model_path.clone())
             }
         }
+    }
+
+    /// Tự động đánh giá và tráo đổi Router <-> Expert model theo độ khó câu hỏi và chính sách chống dao động (U14).
+    pub async fn maybe_auto_swap(
+        &mut self,
+        do_kho: crate::agent::graph::DoKho,
+    ) -> Result<PathBuf, String> {
+        self.maybe_auto_swap_blocking(do_kho)
     }
 
     /// Cập nhật thời gian Cooldown TTL của ExpertSwapGovernor (phục vụ test hoặc cấu hình động).
@@ -395,6 +610,9 @@ impl LlamaRouterManager {
         if self.vocab_only {
             return Err("Cannot generate completions on a vocab-only model".to_string());
         }
+
+        let _guard = GeneratingGuard::enter();
+
         let engine = self.engine.as_ref().ok_or(ERR_NO_MODEL)?;
         let budget = ContextTokenBudget::new(self.n_ctx, RESERVE_FOR_COMPLETION)
             .map_err(|error| error.to_string())?;
@@ -436,6 +654,8 @@ impl LlamaRouterManager {
         if self.vocab_only {
             return Err("Cannot generate completions on a vocab-only model".to_string());
         }
+
+        let _guard = GeneratingGuard::enter();
 
         let engine = self.engine.as_mut().ok_or(ERR_NO_MODEL)?;
 
@@ -517,7 +737,7 @@ impl LlamaRouterManager {
 
         let mut sampler = super::sampler::create_sampler(temperature, top_p);
         let mut decoder = encoding_rs::UTF_8.new_decoder();
-        let mut response_text = String::new();
+        let mut response_text = String::with_capacity(1024);
         let mut raw_response_bytes = 0usize;
         let mut output_filter = super::output_filter::VisibleOutputFilter::from_prompt_tail(prompt);
         let mut callback_active = true;
@@ -525,6 +745,12 @@ impl LlamaRouterManager {
 
         // 4. Token generation loop
         loop {
+            if is_cancel_requested() {
+                tracing::info!("Generation cancelled via atomic cancellation token");
+                callback_active = false;
+                break;
+            }
+
             prune_kv_cache(
                 &mut engine.context,
                 &mut n_past,
@@ -585,6 +811,10 @@ impl LlamaRouterManager {
             }
         }
 
+        if is_cancel_requested() {
+            return Err("LLM generation cancelled: requested by user".to_string());
+        }
+
         let tail = output_filter.finish();
         response_text.push_str(&tail);
         if callback_active && !tail.is_empty() {
@@ -638,6 +868,7 @@ impl LlamaRouterManager {
                     .to_string(),
             );
         }
+        let _guard = GeneratingGuard::enter();
         let n_gpu_layers = self.n_gpu_layers;
         let mmproj_path = self
             .mmproj_path
@@ -766,6 +997,11 @@ impl LlamaRouterManager {
         let mut callback_active = true;
         let mut completion_tokens = 0usize;
         loop {
+            if is_cancel_requested() {
+                tracing::info!("Vision generation cancelled via atomic cancellation token");
+                callback_active = false;
+                break;
+            }
             if n_past as usize >= self.n_ctx {
                 tracing::warn!(
                     "Vision generation reached context limit: n_past={} >= n_ctx={}",
@@ -807,6 +1043,10 @@ impl LlamaRouterManager {
             if completion_tokens >= RESERVE_FOR_COMPLETION || text.len() > 100_000 {
                 break;
             }
+        }
+
+        if is_cancel_requested() {
+            return Err("Vision generation cancelled: requested by user".to_string());
         }
 
         let tail = output_filter.finish();

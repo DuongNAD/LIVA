@@ -1,0 +1,7 @@
+{
+  "name": "LIVA",
+  "category": "01_AI_Agents",
+  "tech": "Node.js, Rust",
+  "command": "npm run dev",
+  "description": "LIVA - Trợ lý AI cá nhân hóa toàn diện (Rust + Node.js)"
+}

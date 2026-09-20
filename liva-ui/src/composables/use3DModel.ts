@@ -400,6 +400,11 @@ export function use3DModel(): Use3DModelReturn {
   //  Renderer Init
   // ═══════════════════════════════════════════
   function initRenderer(canvas: HTMLCanvasElement, width: number, height: number) {
+    if (renderer) {
+      logger.info('[use3DModel]', 'Renderer already initialized, reusing existing WebGL context', { width, height });
+      resize(width, height);
+      return;
+    }
     viewportWidth = width;
     viewportHeight = height;
     renderer = new THREE.WebGLRenderer({
@@ -873,6 +878,7 @@ export function use3DModel(): Use3DModelReturn {
 
   function startRenderLoop() {
     if (animFrameId !== null) return;
+    lastFrameTime = 0;
 
     // Adaptive throttle: reduce FPS when window hidden
     if (typeof document !== 'undefined') {
@@ -903,8 +909,23 @@ export function use3DModel(): Use3DModelReturn {
       //
       // Cửa sổ ẩn vẫn 66 ms: lúc đó không ai nhìn, và trình duyệt còn treo hẳn
       // requestAnimationFrame nên con số này phần lớn là lý thuyết.
-      const throttleInterval = isEcoMode ? ECO_FRAME_INTERVAL_MS : !isWindowVisible ? 66 : 0;
-      if (throttleInterval > 0 && now - lastFrameTime < throttleInterval) return;
+      const isAvatarIdle =
+        !dangleActive &&
+        !lipSyncActive &&
+        !audioAnalyserActive &&
+        !faceTrackingActive &&
+        animation.getState() === 'idle' &&
+        (typeof animation.getMotionWeight !== 'function' || animation.getMotionWeight() <= 0.01) &&
+        (typeof animation.getThinkingWeight !== 'function' || animation.getThinkingWeight() <= 0.01) &&
+        facingCurrent === facingTarget;
+      const throttleInterval = isEcoMode
+        ? ECO_FRAME_INTERVAL_MS
+        : !isWindowVisible
+          ? 66
+          : isAvatarIdle
+            ? ECO_FRAME_INTERVAL_MS // Cap idle rendering to ~30 FPS (33ms) to save CPU/GPU
+            : 0;
+      if (throttleInterval > 0 && lastFrameTime > 0 && now - lastFrameTime < throttleInterval) return;
       lastFrameTime = now;
 
       // Position, pose and mixer share this clock. Only cap very large wake-up jumps;
@@ -970,8 +991,8 @@ export function use3DModel(): Use3DModelReturn {
         // Barge-in physical feedback (zero-mouth clamp + surprised expression flash)
         updateBargeIn(delta);
 
-        // ── 6. VRM secondary animation / spring bone physics update ──
-        const physicsSteps = Math.max(1, Math.ceil(delta / (1 / 60)));
+        // ── 6. VRM secondary animation / spring bone physics update (F8) ──
+        const physicsSteps = Math.min(2, Math.max(1, Math.ceil(delta / (1 / 60))));
         const physicsDelta = delta / physicsSteps;
         for (let step = 0; step < physicsSteps; step += 1) {
           vrm.value.update(physicsDelta);
@@ -999,6 +1020,7 @@ export function use3DModel(): Use3DModelReturn {
       cancelAnimationFrame(animFrameId);
       animFrameId = null;
     }
+    lastFrameTime = 0;
   }
 
   // ═══════════════════════════════════════════
@@ -1280,8 +1302,9 @@ export function use3DModel(): Use3DModelReturn {
   const BAND_EXPRESSIONS: ReadonlyArray<string> = ['aa', 'oh', 'ee', 'ih', 'ou'];
   /** Dead zone threshold — below this, treat as silence to prevent jitter */
   const RMS_DEAD_ZONE = 0.05;
-  /** Smoothing factor for lerp (0=no change, 1=instant snap) */
-  const RMS_SMOOTH_FACTOR = 0.3;
+  /** Asymmetric attack/decay filter coefficients for real-time acoustic envelope tracking (F7) */
+  const RMS_ATTACK_FACTOR = 0.8; // Fast rise: opening mouth quickly (<15ms)
+  const RMS_DECAY_FACTOR = 0.25; // Smooth release: closing mouth naturally without jitter
 
   /**
    * Start real-time audio-driven lip-sync by reading an analyser that the
@@ -1356,8 +1379,9 @@ export function use3DModel(): Use3DModelReturn {
       // Dead zone: suppress jitter during silence
       if (rms < RMS_DEAD_ZONE) rms = 0;
 
-      // Smooth: lerp from previous value for natural movement
-      smoothedBandRMS[band] = lerp(smoothedBandRMS[band], rms, RMS_SMOOTH_FACTOR);
+      // Asymmetric attack/decay filter (F7): fast attack on rising amplitude (0.8), smooth release on decay (0.25)
+      const smoothFactor = rms > smoothedBandRMS[band] ? RMS_ATTACK_FACTOR : RMS_DECAY_FACTOR;
+      smoothedBandRMS[band] = lerp(smoothedBandRMS[band], rms, smoothFactor);
 
       // Map to VRM expression with sensitivity scaling, clamped to [0, 1]
       values[band] = Math.min(smoothedBandRMS[band] * BAND_SENSITIVITY[band], 1.0);

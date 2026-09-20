@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useGateway } from '../../composables/useGateway';
 import { useI18n } from '../../composables/useI18n';
 import { useToast } from '../../composables/useToast';
@@ -19,18 +19,55 @@ const form = ref({
 
 const isSaving = ref(false);
 const saveMessage = ref('');
+let isSyncingFromGateway = false;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+const applyProfileToForm = (profile: Record<string, unknown>) => {
+  isSyncingFromGateway = true;
+  try {
+    if (profile.name !== undefined && form.value.name !== String(profile.name ?? '')) {
+      form.value.name = String(profile.name ?? '');
+    }
+    if (profile.birthYear !== undefined && form.value.birthYear !== String(profile.birthYear ?? '')) {
+      form.value.birthYear = String(profile.birthYear ?? '');
+    }
+    if (profile.nationality !== undefined && form.value.nationality !== String(profile.nationality ?? '')) {
+      form.value.nationality = String(profile.nationality ?? '');
+    }
+    if (profile.language !== undefined && form.value.language !== String(profile.language ?? '')) {
+      form.value.language = String(profile.language ?? '');
+    }
+    if (profile.hobbies !== undefined && form.value.hobbies !== String(profile.hobbies ?? '')) {
+      form.value.hobbies = String(profile.hobbies ?? '');
+    }
+    if (profile.preferences !== undefined && form.value.preferences !== String(profile.preferences ?? 'Friendly')) {
+      form.value.preferences = String(profile.preferences ?? 'Friendly');
+    }
+  } finally {
+    nextTick(() => {
+      isSyncingFromGateway = false;
+    });
+  }
+};
 
 onMounted(() => {
   if (gateway.userProfile.value) {
-    Object.assign(form.value, gateway.userProfile.value);
+    applyProfileToForm(gateway.userProfile.value);
   } else {
     gateway.sendMsg('get_user_profile');
   }
 });
 
+onUnmounted(() => {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+});
+
 watch(() => gateway.userProfile.value, (newVal) => {
-  if (newVal) {
-    Object.assign(form.value, newVal);
+  if (newVal && !isSaving.value) {
+    applyProfileToForm(newVal);
   }
 }, { deep: true });
 
@@ -46,14 +83,21 @@ const saveProfile = async () => {
   const msg = t('pr_saved');
   saveMessage.value = msg;
   toast.success(msg);
-  setTimeout(() => { saveMessage.value = ''; }, 3000);
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveMessage.value = '';
+    saveTimer = null;
+  }, 3000);
 };
 
 // Live-sync: When user changes language dropdown, immediately update
-// the gateway profile so useI18n re-computes and all labels switch in real-time
+// the gateway profile so useI18n re-computes and all labels switch in real-time.
+// Guarded with isSyncingFromGateway and strict equality to break circular reactive ping-pong.
 watch(() => form.value.language, (newLang, oldLang) => {
+  if (isSyncingFromGateway || isSaving.value) return;
   if (newLang && newLang !== oldLang) {
-    if (!gateway.userProfile.value || gateway.userProfile.value.language !== newLang) {
+    const currentGatewayLang = gateway.userProfile.value?.language;
+    if (currentGatewayLang !== newLang) {
       gateway.saveUserProfile({ ...form.value, language: newLang });
     }
   }

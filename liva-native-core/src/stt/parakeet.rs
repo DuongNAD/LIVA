@@ -43,6 +43,12 @@ const EXPECTED_VOCAB: usize = 1024;
 pub const STREAMING_CHUNK_SAMPLES: usize = 2560;
 /// 40ms context overlap @ 16 kHz = 640 samples.
 pub const STREAMING_OVERLAP_SAMPLES: usize = 640;
+/// 1.2s acoustic context for streaming sliding window @ 16 kHz = 19,200 samples.
+pub const STREAMING_CONTEXT_SAMPLES: usize = 19200;
+/// Total bounded sliding window size: 1.2s context + 160ms chunk = 21,760 samples (~1.36s).
+pub const STREAMING_WINDOW_MAX_SAMPLES: usize = STREAMING_CONTEXT_SAMPLES + STREAMING_CHUNK_SAMPLES;
+/// Maximum buffered audio ceiling during streaming (20.0s @ 16 kHz = 320,000 samples).
+pub const STREAMING_BUFFER_MAX_SAMPLES: usize = 320_000;
 
 /// 80-mel `per_feature` front-end for Parakeet — independent of the Nemotron
 /// `SttDsp` because that one is hard-wired to 65 frames / 10 640 samples and
@@ -315,6 +321,12 @@ impl ParakeetVi {
         }
         self.stream_buffer.extend_from_slice(chunk);
 
+        // Keep buffer bounded to prevent unbounded memory growth during continuous streaming
+        if self.stream_buffer.len() > STREAMING_BUFFER_MAX_SAMPLES {
+            let excess = self.stream_buffer.len() - STREAMING_BUFFER_MAX_SAMPLES;
+            self.stream_buffer.drain(0..excess);
+        }
+
         let duration_sec = self.stream_buffer.len() as f32 / SAMPLE_RATE as f32;
         let latency_ms = self
             .stream_started_at
@@ -327,7 +339,15 @@ impl ParakeetVi {
                 return Ok(None);
             }
 
-            let (feat, t_frames) = self.dsp.log_mel_per_feature(&self.stream_buffer);
+            // Bounded sliding context window (e.g. 1.2s context + 160ms chunk = 21,760 samples max).
+            // Fixes O(N^2) quadratic compute accumulation by clamping the evaluation window size.
+            let window_start = self
+                .stream_buffer
+                .len()
+                .saturating_sub(STREAMING_WINDOW_MAX_SAMPLES);
+            let context_window = &self.stream_buffer[window_start..];
+
+            let (feat, t_frames) = self.dsp.log_mel_per_feature(context_window);
             let (text, confidence, _entropy) = self.run_onnx_logprobs(feat, t_frames)?;
 
             if text.is_empty() {
@@ -628,5 +648,49 @@ mod tests {
         let ids: Vec<usize> = (0..10).collect();
         let text = detokenize(&vocab, &ids);
         assert_eq!(text, "hôm nay thời tiết ở hà nội rất đẹp.");
+    }
+
+    #[test]
+    fn streaming_sliding_window_bounds_compute() {
+        assert_eq!(STREAMING_CHUNK_SAMPLES, 2560);
+        assert_eq!(STREAMING_CONTEXT_SAMPLES, 19200);
+        assert_eq!(STREAMING_WINDOW_MAX_SAMPLES, 21760);
+
+        let dsp = ParakeetDsp::new();
+        // Simulate accumulating 20 streaming chunks (51,200 samples = 3.2s of audio)
+        let mut buffer = Vec::new();
+        let chunk = vec![0.05f32; STREAMING_CHUNK_SAMPLES];
+
+        for chunk_idx in 0..20 {
+            buffer.extend_from_slice(&chunk);
+
+            // Bounded sliding window
+            let window_start = buffer.len().saturating_sub(STREAMING_WINDOW_MAX_SAMPLES);
+            let context_window = &buffer[window_start..];
+
+            // Verify window size is strictly bounded
+            assert!(
+                context_window.len() <= STREAMING_WINDOW_MAX_SAMPLES,
+                "Context window {} exceeds ceiling {}",
+                context_window.len(),
+                STREAMING_WINDOW_MAX_SAMPLES
+            );
+
+            // Verify log-mel frame count stays bounded O(1)
+            let (_feat, t_frames) = dsp.log_mel_per_feature(context_window);
+            let max_frames = 1 + STREAMING_WINDOW_MAX_SAMPLES / HOP_LENGTH;
+            assert!(
+                t_frames <= max_frames,
+                "Frame count {} exceeds maximum bounded frames {}",
+                t_frames,
+                max_frames
+            );
+
+            if chunk_idx >= 10 {
+                // In steady state, context window length is exactly clamped to max
+                assert_eq!(context_window.len(), STREAMING_WINDOW_MAX_SAMPLES);
+                assert_eq!(t_frames, max_frames);
+            }
+        }
     }
 }

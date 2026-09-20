@@ -153,9 +153,12 @@ impl Drop for ScopeGuard {
         if self.dismissed {
             return;
         }
-        if let Ok(mut tools) = self.registry.scoped_tools.write()
-            && let Some(scope_map) = tools.get_mut(&self.scope_id)
-        {
+        let mut tools = self
+            .registry
+            .scoped_tools
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(scope_map) = tools.get_mut(&self.scope_id) {
             scope_map.remove(&self.tool_name);
         }
     }
@@ -191,21 +194,25 @@ impl ScopedToolRegistry {
 
     /// Registers or updates a scope in the registry.
     pub fn register_scope(&self, scope: ToolScope) {
-        let mut scopes = self.inner.scopes.write().expect("lock scopes");
+        let mut scopes = self.inner.scopes.write().unwrap_or_else(|e| e.into_inner());
         scopes.insert(scope.scope_id.clone(), scope);
     }
 
     /// Unregisters a scope and all its registered tools.
     pub fn unregister_scope(&self, scope_id: &str) {
-        let mut scopes = self.inner.scopes.write().expect("lock scopes");
+        let mut scopes = self.inner.scopes.write().unwrap_or_else(|e| e.into_inner());
         scopes.remove(scope_id);
-        let mut tools = self.inner.scoped_tools.write().expect("lock tools");
+        let mut tools = self
+            .inner
+            .scoped_tools
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         tools.remove(scope_id);
     }
 
     /// Retrieves a scope definition if present.
     pub fn get_scope(&self, scope_id: &str) -> Option<ToolScope> {
-        let scopes = self.inner.scopes.read().expect("lock scopes");
+        let scopes = self.inner.scopes.read().unwrap_or_else(|e| e.into_inner());
         scopes.get(scope_id).cloned()
     }
 
@@ -215,7 +222,11 @@ impl ScopedToolRegistry {
         scope_id: &str,
         tool: CatalogTool,
     ) -> Result<ScopeGuard, ToolError> {
-        let mut tools = self.inner.scoped_tools.write().expect("lock tools");
+        let mut tools = self
+            .inner
+            .scoped_tools
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         let scope_map = tools.entry(scope_id.to_string()).or_default();
         if scope_map.contains_key(&tool.name) {
             return Err(ToolError::DuplicateTool(tool.name, scope_id.to_string()));
@@ -232,8 +243,12 @@ impl ScopedToolRegistry {
 
     /// Resolves all tools available to a scope following hierarchical inheritance.
     pub fn resolve_tools_for_scope(&self, scope_id: &str) -> Vec<CatalogTool> {
-        let scopes = self.inner.scopes.read().expect("lock scopes");
-        let tools = self.inner.scoped_tools.read().expect("lock tools");
+        let scopes = self.inner.scopes.read().unwrap_or_else(|e| e.into_inner());
+        let tools = self
+            .inner
+            .scoped_tools
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
 
         let mut resolved: HashMap<String, CatalogTool> = HashMap::new();
         let mut curr = Some(scope_id.to_string());

@@ -84,6 +84,12 @@ pub fn dpapi_seal(plain: &[u8]) -> Result<Vec<u8>, KeyError> {
     if ok == 0 {
         return Err(KeyError::Dpapi("CryptProtectData thất bại".into()));
     }
+    if out_blob.pbData.is_null() || out_blob.cbData == 0 {
+        if !out_blob.pbData.is_null() {
+            unsafe { LocalFree(out_blob.pbData as _) };
+        }
+        return Ok(Vec::new());
+    }
     let sealed =
         unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
     unsafe { LocalFree(out_blob.pbData as _) };
@@ -122,6 +128,12 @@ pub fn dpapi_unseal(sealed: &[u8]) -> Result<Vec<u8>, KeyError> {
         return Err(KeyError::Locked(
             "CryptUnprotectData thất bại — sai user Windows hoặc dữ liệu hỏng".into(),
         ));
+    }
+    if out_blob.pbData.is_null() || out_blob.cbData == 0 {
+        if !out_blob.pbData.is_null() {
+            unsafe { LocalFree(out_blob.pbData as _) };
+        }
+        return Ok(Vec::new());
     }
     let plain =
         unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();

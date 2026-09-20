@@ -595,5 +595,173 @@ describe('useGateway — Tauri Streaming Lifecycle & Cleanup', () => {
     gw.offExpertSuggestion();
     gw.destroy();
   });
+
+  it('handles nested streaming token format data.data.token and terminates on data.data.done', async () => {
+    vi.resetModules();
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+
+    let listenerCallback: ((event: { payload: unknown }) => void) | null = null;
+    const unlistenFn = vi.fn();
+    const listenMock = vi.fn().mockImplementation(async (_eventName: string, cb: (event: { payload: unknown }) => void) => {
+      listenerCallback = cb;
+      return unlistenFn;
+    });
+
+    const invokeMock = vi.fn().mockResolvedValue({ success: true });
+
+    vi.doMock('@tauri-apps/api/event', () => ({ listen: listenMock }));
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+
+    try {
+      const { useGateway: useTauriGateway } = await import('../../src/composables/useGateway');
+      const gw = useTauriGateway();
+
+      const replyCb = vi.fn();
+      gw.onTaskPlanReply(replyCb);
+
+      gw.sendMsg('task_plan_chat', { taskId: 'task-nested', stream: true });
+      await vi.waitFor(() => expect(listenMock).toHaveBeenCalled());
+
+      // Simulate Rust chat:completion format: { id, status: "ok", data: { token: "...", done: false } }
+      expect(listenerCallback).not.toBeNull();
+      listenerCallback!({
+        payload: {
+          id: 'req_123',
+          status: 'ok',
+          data: {
+            token: 'Nested token chunk',
+            done: false,
+          },
+        },
+      });
+
+      expect(replyCb).toHaveBeenCalledWith({
+        taskId: 'task-nested',
+        message: 'Nested token chunk',
+        done: false,
+      });
+
+      // Simulate final chunk with nested done: true
+      listenerCallback!({
+        payload: {
+          id: 'req_123',
+          status: 'ok',
+          data: {
+            token: '',
+            done: true,
+          },
+        },
+      });
+
+      expect(unlistenFn).toHaveBeenCalled();
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      vi.doUnmock('@tauri-apps/api/event');
+      vi.doUnmock('@tauri-apps/api/core');
+      vi.resetModules();
+    }
+  });
+
+  it('prevents configData and userProfile store overwrites when backend mutation returns { success: true }', async () => {
+    vi.resetModules();
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+
+    let invokeHandler: ((command: string, args: Record<string, unknown>) => Promise<unknown>) | null = null;
+    const invokeMock = vi.fn().mockImplementation((command: string, args: Record<string, unknown>) => {
+      if (invokeHandler) return invokeHandler(command, args);
+      return Promise.resolve({ success: true });
+    });
+
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+
+    try {
+      const { useGateway: useTauriGateway } = await import('../../src/composables/useGateway');
+      const gw = useTauriGateway();
+
+      // Bootstrap initial configData
+      invokeHandler = async (cmd) => {
+        if (cmd === 'native_ipc_call') {
+          return {
+            ai: { provider: 'openai', model: 'gpt-4o' },
+            general: { language: 'vi' },
+          };
+        }
+        return { success: true };
+      };
+
+      gw.sendMsg('get_config');
+      await vi.waitFor(() => expect(gw.configData.value.ai).toBeDefined());
+      expect(gw.configData.value.ai?.provider).toBe('openai');
+
+      // Now mutate config: backend returns { success: true }
+      invokeHandler = async () => ({ success: true });
+      gw.sendMsg('update_config', { ai: { provider: 'anthropic', model: 'claude-3-5' } });
+
+      await vi.waitFor(() => expect(gw.configData.value.ai?.provider).toBe('anthropic'));
+      // Confirm other config fields remain preserved, not wiped to { success: true }
+      expect(gw.configData.value.general?.language).toBe('vi');
+
+      // Now test userProfile mutation:
+      gw.userProfile.value = { name: 'Alice', language: 'vi' };
+      gw.sendMsg('update_user_profile', { language: 'en' });
+
+      await vi.waitFor(() => expect(gw.userProfile.value?.language).toBe('en'));
+      expect(gw.userProfile.value?.name).toBe('Alice');
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      vi.doUnmock('@tauri-apps/api/core');
+      vi.resetModules();
+    }
+  });
+
+  it('supports multiple listeners and unsubscription in callback registry', () => {
+    const gw = useGateway();
+    gw.init();
+    const socket = gw.getRawWs() as MockWebSocket;
+
+    const cb1 = vi.fn();
+    const cb2 = vi.fn();
+
+    const unsub1 = gw.onTaskPlanReply(cb1);
+    gw.onTaskPlanReply(cb2);
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        event: 'task_plan_reply',
+        payload: { taskId: 't1', message: 'multi test', done: false },
+      }),
+    } as MessageEvent);
+
+    expect(cb1).toHaveBeenCalledTimes(1);
+    expect(cb2).toHaveBeenCalledTimes(1);
+
+    // Unsubscribe cb1 via returned cleanup function
+    unsub1();
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        event: 'task_plan_reply',
+        payload: { taskId: 't1', message: 'multi test 2', done: false },
+      }),
+    } as MessageEvent);
+
+    expect(cb1).toHaveBeenCalledTimes(1);
+    expect(cb2).toHaveBeenCalledTimes(2);
+
+    // Unsubscribe all via offTaskPlanReply
+    gw.offTaskPlanReply();
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        event: 'task_plan_reply',
+        payload: { taskId: 't1', message: 'multi test 3', done: true },
+      }),
+    } as MessageEvent);
+
+    expect(cb1).toHaveBeenCalledTimes(1);
+    expect(cb2).toHaveBeenCalledTimes(2);
+
+    gw.destroy();
+  });
 });
 

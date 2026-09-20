@@ -97,32 +97,22 @@ async fn upsert(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
         .unwrap_or("")
         .to_string();
 
-    let c = tokio::task::spawn_blocking(move || {
-        let conn = state
-            .db
-            .writer
-            .get()
-            .map_err(|e| format!("Không lấy được kết nối ghi: {e}"))?;
-        contacts::upsert(&conn, &ten, nen, &handle, &note)
-    })
-    .await
-    .map_err(|e| format!("Tác vụ chặn panic: {e}"))??;
+    let c = state
+        .db
+        .writer_actor
+        .execute(move |conn| contacts::upsert(conn, &ten, nen, &handle, &note))
+        .await?;
 
     Ok(json!({ "success": true, "contact": c }))
 }
 
 async fn delete(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let id = chuoi_bat_buoc(&payload, "contactId")?;
-    let xoa_duoc = tokio::task::spawn_blocking(move || {
-        let conn = state
-            .db
-            .writer
-            .get()
-            .map_err(|e| format!("Không lấy được kết nối ghi: {e}"))?;
-        contacts::delete(&conn, &id)
-    })
-    .await
-    .map_err(|e| format!("Tác vụ chặn panic: {e}"))??;
+    let xoa_duoc = state
+        .db
+        .writer_actor
+        .execute(move |conn| contacts::delete(conn, &id))
+        .await?;
 
     Ok(json!({ "deleted": xoa_duoc }))
 }
@@ -171,18 +161,15 @@ async fn draft(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
         contacts::Resolution::Found(c) => {
             let nen = contacts::Platform::parse(&c.platform)?;
             let crypto = state.crypto.clone();
-            let db = state.db.clone();
             let display_name = c.display_name.clone();
             let handle = c.handle.clone();
-            let d = tokio::task::spawn_blocking(move || {
-                let conn = db
-                    .writer
-                    .get()
-                    .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
-                outbox::stage(&conn, &crypto, nen, &display_name, &handle, &text)
-            })
-            .await
-            .map_err(|e| format!("Tác vụ ghi outbox panic: {e}"))??;
+            let d = state
+                .db
+                .writer_actor
+                .execute(move |conn| {
+                    outbox::stage(conn, &crypto, nen, &display_name, &handle, &text)
+                })
+                .await?;
             Ok(json!({
                 "needsConfirm": true,
                 "draft": d,
@@ -196,17 +183,12 @@ async fn draft(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
 async fn confirm(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let id = chuoi_bat_buoc(&payload, "draftId")?;
     let crypto = state.crypto.clone();
-    let db = state.db.clone();
     let id_cho_db = id.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let conn = db
-            .writer
-            .get()
-            .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
-        outbox::take(&conn, &crypto, &id_cho_db)
-    })
-    .await
-    .map_err(|e| format!("Tác vụ xác nhận outbox panic: {e}"))??;
+    let result = state
+        .db
+        .writer_actor
+        .execute(move |conn| outbox::take(conn, &crypto, &id_cho_db))
+        .await?;
     let d = match result {
         outbox::TakeResult::Taken(draft) => draft,
         outbox::TakeResult::Expired => {
@@ -236,31 +218,21 @@ async fn confirm(state: Arc<AppState>, payload: Value) -> Result<Value, String> 
 
 async fn cancel(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let id = chuoi_bat_buoc(&payload, "draftId")?;
-    let db = state.db.clone();
-    let cancelled = tokio::task::spawn_blocking(move || {
-        let conn = db
-            .writer
-            .get()
-            .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
-        outbox::cancel(&conn, &id)
-    })
-    .await
-    .map_err(|e| format!("Tác vụ hủy outbox panic: {e}"))??;
+    let cancelled = state
+        .db
+        .writer_actor
+        .execute(move |conn| outbox::cancel(conn, &id))
+        .await?;
     Ok(json!({ "cancelled": cancelled }))
 }
 
 async fn pending(state: Arc<AppState>) -> Result<Value, String> {
-    let db = state.db.clone();
     let crypto = state.crypto.clone();
-    let drafts = tokio::task::spawn_blocking(move || {
-        let conn = db
-            .writer
-            .get()
-            .map_err(|e| format!("Không lấy được kết nối ghi outbox: {e}"))?;
-        outbox::pending(&conn, &crypto)
-    })
-    .await
-    .map_err(|e| format!("Tác vụ liệt kê outbox panic: {e}"))??;
+    let drafts = state
+        .db
+        .writer_actor
+        .execute(move |conn| outbox::pending(conn, &crypto))
+        .await?;
     Ok(json!({ "drafts": drafts }))
 }
 

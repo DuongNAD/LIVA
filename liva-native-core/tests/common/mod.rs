@@ -3,6 +3,8 @@
 //! Files directly under `tests/` are each compiled as their own test binary; a subdirectory
 //! module like this one is not, so it can be shared without becoming a test target of its own.
 
+#![allow(dead_code)]
+
 use rodio::{Decoder, Source};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};

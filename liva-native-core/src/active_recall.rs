@@ -255,7 +255,6 @@ impl ActiveRecallManager {
             }
         };
 
-        let mut candidate_facts = Vec::new();
         let rows = stmt
             .query_map([], |row| {
                 Ok((
@@ -268,32 +267,20 @@ impl ActiveRecallManager {
             })
             .ok()?;
 
+        // Tìm fact khớp với user_text: lọc theo access interval & key trước, chỉ giải mã AES-256-GCM theo nhu cầu
+        let mut best_match = None;
+        let user_stripped = strip_vietnamese_diacritics(&user_clean);
+
         for row in rows.flatten() {
             let (key, enc_val, memory_strength, last_accessed_at, access_count) = row;
 
-            // Bỏ qua fact bị khoá/không giải mã được
-            let fr = crypto.read_fact(&enc_val);
-            if fr.is_locked() {
-                continue;
-            }
-            let plain_val = fr.into_value();
-            if plain_val.trim().is_empty() {
+            // 1. Kiểm tra giãn cách spaced repetition trước (access pattern filter)
+            let interval = (config.min_interval_secs as f64 * memory_strength) as i64;
+            if now - last_accessed_at < interval {
                 continue;
             }
 
-            candidate_facts.push((
-                key,
-                plain_val,
-                memory_strength,
-                last_accessed_at,
-                access_count,
-            ));
-        }
-
-        // Tìm fact khớp với user_text
-        let mut best_match = None;
-        let user_stripped = strip_vietnamese_diacritics(&user_clean);
-        for (key, plain_val, memory_strength, last_accessed_at, access_count) in candidate_facts {
+            // 2. So khớp từ khóa trước khi giải mã
             let norm_key = key.replace(['_', '-'], " ").to_lowercase();
             let norm_key_stripped = strip_vietnamese_diacritics(&norm_key);
             let key_lower = key.to_lowercase();
@@ -308,14 +295,22 @@ impl ActiveRecallManager {
                         .split_whitespace()
                         .all(|part| part.len() >= 2 && user_stripped.contains(part)));
 
-            if matches_key {
-                // Kiểm tra giãn cách spaced repetition
-                let interval = (config.min_interval_secs as f64 * memory_strength) as i64;
-                if now - last_accessed_at >= interval {
-                    best_match = Some((key, plain_val, memory_strength, access_count));
-                    break;
-                }
+            if !matches_key {
+                continue;
             }
+
+            // 3. Giải mã AES-256-GCM theo nhu cầu (on-demand) CHỈ cho fact ứng viên đã khớp
+            let fr = crypto.read_fact(&enc_val);
+            if fr.is_locked() {
+                continue;
+            }
+            let plain_val = fr.into_value();
+            if plain_val.trim().is_empty() {
+                continue;
+            }
+
+            best_match = Some((key, plain_val, memory_strength, access_count));
+            break;
         }
 
         let (matched_key, expected_answer, _, _) = best_match?;

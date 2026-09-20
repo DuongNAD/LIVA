@@ -454,9 +454,6 @@ pub fn build_pipeline_graph(
                     phan_loai_do_kho_with_embedder(&user_text, embedder_ref)
                 });
 
-            // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
-            let _ = ss.llm.lock().await.maybe_auto_swap(do_kho).await;
-
             let (model_tx, model_rx) = tokio::sync::oneshot::channel();
 
             // Giữ một handle riêng cho persist_turn: closure spawn_blocking bên
@@ -468,6 +465,9 @@ pub fn build_pipeline_graph(
                     return Err("LLM cancelled before lock".to_string());
                 }
                 let mut llm = ss.llm.blocking_lock();
+                // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
+                // Thực hiện NGAY trong khi đang giữ lock, loại bỏ hoàn toàn race condition check-then-act.
+                let _ = llm.maybe_auto_swap_blocking(do_kho);
                 let _ = model_tx.send(llm.current_model_path.to_string_lossy().to_string());
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     return Err("LLM cancelled post-lock".to_string());

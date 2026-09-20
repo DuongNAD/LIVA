@@ -97,10 +97,17 @@ pub fn process_pending_batch(
     worker_id: &str,
     batch_size: usize,
 ) -> Result<ConsolidationBatchResult, rusqlite::Error> {
-    let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let tx = if conn.is_autocommit() {
+        Some(Transaction::new_unchecked(
+            conn,
+            TransactionBehavior::Immediate,
+        )?)
+    } else {
+        None
+    };
     let batch_size = batch_size.clamp(1, MAX_BATCH_SIZE) as i64;
     let events = {
-        let mut statement = transaction.prepare(
+        let mut statement = conn.prepare(
             "SELECT eventId, retry_count, domain, category FROM events \
              WHERE consolidation_status = 'pending' \
              ORDER BY timestamp, eventId \
@@ -120,9 +127,9 @@ pub fn process_pending_batch(
     let mut result = ConsolidationBatchResult::default();
 
     for event in &events {
-        if projection_matches(&transaction, event)? {
+        if projection_matches(conn, event)? {
             // L3 Knowledge Graph extraction: extract triples from turn content
-            let content: Option<String> = transaction
+            let content: Option<String> = conn
                 .query_row(
                     "SELECT content FROM vectors_meta WHERE vec_id = ?1",
                     [&event.event_id],
@@ -148,21 +155,21 @@ pub fn process_pending_batch(
                         crate::cognitive::triple_extractor::extract_triples(&turn_content);
                     for triple in &triples {
                         // 1. Insert Subject Node
-                        transaction.execute(
+                        conn.execute(
                             "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?1, '{}')
                              ON CONFLICT(id) DO UPDATE SET label = excluded.label",
                             [&triple.subject],
                         )?;
 
                         // 2. Insert Object Node
-                        transaction.execute(
+                        conn.execute(
                             "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?1, '{}')
                              ON CONFLICT(id) DO UPDATE SET label = excluded.label",
                             [&triple.object],
                         )?;
 
                         // 3. Insert Edge (Subject -> Object)
-                        transaction.execute(
+                        conn.execute(
                             "INSERT INTO l3_edges (source, target, relation, weight, obsolete)
                              VALUES (?1, ?2, ?3, ?4, 0)
                              ON CONFLICT(source, target, relation) DO UPDATE SET weight = excluded.weight, obsolete = 0",
@@ -173,7 +180,7 @@ pub fn process_pending_batch(
                 }
             }
 
-            let updated = transaction.execute(
+            let updated = conn.execute(
                 "UPDATE events \
                  SET consolidated = 1, consolidation_status = 'consolidated' \
                  WHERE eventId = ?1 AND consolidation_status = 'pending'",
@@ -186,14 +193,14 @@ pub fn process_pending_batch(
 
         let retry_count = event.retry_count + 1;
         if retry_count >= MAX_RETRIES {
-            let updated = transaction.execute(
+            let updated = conn.execute(
                 "UPDATE events \
                  SET consolidated = 0, consolidation_status = 'dlq', retry_count = ?2 \
                  WHERE eventId = ?1 AND consolidation_status = 'pending'",
                 params![event.event_id, retry_count],
             )?;
             if updated > 0 {
-                transaction.execute(
+                conn.execute(
                     "INSERT INTO dlq_consolidation (
                         session_id, failed_step, error_msg, retry_count, status, created_at
                      ) VALUES (
@@ -206,7 +213,7 @@ pub fn process_pending_batch(
             }
             result.processed += updated;
         } else {
-            let updated = transaction.execute(
+            let updated = conn.execute(
                 "UPDATE events SET retry_count = ?2 \
                  WHERE eventId = ?1 AND consolidation_status = 'pending'",
                 params![event.event_id, retry_count],
@@ -226,7 +233,7 @@ pub fn process_pending_batch(
             "dead_lettered": result.dead_lettered,
         })
         .to_string();
-        transaction.execute(
+        conn.execute(
             "INSERT INTO consolidation_checkpoints (
                 session_id, last_step, state_data, created_at, updated_at
              ) VALUES (?1, ?2, ?3, ?4, ?4)
@@ -238,7 +245,9 @@ pub fn process_pending_batch(
         )?;
     }
 
-    transaction.commit()?;
+    if let Some(t) = tx {
+        t.commit()?;
+    }
     Ok(result)
 }
 

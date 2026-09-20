@@ -111,6 +111,12 @@ async fn test_truy_xuat_de_lai_dau_vet() {
     assert_eq!(get_2["value"], "Hà Nội");
 
     // 4. Kiểm tra trực tiếp trong SQLite: access_count phải TĂNG ĐÚNG 2, last_accessed_at != 0
+    state
+        .db
+        .writer_actor
+        .flush()
+        .await
+        .expect("flush writer actor");
     let reader = state.db.readers.get().expect("reader conn");
     let (access_count, last_accessed_at): (i64, i64) = reader
         .query_row(
@@ -161,6 +167,12 @@ async fn test_trang_thai_song_sot_qua_set_fact_thuong() {
     }
 
     // Xác nhận access_count = 2
+    state
+        .db
+        .writer_actor
+        .flush()
+        .await
+        .expect("flush writer actor");
     {
         let reader = state.db.readers.get().expect("reader conn");
         let count: i64 = reader
@@ -195,6 +207,12 @@ async fn test_trang_thai_song_sot_qua_set_fact_thuong() {
     assert_eq!(set_overwrite, json!({ "success": true }));
 
     // 3. Kiểm tra lại: access_count KHÔNG về 0, value được cập nhật mới
+    state
+        .db
+        .writer_actor
+        .flush()
+        .await
+        .expect("flush writer actor");
     let reader = state.db.readers.get().expect("reader conn");
     let (count_after, value_after, last_accessed_after): (i64, String, i64) = reader
         .query_row(
@@ -321,6 +339,14 @@ async fn test_vong_lap_active_recall_0_token() {
         "Phản hồi phải xác nhận chính xác: {a2}"
     );
 
+    // Đồng bộ hóa hàng đợi DbActor để các thao tác cập nhật lịch ôn đã commit vào WAL
+    state
+        .db
+        .writer_actor
+        .flush()
+        .await
+        .expect("flush writer actor");
+
     // Kiểm tra memory_strength đã tăng lên 1.5
     {
         let reader = state.db.readers.get().expect("reader");
@@ -383,6 +409,14 @@ async fn test_vong_lap_active_recall_0_token() {
         a4.contains("Đáp án là:") && a4.contains("Bún chả"),
         "Phản hồi khi quên phải đưa ra đáp án đầy đủ: {a4}"
     );
+
+    // Đồng bộ hóa hàng đợi DbActor
+    state
+        .db
+        .writer_actor
+        .flush()
+        .await
+        .expect("flush writer actor");
 
     // Kiểm tra memory_strength đã giảm (2.0 * 0.8 = 1.6)
     {

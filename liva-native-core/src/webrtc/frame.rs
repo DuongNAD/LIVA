@@ -92,13 +92,11 @@ pub fn speaker_frames(turn_epoch: u32, sample_rate: u32, samples: &[f32]) -> Vec
         .chunks(samples_per_100ms)
         .enumerate()
         .map(|(seq_id, chunk)| {
-            let mut payload =
-                Vec::with_capacity(SPEAKER_PAYLOAD_HEADER_BYTES + std::mem::size_of_val(chunk));
+            let chunk_bytes = bytemuck::cast_slice::<f32, u8>(chunk);
+            let mut payload = Vec::with_capacity(SPEAKER_PAYLOAD_HEADER_BYTES + chunk_bytes.len());
             payload.extend_from_slice(&turn_epoch.to_le_bytes());
             payload.extend_from_slice(&sample_rate.to_le_bytes());
-            for sample in chunk {
-                payload.extend_from_slice(&sample.to_le_bytes());
-            }
+            payload.extend_from_slice(chunk_bytes);
             VoiceFrame {
                 op_code: OP_SPEAKER_OUT,
                 seq_id: seq_id as u32,

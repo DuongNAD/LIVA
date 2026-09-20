@@ -30,6 +30,8 @@ const OWNED: &[&str] = &[
     "llm:swap_model",
     "llm:embed",
     "llm:health_check",
+    "llm:context_info",
+    "llm:cancel",
     "chat:completion",
     "task_plan_chat",
     "telemetry:summary",
@@ -55,6 +57,8 @@ pub async fn handle(
         "llm:swap_model" => swap_model(state, payload).await,
         "llm:embed" => embed(state, payload).await,
         "llm:health_check" => health_check(state).await,
+        "llm:context_info" => context_info(state).await,
+        "llm:cancel" => cancel(state).await,
         "chat:completion" => {
             let memory_scope = agent::graph::ConversationMemoryScope::new("local", "default")?;
             handle_chat_completion_scoped(state, payload, tx, req_id, memory_scope).await
@@ -92,36 +96,21 @@ async fn embed(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let inputs = if let Some(s) = payload["input"].as_str() {
         vec![s.to_string()]
     } else if let Some(arr) = payload["input"].as_array() {
-        arr.iter()
-            .map(|v| {
-                v.as_str()
-                    .map(str::to_string)
-                    .ok_or_else(|| "Invalid string in input list".to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?
+        let mut list = Vec::with_capacity(arr.len());
+        for v in arr {
+            let s = v
+                .as_str()
+                .ok_or_else(|| "Invalid string in input list".to_string())?;
+            list.push(s.to_string());
+        }
+        list
     } else {
         return Err("Missing or invalid 'input' parameter".to_string());
     };
 
-    let state_clone = state.clone();
-    let embeddings = tokio::task::spawn_blocking(move || -> Result<Vec<Vec<f32>>, String> {
-        let mut llm_manager = state_clone.llm.blocking_lock();
-        if llm_manager.vocab_only {
-            return Err("Cannot compute embeddings on a vocab-only model".to_string());
-        }
-        let engine = llm_manager
-            .engine
-            .as_mut()
-            .ok_or_else(|| crate::llm::engine::ERR_NO_MODEL.to_string())?;
-        let mut embeddings = Vec::with_capacity(inputs.len());
-        for text in inputs {
-            let emb = llm::get_embedding(&engine.model, &mut engine.context, &text)?;
-            embeddings.push(emb);
-        }
-        Ok(embeddings)
-    })
-    .await
-    .map_err(|e| format!("Blocking embedding computation panicked: {e}"))??;
+    // Decoupled embedding pipeline: computes embeddings via thread-safe ORT
+    // without acquiring state.llm lock, preventing contention with chat generation.
+    let embeddings = crate::llm::embedding::compute_embeddings(&state, &inputs).await?;
 
     // Vào là một chuỗi thì ra một vector; vào là mảng thì ra mảng vector.
     if mot_chuoi {
@@ -132,13 +121,102 @@ async fn embed(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
 }
 
 async fn health_check(state: Arc<AppState>) -> Result<Value, String> {
-    let llm_manager = state.llm.lock().await;
+    let is_generating = crate::llm::engine::is_generating();
+    match state.llm.try_lock() {
+        Ok(llm_manager) => {
+            let loaded = llm_manager.engine.is_some();
+            let path = llm_manager.current_model_path.to_string_lossy().to_string();
+            crate::llm::engine::update_active_metadata(
+                &path,
+                loaded,
+                llm_manager.n_ctx,
+                llm_manager.n_gpu_layers,
+            );
+            Ok(json!({
+                "status": if is_generating { "busy" } else if loaded { "healthy" } else { "offline" },
+                "model_loaded": loaded,
+                "model_path": path,
+                "n_ctx": llm_manager.n_ctx,
+                "n_gpu_layers": llm_manager.n_gpu_layers,
+                "is_generating": is_generating
+            }))
+        }
+        Err(_) => {
+            // Lock is held by generation or swap: return immediate status from cached metadata without blocking!
+            let meta = crate::llm::engine::get_active_metadata();
+            Ok(json!({
+                "status": "busy",
+                "model_loaded": meta.model_loaded || is_generating,
+                "model_path": if !meta.model_path.is_empty() {
+                    meta.model_path
+                } else {
+                    crate::paths::configured_router_model_path()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                },
+                "n_ctx": meta.n_ctx,
+                "n_gpu_layers": meta.n_gpu_layers,
+                "is_generating": true
+            }))
+        }
+    }
+}
+
+async fn context_info(state: Arc<AppState>) -> Result<Value, String> {
+    let is_generating = crate::llm::engine::is_generating();
+    let (n_ctx, n_gpu_layers, model_path, model_loaded) = match state.llm.try_lock() {
+        Ok(llm_manager) => {
+            let path = llm_manager.current_model_path.to_string_lossy().to_string();
+            let loaded = llm_manager.engine.is_some();
+            crate::llm::engine::update_active_metadata(
+                &path,
+                loaded,
+                llm_manager.n_ctx,
+                llm_manager.n_gpu_layers,
+            );
+            (llm_manager.n_ctx, llm_manager.n_gpu_layers, path, loaded)
+        }
+        Err(_) => {
+            let meta = crate::llm::engine::get_active_metadata();
+            (
+                meta.n_ctx,
+                meta.n_gpu_layers,
+                if !meta.model_path.is_empty() {
+                    meta.model_path
+                } else {
+                    crate::paths::configured_router_model_path()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                },
+                meta.model_loaded || is_generating,
+            )
+        }
+    };
+
+    let reserve = llm::engine::RESERVE_FOR_COMPLETION;
+    let max_prompt_tokens = n_ctx.saturating_sub(reserve);
+
     Ok(json!({
-        "status": "healthy",
-        "model_loaded": llm_manager.engine.is_some(),
-        "model_path": llm_manager.current_model_path.to_string_lossy().to_string(),
-        "n_ctx": llm_manager.n_ctx,
-        "n_gpu_layers": llm_manager.n_gpu_layers
+        "status": if is_generating { "busy" } else if model_loaded { "ready" } else { "idle" },
+        "model_loaded": model_loaded,
+        "model_path": model_path,
+        "n_ctx": n_ctx,
+        "context_size": n_ctx,
+        "n_gpu_layers": n_gpu_layers,
+        "reserve_for_completion": reserve,
+        "max_prompt_tokens": max_prompt_tokens,
+        "is_generating": is_generating
+    }))
+}
+
+async fn cancel(_state: Arc<AppState>) -> Result<Value, String> {
+    crate::llm::engine::request_cancel();
+    let was_generating = crate::llm::engine::is_generating();
+    Ok(json!({
+        "success": true,
+        "cancelled": true,
+        "status": "cancellation_requested",
+        "was_generating": was_generating
     }))
 }
 
@@ -241,7 +319,9 @@ async fn task_plan_chat(
                 });
             stream_state.finish(completion)
         } else {
-            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| true)
+            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| {
+                !llm::engine::is_cancel_requested()
+            })
         }
     })
     .await
@@ -268,9 +348,36 @@ async fn telemetry_summary(state: Arc<AppState>, payload: Value) -> Result<Value
 mod tests {
     use super::*;
 
+    fn create_test_state() -> Arc<AppState> {
+        let pool = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
+        Arc::new(AppState {
+            db: pool,
+            crypto: crate::crypto::EncryptionEngine::new("00000000000000000000000000000000"),
+            stt: tokio::sync::Mutex::new(crate::stt::SttManager::new(".")),
+            tts: tokio::sync::Mutex::new(None),
+            tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
+            llm: tokio::sync::Mutex::new(llm::LlamaRouterManager::new(512, 0).expect("llm")),
+            vad: tokio::sync::Mutex::new(None),
+            denoiser: tokio::sync::Mutex::new(None),
+            turn_shadow: tokio::sync::Mutex::new(None),
+            aec: tokio::sync::Mutex::new(None),
+            mcp_server: Arc::new(crate::mcp::server::NativeMcpServer::new("test_vault")),
+            vision: tokio::sync::Mutex::new(crate::vision::VisionManager::new(
+                Arc::new(crate::vision::capture::MockScreenCapturer::new(
+                    64,
+                    64,
+                    crate::vision::capture::PixelFormat::Rgba,
+                )),
+                crate::vision::VisionConfig::default(),
+            )),
+            embedder: AppState::empty_embedder(),
+            active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
+        })
+    }
+
     #[test]
     fn owns_dung_sau_lenh_va_khong_om_lenh_khac() {
-        assert_eq!(OWNED.len(), 6);
+        assert_eq!(OWNED.len(), 8);
         for name in OWNED {
             assert!(owns(name));
         }
@@ -278,8 +385,73 @@ mod tests {
         assert!(owns("chat:completion"));
         assert!(owns("task_plan_chat"));
         assert!(owns("telemetry:summary"));
+        assert!(owns("llm:context_info"));
+        assert!(owns("llm:cancel"));
         // Nhưng không được ôm CRUD của miền task:
         assert!(!owns("get_tasks"));
         assert!(!owns("add_task"));
+    }
+
+    #[tokio::test]
+    async fn test_llm_cancel_sets_atomic_flag() {
+        let state = create_test_state();
+        let res = handle(state, "llm:cancel", json!({}), None, None)
+            .await
+            .expect("cancel handle");
+        assert_eq!(res["cancelled"], true);
+        assert_eq!(res["status"], "cancellation_requested");
+        assert!(llm::engine::is_cancel_requested());
+
+        // Reset so subsequent tests start clean
+        let guard = llm::engine::GeneratingGuard::enter();
+        drop(guard);
+        assert!(!llm::engine::is_cancel_requested());
+    }
+
+    #[tokio::test]
+    async fn test_llm_context_info_non_blocking() {
+        let state = create_test_state();
+        let res = handle(state, "llm:context_info", json!({}), None, None)
+            .await
+            .expect("context_info handle");
+        assert_eq!(res["status"], "idle");
+        assert_eq!(res["is_generating"], false);
+        assert!(res["context_size"].as_u64().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_llm_health_check_non_blocking_when_locked() {
+        let state = create_test_state();
+
+        // When lock is free (and no model is loaded into memory yet):
+        let res_free = handle(state.clone(), "llm:health_check", json!({}), None, None)
+            .await
+            .expect("health_check when free");
+        assert_eq!(res_free["status"], "offline");
+
+        // When exclusive lock is held by another task:
+        let lock_guard = state.llm.lock().await;
+        // health_check must not hang/block; it must return immediately using try_lock fallback
+        let res_busy = handle(state.clone(), "llm:health_check", json!({}), None, None)
+            .await
+            .expect("health_check when busy");
+        assert_eq!(res_busy["status"], "busy");
+        assert_eq!(res_busy["is_generating"], true);
+        drop(lock_guard);
+
+        // After releasing, health_check is offline/idle again without blocking
+        let res_after = handle(state.clone(), "llm:health_check", json!({}), None, None)
+            .await
+            .expect("health_check after release");
+        assert_eq!(res_after["status"], "offline");
+    }
+
+    #[tokio::test]
+    async fn test_llm_embed_empty_input() {
+        let state = create_test_state();
+        let res = handle(state, "llm:embed", json!({"input": []}), None, None)
+            .await
+            .expect("embed empty");
+        assert_eq!(res, json!([]));
     }
 }

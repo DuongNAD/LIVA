@@ -15,6 +15,7 @@ import {
   onMounted,
   onUnmounted,
   onDeactivated,
+  onErrorCaptured,
   nextTick,
   watch,
   inject,
@@ -54,6 +55,15 @@ import { useWidgetWindow } from './composables/useWidgetWindow';
 import type { ToolPanelView } from './types/ui';
 
 const platform = inject<IPlatformAdapter>('platform');
+
+// ErrorBoundary & Crash Shield: prevent WebGL or child errors from freezing the widget
+const widgetError = ref<string | null>(null);
+onErrorCaptured((err, _instance, info) => {
+  const errMsg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  logger.error('[WidgetApp] Crash Shield intercepted error:', err, 'info:', info);
+  widgetError.value = `${errMsg} (${info})`;
+  return false; // Stop propagation to prevent window unmount
+});
 
 // Hình dạng gói tin Gateway nay ở `types/gateway.ts` — `useWidgetTransport.ts`
 // cần đúng những kiểu này cho `onJsonMessage`, mà kiểu khai bên trong một SFC
@@ -525,10 +535,20 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
       triggerRef(messages);
       scrollToBottom();
     } else if (data.event === 'ai_stream_chunk') {
-      if (messages.value.length > 0) {
-        const lastMsg = messages.value[messages.value.length - 1];
-        let chunk = data.payload.textChunk as string;
-        const isThoughtChunk = !!data.payload.isThought;
+      let lastMsg = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
+      // Stream Chunk Race Guard: only append if last message is assistant; otherwise push a new assistant bubble
+      if (!lastMsg || lastMsg.role !== 'assistant') {
+        const newAssistantMsg = {
+          id: generateMsgId(),
+          role: 'assistant' as const,
+          text: '',
+          thinking: '',
+        };
+        messages.value.push(newAssistantMsg);
+        lastMsg = newAssistantMsg;
+      }
+      let chunk = data.payload.textChunk as string;
+      const isThoughtChunk = !!data.payload.isThought;
 
         if (isThoughtChunk) {
           // Strip raw XML thought tags if any leak
@@ -560,10 +580,9 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
           chunk = chunk.replace(/\n/g, '<br/>');
           lastMsg.text += chunk;
         }
-        triggerRef(messages);
-        scrollToBottom();
-        voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
-      }
+      triggerRef(messages);
+      scrollToBottom();
+      voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
     } else if (data.event === 'ai_spoken_response') {
       speaker.unblock();
       isThinking.value = false;
@@ -1109,6 +1128,21 @@ onDeactivated(() => {
   <div
     class="h-screen w-screen flex flex-col items-end justify-end bg-transparent font-sans relative overflow-hidden"
   >
+    <!-- ErrorBoundary & Crash Shield Fallback Banner -->
+    <div
+      v-if="widgetError"
+      class="widget-error-shield"
+      style="position: fixed; top: 12px; left: 12px; z-index: 99999; background: rgba(30, 0, 0, 0.85); border: 1px solid #ff4444; border-radius: 8px; padding: 8px 12px; color: #ff8888; font-size: 11px; max-width: 320px; pointer-events: auto; backdrop-filter: blur(8px); box-shadow: 0 4px 12px rgba(0,0,0,0.5);"
+    >
+      <div style="font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+        <span>⚠️ Shield: Component Error</span>
+        <button
+          @click="widgetError = null"
+          style="background: transparent; border: none; color: #aaa; cursor: pointer; font-size: 14px; padding: 0 4px;"
+        >×</button>
+      </div>
+      <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ widgetError }}</div>
+    </div>
     <!-- 3D/2D Engine — khung vẽ phủ trọn màn hình để nhân vật đi lại được.
          `pointer-events: none` giữ click xuyên qua; vùng bắt chuột của riêng thân
          nhân vật do updateInteractiveZones() đăng ký với Rust theo hộp bao thật. -->

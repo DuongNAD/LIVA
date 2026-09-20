@@ -89,7 +89,8 @@ pub enum PipelineState {
 #[derive(Debug)]
 pub enum PipelineEvent {
     VadStart,
-    VadEnd(Vec<f32>), // Raw audio samples
+    VadEnd(Vec<f32>),     // Raw audio samples
+    AudioChunk(Vec<f32>), // Streaming audio chunk during speech
     Interrupted,
     SpeakText(String),
     ResetDsp,
@@ -125,6 +126,12 @@ impl WebRTCPipelineHandle {
         self.event_tx
             .try_send(PipelineEvent::VadStart)
             .map_err(|e| format!("Failed to queue VadStart: {}", e))
+    }
+
+    pub fn on_audio_chunk(&self, chunk: Vec<f32>) -> Result<(), String> {
+        self.event_tx
+            .try_send(PipelineEvent::AudioChunk(chunk))
+            .map_err(|e| format!("Failed to queue AudioChunk: {}", e))
     }
 
     pub fn on_vad_end(&self, audio_data: Vec<f32>) -> Result<(), String> {
@@ -226,7 +233,7 @@ impl WebRTCActor {
         self
     }
 
-    /// Reset recurrent states across VAD, GTCRN Denoiser, and AEC upon turn completion.
+    /// Reset recurrent states across VAD, GTCRN Denoiser, AEC, and STT upon turn completion.
     pub fn reset_turn_dsp(&self) {
         if let Some(ref session) = self.voice_session {
             session.reset_dsp();
@@ -236,6 +243,9 @@ impl WebRTCActor {
             };
             aec.reset();
         }
+        if let Ok(mut stt) = self.state_shared.stt.try_lock() {
+            stt.reset_stream();
+        }
     }
 
     pub async fn run(mut self) {
@@ -244,6 +254,9 @@ impl WebRTCActor {
             match event {
                 PipelineEvent::VadStart => {
                     self.handle_vad_start().await;
+                }
+                PipelineEvent::AudioChunk(chunk) => {
+                    self.handle_audio_chunk(chunk).await;
                 }
                 PipelineEvent::VadEnd(audio_data) => {
                     self.handle_vad_end(audio_data).await;
@@ -285,7 +298,34 @@ impl WebRTCActor {
     async fn handle_vad_start(&mut self) {
         info!("🎙️ [VAD] Speech START detected.");
         self.cancel_active_operations().await;
+        if let Ok(mut stt) = self.state_shared.stt.try_lock() {
+            stt.reset_stream();
+        }
         self.transition_to(PipelineState::VadStart);
+    }
+
+    async fn handle_audio_chunk(&mut self, chunk: Vec<f32>) {
+        if chunk.is_empty() || self.state != PipelineState::VadStart {
+            return;
+        }
+
+        let session_id = self.session_id;
+        let state_shared = Arc::clone(&self.state_shared);
+        let active_session_id_stt = Arc::clone(&self.active_session_id);
+
+        tokio::task::spawn_blocking(move || {
+            if active_session_id_stt.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                return;
+            }
+            let mut manager = match state_shared.stt.try_lock() {
+                Ok(m) => m,
+                Err(_) => return,
+            };
+            if active_session_id_stt.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                return;
+            }
+            let _ = manager.feed_chunk(&chunk, false);
+        });
     }
 
     async fn handle_vad_end(&mut self, audio_data: Vec<f32>) {

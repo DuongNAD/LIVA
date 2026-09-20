@@ -144,6 +144,26 @@ describe("Dashboard Components Test Suite", () => {
       await wrapper.find("button.btn-primary").trigger("click");
       expect(saveUserProfileMock).toHaveBeenCalled();
     });
+
+    it("should not trigger saveUserProfile when profile updates from gateway (breaks circular loop)", async () => {
+      saveUserProfileMock.mockClear();
+      const wrapper = mount(UserProfile);
+      await wrapper.vm.$nextTick();
+
+      // Simulate incoming profile update from gateway
+      userProfileRef.value = {
+        name: "Jane Doe",
+        birthYear: "1998",
+        nationality: "VN",
+        language: "vi-VN",
+        hobbies: "Design",
+        preferences: "Friendly",
+      };
+      await wrapper.vm.$nextTick();
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(saveUserProfileMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("OnboardingForm.vue", () => {

@@ -305,6 +305,13 @@ pub struct WasapiLoopbackCapturer {
     inner: Arc<WasapiLoopbackInner>,
 }
 
+struct SharedLoopbackManager {
+    capturer: WasapiLoopbackCapturer,
+    subscribers: Arc<Mutex<Vec<std::sync::Weak<Mutex<Option<SelfEchoCanceller>>>>>>,
+}
+
+static SHARED_LOOPBACK: Mutex<Option<SharedLoopbackManager>> = Mutex::new(None);
+
 impl WasapiLoopbackCapturer {
     /// Create a stopped / idle capturer handle (useful for testing or fallback).
     pub fn new() -> Self {
@@ -320,7 +327,20 @@ impl WasapiLoopbackCapturer {
     }
 
     /// Discover the default output device and start continuous loopback capture into AEC.
+    /// Reuses existing running loopback stream across sessions to avoid hardware stream leaks.
     pub fn start(aec_handle: crate::webrtc::session::SessionAec) -> Result<Self, String> {
+        let mut shared_guard = SHARED_LOOPBACK.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(ref manager) = *shared_guard {
+            if manager.capturer.is_running() {
+                let mut subs = manager
+                    .subscribers
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                subs.push(Arc::downgrade(&aec_handle));
+                return Ok(manager.capturer.clone());
+            }
+        }
+
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -344,7 +364,9 @@ impl WasapiLoopbackCapturer {
 
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = Arc::clone(&running);
-        let aec_target = Arc::clone(&aec_handle);
+        let subscribers: Arc<Mutex<Vec<std::sync::Weak<Mutex<Option<SelfEchoCanceller>>>>>> =
+            Arc::new(Mutex::new(vec![Arc::downgrade(&aec_handle)]));
+        let subs_clone = Arc::clone(&subscribers);
 
         let err_fn = move |err: cpal::StreamError| {
             tracing::warn!("WASAPI loopback stream error: {err}");
@@ -353,7 +375,7 @@ impl WasapiLoopbackCapturer {
         let stream = match sample_format {
             cpal::SampleFormat::F32 => {
                 let r = Arc::clone(&running_clone);
-                let aec = Arc::clone(&aec_target);
+                let subs = Arc::clone(&subs_clone);
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -361,10 +383,19 @@ impl WasapiLoopbackCapturer {
                             return;
                         }
                         let mono = downmix_f32_to_mono(data, channels);
-                        if let Ok(mut guard) = aec.lock()
-                            && let Some(ref mut echo) = *guard
-                        {
-                            echo.push_loopback_render(&mono, sample_rate);
+                        if let Ok(mut list) = subs.lock() {
+                            list.retain(|weak| {
+                                if let Some(strong) = weak.upgrade() {
+                                    if let Ok(mut guard) = strong.lock()
+                                        && let Some(ref mut echo) = *guard
+                                    {
+                                        echo.push_loopback_render(&mono, sample_rate);
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
+                            });
                         }
                     },
                     err_fn,
@@ -373,7 +404,7 @@ impl WasapiLoopbackCapturer {
             }
             cpal::SampleFormat::I16 => {
                 let r = Arc::clone(&running_clone);
-                let aec = Arc::clone(&aec_target);
+                let subs = Arc::clone(&subs_clone);
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
@@ -381,10 +412,19 @@ impl WasapiLoopbackCapturer {
                             return;
                         }
                         let mono = downmix_i16_to_mono(data, channels);
-                        if let Ok(mut guard) = aec.lock()
-                            && let Some(ref mut echo) = *guard
-                        {
-                            echo.push_loopback_render(&mono, sample_rate);
+                        if let Ok(mut list) = subs.lock() {
+                            list.retain(|weak| {
+                                if let Some(strong) = weak.upgrade() {
+                                    if let Ok(mut guard) = strong.lock()
+                                        && let Some(ref mut echo) = *guard
+                                    {
+                                        echo.push_loopback_render(&mono, sample_rate);
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
+                            });
                         }
                     },
                     err_fn,
@@ -404,7 +444,7 @@ impl WasapiLoopbackCapturer {
             .play()
             .map_err(|e| format!("Failed to start WASAPI loopback stream: {}", e))?;
 
-        Ok(Self {
+        let capturer = Self {
             inner: Arc::new(WasapiLoopbackInner {
                 running: AtomicBool::new(true),
                 stream: Mutex::new(Some(SendStream(stream))),
@@ -412,7 +452,14 @@ impl WasapiLoopbackCapturer {
                 sample_rate,
                 channels: channels as u16,
             }),
-        })
+        };
+
+        *shared_guard = Some(SharedLoopbackManager {
+            capturer: capturer.clone(),
+            subscribers,
+        });
+
+        Ok(capturer)
     }
 
     pub fn is_running(&self) -> bool {
@@ -423,6 +470,9 @@ impl WasapiLoopbackCapturer {
         self.inner.running.store(false, Ordering::SeqCst);
         if let Ok(mut guard) = self.inner.stream.lock() {
             let _ = guard.take();
+        }
+        if let Ok(mut shared) = SHARED_LOOPBACK.lock() {
+            *shared = None;
         }
     }
 

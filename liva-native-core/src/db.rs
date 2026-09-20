@@ -52,8 +52,8 @@ fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqli
         "
         PRAGMA foreign_keys = ON;
         PRAGMA busy_timeout = 5000;
-        PRAGMA cache_size = -8192;
-        PRAGMA page_size = 32768;
+        PRAGMA cache_size = -2000;
+        PRAGMA page_size = 4096;
         PRAGMA mmap_size = 268435456;
         PRAGMA temp_store = MEMORY;
     ",
@@ -66,7 +66,8 @@ fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqli
             "
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
-            PRAGMA wal_autocheckpoint = 500;
+            PRAGMA journal_size_limit = 67108864;
+            PRAGMA wal_autocheckpoint = 1000;
         ",
         )?;
     }
@@ -253,7 +254,7 @@ impl DatabasePool {
         let read_manager = SqliteConnectionManager::file(path.as_ref())
             .with_flags(OpenFlags::SQLITE_OPEN_READ_ONLY);
 
-        let writer = Pool::builder().max_size(1).build(CustomSqliteManager {
+        let writer = Pool::builder().max_size(2).build(CustomSqliteManager {
             inner: Arc::new(write_manager),
             read_only: false,
         })?;
@@ -293,7 +294,7 @@ impl DatabasePool {
         let read_manager = SqliteConnectionManager::file(&db_uri)
             .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI);
 
-        let writer = Pool::builder().max_size(1).build(CustomSqliteManager {
+        let writer = Pool::builder().max_size(2).build(CustomSqliteManager {
             inner: Arc::new(write_manager),
             read_only: false,
         })?;
@@ -374,6 +375,26 @@ impl DatabasePool {
             .await
     }
 
+    /// Asynchronously wait for all queued writes to be committed to SQLite WAL.
+    pub async fn flush(&self) -> Result<(), crate::db_actor::DbActorError> {
+        self.writer_actor.flush().await
+    }
+
+    /// Asynchronously wait for all queued writes to be committed to SQLite WAL (alias for flush).
+    pub async fn sync(&self) -> Result<(), crate::db_actor::DbActorError> {
+        self.writer_actor.sync().await
+    }
+
+    /// Synchronously wait for all queued writes to be committed to SQLite WAL.
+    pub fn blocking_flush(&self) -> Result<(), crate::db_actor::DbActorError> {
+        self.writer_actor.blocking_flush()
+    }
+
+    /// Synchronously wait for all queued writes to be committed to SQLite WAL (alias for blocking_flush).
+    pub fn blocking_sync(&self) -> Result<(), crate::db_actor::DbActorError> {
+        self.writer_actor.blocking_sync()
+    }
+
     /// Asynchronously insert an L3 knowledge graph triple via DbActor and update in-memory CSR cache.
     pub async fn insert_l3_triple(
         &self,
@@ -400,6 +421,30 @@ impl DatabasePool {
 
         Ok(())
     }
+
+    /// Asynchronously insert multiple L3 knowledge graph triples in a single batch transaction and update in-memory CSR cache.
+    pub async fn insert_l3_triples_batch(
+        &self,
+        triples: &[(String, String, String, f32)],
+    ) -> Result<(), String> {
+        if triples.is_empty() {
+            return Ok(());
+        }
+        self.writer_actor
+            .insert_l3_triples_batch(triples.to_vec())
+            .await?;
+
+        if let Ok(mut graph) = self.csr_graph.write() {
+            for (sub, pred, obj, weight) in triples {
+                graph.add_node(sub.clone(), sub.clone(), "{}".to_string());
+                graph.add_node(obj.clone(), obj.clone(), "{}".to_string());
+                graph.add_edge(sub, obj, pred, *weight, true);
+            }
+            graph.compile_csr();
+        }
+
+        Ok(())
+    }
 }
 
 fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -419,6 +464,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             last_accessed_at INTEGER DEFAULT 0,
             access_count INTEGER DEFAULT 0
         );
+        CREATE INDEX IF NOT EXISTS idx_facts_last_accessed ON facts(last_accessed_at DESC);
 
         CREATE TABLE IF NOT EXISTS agent_checkpoints (
             thread_id TEXT PRIMARY KEY,
@@ -457,6 +503,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
 
         CREATE INDEX IF NOT EXISTS idx_events_pending_ts ON events(timestamp, eventId) WHERE consolidation_status = 'pending';
+        CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);
 
         CREATE TABLE IF NOT EXISTS vector_dlq (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -495,6 +542,7 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at DESC);
 
         CREATE TABLE IF NOT EXISTS consolidation_checkpoints (
             session_id TEXT PRIMARY KEY,
@@ -563,6 +611,8 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             FOREIGN KEY(source) REFERENCES l3_nodes(id),
             FOREIGN KEY(target) REFERENCES l3_nodes(id)
         );
+        CREATE INDEX IF NOT EXISTS idx_l3_edges_subject ON l3_edges(source, relation);
+        CREATE INDEX IF NOT EXISTS idx_l3_edges_object ON l3_edges(target, relation);
 
         CREATE TABLE IF NOT EXISTS idempotency_records (
             idempotency_key TEXT PRIMARY KEY,
@@ -632,6 +682,15 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
         CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON turn_telemetry(ts);
         CREATE INDEX IF NOT EXISTS idx_telemetry_model ON turn_telemetry(model_id);
+
+        CREATE TABLE IF NOT EXISTS artifact_trust_cache (
+            canonical_path TEXT PRIMARY KEY,
+            file_size INTEGER NOT NULL,
+            mtime_nanos INTEGER NOT NULL,
+            sha256 TEXT NOT NULL,
+            verified_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_artifact_trust_path ON artifact_trust_cache(canonical_path);
     ")?;
 
     let count: i64 = conn.query_row(
@@ -1048,8 +1107,6 @@ pub fn set_fact(
     engine: &EncryptionEngine,
     fact: &Fact,
 ) -> Result<(), rusqlite::Error> {
-    use rusqlite::OptionalExtension;
-
     let encrypted_val = match engine.encrypt(&fact.value) {
         Ok(v) => v,
         Err(e) => {
@@ -1059,6 +1116,23 @@ pub fn set_fact(
         }
     };
 
+    if conn.is_autocommit() {
+        let tx = conn.unchecked_transaction()?;
+        set_fact_inner(&tx, engine, fact, &encrypted_val)?;
+        tx.commit()
+    } else {
+        set_fact_inner(conn, engine, fact, &encrypted_val)
+    }
+}
+
+fn set_fact_inner(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    fact: &Fact,
+    encrypted_val: &str,
+) -> Result<(), rusqlite::Error> {
+    use rusqlite::OptionalExtension;
+
     // BACKUP-BEFORE-OVERWRITE (fail-closed): nếu value ĐANG lưu KHÔNG giải mã
     // được bằng khoá hiện tại (locked — vd đổi khoá, hoặc rekey chưa kịp chạy),
     // đè nó đi sẽ MẤT bản gốc mã hoá VĨNH VIỄN. Đây chính là kịch bản
@@ -1066,68 +1140,64 @@ pub fn set_fact(
     // với tới (caller tự động). Sao lưu ciphertext cũ vào facts_locked_backup
     // TRƯỚC khi ghi, atomic trong 1 transaction. Chỉ đụng ca locked — ghi đè
     // value đọc-được là hành vi bình thường, không sao lưu.
-    let tx = conn.unchecked_transaction()?;
+    let existing: Option<String> = conn
+        .query_row("SELECT value FROM facts WHERE key = ?1", [&fact.key], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    if let Some(old) = existing
+        && engine.read_fact(&old).is_locked()
     {
-        let existing: Option<String> = tx
-            .query_row("SELECT value FROM facts WHERE key = ?1", [&fact.key], |r| {
-                r.get(0)
-            })
-            .optional()?;
-        if let Some(old) = existing
-            && engine.read_fact(&old).is_locked()
-        {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            tx.execute(
-                "INSERT INTO facts_locked_backup (key, value, backed_up_at) VALUES (?1, ?2, ?3)",
-                (&fact.key, &old, now),
-            )?;
-            tracing::warn!(
-                "set_fact: value cũ của '{}' KHÔNG giải mã được bằng khoá hiện tại — \
-                 đã sao lưu ciphertext vào facts_locked_backup trước khi ghi đè (không mất bản gốc)",
-                fact.key
-            );
-        }
-
-        tx.execute(
-            "INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-             ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updatedAt = excluded.updatedAt,
-                ttlDays = excluded.ttlDays,
-                source = excluded.source,
-                category = excluded.category,
-                importance = excluded.importance,
-                confidenceScore = excluded.confidenceScore,
-                sourceTurnId = excluded.sourceTurnId,
-                memory_strength = CASE
-                    WHEN excluded.memory_strength > 0.0 AND excluded.memory_strength != 1.0
-                    THEN excluded.memory_strength
-                    ELSE facts.memory_strength
-                END,
-                last_accessed_at = MAX(facts.last_accessed_at, excluded.last_accessed_at),
-                access_count = MAX(facts.access_count, excluded.access_count)",
-            (
-                &fact.key,
-                &encrypted_val,
-                &fact.createdAt,
-                &fact.updatedAt,
-                &fact.ttlDays,
-                &fact.source,
-                &fact.category,
-                fact.importance,
-                fact.confidenceScore,
-                &fact.sourceTurnId,
-                fact.memory_strength,
-                fact.last_accessed_at,
-                fact.access_count,
-            ),
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        conn.execute(
+            "INSERT INTO facts_locked_backup (key, value, backed_up_at) VALUES (?1, ?2, ?3)",
+            (&fact.key, &old, now),
         )?;
+        tracing::warn!(
+            "set_fact: value cũ của '{}' KHÔNG giải mã được bằng khoá hiện tại — \
+             đã sao lưu ciphertext vào facts_locked_backup trước khi ghi đè (không mất bản gốc)",
+            fact.key
+        );
     }
-    tx.commit()?;
+
+    conn.execute(
+        "INSERT INTO facts (key, value, createdAt, updatedAt, ttlDays, source, category, importance, confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updatedAt = excluded.updatedAt,
+            ttlDays = excluded.ttlDays,
+            source = excluded.source,
+            category = excluded.category,
+            importance = excluded.importance,
+            confidenceScore = excluded.confidenceScore,
+            sourceTurnId = excluded.sourceTurnId,
+            memory_strength = CASE
+                WHEN excluded.memory_strength > 0.0 AND excluded.memory_strength != 1.0
+                THEN excluded.memory_strength
+                ELSE facts.memory_strength
+            END,
+            last_accessed_at = MAX(facts.last_accessed_at, excluded.last_accessed_at),
+            access_count = MAX(facts.access_count, excluded.access_count)",
+        (
+            &fact.key,
+            encrypted_val,
+            &fact.createdAt,
+            &fact.updatedAt,
+            &fact.ttlDays,
+            &fact.source,
+            &fact.category,
+            fact.importance,
+            fact.confidenceScore,
+            &fact.sourceTurnId,
+            fact.memory_strength,
+            fact.last_accessed_at,
+            fact.access_count,
+        ),
+    )?;
 
     Ok(())
 }
@@ -1650,13 +1720,40 @@ pub fn persist_conversation_event_vector(
     domain: &str,
     category: &str,
 ) -> Result<(), rusqlite::Error> {
-    let transaction = conn.unchecked_transaction()?;
+    if conn.is_autocommit() {
+        let transaction = conn.unchecked_transaction()?;
+        persist_conversation_event_vector_tx(
+            &transaction,
+            engine,
+            event_id,
+            content,
+            vector,
+            domain,
+            category,
+        )?;
+        transaction.commit()
+    } else {
+        persist_conversation_event_vector_tx(
+            conn, engine, event_id, content, vector, domain, category,
+        )
+    }
+}
+
+fn persist_conversation_event_vector_tx(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    event_id: &str,
+    content: &str,
+    vector: &[f32],
+    domain: &str,
+    category: &str,
+) -> Result<(), rusqlite::Error> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
 
-    transaction.execute(
+    conn.execute(
         "INSERT INTO events (
             eventId, timestamp, consolidated, domain, category,
             consolidation_status, retry_count, agentId
@@ -1666,7 +1763,7 @@ pub fn persist_conversation_event_vector(
 
     let source_event_ids = [event_id.to_string()];
     upsert_vector(
-        &transaction,
+        conn,
         engine,
         event_id,
         "conversation_turn",
@@ -1679,7 +1776,77 @@ pub fn persist_conversation_event_vector(
         Some(&source_event_ids),
     )?;
 
-    transaction.commit()
+    Ok(())
+}
+
+pub struct BatchConversationTurn<'a> {
+    pub event_id: &'a str,
+    pub content: &'a str,
+    pub vector: &'a [f32],
+    pub domain: &'a str,
+    pub category: &'a str,
+}
+
+pub fn persist_conversation_event_vectors_batch(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    items: &[BatchConversationTurn<'_>],
+) -> Result<(), rusqlite::Error> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    if conn.is_autocommit() {
+        let transaction = conn.unchecked_transaction()?;
+        persist_conversation_event_vectors_batch_tx(&transaction, engine, items)?;
+        transaction.commit()
+    } else {
+        persist_conversation_event_vectors_batch_tx(conn, engine, items)
+    }
+}
+
+fn persist_conversation_event_vectors_batch_tx(
+    conn: &Connection,
+    engine: &EncryptionEngine,
+    items: &[BatchConversationTurn<'_>],
+) -> Result<(), rusqlite::Error> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    {
+        let mut stmt_event = conn.prepare_cached(
+            "INSERT INTO events (
+                eventId, timestamp, consolidated, domain, category,
+                consolidation_status, retry_count, agentId
+             ) VALUES (?1, ?2, 0, ?3, ?4, 'pending', 0, 'liva_core')",
+        )?;
+
+        for item in items {
+            stmt_event.execute(rusqlite::params![
+                item.event_id,
+                now,
+                item.domain,
+                item.category
+            ])?;
+            let source_event_ids = [item.event_id.to_string()];
+            upsert_vector(
+                conn,
+                engine,
+                item.event_id,
+                "conversation_turn",
+                item.content,
+                item.vector,
+                Some(item.domain),
+                Some(item.category),
+                None,
+                None,
+                Some(&source_event_ids),
+            )?;
+        }
+    }
+
+    Ok(())
 }
 
 pub fn search_similar_vectors(
@@ -2323,6 +2490,45 @@ pub fn get_telemetry_summary(
         models,
         entry_paths,
     })
+}
+
+pub fn get_artifact_trust_cache(
+    conn: &rusqlite::Connection,
+    canonical_path: &str,
+    file_size: u64,
+    mtime_nanos: i64,
+) -> Result<Option<String>, rusqlite::Error> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT sha256 FROM artifact_trust_cache WHERE canonical_path = ?1 AND file_size = ?2 AND mtime_nanos = ?3",
+        rusqlite::params![canonical_path, file_size as i64, mtime_nanos],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+}
+
+pub fn set_artifact_trust_cache(
+    conn: &rusqlite::Connection,
+    canonical_path: &str,
+    file_size: u64,
+    mtime_nanos: i64,
+    sha256: &str,
+) -> Result<(), rusqlite::Error> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    conn.execute(
+        "INSERT INTO artifact_trust_cache (canonical_path, file_size, mtime_nanos, sha256, verified_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(canonical_path) DO UPDATE SET
+            file_size = excluded.file_size,
+            mtime_nanos = excluded.mtime_nanos,
+            sha256 = excluded.sha256,
+            verified_at = excluded.verified_at",
+        rusqlite::params![canonical_path, file_size as i64, mtime_nanos, sha256, now],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

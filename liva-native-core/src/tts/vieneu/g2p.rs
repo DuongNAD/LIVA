@@ -177,15 +177,31 @@ impl PhonemeDict {
         })
     }
 
+    fn read_u32_at(&self, pos: usize) -> Option<u32> {
+        let bytes: [u8; 4] = self.data.get(pos..pos + 4)?.try_into().ok()?;
+        Some(u32::from_le_bytes(bytes))
+    }
+
     fn get_string(&self, id: u32) -> &str {
         if id >= self.string_count {
             return "";
         }
-        let off_ptr = self.string_offsets_pos + (id as usize * 4);
-        let offset =
-            u32::from_le_bytes(self.data[off_ptr..off_ptr + 4].try_into().unwrap()) as usize;
+        let off_ptr = match (id as usize)
+            .checked_mul(4)
+            .and_then(|x| self.string_offsets_pos.checked_add(x))
+        {
+            Some(p) => p,
+            None => return "",
+        };
+        let offset = match self.read_u32_at(off_ptr) {
+            Some(o) => o as usize,
+            None => return "",
+        };
 
-        let start = 32 + offset;
+        let start = match 32usize.checked_add(offset) {
+            Some(s) if s < self.data.len() => s,
+            _ => return "",
+        };
         let mut end = start;
         while end < self.data.len() && self.data[end] != 0 {
             end += 1;
@@ -199,12 +215,14 @@ impl PhonemeDict {
 
         while low <= high {
             let mid = (low + high) / 2;
-            let ptr = self.merged_pos + (mid as usize * 8);
-            let w_id = u32::from_le_bytes(self.data[ptr..ptr + 4].try_into().unwrap());
+            let ptr = (mid as usize)
+                .checked_mul(8)
+                .and_then(|x| self.merged_pos.checked_add(x))?;
+            let w_id = self.read_u32_at(ptr)?;
             let current_word = self.get_string(w_id);
 
             if current_word == word {
-                let p_id = u32::from_le_bytes(self.data[ptr + 4..ptr + 8].try_into().unwrap());
+                let p_id = self.read_u32_at(ptr.checked_add(4)?)?;
                 return Some(self.get_string(p_id));
             } else if current_word < word {
                 low = mid + 1;
@@ -221,13 +239,15 @@ impl PhonemeDict {
 
         while low <= high {
             let mid = (low + high) / 2;
-            let ptr = self.common_pos + (mid as usize * 12);
-            let w_id = u32::from_le_bytes(self.data[ptr..ptr + 4].try_into().unwrap());
+            let ptr = (mid as usize)
+                .checked_mul(12)
+                .and_then(|x| self.common_pos.checked_add(x))?;
+            let w_id = self.read_u32_at(ptr)?;
             let current_word = self.get_string(w_id);
 
             if current_word == word {
-                let vi_id = u32::from_le_bytes(self.data[ptr + 4..ptr + 8].try_into().unwrap());
-                let en_id = u32::from_le_bytes(self.data[ptr + 8..ptr + 12].try_into().unwrap());
+                let vi_id = self.read_u32_at(ptr.checked_add(4)?)?;
+                let en_id = self.read_u32_at(ptr.checked_add(8)?)?;
                 return Some((self.get_string(vi_id), self.get_string(en_id)));
             } else if current_word < word {
                 low = mid + 1;
@@ -922,5 +942,88 @@ mod dictionary_validation_tests {
         // Điều đang khẳng định: vẫn phục vụ được sau khi nhiễm độc.
         let _ = engine.phonemize("abc");
         let _ = engine.phonemize("xin chào");
+    }
+
+    #[test]
+    fn dict_bounds_checked_khong_panic_khi_du_lieu_bi_cat_ngang() {
+        let dict = PhonemeDict {
+            data: vec![0u8; 16], // heavily truncated buffer
+            string_count: 10,
+            merged_count: 10,
+            common_count: 10,
+            string_offsets_pos: 100,
+            merged_pos: 200,
+            common_pos: 300,
+        };
+
+        // All these operations must return default/None instead of panicking on out-of-bounds
+        assert_eq!(dict.get_string(0), "");
+        assert_eq!(dict.get_string(999), "");
+        assert_eq!(dict.lookup_merged("hello"), None);
+        assert_eq!(dict.lookup_common("world"), None);
+    }
+
+    #[test]
+    fn test_adversarial_corrupt_dictionary_fuzz_and_bounds_safety() {
+        // 1. Zero-length and truncated slices must be safely rejected by PhonemeDict::new
+        for len in [0, 1, 4, 15, 31] {
+            let truncated = vec![0u8; len];
+            let f = dict_tam(&truncated);
+            let res = PhonemeDict::new(duong_dan(&f));
+            assert!(
+                res.is_err(),
+                "Length {len} must be rejected as invalid data"
+            );
+        }
+
+        // 2. Corrupt magic header must be rejected
+        let mut bad_magic = vec![0u8; 64];
+        bad_magic[0..4].copy_from_slice(b"BADM");
+        let f = dict_tam(&bad_magic);
+        assert!(PhonemeDict::new(duong_dan(&f)).is_err());
+
+        // 3. Integer overflow in section counts must be rejected
+        let mut overflow_blob = vec![0u8; 68];
+        overflow_blob[0..4].copy_from_slice(b"SEAP");
+        overflow_blob[8..12].copy_from_slice(&u32::MAX.to_le_bytes()); // string_count = u32::MAX
+        overflow_blob[20..24].copy_from_slice(&32_u32.to_le_bytes());
+        let f = dict_tam(&overflow_blob);
+        assert!(PhonemeDict::new(duong_dan(&f)).is_err());
+
+        // 4. Section position overlapping header (< 32) must be rejected
+        let mut overlap_blob = vec![0u8; 68];
+        overlap_blob[0..4].copy_from_slice(b"SEAP");
+        overlap_blob[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        overlap_blob[20..24].copy_from_slice(&16_u32.to_le_bytes()); // pos 16 < 32
+        let f = dict_tam(&overlap_blob);
+        assert!(PhonemeDict::new(duong_dan(&f)).is_err());
+
+        // 5. Corrupt PhonemeDict with 0-byte buffer must never panic on lookups
+        let empty_dict = PhonemeDict {
+            data: Vec::new(),
+            string_count: 50,
+            merged_count: 50,
+            common_count: 50,
+            string_offsets_pos: 0,
+            merged_pos: 0,
+            common_pos: 0,
+        };
+        assert_eq!(empty_dict.get_string(0), "");
+        assert_eq!(empty_dict.get_string(u32::MAX), "");
+        assert_eq!(empty_dict.lookup_merged("anything"), None);
+        assert_eq!(empty_dict.lookup_common("anything"), None);
+
+        // 6. PhonemeDict with strings missing NUL terminator must not read out of bounds
+        let unterminated_dict = PhonemeDict {
+            data: b"SEAP....unterminated_string_bytes_without_null".to_vec(),
+            string_count: 1,
+            merged_count: 0,
+            common_count: 0,
+            string_offsets_pos: 0,
+            merged_pos: 0,
+            common_pos: 0,
+        };
+        let s = unterminated_dict.get_string(0);
+        assert!(s.is_empty() || s.len() <= unterminated_dict.data.len());
     }
 }

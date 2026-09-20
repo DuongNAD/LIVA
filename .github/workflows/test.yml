@@ -1,4 +1,4 @@
-name: LIVA H-MEM Test Suite CI
+name: LIVA Test Suite CI (Parallel DAG)
 
 on:
   push:
@@ -7,18 +7,15 @@ on:
     branches: [ main, master ]
 
 jobs:
-  test-gateway:
-    runs-on: windows-latest
-    env:
-      LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
-
+  lint-and-docs:
+    name: Lint & Documentation
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
-        # docs-check.mjs đối chiếu `git log <commit-trong-front-matter>..HEAD`.
-        # Clone nông (mặc định depth=1) không có commit đó nên mọi tài liệu bị
-        # báo "không đối chiếu được" và tính năng dò lỗi thời chết trên CI.
+        # docs-check.mjs matches `git log <commit-in-front-matter>..HEAD`.
+        # Shallow clone lacks history, requiring full depth.
         fetch-depth: 0
 
     - name: Setup Node.js
@@ -27,130 +24,59 @@ jobs:
         node-version: '22'
         cache: 'npm'
 
-    # Chỉ dùng thư viện chuẩn của Node — không cần `npm ci`, nên đặt sớm để fail nhanh.
-    # Gate: front-matter thiếu/sai, liên kết hỏng, `covers` trỏ tới file không tồn tại,
-    # hai tài liệu cùng nhận sở hữu một sự thật.
-    #
-    # `--strict-stale=docs/03-danh-gia` (26/07/2026): với RIÊNG tầng đánh giá, lỗi
-    # thời là LỖI chứ không phải cảnh báo. Lý do: đợt rà 26/07 tìm ra 11 phán quyết
-    # đã sai trong 4 tài liệu ở đó — `docs-check` đã phát hiện được CẢ 11, nhưng chỉ
-    # ở mức cảnh báo nên chúng sống nhiều ngày. Đáng lo hơn cả: mọi mục đều sai theo
-    # hướng tài liệu NÓI XẤU sản phẩm hơn thực tế, thứ đắt nhất khi người đọc là giám khảo.
-    #
-    # Chỉ siết ĐÚNG một thư mục, cố ý. Bật cho toàn `docs/` sẽ đỏ ngay 16 file khác
-    # và người ta sẽ tắt gate — mất luôn cảnh báo đang có.
-    #
-    # Khi bước này đỏ, có HAI cách sửa và chúng KHÔNG thay thế nhau được:
-    #   commit:   = "tôi đã đối chiếu NỘI DUNG tài liệu tới commit này"
-    #   stale-ok: = "tôi đã ĐỌC DIFF tới commit này và xác nhận không cần sửa gì"
-    # Tách ra vì `commit:` là silencer quá rẻ: 18/30 commit gần nhất chạm
-    # `liva-native-core/src/`, mà ba tài liệu ở đây khai `covers: liva-native-core/src/*`.
-    # Nếu cách duy nhất để dập là sửa `commit:`, nó sẽ bị sửa mù — xanh dối còn tệ hơn
-    # cảnh báo trung thực. `stale-ok` grep được để kiểm toán ai đang sống nhờ nó.
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+
     - name: Check Documentation
       run: node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
 
-    # Tài liệu LIVA trích dẫn ~2.000 toạ độ `file:dòng`. Mỗi lần mã nguồn dịch
-    # chuyển, chúng âm thầm trỏ sai và không có gì báo lỗi. Bước này bắt lỗi
-    # CƠ HỌC (file bị xoá/đổi tên, số dòng vượt quá độ dài file); phần ngữ nghĩa
-    # — dòng đó có đúng nội dung được nhắc tới không — vẫn phải người đọc.
-    # Trích dẫn lịch sử có chủ ý được đánh dấu bằng ~~gạch ngang~~ và bỏ qua.
-    #
-    # `--max-unchecked=207` là CHỐT CHỐNG THỤT LÙI, không phải mục tiêu.
-    # Tài liệu hay viết tên file trần (`lib.rs:1055`, `main.rs:958`); tên trần
-    # trùng nhau nên bộ dò không kết luận được. Bản trước **bỏ qua im lặng** —
-    # biến `skipped` chưa từng được in ra — nên 39% trích dẫn (853/2 184) chưa
-    # bao giờ được kiểm, gồm TOÀN BỘ trích `lib.rs` và `main.rs`. Nay con số đó
-    # hiện ra và chỉ được phép GIẢM: thêm trích dẫn mơ hồ mới ⇒ CI đỏ.
-    # Hạ chốt mỗi khi chuyển một nhóm sang neo ký hiệu (`--suggest`).
     - name: Check Documentation Citations
       run: node scripts/docs-citations.mjs --max-unchecked=207
 
     - name: Install Dependencies
       run: npm ci
 
-    # `devkit:lint` invokes the pinned actionlint wrapper. Cache the verified
-    # binary after `npm ci` (which recreates node_modules) so GitHub Releases is
-    # not a runtime dependency of every CI run. The key intentionally contains
-    # the exact wrapper version; upgrades cannot reuse an older executable.
     - name: Cache actionlint 1.7.12
       uses: actions/cache@v4
       with:
         path: node_modules/.cache/liva-actionlint
         key: ${{ runner.os }}-${{ runner.arch }}-actionlint-1.7.12
 
-    # Pin the external workflow checker. The five docs/ai README files are
-    # compatibility pointers to LIVA's canonical docs, not a second doc tree.
     - name: Check AI DevKit Workspace Contract
       run: npm run devkit:lint
 
-    # Production and development tooling both process untrusted files on CI.
-    # Keep the full workspace clean instead of allowing vulnerable archive/image
-    # tooling merely because it is not shipped in the desktop bundle.
     - name: Audit npm Dependencies
       run: npm audit --audit-level=high
 
     - name: Check Rust Formatting
       run: cargo fmt --all -- --check
 
-    # Cache Cargo registry + build artifacts. llama.cpp được biên dịch từ C++ và
-    # bị ghim opt-level=3 ngay cả ở profile dev, nên build sạch mất rất lâu —
-    # đây là khoản tiết kiệm lớn nhất của toàn bộ pipeline.
-    - name: Cache Cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          target
-        # `hashFiles('Cargo.lock')` chứ KHÔNG phải `'**/Cargo.lock'`: glob hai sao
-        # khớp cả lockfile phụ trong crate con, nên xoá `liva-native-core/Cargo.lock`
-        # (rác tiền-workspace, gỡ ở 147f55c) làm đổi khoá và ép build lại llama.cpp
-        # từ C++ — đo được: run 30878009176 mất 1h03m thay vì vài phút.
-        key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-        restore-keys: ${{ runner.os }}-cargo-
-
-    # Pin the scanner version so an upstream CLI release cannot silently change
-    # the gate contract between two runs of the same revision.
-    # cargo-deny thay thế cargo-audit từ 08/08/2026: thêm license compliance
-    # và source control mà cargo-audit không có. Flag `-W unmaintained -W unsound`
-    # giữ behavior cũ: chỉ vulnerability mới là lỗi, unmaintained/unsound là warning.
-    - name: Install cargo-deny
-      run: cargo install cargo-deny --version 0.20.2 --locked
-
-    - name: Audit Rust Dependencies (cargo-deny)
-      run: cargo deny check -W unmaintained -W unsound advisories licenses sources
-
-    - name: Install LLVM
-      run: choco install llvm -y
-
-    # Hai gate này pre-commit đã chạy trên file staged, nhưng hook có thể bị
-    # bypass (SKIP_AI_HOOK / --no-verify) và chỉ soi file trong commit đó —
-    # CI kiểm toàn bộ cây.
-    # `vue-tsc -p tsconfig.app.json`, KHÔNG phải `tsc --noEmit`.
-    #
-    # Hai cái bẫy chồng lên nhau khiến bước này từng xanh mà không kiểm gì:
-    #  1. `liva-ui/tsconfig.json` là config kiểu solution — `"files": []` cộng
-    #     hai `references`. `tsc --noEmit` với nó duyệt đúng **0 file**
-    #     (`tsc --noEmit --listFiles | grep src` = 0). Xanh vĩnh viễn.
-    #  2. `tsc` thuần không đọc được SFC, nên kể cả trỏ đúng tsconfig thì
-    #     `<script setup>` trong 22 file `.vue` vẫn nằm ngoài tầm kiểm.
-    #
-    # Khi sửa lại cho đúng, lộ ra 1 lỗi thật (`useVoicePipeline.ts` truyền
-    # `Uint8Array<ArrayBufferLike>` vào `WebSocket.send()`).
-    - name: TypeScript typecheck
-      run: npx vue-tsc --noEmit -p tsconfig.app.json
-      working-directory: liva-ui
-
     - name: ESLint
-      run: npx eslint . --max-warnings 0 --no-warn-ignored
       working-directory: liva-ui
+      run: npx eslint . --max-warnings 0 --no-warn-ignored
 
-    # `test:coverage`, KHÔNG phải `test`. `vitest.config.ts` khai ngưỡng
-    # coverage từ lâu, nhưng script `test` là `vitest run` trần nên ngưỡng
-    # KHÔNG BAO GIỜ được áp — cổng xanh giả. Bước này chạy `--coverage` để
-    # ngưỡng thành gate thật (xem chú thích trong vitest.config.ts).
+  web-and-ui:
+    name: Web & UI Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Install Dependencies
+      run: npm ci
+
+    - name: TypeScript typecheck
+      working-directory: liva-ui
+      run: npx vue-tsc --noEmit -p tsconfig.app.json
+
     - name: Run UI Tests
       run: npm run test:coverage -w liva-ui
 
@@ -165,63 +91,101 @@ jobs:
         npm run typecheck -w obsidian-llm-wiki
         npm test -w obsidian-llm-wiki
 
-    - name: Run Native Core Tests
+  rust-check:
+    name: Rust Workspace Quality
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
+
+    - name: Cache Cargo Dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: ${{ runner.os }}-cargo-check-${{ hashFiles('Cargo.lock') }}
+        restore-keys: ${{ runner.os }}-cargo-check-
+
+    - name: Install cargo-deny
+      uses: taiki-e/install-action@cargo-deny
+
+    - name: Audit Rust Dependencies (cargo-deny)
+      run: cargo deny check -W unmaintained -W unsound advisories licenses sources
+
+    - name: Workspace Cargo Check
+      run: cargo check --workspace -j 2
+
+    - name: Clippy
       working-directory: liva-native-core
-      run: cargo test
+      run: cargo clippy --all-targets -- -D warnings
 
-    # Bộ kiểm chứng DUY NHẤT chạm tới lớp dispatch qua một socket THẬT. Mọi
-    # test khác gọi `handle_command` trong tiến trình và không bao giờ đụng ổ
-    # cắm — đúng khoảng trống đã che một nhánh `Err` bị nuốt suốt thời gian dài
-    # (lệnh thất bại biến mất im lặng, client chỉ biết khi hết giờ chờ).
-    #
-    # Đầu `e2e-gateway.mjs` từng ghi "KHÔNG nằm trong CI: cần model weights".
-    # Đo lại 26/07/2026: SAI. Trỏ mọi biến model vào đường dẫn không tồn tại rồi
-    # chạy → vẫn 8/8. Lõi khởi động được mà không cần weight nào, và cả 8 mục
-    # kiểm đều nói về GIAO THỨC chứ không về chất lượng model. Thứ duy nhất thật
-    # sự cần là `vec0`, do npm `sqlite-vec` cung cấp ⇒ `npm ci` ở trên đã đủ.
-    #
-    # Ở debug, `vision:ask` luôn trả lỗi "requires a release build" — mục kiểm
-    # vẫn xanh vì nó chỉ đòi CÓ HỒI ÂM (không treo). Đường release được
-    # `release.yml` kiểm.
-    - name: Build gateway binary
-      working-directory: liva-native-core
-      run: cargo build --bin liva-native-core
-
-    - name: E2E gateway over a real socket (debug)
-      run: node scripts/e2e-gateway-ci.mjs
-
-    # Capability policy is a security boundary: setup must not inherit the
-    # dashboard/widget command surface. Compile-only used to leave these five
-    # policy tests completely outside CI.
-    - name: Test Tauri Desktop Integration
-      run: cargo test -p liva-desktop
-
-    - name: Check Tauri Desktop Integration
-      run: cargo check -p liva-desktop
-
-    # Ba module experimental (evolution/, passive/, agent/dispatcher.rs) nằm
-    # ngoài build mặc định — chúng chưa nối dây vào đường chạy nào, và hai bộ
-    # test của chúng spawn `cargo test` lồng nhau nên tốn ~65s. Chỉ COMPILE-CHECK
-    # ở đây để code không mục nát mà không phải trả giá thời gian chạy test.
     - name: Compile-check experimental modules
       working-directory: liva-native-core
       run: cargo check --all-targets --features experimental
 
-    # Clippy là GATE CỨNG từ 22/07/2026 — 0 cảnh báo trên toàn workspace.
-    # Hành trình 80 → 35 → 0 cùng ngày:
-    #  - 80 → 35: `cargo clippy --fix` (chỉ suggestion machine-applicable).
-    #  - 35 → 0: sửa tay — 3 fill-theo-công-thức thành `collect`, 5 vòng DSP
-    #    thành zip/slice TƯƠNG ĐƯƠNG CHỨNG MINH ĐƯỢC (denoise/dsp/parakeet/g2p;
-    #    riêng g2p còn kiểm bằng hash WAV seed-42 của VieNeu: giống hệt từng
-    #    byte trước/sau), 3 type alias, 2 chỗ argon2 dùng struct literal.
-    #  - Các `#[allow]` còn lại đều CÓ CHỦ ĐÍCH kèm lý do tại chỗ: `past_len`
-    #    trong decode VieNeu (khái niệm KV-cache, không phải biến đếm),
-    #    `upsert_vector` 10 tham số (SQL phẳng, struct chỉ thêm nghi lễ),
-    #    `result_large_err` ở callback tungstenite (kiểu do thư viện quy định),
-    #    `identity_op` cho shape tensor trong denoise.rs.
-    #
-    # Đo thủ công: `--message-format=short` + grep '": warning:"' — đường dẫn
-    # có tiền tố `liva-native-core\src\…` nên `grep '^src/'` luôn ra 0 (bẫy cũ).
-    - name: Clippy
-      working-directory: liva-native-core
-      run: cargo clippy --all-targets -- -D warnings
+  native-core-and-tauri:
+    name: Native Core & Tauri Desktop (Windows)
+    needs: [lint-and-docs, web-and-ui, rust-check]
+    runs-on: windows-latest
+    env:
+      LIBCLANG_PATH: 'C:\Program Files\LLVM\bin'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Setup Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@v0.0.8
+      env:
+        SCCACHE_GHA_ENABLED: "true"
+        RUSTC_WRAPPER: "sccache"
+
+    - name: Install LLVM
+      run: choco install llvm -y
+
+    # Cache Cargo registry and git db only. Do NOT cache entire 10GB target folder to prevent cache eviction.
+    - name: Cache Cargo Dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: ${{ runner.os }}-cargo-native-${{ hashFiles('Cargo.lock') }}
+        restore-keys: ${{ runner.os }}-cargo-native-
+
+    - name: Install Dependencies
+      run: npm ci
+
+    - name: Build UI Frontend
+      run: npm run build -w liva-ui
+
+    - name: Run Native Core Tests
+      run: cargo test -p liva-native-core -j 2 -- --test-threads 2
+
+    - name: Test Tauri Desktop Integration
+      run: cargo test -p liva-desktop -j 2 -- --test-threads 2
+
+    - name: Check Tauri Desktop Integration
+      run: cargo check -p liva-desktop -j 2
+
+    - name: Build gateway binary
+      run: cargo build --bin liva-native-core -j 2
+
+    - name: E2E gateway over a real socket (debug)
+      run: node scripts/e2e-gateway-ci.mjs

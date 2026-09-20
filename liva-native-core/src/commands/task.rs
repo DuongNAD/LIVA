@@ -101,22 +101,19 @@ async fn add_task(state: Arc<AppState>, payload: Value) -> Result<Value, String>
 
     let now = bay_gio();
     let id_clone = id.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = state
-            .db
-            .writer
-            .get()
-            .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
-
-        conn.execute(
-            "INSERT INTO tasks (id, title, description, status, priority, result, created_at, \
-             updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![id_clone, title, description, status, priority, "", now, now],
-        )
-        .map_err(|e| format!("Failed to insert task: {}", e))
-    })
-    .await
-    .map_err(|e| format!("Blocking task panicked: {}", e))??;
+    state
+        .db
+        .writer_actor
+        .execute(move |conn| {
+            conn.execute(
+                "INSERT INTO tasks (id, title, description, status, priority, result, created_at, \
+                 updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![id_clone, title, description, status, priority, "", now, now],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("Failed to insert task: {}", e))
+        })
+        .await?;
 
     Ok(json!({ "success": true, "id": id }))
 }
@@ -124,18 +121,15 @@ async fn add_task(state: Arc<AppState>, payload: Value) -> Result<Value, String>
 async fn delete_task(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let id = chuoi_bat_buoc(&payload, "id")?;
 
-    tokio::task::spawn_blocking(move || {
-        let conn = state
-            .db
-            .writer
-            .get()
-            .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
-
-        conn.execute("DELETE FROM tasks WHERE id = ?1", rusqlite::params![id])
-            .map_err(|e| format!("Failed to delete task: {}", e))
-    })
-    .await
-    .map_err(|e| format!("Blocking task panicked: {}", e))??;
+    state
+        .db
+        .writer_actor
+        .execute(move |conn| {
+            conn.execute("DELETE FROM tasks WHERE id = ?1", rusqlite::params![id])
+                .map(|_| ())
+                .map_err(|e| format!("Failed to delete task: {}", e))
+        })
+        .await?;
 
     Ok(json!({ "success": true }))
 }
@@ -147,67 +141,72 @@ async fn update_task(state: Arc<AppState>, payload: Value) -> Result<Value, Stri
         .cloned()
         .ok_or_else(|| "Missing or invalid 'updates' object".to_string())?;
 
-    tokio::task::spawn_blocking(move || {
-        let mut conn = state
-            .db
-            .writer
-            .get()
-            .map_err(|e| format!("Failed to acquire write connection: {}", e))?;
+    state
+        .db
+        .writer_actor
+        .execute(move |conn| {
+            let update_task_fn = |target_conn: &rusqlite::Connection| -> Result<(), String> {
+                // Đọc giá trị hiện tại trong một scope lồng, để `stmt` bị drop trước
+                // `tx.commit()`.
+                let current: (String, String, String, String, String) = {
+                    let mut stmt = target_conn
+                        .prepare(
+                            "SELECT title, description, status, priority, result FROM tasks WHERE id = ?1",
+                        )
+                        .map_err(|e| format!("Failed to prepare select query: {}", e))?;
 
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("Failed to start transaction: {}", e))?;
+                    stmt.query_row(rusqlite::params![id], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                            row.get::<_, Option<String>>(2)?
+                                .unwrap_or_else(|| "pending".to_string()),
+                            row.get::<_, Option<String>>(3)?
+                                .unwrap_or_else(|| "medium".to_string()),
+                            row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                        ))
+                    })
+                    .map_err(|e| format!("Task not found: {}", e))?
+                };
 
-        // Đọc giá trị hiện tại trong một scope lồng, để `stmt` bị drop trước
-        // `tx.commit()`.
-        let current: (String, String, String, String, String) = {
-            let mut stmt = tx
-                .prepare(
-                    "SELECT title, description, status, priority, result FROM tasks WHERE id = ?1",
+                // Trường vắng trong `updates` = GIỮ NGUYÊN giá trị cũ, không phải xoá.
+                let giu = |key: &str, cu: String| {
+                    updates
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                        .unwrap_or(cu)
+                };
+                let title = giu("title", current.0);
+                let description = giu("description", current.1);
+                let status = giu("status", current.2);
+                let priority = giu("priority", current.3);
+                let result = giu("result", current.4);
+
+                target_conn.execute(
+                    "UPDATE tasks SET title = ?1, description = ?2, status = ?3, priority = ?4, \
+                     result = ?5, updated_at = ?6 WHERE id = ?7",
+                    rusqlite::params![title, description, status, priority, result, bay_gio(), id],
                 )
-                .map_err(|e| format!("Failed to prepare select query: {}", e))?;
+                .map_err(|e| format!("Failed to update task: {}", e))?;
 
-            stmt.query_row(rusqlite::params![id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    row.get::<_, Option<String>>(2)?
-                        .unwrap_or_else(|| "pending".to_string()),
-                    row.get::<_, Option<String>>(3)?
-                        .unwrap_or_else(|| "medium".to_string()),
-                    row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                ))
-            })
-            .map_err(|e| format!("Task not found: {}", e))?
-        };
+                Ok(())
+            };
 
-        // Trường vắng trong `updates` = GIỮ NGUYÊN giá trị cũ, không phải xoá.
-        let giu = |key: &str, cu: String| {
-            updates
-                .get(key)
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .unwrap_or(cu)
-        };
-        let title = giu("title", current.0);
-        let description = giu("description", current.1);
-        let status = giu("status", current.2);
-        let priority = giu("priority", current.3);
-        let result = giu("result", current.4);
+            if conn.is_autocommit() {
+                let tx = conn
+                    .unchecked_transaction()
+                    .map_err(|e| format!("Failed to start transaction: {}", e))?;
+                update_task_fn(&tx)?;
+                tx.commit()
+                    .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            } else {
+                update_task_fn(conn)?;
+            }
 
-        tx.execute(
-            "UPDATE tasks SET title = ?1, description = ?2, status = ?3, priority = ?4, \
-             result = ?5, updated_at = ?6 WHERE id = ?7",
-            rusqlite::params![title, description, status, priority, result, bay_gio(), id],
-        )
-        .map_err(|e| format!("Failed to update task: {}", e))?;
-
-        tx.commit()
-            .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-        Ok::<_, String>(())
-    })
-    .await
-    .map_err(|e| format!("Blocking task panicked: {}", e))??;
+            Ok::<_, String>(())
+        })
+        .await?;
 
     Ok(json!({ "success": true }))
 }

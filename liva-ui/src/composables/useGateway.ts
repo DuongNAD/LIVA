@@ -238,31 +238,65 @@ const applyVieneuPayload = (payload: unknown) => {
   if (typeof data.applied === 'string') vieneuNotice.value = data.applied;
 };
 
-// Task Planning Chat — callback registry for inline AI planning
-let _taskPlanReplyCallback: ((payload: TaskPlanReplyPayload) => void) | null = null;
+// Task Planning Chat — callback registry for inline AI planning (multi-listener Set)
+const _taskPlanReplyCallbacks = new Set<(payload: TaskPlanReplyPayload) => void>();
 
-// Skill Check Result — callback registry for self-test results
-let _skillCheckResultCallback: ((payload: unknown) => void) | null = null;
+// Skill Check Result — callback registry for self-test results (multi-listener Set)
+const _skillCheckResultCallbacks = new Set<(payload: unknown) => void>();
 
-// Bulk Skill Check Complete — callback registry
-let _allSkillsCheckCompleteCallback: ((payload: unknown) => void) | null = null;
+// Bulk Skill Check Complete — callback registry (multi-listener Set)
+const _allSkillsCheckCompleteCallbacks = new Set<(payload: unknown) => void>();
 
-// Env Config Data — callback registry
+// Memory Reset Result — callback registry (multi-listener Set)
+const _memoryResetResultCallbacks = new Set<(payload: unknown) => void>();
 
-// Memory Reset Result — callback registry
-let _memoryResetResultCallback: ((payload: unknown) => void) | null = null;
+// Memory Updated — callback registry (multi-listener Set)
+const _memoryUpdatedCallbacks = new Set<() => void>();
 
-// Memory Updated — callback registry
-let _memoryUpdatedCallback: (() => void) | null = null;
-
-// AI Expert Suggestion — callback registry
+// AI Expert Suggestion — callback registry (multi-listener Set)
 export interface ExpertSuggestionPayload {
   goi_y_expert: boolean;
   do_kho: string;
   user_text?: string;
 }
 const expertSuggestion = ref<ExpertSuggestionPayload | null>(null);
-let _expertSuggestionCallback: ((payload: ExpertSuggestionPayload) => void) | null = null;
+const _expertSuggestionCallbacks = new Set<(payload: ExpertSuggestionPayload) => void>();
+
+const emitTaskPlanReply = (payload: TaskPlanReplyPayload) => {
+  _taskPlanReplyCallbacks.forEach((cb) => {
+    try { cb(payload); } catch (e) { logger.error('[useGateway] Error in taskPlanReply callback:', e); }
+  });
+};
+
+const emitSkillCheckResult = (payload: unknown) => {
+  _skillCheckResultCallbacks.forEach((cb) => {
+    try { cb(payload); } catch (e) { logger.error('[useGateway] Error in skillCheckResult callback:', e); }
+  });
+};
+
+const emitAllSkillsCheckComplete = (payload: unknown) => {
+  _allSkillsCheckCompleteCallbacks.forEach((cb) => {
+    try { cb(payload); } catch (e) { logger.error('[useGateway] Error in allSkillsCheckComplete callback:', e); }
+  });
+};
+
+const emitMemoryResetResult = (payload: unknown) => {
+  _memoryResetResultCallbacks.forEach((cb) => {
+    try { cb(payload); } catch (e) { logger.error('[useGateway] Error in memoryResetResult callback:', e); }
+  });
+};
+
+const emitMemoryUpdated = () => {
+  _memoryUpdatedCallbacks.forEach((cb) => {
+    try { cb(); } catch (e) { logger.error('[useGateway] Error in memoryUpdated callback:', e); }
+  });
+};
+
+const emitExpertSuggestion = (payload: ExpertSuggestionPayload) => {
+  _expertSuggestionCallbacks.forEach((cb) => {
+    try { cb(payload); } catch (e) { logger.error('[useGateway] Error in expertSuggestion callback:', e); }
+  });
+};
 
 // User Profile & Onboarding State
 const userProfile = ref<Record<string, unknown> | null>(null);
@@ -276,8 +310,15 @@ let isTearingDown = false;
 const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
   switch (event) {
     case 'get_config':
-    case 'update_config':
       applyConfigPayload(res);
+      break;
+    case 'update_config':
+      // Prevent { success: true } from wiping configData store
+      if (res && typeof res === 'object' && !Array.isArray(res) && ('ai' in res || 'voice' in res || 'general' in res || 'system' in res)) {
+        applyConfigPayload(res);
+      } else if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        configData.value = { ...configData.value, ...(payload as Partial<LivaConfig>) };
+      }
       break;
     case 'get_ai_config':
     case 'update_ai_config':
@@ -315,8 +356,17 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       skillsList.value = ((res as { skills?: SkillInfo[] })?.skills || (res as SkillInfo[]) || []) as SkillInfo[];
       break;
     case 'get_user_profile':
-    case 'update_user_profile':
       userProfile.value = (res as Record<string, unknown>) ?? {};
+      isProfileLoading.value = false;
+      if (profileTimeout) { clearTimeout(profileTimeout); profileTimeout = null; }
+      break;
+    case 'update_user_profile':
+      // Prevent { success: true } from wiping userProfile store
+      if (res && typeof res === 'object' && !Array.isArray(res) && ('name' in res || 'language' in res || 'preferences' in res)) {
+        userProfile.value = res as Record<string, unknown>;
+      } else if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        userProfile.value = { ...(userProfile.value ?? {}), ...(payload as Record<string, unknown>) };
+      }
       isProfileLoading.value = false;
       if (profileTimeout) { clearTimeout(profileTimeout); profileTimeout = null; }
       break;
@@ -336,26 +386,26 @@ const mapTauriResponse = (event: string, res: unknown, payload: unknown) => {
       }
       break;
     case 'consolidate_memory':
-      if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+      emitMemoryUpdated();
       break;
     case 'task_plan_chat':
-      if (_taskPlanReplyCallback && !(payload && typeof payload === 'object' && (payload as Record<string, unknown>).stream === true)) {
-        _taskPlanReplyCallback(res as TaskPlanReplyPayload);
+      if (!(payload && typeof payload === 'object' && (payload as Record<string, unknown>).stream === true)) {
+        emitTaskPlanReply(res as TaskPlanReplyPayload);
       }
       break;
     case 'reset_memory':
     case 'memory:delete_subject':
-      if (_memoryResetResultCallback) _memoryResetResultCallback(res);
+      emitMemoryResetResult(res);
       break;
     case 'memory_updated':
-      if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+      emitMemoryUpdated();
       break;
     case 'vision:ask':
       finishVision((res as { text?: string })?.text ?? '');
       break;
     case 'ai_expert_suggestion':
       expertSuggestion.value = (res as ExpertSuggestionPayload) ?? { goi_y_expert: true, do_kho: 'kho' };
-      if (_expertSuggestionCallback) _expertSuggestionCallback(expertSuggestion.value);
+      emitExpertSuggestion(expertSuggestion.value);
       break;
   }
 };
@@ -426,42 +476,43 @@ const handleTauriStream = async (
   try {
     const { listen } = await import('@tauri-apps/api/event');
     unlisten = await listen(`ipc-stream:${reqId}`, (tauriEvent: { payload: unknown }) => {
-      const data = tauriEvent.payload as {
-        event?: string;
-        payload?: TaskPlanReplyPayload;
-        token?: string;
-        message?: string;
-        taskId?: string;
-        task_id?: string;
-        done?: boolean;
-      } | null;
-      logger.debug(`[useGateway] Stream chunk for ${reqId}:`, data);
-      if (data) {
-        const token = data.token !== undefined ? data.token : (data.message !== undefined ? data.message : undefined);
-        if (token !== undefined) {
-          if (_taskPlanReplyCallback) {
-            _taskPlanReplyCallback({
-              taskId: (data.taskId || data.task_id || payload.taskId || '') as string,
-              message: token,
-              done: data.done || false,
-            });
-          }
-        } else if (data.event === 'task_plan_reply' || data.payload) {
-          if (_taskPlanReplyCallback) {
-            _taskPlanReplyCallback((data.payload ?? data) as TaskPlanReplyPayload);
-          }
+      const raw = tauriEvent.payload as Record<string, unknown> | null;
+      if (!raw) return;
+      logger.debug(`[useGateway] Stream chunk for ${reqId}:`, raw);
+
+      const subData = (raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data))
+        ? (raw.data as Record<string, unknown>)
+        : null;
+
+      const token = (subData?.token as string | undefined) ??
+                    (raw.token as string | undefined) ??
+                    (subData?.message as string | undefined) ??
+                    (raw.message as string | undefined);
+
+      const isDone = subData?.done === true || raw.done === true;
+      const taskId = String(subData?.taskId || subData?.task_id || raw.taskId || raw.task_id || payload.taskId || '');
+
+      if (token !== undefined) {
+        emitTaskPlanReply({
+          taskId,
+          message: token,
+          done: isDone,
+        });
+      } else if (raw.event === 'task_plan_reply' || raw.payload || subData?.payload) {
+        const replyPayload = (subData?.payload ?? raw.payload ?? subData ?? raw) as TaskPlanReplyPayload;
+        emitTaskPlanReply(replyPayload);
+      }
+
+      if (isDone) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+          activeStreamTimers.delete(reqId);
         }
-        if (data.done === true) {
-          if (timer) {
-            clearTimeout(timer);
-            timer = null;
-            activeStreamTimers.delete(reqId);
-          }
-          if (unlisten) {
-            unlisten();
-            unlisten = null;
-            activeStreamUnlistens.delete(reqId);
-          }
+        if (unlisten) {
+          unlisten();
+          unlisten = null;
+          activeStreamUnlistens.delete(reqId);
         }
       }
     });
@@ -696,7 +747,7 @@ const connect = () => {
           memoryData.value = data.payload || { l0: [], l0_5: "", facts: [], events: [], vectors: [] };
           break;
         case 'consolidate_memory_response':
-          if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+          emitMemoryUpdated();
           break;
         case 'fact_deleted':
           if (data.payload?.success) {
@@ -704,23 +755,23 @@ const connect = () => {
           }
           break;
         case 'task_plan_reply':
-          if (_taskPlanReplyCallback) _taskPlanReplyCallback(data.payload);
+          emitTaskPlanReply(data.payload);
           break;
         case 'skill_check_result':
-          if (_skillCheckResultCallback) _skillCheckResultCallback(data.payload);
+          emitSkillCheckResult(data.payload);
           break;
         case 'all_skills_check_complete':
-          if (_allSkillsCheckCompleteCallback) _allSkillsCheckCompleteCallback(data.payload);
+          emitAllSkillsCheckComplete(data.payload);
           break;
         case 'memory_reset_result':
-          if (_memoryResetResultCallback) _memoryResetResultCallback(data.payload);
+          emitMemoryResetResult(data.payload);
           break;
         case 'memory_updated':
-          if (_memoryUpdatedCallback) _memoryUpdatedCallback();
+          emitMemoryUpdated();
           break;
         case 'ai_expert_suggestion':
           expertSuggestion.value = (data.payload as ExpertSuggestionPayload) ?? { goi_y_expert: true, do_kho: 'kho' };
-          if (_expertSuggestionCallback) _expertSuggestionCallback(expertSuggestion.value);
+          emitExpertSuggestion(expertSuggestion.value);
           break;
         case 'vision:ask_response':
           finishVision(data.payload?.text ?? '');
@@ -840,6 +891,12 @@ export function useGateway() {
       }
     }
     activeStreamUnlistens.clear();
+    _taskPlanReplyCallbacks.clear();
+    _skillCheckResultCallbacks.clear();
+    _allSkillsCheckCompleteCallbacks.clear();
+    _memoryResetResultCallbacks.clear();
+    _memoryUpdatedCallbacks.clear();
+    _expertSuggestionCallbacks.clear();
     if (ws.value) ws.value.close();
   };
 
@@ -902,42 +959,84 @@ export function useGateway() {
     watchStarting.value = false;
   };
 
-  /** [v25] Register callback for task planning AI replies */
+  /** [v25] Register callback for task planning AI replies (supports multi-listener & unsubscribe) */
   const onTaskPlanReply = (cb: (payload: TaskPlanReplyPayload) => void) => {
-    _taskPlanReplyCallback = cb;
+    _taskPlanReplyCallbacks.add(cb);
+    return () => _taskPlanReplyCallbacks.delete(cb);
+  };
+
+  const offTaskPlanReply = (cb?: (payload: TaskPlanReplyPayload) => void) => {
+    if (cb) {
+      _taskPlanReplyCallbacks.delete(cb);
+    } else {
+      _taskPlanReplyCallbacks.clear();
+    }
   };
 
   /** [v26] Register callback for skill self-test results */
   const onSkillCheckResult = (cb: (payload: unknown) => void) => {
-    _skillCheckResultCallback = cb;
+    _skillCheckResultCallbacks.add(cb);
+    return () => _skillCheckResultCallbacks.delete(cb);
   };
 
-  const offSkillCheckResult = () => {
-    _skillCheckResultCallback = null;
+  const offSkillCheckResult = (cb?: (payload: unknown) => void) => {
+    if (cb) {
+      _skillCheckResultCallbacks.delete(cb);
+    } else {
+      _skillCheckResultCallbacks.clear();
+    }
   };
 
   const onAllSkillsCheckComplete = (cb: (payload: unknown) => void) => {
-    _allSkillsCheckCompleteCallback = cb;
+    _allSkillsCheckCompleteCallbacks.add(cb);
+    return () => _allSkillsCheckCompleteCallbacks.delete(cb);
   };
 
-  const offAllSkillsCheckComplete = () => {
-    _allSkillsCheckCompleteCallback = null;
+  const offAllSkillsCheckComplete = (cb?: (payload: unknown) => void) => {
+    if (cb) {
+      _allSkillsCheckCompleteCallbacks.delete(cb);
+    } else {
+      _allSkillsCheckCompleteCallbacks.clear();
+    }
   };
 
   const onMemoryResetResult = (cb: (payload: unknown) => void) => {
-    _memoryResetResultCallback = cb;
+    _memoryResetResultCallbacks.add(cb);
+    return () => _memoryResetResultCallbacks.delete(cb);
   };
 
-  const offMemoryResetResult = () => {
-    _memoryResetResultCallback = null;
+  const offMemoryResetResult = (cb?: (payload: unknown) => void) => {
+    if (cb) {
+      _memoryResetResultCallbacks.delete(cb);
+    } else {
+      _memoryResetResultCallbacks.clear();
+    }
   };
 
   const onMemoryUpdated = (cb: () => void) => {
-    _memoryUpdatedCallback = cb;
+    _memoryUpdatedCallbacks.add(cb);
+    return () => _memoryUpdatedCallbacks.delete(cb);
   };
 
-  const offMemoryUpdated = () => {
-    _memoryUpdatedCallback = null;
+  const offMemoryUpdated = (cb?: () => void) => {
+    if (cb) {
+      _memoryUpdatedCallbacks.delete(cb);
+    } else {
+      _memoryUpdatedCallbacks.clear();
+    }
+  };
+
+  const onExpertSuggestion = (cb: (payload: ExpertSuggestionPayload) => void) => {
+    _expertSuggestionCallbacks.add(cb);
+    return () => _expertSuggestionCallbacks.delete(cb);
+  };
+
+  const offExpertSuggestion = (cb?: (payload: ExpertSuggestionPayload) => void) => {
+    if (cb) {
+      _expertSuggestionCallbacks.delete(cb);
+    } else {
+      _expertSuggestionCallbacks.clear();
+    }
   };
 
   return {
@@ -979,6 +1078,7 @@ export function useGateway() {
     sendMsg,
     getRawWs,
     onTaskPlanReply,
+    offTaskPlanReply,
     onSkillCheckResult,
     offSkillCheckResult,
     onAllSkillsCheckComplete,
@@ -988,12 +1088,8 @@ export function useGateway() {
     onMemoryUpdated,
     offMemoryUpdated,
     expertSuggestion,
-    onExpertSuggestion: (cb: (payload: ExpertSuggestionPayload) => void) => {
-      _expertSuggestionCallback = cb;
-    },
-    offExpertSuggestion: () => {
-      _expertSuggestionCallback = null;
-    },
+    onExpertSuggestion,
+    offExpertSuggestion,
     clearExpertSuggestion: () => {
       expertSuggestion.value = null;
     },

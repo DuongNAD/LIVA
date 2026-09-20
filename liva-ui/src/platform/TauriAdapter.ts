@@ -82,8 +82,8 @@ export class TauriAdapter implements IPlatformAdapter {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke(command, args);
     } catch (e) {
-      logger.warn(`[TauriAdapter] invokeBackend(${command}) not available`, e);
-      return null;
+      logger.error(`[TauriAdapter] invokeBackend(${command}) failed:`, e);
+      throw e;
     }
   }
 }

@@ -81,15 +81,28 @@ impl<'a> SkillStore<'a> {
         conn: &rusqlite::Connection,
         s: &super::LoadedSkill,
     ) -> Result<Option<String>, String> {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        if conn.is_autocommit() {
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let res = Self::upsert_conn_inner(&tx, s)?;
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(res)
+        } else {
+            Self::upsert_conn_inner(conn, s)
+        }
+    }
+
+    fn upsert_conn_inner(
+        conn: &rusqlite::Connection,
+        s: &super::LoadedSkill,
+    ) -> Result<Option<String>, String> {
         let now = bay_gio();
         let dir = s.dir_path.to_string_lossy().to_string();
 
-        let hien_hanh: Option<(Option<String>, Option<String>)> = tx
+        let hien_hanh: Option<(Option<String>, Option<String>)> = conn
             .query_row(
                 "SELECT current_version_id,
                         (SELECT body_sha FROM skill_versions WHERE version_id = current_version_id)
-                 FROM skills WHERE skill_id = ?1",
+                  FROM skills WHERE skill_id = ?1",
                 params![s.skill_id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -99,7 +112,7 @@ impl<'a> SkillStore<'a> {
         // Metadata (name/description/dir) luôn được đồng bộ, kể cả khi thân bài
         // không đổi — đổi `description` mà không đổi `body` là ca thật, và nó ảnh
         // hưởng truy hồi.
-        tx.execute(
+        conn.execute(
             "INSERT INTO skills (skill_id, name, description, dir_path, current_version_id, updated_at)
              VALUES (?1, ?2, ?3, ?4, NULL, ?5)
              ON CONFLICT(skill_id) DO UPDATE SET
@@ -116,23 +129,21 @@ impl<'a> SkillStore<'a> {
             None => (None, None),
         };
         if sha_cu.as_deref() == Some(s.body_sha.as_str()) {
-            tx.commit().map_err(|e| e.to_string())?;
             return Ok(None); // nội dung không đổi
         }
 
         let version_id = uuid::Uuid::new_v4().to_string();
-        tx.execute(
+        conn.execute(
             "INSERT INTO skill_versions (version_id, skill_id, parent_id, body, body_sha, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![version_id, s.skill_id, parent, s.body, s.body_sha, now],
         )
         .map_err(|e| e.to_string())?;
-        tx.execute(
+        conn.execute(
             "UPDATE skills SET current_version_id = ?1, updated_at = ?2 WHERE skill_id = ?3",
             params![version_id, now, s.skill_id],
         )
         .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
         Ok(Some(version_id))
     }
 

@@ -186,11 +186,10 @@ describe("Platform Adapters", () => {
       expect(res).toBe("res");
     });
 
-    it("should handle error in invokeBackend gracefully", async () => {
+    it("should propagate error in invokeBackend rather than swallowing to null", async () => {
       const adapter = new TauriAdapter();
       mockInvoke.mockRejectedValueOnce(new Error("Invoke backend error"));
-      const res = await adapter.invokeBackend("cmd", { a: 1 });
-      expect(res).toBeNull();
+      await expect(adapter.invokeBackend("cmd", { a: 1 })).rejects.toThrow("Invoke backend error");
     });
 
     it("should subscribe to event onGatewayReady", async () => {

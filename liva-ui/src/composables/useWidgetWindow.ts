@@ -107,6 +107,18 @@ export function useWidgetWindow(options: UseWidgetWindowOptions) {
   //  Phantom Bounding Box Fix — Rust Cursor Hit-Test System
   // ═══════════════════════════════════════════════════════
   let zonesInterval: ReturnType<typeof setInterval> | null = null;
+  let lastZonesHash = '';
+  let currentIntervalMs = 150;
+  let idleTickCount = 0;
+
+  const setIntervalRate = (ms: number) => {
+    if (currentIntervalMs === ms && zonesInterval) return;
+    currentIntervalMs = ms;
+    if (zonesInterval) {
+      clearInterval(zonesInterval);
+      zonesInterval = setInterval(updateInteractiveZones, ms);
+    }
+  };
 
   const updateInteractiveZones = () => {
     if (!platform) return;
@@ -115,30 +127,30 @@ export function useWidgetWindow(options: UseWidgetWindowOptions) {
     if (chatUIRef.value) {
       const rect = chatUIRef.value.getBoundingClientRect();
       zones.push({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
       });
     }
 
     if (!isCollapsed.value && chatContainer.value) {
       const rect = chatContainer.value.getBoundingClientRect();
       zones.push({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
       });
     }
 
     if (miniIconsRef.value) {
       const rect = miniIconsRef.value.getBoundingClientRect();
       zones.push({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
       });
     }
 
@@ -146,10 +158,10 @@ export function useWidgetWindow(options: UseWidgetWindowOptions) {
       const rect = toolPanelZoneRef.value.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         zones.push({
-          x: rect.left,
-          y: rect.top,
-          width: rect.width,
-          height: rect.height,
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
         });
       }
     }
@@ -167,11 +179,27 @@ export function useWidgetWindow(options: UseWidgetWindowOptions) {
     } else if (avatarBounds && avatarBounds.width > 0 && avatarBounds.height > 0) {
       const pad = 12;
       zones.push({
-        x: Math.max(avatarBounds.x - pad, 0),
-        y: Math.max(avatarBounds.y - pad, 0),
-        width: avatarBounds.width + pad * 2,
-        height: avatarBounds.height + pad * 2,
+        x: Math.round(Math.max(avatarBounds.x - pad, 0)),
+        y: Math.round(Math.max(avatarBounds.y - pad, 0)),
+        width: Math.round(avatarBounds.width + pad * 2),
+        height: Math.round(avatarBounds.height + pad * 2),
       });
+    }
+
+    const currentHash = JSON.stringify(zones);
+    if (currentHash === lastZonesHash) {
+      idleTickCount++;
+      if (idleTickCount >= 3 && currentIntervalMs === 150) {
+        // Window is stationary and idle: throttle check from 150ms to 500ms
+        setIntervalRate(500);
+      }
+      return;
+    }
+
+    lastZonesHash = currentHash;
+    idleTickCount = 0;
+    if (currentIntervalMs !== 150) {
+      setIntervalRate(150);
     }
 
     platform.invokeBackend('update_interactive_zones', { zones }).catch((err) => {
@@ -181,7 +209,9 @@ export function useWidgetWindow(options: UseWidgetWindowOptions) {
 
   const startZonesInterval = () => {
     if (!zonesInterval) {
-      zonesInterval = setInterval(updateInteractiveZones, 150);
+      currentIntervalMs = 150;
+      idleTickCount = 0;
+      zonesInterval = setInterval(updateInteractiveZones, currentIntervalMs);
     }
   };
 
@@ -195,6 +225,10 @@ export function useWidgetWindow(options: UseWidgetWindowOptions) {
   watch(
     [isCollapsed, isDragging, messagesLength, toolPanel],
     () => {
+      idleTickCount = 0;
+      if (currentIntervalMs !== 150) {
+        setIntervalRate(150);
+      }
       nextTick(() => {
         updateInteractiveZones();
       });

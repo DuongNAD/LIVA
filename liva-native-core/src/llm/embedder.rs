@@ -170,7 +170,7 @@ impl EmbeddingEngine {
 
     /// Chạy model trên văn bản đã có tiền tố. Mean-pooling theo attention mask
     /// rồi chuẩn hoá L2 — đúng công thức tham chiếu của họ E5/MiniLM.
-    fn embed_raw(&self, text: &str) -> Result<Vec<f32>, String> {
+    pub fn embed_raw(&self, text: &str) -> Result<Vec<f32>, String> {
         let encoding = self
             .tokenizer
             .encode(text, true)

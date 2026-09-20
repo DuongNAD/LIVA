@@ -130,7 +130,11 @@ pub fn verify_trusted_file(
         ));
     }
 
-    let actual = sha256_file(&canonical_file)?;
+    let actual = crate::llm::trust_cache::check_or_verify_artifact(
+        &canonical_file,
+        expected_sha256,
+        sha256_file,
+    )?;
     if !actual.eq_ignore_ascii_case(expected_sha256) {
         return Err(format!(
             "SHA-256 artifact không khớp: mong đợi {expected_sha256}, nhận {actual}"

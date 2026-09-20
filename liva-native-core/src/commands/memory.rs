@@ -58,21 +58,41 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .get()
                 .map_err(|e| format!("Failed to acquire read connection: {}", e))?;
 
-            // 1. Query l0
-            let mut stmt_l0 = conn.prepare(
-                "SELECT turnId, userMsg, aiReply, temporal_anchor FROM turn_layer_nodes ORDER BY temporal_anchor DESC LIMIT 100"
-            ).map_err(|e| format!("Prepare l0 failed: {}", e))?;
-            let rows_l0 = stmt_l0.query_map([], |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, String>(0)?,
-                    "userMsg": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    "aiReply": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    "timestamp": row.get::<_, i64>(3)?,
-                }))
-            }).map_err(|e| format!("Query l0 failed: {}", e))?;
+            // 1. Query l0 from active events table (with safe legacy fallback)
             let mut l0 = Vec::new();
-            for r in rows_l0 {
-                l0.push(r.map_err(|e| e.to_string())?);
+            if let Ok(mut stmt_events) = conn.prepare(
+                "SELECT eventId, rawUserMsg, rawAiReply, timestamp FROM events ORDER BY timestamp DESC LIMIT 100"
+            ) {
+                if let Ok(rows) = stmt_events.query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, String>(0)?,
+                        "userMsg": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                        "aiReply": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                        "timestamp": row.get::<_, i64>(3)?,
+                    }))
+                }) {
+                    for r in rows.flatten() {
+                        l0.push(r);
+                    }
+                }
+            }
+            if l0.is_empty() {
+                if let Ok(mut stmt_l0) = conn.prepare(
+                    "SELECT turnId, userMsg, aiReply, temporal_anchor FROM turn_layer_nodes ORDER BY temporal_anchor DESC LIMIT 100"
+                ) {
+                    if let Ok(rows_l0) = stmt_l0.query_map([], |row| {
+                        Ok(serde_json::json!({
+                            "id": row.get::<_, String>(0)?,
+                            "userMsg": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                            "aiReply": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                            "timestamp": row.get::<_, i64>(3)?,
+                        }))
+                    }) {
+                        for r in rows_l0.flatten() {
+                            l0.push(r);
+                        }
+                    }
+                }
             }
 
             // 2. Query facts
@@ -260,28 +280,23 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 let fact = db::get_fact(&conn, &state_clone.crypto, &key_clone)
                     .map_err(|e| format!("Failed to get fact: {}", e))?;
 
-                // Drop reader connection before delegating touch update to prevent cross-pool starvation
-                drop(conn);
-
-                if fact.is_some() {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
-                    if let Err(e) = state_clone.db.writer_actor.blocking_execute(move |w_conn| {
-                        if let Err(e) = db::touch_fact_access(w_conn, &key_clone, now) {
-                            tracing::warn!("touch_fact_access error for key '{key_clone}': {e}");
-                        }
-                        Ok(())
-                    }) {
-                        tracing::warn!("Failed to dispatch touch_fact_access to DbActor: {e}");
-                    }
-                }
-
                 Ok::<_, String>(fact)
             })
             .await
             .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+            if fact.is_some() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                // Asynchronously await touch update commit to ensure read-after-write consistency
+                state
+                    .db
+                    .writer_actor
+                    .touch_fact_access_async(key, now)
+                    .await?;
+            }
 
             match fact {
                 Some(f) => Ok(serde_json::to_value(f)
@@ -578,27 +593,44 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .db
                 .writer_actor
                 .execute(move |conn| {
-                    let tx = conn
-                        .unchecked_transaction()
-                        .map_err(|e| format!("Failed to begin transaction: {e}"))?;
+                    if conn.is_autocommit() {
+                        let tx = conn
+                            .unchecked_transaction()
+                            .map_err(|e| format!("Failed to begin transaction: {e}"))?;
 
-                    db::upsert_vector(
-                        &tx,
-                        &crypto,
-                        &vec_id,
-                        &r#type,
-                        &content,
-                        &vector,
-                        domain.as_deref(),
-                        category.as_deref(),
-                        Some(&trace_keywords),
-                        file_target.as_deref(),
-                        Some(&source_event_ids),
-                    )
-                    .map_err(|e| format!("Failed to upsert vector: {e}"))?;
+                        db::upsert_vector(
+                            &tx,
+                            &crypto,
+                            &vec_id,
+                            &r#type,
+                            &content,
+                            &vector,
+                            domain.as_deref(),
+                            category.as_deref(),
+                            Some(&trace_keywords),
+                            file_target.as_deref(),
+                            Some(&source_event_ids),
+                        )
+                        .map_err(|e| format!("Failed to upsert vector: {e}"))?;
 
-                    tx.commit()
-                        .map_err(|e| format!("Failed to commit transaction: {e}"))
+                        tx.commit()
+                            .map_err(|e| format!("Failed to commit transaction: {e}"))
+                    } else {
+                        db::upsert_vector(
+                            conn,
+                            &crypto,
+                            &vec_id,
+                            &r#type,
+                            &content,
+                            &vector,
+                            domain.as_deref(),
+                            category.as_deref(),
+                            Some(&trace_keywords),
+                            file_target.as_deref(),
+                            Some(&source_event_ids),
+                        )
+                        .map_err(|e| format!("Failed to upsert vector: {e}"))
+                    }
                 })
                 .await?;
 

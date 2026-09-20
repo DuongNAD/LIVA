@@ -37,6 +37,12 @@ struct EcoModeState {
 
 struct StrongholdKey(Mutex<Option<Vec<u8>>>);
 
+#[derive(Default)]
+#[allow(dead_code)]
+struct StrongholdVaultLock(Mutex<()>);
+
+static VAULT_FILE_LOCK: Mutex<()> = Mutex::new(());
+
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 struct Rect {
     x: f64,
@@ -119,6 +125,8 @@ fn open_dashboard(handle: tauri::AppHandle) -> Result<(), String> {
             tauri::WebviewUrl::App("dashboard.html".into()),
         )
         .title("LIVA Dashboard")
+        .decorations(false)
+        .min_inner_size(900.0, 600.0)
         .inner_size(1200.0, 800.0)
         .resizable(true)
         .center()
@@ -403,6 +411,7 @@ fn validate_vault_secret_input(key: &str, value: &str) -> Result<(), String> {
 }
 
 fn read_vault_key(app: &tauri::AppHandle, key: &str) -> Result<Option<String>, String> {
+    let _guard = VAULT_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     validate_vault_secret_key(key)?;
     let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let snapshot_path = local_data_dir.join("liva_vault.app");
@@ -436,6 +445,7 @@ fn read_vault_key(app: &tauri::AppHandle, key: &str) -> Result<Option<String>, S
 }
 
 fn write_vault_key(app: &tauri::AppHandle, key: &str, value: &str) -> Result<(), String> {
+    let _guard = VAULT_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     validate_vault_secret_input(key, value)?;
     let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let snapshot_path = local_data_dir.join("liva_vault.app");
@@ -474,6 +484,7 @@ fn write_vault_key(app: &tauri::AppHandle, key: &str, value: &str) -> Result<(),
 }
 
 fn delete_vault_key(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
+    let _guard = VAULT_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     validate_vault_secret_key(key)?;
     let local_data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let snapshot_path = local_data_dir.join("liva_vault.app");
@@ -586,7 +597,14 @@ async fn native_ipc_call_stream(
         while let Some(msg) = rx.recv().await {
             match serde_json::value::RawValue::from_string(msg) {
                 Ok(resp) => {
-                    let _ = window_clone.emit(&event_name, &resp);
+                    if let Err(err) = window_clone.emit(&event_name, &resp) {
+                        tracing::warn!(
+                            "Stream '{}' target window closed or unreachable ({}); terminating forwarding loop to cancel upstream generator.",
+                            req_id_log,
+                            err
+                        );
+                        break;
+                    }
                 }
                 // Một producer ghi text thô thay vì JSON sẽ biến mất không dấu vết ở đây:
                 // chunk bị bỏ, không emit gì, và UI chỉ ngồi chờ tới lúc hết giờ. Ghi log
@@ -670,6 +688,7 @@ pub fn run() {
         .manage(InteractiveZones::default())
         .manage(EcoModeState::default())
         .manage(StrongholdKey(Mutex::new(None)))
+        .manage(StrongholdVaultLock::default())
         .manage(WebSocketSessionState::default())
         // Plugin tauri_plugin_stronghold ĐÃ GỠ (H2): closure của nó là literal
         // hardcode salt cuối cùng trên write path, và UI KHÔNG import
@@ -766,9 +785,8 @@ pub fn run() {
                 let mut sleep_duration = std::time::Duration::from_millis(30);
                 let mut last_ignore: Option<bool> = None;
 
-                // Cache scale factor and window position to prevent querying OS APIs 33 times/sec
+                // Cache scale factor to prevent querying OS APIs 33 times/sec
                 let mut cached_scale_factor: Option<f64> = None;
-                let mut cached_window_pos: Option<tauri::PhysicalPosition<i32>> = None;
                 let mut last_property_check = std::time::Instant::now();
 
                 loop {
@@ -796,11 +814,9 @@ pub fn run() {
                     // Refresh cached properties every 1000ms (or 2000ms in Eco Mode)
                     let cache_ttl_ms = if is_eco { 2000 } else { 1000 };
                     if cached_scale_factor.is_none()
-                        || cached_window_pos.is_none()
                         || now.duration_since(last_property_check).as_millis() > cache_ttl_ms
                     {
                         cached_scale_factor = Some(widget_window.scale_factor().unwrap_or(1.0));
-                        cached_window_pos = widget_window.inner_position().ok();
                         last_property_check = now;
                     }
 
@@ -815,17 +831,8 @@ pub fn run() {
                         }
                     };
 
-                    let window_pos = match cached_window_pos {
-                        Some(pos) => pos,
-                        None => {
-                            sleep_duration =
-                                std::time::Duration::from_millis(if is_eco { 1000 } else { 500 });
-                            continue;
-                        }
-                    };
-
-                    let rx = (cursor_pos.x - window_pos.x as f64) / scale_factor;
-                    let ry = (cursor_pos.y - window_pos.y as f64) / scale_factor;
+                    let rx = cursor_pos.x / scale_factor;
+                    let ry = cursor_pos.y / scale_factor;
 
                     let zones_state = handle_clone.state::<InteractiveZones>();
                     let mut is_inside = false;

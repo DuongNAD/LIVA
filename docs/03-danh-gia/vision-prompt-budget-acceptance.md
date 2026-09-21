@@ -1,3 +1,12 @@
+---
+title: vision-prompt-budget-acceptance
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Vision Context Guard & Dynamic Prompt Budgeting — baseline và Bước 3–4
 
 Ngày: 17/09/2026. Trạng thái hiện tại: **đã triển khai Bước 5–6 và runtime suites Bước 7; 53 test model-free pass + runtime text-path thật 1 pass (release, gemma-4-E2B); vision runtime BLOCKED do thiếu mmproj fixture**. Mục 1–6 lưu baseline Bước 1–2; cập nhật mới nhất tại mục 9.

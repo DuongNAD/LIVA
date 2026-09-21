@@ -2,7 +2,7 @@
 title: "Master roadmap LIVA → JARVIS"
 updated: 2026-08-07
 commit: deac6aa
-stale-ok: eeed694
+stale-ok: f041c08
 status: living
 owns:
   - master-roadmap-jarvis

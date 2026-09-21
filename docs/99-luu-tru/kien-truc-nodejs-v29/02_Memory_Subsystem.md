@@ -1,3 +1,12 @@
+---
+title: 02_Memory_Subsystem
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # 02. Hệ Thống Bộ Nhớ H-MEM v18 (Memory Subsystem)
 
 **Phiên bản: v29 Enterprise-Ready Cognitive OS**

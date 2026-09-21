@@ -1,3 +1,12 @@
+---
+title: LIVA_UPGRADE_RESEARCH_AND_BLUEPRINT_2026
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Báo Cáo Nghiên Cứu Chuyên Sâu & Bản Thiết Kế Kiến Trúc Nâng Cấp Hệ Thống LIVA 2026
 **Mã tài liệu**: `LIVA-ARCH-BLUEPRINT-2026`  
 **Cấp độ bảo mật**: Tài liệu kiến trúc chuẩn (Architectural Single Source of Truth)  

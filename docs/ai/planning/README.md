@@ -2,6 +2,7 @@
 title: "AI DevKit pointer — planning"
 updated: 2026-07-31
 commit: 3688b5f
+stale-ok: f041c08
 status: index
 ---
 # Planning

@@ -2,6 +2,7 @@
 title: "Voice runtime — kiến trúc as-built"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: f041c08
 status: living
 owns:
   - chuoi-xu-ly-thoai
@@ -9,7 +10,6 @@ owns:
   - bang-engine-stt
 covers:
   - liva-native-core/src/boot.rs
-  - liva-native-core/src/websocket.rs
   - liva-native-core/src/webrtc
   - liva-native-core/src/stt
   - liva-native-core/src/tts

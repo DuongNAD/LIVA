@@ -1,3 +1,12 @@
+---
+title: optimize-spring-cleaning
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Meta-Prompt: Optimize Spring Cleaning Prompt
 Target Output: `docs/04-quy-trinh/prompts/spring-cleaning-prompt.md`
 

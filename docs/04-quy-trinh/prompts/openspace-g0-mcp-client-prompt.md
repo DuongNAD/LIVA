@@ -1,3 +1,12 @@
+---
+title: openspace-g0-mcp-client-prompt
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Prompt bàn giao — G0: MCP client thật cho LIVA
 
 > Dán nguyên khối dưới đây vào một session LIVA mới. Đã tự chứa: không cần đọc lại

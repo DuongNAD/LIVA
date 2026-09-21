@@ -1,3 +1,12 @@
+---
+title: PROJECT
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Project: LIVA Desktop UI Redesign
 
 ## Architecture

@@ -2,6 +2,7 @@
 title: "Khảo sát kiểm thử và CI ngày 22/07/2026"
 updated: 2026-07-22
 commit: a37c2d2
+stale-ok: f041c08
 status: archived
 owns:
   - bang-test

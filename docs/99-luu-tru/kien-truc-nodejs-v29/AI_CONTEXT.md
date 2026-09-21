@@ -1,3 +1,12 @@
+---
+title: AI_CONTEXT
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # 🤖 LIVA System — AI Developer Context & System Guidelines
 # Last Updated: 2026-06-21 | Maintainer: Dương (System Architect)
 

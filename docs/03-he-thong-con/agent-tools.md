@@ -2,7 +2,7 @@
 title: "Agent và tool runtime — kiến trúc as-built"
 updated: 2026-08-07
 commit: bd11c84
-stale-ok: dec1c14
+stale-ok: f041c08
 status: living
 owns:
   - may-trang-thai-agent

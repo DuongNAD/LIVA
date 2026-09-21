@@ -1,3 +1,12 @@
+---
+title: Architectural_Teardown_Proposal
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA System Architectural Teardown & Redesign Proposal
 **Date**: June 24, 2026
 **Author**: Project Orchestrator

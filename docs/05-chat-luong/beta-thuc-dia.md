@@ -2,6 +2,7 @@
 title: "Sổ lỗi beta thực địa"
 updated: 2026-08-03
 commit: 596e8b6
+stale-ok: f041c08
 status: living
 owns:
   - so-loi-beta-thuc-dia

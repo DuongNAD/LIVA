@@ -1,3 +1,12 @@
+---
+title: skills_development_guide
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA Skill Development Guide
 
 This guide describes how to build, validate, secure, test, and maintain `AgentSkill` components (MCP tools) inside the LIVA gateway ecosystem.

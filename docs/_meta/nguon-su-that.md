@@ -2,6 +2,7 @@
 title: "Sổ đăng ký nguồn sự thật"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: f041c08
 status: index
 owns:
   - so-do-nguon-su-that

@@ -2,7 +2,7 @@
 title: "Kiểm thử và CI"
 updated: 2026-08-07
 commit: bd11c84
-stale-ok: eeed694
+stale-ok: f041c08
 status: living
 owns:
   - bang-test

@@ -2,6 +2,7 @@
 title: "Tích hợp ngoài"
 updated: 2026-08-07
 commit: dec1c14
+stale-ok: f041c08
 status: living
 owns:
   - bang-tich-hop-ngoai
@@ -13,7 +14,6 @@ covers:
   - liva-native-core/src/main.rs
   - liva-native-core/src/telegram.rs
   - liva-native-core/src/agent/graph.rs
-  - liva-native-core/src/bin/verify_integrations.rs
   - liva-native-core/src/integrations/smart_home.rs
   - liva-native-core/src/mcp/*
   - liva-native-core/src/tts/*

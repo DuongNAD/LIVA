@@ -1,3 +1,12 @@
+---
+title: personality_architecture_report
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA Dynamic Evolving Personality Architecture Report
 
 ## 1. Architectural Approach

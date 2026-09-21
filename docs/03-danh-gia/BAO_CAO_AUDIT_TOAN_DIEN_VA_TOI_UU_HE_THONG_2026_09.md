@@ -1,3 +1,12 @@
+---
+title: BAO_CAO_AUDIT_TOAN_DIEN_VA_TOI_UU_HE_THONG_2026_09
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # BÁO CÁO KIỂM TOÁN HỆ THỐNG, TỐI ƯU HÓA & LỘ TRÌNH PHÁT TRIỂN LIVA (09/2026)
 
 > **Mã báo cáo**: `LIVA-AUDIT-OPT-2026-09`  

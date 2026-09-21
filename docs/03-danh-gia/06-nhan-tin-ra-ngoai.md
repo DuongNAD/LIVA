@@ -2,7 +2,7 @@
 title: "Nhắn tin ra ngoài — hiện trạng, việc còn lại, và các bẫy đã trả giá"
 updated: 2026-08-04
 commit: 596e8b6
-stale-ok: 596e8b6
+stale-ok: f041c08
 status: living
 owns:
   - nhan-tin-ra-ngoai-telegram-messenger

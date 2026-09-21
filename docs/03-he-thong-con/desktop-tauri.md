@@ -2,6 +2,7 @@
 title: "Desktop Tauri — cửa sổ, capability và native IPC boundary"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: f041c08
 status: living
 owns:
   - bang-tauri-command
@@ -19,7 +20,6 @@ covers:
   - liva-desktop/src-tauri/tests/capability_policy.rs
   - liva-native-core/src/authorization.rs
   - liva-native-core/src/boot.rs
-  - liva-native-core/src/websocket.rs
   - liva-ui/public/setup.html
   - liva-ui/public/setup.js
 ---

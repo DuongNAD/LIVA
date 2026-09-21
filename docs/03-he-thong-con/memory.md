@@ -2,7 +2,7 @@
 title: "Memory runtime — kiến trúc as-built và kế hoạch nâng cấp"
 updated: 2026-07-31
 commit: 3688b5f
-stale-ok: bd11c84
+stale-ok: f041c08
 status: living
 owns:
   - memory-runtime-as-built
@@ -19,7 +19,6 @@ covers:
   - liva-native-core/src/crypto.rs
   - liva-native-core/src/boot.rs
   - liva-native-core/src/lib.rs
-  - liva-native-core/src/websocket.rs
   - liva-native-core/src/telegram.rs
   - liva-native-core/src/llm/embedder.rs
   - liva-native-core/src/webrtc/pipeline.rs

@@ -1,3 +1,12 @@
+---
+title: LIVA_Acceptance_Report_2026
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA Rust Migration - Final Acceptance & Performance Audit Report
 
 ## 1. Executive Summary

@@ -1,3 +1,12 @@
+---
+title: LIVA_CLIENT_SERVER_DESIGN
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA Architecture Upgrade Design: Rust-Centric Client-Server Model
 
 This document proposes the architectural design to transform **LIVA** into a unified, decentralized client-server architecture powered by `liva-native-core` as a high-performance backend server, communicating with ultra-lightweight frontend clients via **WebSockets**.

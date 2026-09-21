@@ -1,3 +1,12 @@
+---
+title: LIVA_NATIVE_MIGRATION_PLAN
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA Unified Native Engine (Rust) - Migration Plan
 
 **Goal**: Complete the migration of `liva-gateway` (Node.js) and `liva-ai-engine` (Python) into a single, high-performance binary using Rust and Tokio (`liva-native-core`).

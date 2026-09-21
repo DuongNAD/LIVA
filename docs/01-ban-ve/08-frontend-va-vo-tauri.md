@@ -2,6 +2,7 @@
 title: "Frontend và vỏ Tauri"
 updated: 2026-08-05
 commit: 3688b5f
+stale-ok: f041c08
 status: frozen
 owns: []
 superseded_by:

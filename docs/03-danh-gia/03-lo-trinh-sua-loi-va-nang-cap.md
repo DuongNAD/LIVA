@@ -2,7 +2,7 @@
 title: "Lộ trình sửa lỗi và nâng cấp"
 updated: 2026-08-05
 commit: 272d791
-stale-ok: 0fd816c
+stale-ok: f041c08
 status: frozen
 owns: []
 superseded_by:

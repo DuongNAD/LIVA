@@ -2,6 +2,7 @@
 title: "Tiến độ nâng cấp và giải quyết nợ kỹ thuật (Milestone M1–M4)"
 updated: 2026-09-13
 commit: 67eb98b
+stale-ok: f041c08
 status: living
 owns: []
 covers:
@@ -10,7 +11,6 @@ covers:
   - liva-native-core/src/webrtc/vad.rs
   - liva-native-core/src/cognitive/redaction.rs
   - liva-native-core/src/authorization.rs
-  - liva-native-core/src/websocket.rs
   - liva-native-core/src/stt/mod.rs
   - liva-native-core/src/tts/mod.rs
   - liva-native-core/src/tts/vieneu/mod.rs

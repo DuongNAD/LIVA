@@ -2,9 +2,11 @@
 title: "Cơ sở tri thức — con trỏ tới Obsidian vault"
 updated: 2026-07-21
 commit: a6c735c
+stale-ok: f041c08
 status: index
 owns: []
 covers: []
+status: living
 ---
 # Knowledge Base — Single Source of Truth
 

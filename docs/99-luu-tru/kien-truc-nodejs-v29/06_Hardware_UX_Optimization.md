@@ -1,3 +1,12 @@
+---
+title: 06_Hardware_UX_Optimization
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # 06. Tối Ưu UX & Phần Cứng (Ambient Cognitive OS)
 
 **Phiên bản: v29 Enterprise-Ready Cognitive OS**

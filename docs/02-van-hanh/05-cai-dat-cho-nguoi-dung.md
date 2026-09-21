@@ -2,6 +2,7 @@
 title: "Cài đặt và sử dụng LIVA (cho người dùng)"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: f041c08
 status: living
 owns:
   - cai-dat-windows

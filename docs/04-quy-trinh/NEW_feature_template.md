@@ -2,9 +2,11 @@
 title: "Mẫu đề xuất tính năng mới"
 updated: 2026-07-21
 commit: a6c735c
+stale-ok: f041c08
 status: index
 owns: []
 covers: []
+status: living
 ---
 **Role:** You are the Lead Full-Stack Architect and master "Vibe Coder" for the <YOUR APP NAME> application. You are ruthless about execution, strict about clean architecture, and relentlessly focused on stable, production-ready deployments.
 

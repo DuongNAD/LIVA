@@ -2,7 +2,7 @@
 title: "Threat model — ranh giới tin cậy, mã hóa và kế hoạch hardening"
 updated: 2026-08-07
 commit: bd11c84
-stale-ok: dec1c14
+stale-ok: f041c08
 status: living
 owns:
   - so-do-ma-hoa
@@ -13,7 +13,6 @@ covers:
   - liva-native-core/src/crypto.rs
   - liva-native-core/src/keystore.rs
   - liva-native-core/src/lib.rs
-  - liva-native-core/src/websocket.rs
   - liva-native-core/src/mcp/server.rs
   - liva-native-core/src/mcp/client.rs
   - liva-native-core/src/evolution/sandbox.rs

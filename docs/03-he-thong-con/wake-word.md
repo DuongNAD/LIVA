@@ -2,14 +2,13 @@
 title: "Wake word — kiến trúc và giới hạn sản phẩm"
 updated: 2026-08-02
 commit: 3688b5f
-stale-ok: bd11c84
+stale-ok: f041c08
 status: living
 owns:
   - wake-word-viec-con-lai
 covers:
   - liva-native-core/src/wake.rs
   - liva-native-core/src/wake_model.rs
-  - liva-native-core/src/websocket.rs
   - liva-native-core/src/webrtc/frame.rs
   - liva-native-core/src/stt/mod.rs
   - liva-ui/src/composables/useVoicePipeline.ts

@@ -1,3 +1,12 @@
+---
+title: 07_Hybrid_Cloud_Architecture
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Kế Hoạch Triển Khai Kiến Trúc Tổng Thể Cho Dự Án Trợ Lý LIVA
 
 ## 1. Tổng Quan Kiến Trúc Hệ Thống Đám Mây Lai (Hybrid Cloud Architecture Overview)

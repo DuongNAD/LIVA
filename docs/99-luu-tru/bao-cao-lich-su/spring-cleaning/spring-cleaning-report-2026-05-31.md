@@ -1,3 +1,12 @@
+---
+title: spring-cleaning-report-2026-05-31
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA Spring Cleaning Report - 2026-05-31
 
 ## Executive Summary

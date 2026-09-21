@@ -1,3 +1,12 @@
+---
+title: optimize-code-review
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Meta-Prompt: Optimize Code Review Prompt
 Target Output: `docs/04-quy-trinh/prompts/code-review-prompt.md`
 

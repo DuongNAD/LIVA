@@ -1,3 +1,12 @@
+---
+title: readme-generation-prompt
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # README Generation Prompt (LIVA Project-Specific)
 This is an automatically generated system prompt. Do not edit directly.
 

@@ -1,3 +1,12 @@
+---
+title: optimize-readme
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Meta-Prompt: Optimize README Prompt
 Target Output: `docs/04-quy-trinh/prompts/readme-generation-prompt.md`
 

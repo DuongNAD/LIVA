@@ -1,3 +1,12 @@
+---
+title: 05_Security_Guardrails
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # 05. Rào Chắn An Ninh & Guardrails (Security Guardrails)
 
 **Phiên bản: v29 Enterprise-Ready Cognitive OS**

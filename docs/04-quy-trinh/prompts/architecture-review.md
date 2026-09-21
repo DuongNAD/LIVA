@@ -1,3 +1,12 @@
+---
+title: architecture-review
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Architecture Review Prompt (LIVA Project-Specific)
 This is an automatically generated system prompt. Do not edit directly.
 

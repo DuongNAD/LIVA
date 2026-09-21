@@ -1,3 +1,12 @@
+---
+title: 01_System_Overview
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # 01. Tổng Quan Hệ Thống LIVA (System Overview)
 
 **Phiên bản: v29 Enterprise-Ready Cognitive OS**

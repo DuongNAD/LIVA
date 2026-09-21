@@ -2,9 +2,11 @@
 title: "Lưu trữ — cảnh báo tài liệu lỗi thời"
 updated: 2026-07-21
 commit: 5d69c3c
+stale-ok: f041c08
 status: living
 owns: []
 covers: []
+status: living
 ---
 # ⚠️ THƯ MỤC LƯU TRỮ — KHÔNG DÙNG LÀM TÀI LIỆU THAM CHIẾU
 

@@ -1,3 +1,12 @@
+---
+title: ORIGINAL_REQUEST
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Original User Request
 
 ## Initial Request — 2026-06-27T11:16:08+07:00

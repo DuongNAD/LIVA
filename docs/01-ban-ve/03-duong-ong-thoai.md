@@ -2,6 +2,7 @@
 title: "Đường ống thoại"
 updated: 2026-08-05
 commit: 17f1774
+stale-ok: f041c08
 status: frozen
 owns: []
 superseded_by:

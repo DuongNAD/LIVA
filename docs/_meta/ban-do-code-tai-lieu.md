@@ -2,9 +2,11 @@
 title: "Bản đồ code ↔ tài liệu"
 updated: 2026-07-30
 commit: auto
+stale-ok: f041c08
 status: index
 owns: []
 covers: []
+status: living
 ---
 
 # Bản đồ code ↔ tài liệu

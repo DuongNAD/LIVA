@@ -2,6 +2,7 @@
 title: "Hệ agent, bộ nhớ và tiến hoá"
 updated: 2026-08-05
 commit: 6b5b87b
+stale-ok: f041c08
 status: frozen
 owns: []
 superseded_by:

@@ -2,11 +2,13 @@
 title: "Hướng dẫn bảo trì bộ tài liệu"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: f041c08
 status: index
 owns:
   - luoc-do-front-matter
   - quy-trinh-bao-tri-tai-lieu
 covers: []
+status: living
 ---
 # Hướng dẫn bảo trì bộ tài liệu LIVA
 

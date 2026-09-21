@@ -2,6 +2,7 @@
 title: "Wake word — việc còn lại sau bản vá 27/07/2026"
 updated: 2026-07-29
 commit: 0fd816c
+stale-ok: f041c08
 status: frozen
 owns: []
 superseded_by:
@@ -11,7 +12,6 @@ covers:
   - liva-native-core/src/wake.rs
   - liva-native-core/src/wake_model.rs
   - liva-native-core/src/webrtc/frame.rs
-  - liva-native-core/src/websocket.rs
   - liva-native-core/src/stt/mod.rs
   - liva-ui/src/composables/useVoicePipeline.ts
   - liva-ui/src/workers/LivaWakeWorker.ts

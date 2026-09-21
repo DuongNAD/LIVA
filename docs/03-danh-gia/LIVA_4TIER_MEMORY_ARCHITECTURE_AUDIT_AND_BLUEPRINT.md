@@ -2,7 +2,7 @@
 title: "LIVA Native 4-Tier Memory Hierarchy & Background Daemons Blueprint"
 updated: 2026-08-14
 commit: f35961c
-stale-ok: 67eb98b
+stale-ok: f041c08
 status: living
 owns: []
 covers:

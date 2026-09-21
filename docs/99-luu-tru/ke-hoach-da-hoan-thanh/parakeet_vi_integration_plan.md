@@ -1,3 +1,12 @@
+---
+title: parakeet_vi_integration_plan
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Kế hoạch tích hợp Parakeet-CTC vi vào LIVA (STT tiếng Việt chất lượng cao)
 
 > Trạng thái: **✅ ĐÃ TÍCH HỢP (2026-07-05).** Opt-in qua `LIVA_STT_VI_ENGINE=parakeet`.

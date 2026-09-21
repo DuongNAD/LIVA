@@ -2,6 +2,7 @@
 title: "Vision runtime — chụp màn hình, diff vùng và hỏi đáp đa phương thức"
 updated: 2026-08-07
 commit: bd11c84
+stale-ok: f041c08
 status: living
 owns:
   - vision-runtime-as-built

@@ -1,3 +1,12 @@
+---
+title: LIVA_OSS_Research_2026-07
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # Khảo sát OSS & nghiên cứu mới nhất cho LIVA (2025 → giữa 2026)
 
 > Ngày: 2026-07-04 · Phương pháp: deep-research workflow 109 agent — 6 hướng tìm kiếm song song,

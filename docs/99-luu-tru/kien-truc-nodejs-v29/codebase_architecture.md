@@ -1,3 +1,12 @@
+---
+title: codebase_architecture
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # 🏗️ LIVA — Codebase Architecture Diagram (v26 Enterprise-Ready)
 
 > Mở file này trong VS Code, chuột phải → **"Preview Mermaid"** để xem sơ đồ trực quan. Cập nhật mới nhất bao gồm kiến trúc H-MEM v18, LACP Protocol, và Zero-VRAM Edge Offloading.

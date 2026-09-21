@@ -1,3 +1,12 @@
+---
+title: 03_Agent_Control_Flow
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # 03. Luồng Kiểm Soát Tác Vụ Đặc Vụ (Agent Control Flow)
 
 **Phiên bản: v29 Enterprise-Ready Cognitive OS**

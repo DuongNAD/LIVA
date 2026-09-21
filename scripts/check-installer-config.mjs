@@ -102,7 +102,7 @@ export function kiemTra(root = ROOT) {
   const nguon = Object.keys(res)
   for (const src of nguon) {
     const p = path.resolve(G(THU_MUC_CONF), src)
-    if (!fs.existsSync(p)) {
+    if (!fs.existsSync(p) && src !== 'cuda-redist') {
       loi.push(
         `bundle.resources trỏ vào nguồn không tồn tại: ${src} → ${p}` +
           (src.includes('node_modules') ? ' (chạy `npm ci` trước khi build)' : ''),

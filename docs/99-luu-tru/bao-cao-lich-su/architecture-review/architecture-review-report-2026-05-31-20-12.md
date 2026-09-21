@@ -1,3 +1,12 @@
+---
+title: architecture-review-report-2026-05-31-20-12
+updated: 2026-09-21
+commit: f041c08
+stale-ok: f041c08
+covers: []
+status: living
+---
+
 # LIVA Architecture Review Report - 2026-05-31-20-12
 
 ## 1. Executive Summary, Vibe Rating & Health Score

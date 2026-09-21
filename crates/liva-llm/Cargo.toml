@@ -1,0 +1,10 @@
+[package]
+name = "liva-llm"
+version = "0.1.0"
+edition = "2021"
+description = "Actor-based LLM engine for LIVA"
+
+[dependencies]
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time"] }
+anyhow = "1"
+tracing = "0.1"

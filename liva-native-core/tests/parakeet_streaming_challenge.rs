@@ -22,13 +22,12 @@ use liva_native_core::{AppState, db, llm, stt, tts};
 use std::sync::Arc;
 use std::time::Instant;
 
-mod common;
+use crate::common;
 use common::resolve_model_paths;
 
 fn build_test_app_state() -> Arc<AppState> {
     let db = db::DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non-existent-model");
-    let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         64,
         64,
@@ -41,7 +40,7 @@ fn build_test_app_state() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),

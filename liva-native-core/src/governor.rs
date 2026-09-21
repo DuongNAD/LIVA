@@ -90,8 +90,8 @@ pub struct Governor {
 pub enum VisualRoiState {
     /// Dormant / Voice-only state (VLM unloaded from VRAM, saving 750 MB).
     Dormant,
-    /// Active visual query processing (VLM loaded on GPU).
-    Active,
+    /// Active visual query processing with reference counting (VLM loaded on GPU).
+    Active { active_count: usize },
     /// Cooldown window (15s after last visual query before unloading VLM).
     Cooldown { until: Instant },
 }
@@ -115,18 +115,40 @@ impl VisualGovernor {
         }
     }
 
-    /// Requests activation for a visual ROI inspection task.
+    /// Requests activation for a visual ROI inspection task, incrementing active reference count.
     pub fn acquire_visual_slot(&self) {
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        *guard = VisualRoiState::Active;
+        match *guard {
+            VisualRoiState::Active { active_count } => {
+                *guard = VisualRoiState::Active {
+                    active_count: active_count.saturating_add(1),
+                };
+            }
+            VisualRoiState::Dormant | VisualRoiState::Cooldown { .. } => {
+                *guard = VisualRoiState::Active { active_count: 1 };
+            }
+        }
     }
 
-    /// Marks visual query completion and enters cooldown window.
+    /// Marks visual query completion, decrementing reference count and only entering cooldown when count is 0.
     pub fn release_visual_slot(&self) {
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        *guard = VisualRoiState::Cooldown {
-            until: Instant::now() + self.cooldown,
-        };
+        match *guard {
+            VisualRoiState::Active { active_count } => {
+                if active_count > 1 {
+                    *guard = VisualRoiState::Active {
+                        active_count: active_count - 1,
+                    };
+                } else {
+                    *guard = VisualRoiState::Cooldown {
+                        until: Instant::now() + self.cooldown,
+                    };
+                }
+            }
+            VisualRoiState::Cooldown { .. } | VisualRoiState::Dormant => {
+                // Defensive no-op on unmatched or redundant release
+            }
+        }
     }
 
     /// Checks if the VLM should be unloaded (if cooldown expired or already dormant).
@@ -134,7 +156,7 @@ impl VisualGovernor {
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
         match *guard {
             VisualRoiState::Dormant => true,
-            VisualRoiState::Active => false,
+            VisualRoiState::Active { .. } => false,
             VisualRoiState::Cooldown { until } => {
                 if Instant::now() >= until {
                     *guard = VisualRoiState::Dormant;
@@ -148,7 +170,16 @@ impl VisualGovernor {
 
     pub fn is_active(&self) -> bool {
         let guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        matches!(*guard, VisualRoiState::Active)
+        matches!(*guard, VisualRoiState::Active { active_count } if active_count > 0)
+    }
+
+    /// Returns the current number of active visual tasks holding the slot.
+    pub fn active_count(&self) -> usize {
+        let guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match *guard {
+            VisualRoiState::Active { active_count } => active_count,
+            _ => 0,
+        }
     }
 
     pub fn is_dormant(&self) -> bool {
@@ -163,7 +194,7 @@ impl VisualGovernor {
                     false
                 }
             }
-            VisualRoiState::Active => false,
+            VisualRoiState::Active { .. } => false,
         }
     }
 }
@@ -935,6 +966,41 @@ mod governor_cpu_tests {
         // Wait for cooldown to expire
         std::thread::sleep(Duration::from_millis(60));
         assert!(gov.should_unload_vlm()); // expired -> back to Dormant
+        assert!(gov.is_dormant());
+    }
+
+    #[test]
+    fn test_visual_governor_reference_counting() {
+        use super::VisualGovernor;
+        use std::time::Duration;
+
+        let gov = VisualGovernor::new(Duration::from_millis(50));
+        assert_eq!(gov.active_count(), 0);
+        assert!(gov.is_dormant());
+
+        gov.acquire_visual_slot();
+        assert_eq!(gov.active_count(), 1);
+        assert!(gov.is_active());
+
+        gov.acquire_visual_slot();
+        assert_eq!(gov.active_count(), 2);
+        assert!(gov.is_active());
+
+        // First release keeps state Active
+        gov.release_visual_slot();
+        assert_eq!(gov.active_count(), 1);
+        assert!(gov.is_active());
+        assert!(!gov.should_unload_vlm());
+
+        // Second release transitions to Cooldown
+        gov.release_visual_slot();
+        assert_eq!(gov.active_count(), 0);
+        assert!(!gov.is_active());
+        assert!(!gov.should_unload_vlm());
+
+        // Expire cooldown
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(gov.should_unload_vlm());
         assert!(gov.is_dormant());
     }
 }

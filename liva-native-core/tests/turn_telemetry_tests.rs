@@ -9,7 +9,6 @@ use std::sync::Arc;
 fn test_state() -> Arc<AppState> {
     let db = DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non-existent-model");
-    let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         64,
         64,
@@ -22,7 +21,7 @@ fn test_state() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),

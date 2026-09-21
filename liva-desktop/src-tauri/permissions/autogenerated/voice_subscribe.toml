@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-voice-subscribe"
+description = "Enables the voice_subscribe command without any pre-configured scope."
+commands.allow = ["voice_subscribe"]
+
+[[permission]]
+identifier = "deny-voice-subscribe"
+description = "Denies the voice_subscribe command without any pre-configured scope."
+commands.deny = ["voice_subscribe"]

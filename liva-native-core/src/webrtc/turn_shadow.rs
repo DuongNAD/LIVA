@@ -26,6 +26,7 @@
 //! Input tensor `input_features` [1, 80, 800] f32; output `logits` [1, 1] is
 //! already sigmoid-applied (despite the name) — >0.5 means turn complete.
 use crate::stt::dsp::compute_mel_filterbank;
+pub use liva_core_types::{AdaptiveTurnDecision, TurnVerdict};
 use ort::{session::Session, value::Value};
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::path::Path;
@@ -56,48 +57,6 @@ pub struct SmartTurnClassifier {
     fft: Arc<dyn Fft<f32>>,
     window: Arc<[f32]>,           // periodic Hann, len N_FFT
     mel_filters: Arc<[Vec<f32>]>, // N_MELS x (N_FFT/2+1)
-}
-
-/// Turn verdict with probability and completion flag.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TurnVerdict {
-    pub probability: f32,
-    pub complete: bool,
-}
-
-/// Adaptive end-of-turn decision for the Two-Stage Turn Gate.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AdaptiveTurnDecision {
-    /// Turn clearly complete (p > 0.92). Immediate cutoff at ~200ms silence.
-    ImmediateCutoff { probability: f32 },
-    /// Hesitation / thinking pause (0.50 <= p <= 0.92). Extend silence window up to ~450ms.
-    HesitationWait { probability: f32 },
-    /// User still actively speaking / incomplete (p < 0.50). Continue accumulating.
-    Incomplete { probability: f32 },
-}
-
-impl AdaptiveTurnDecision {
-    pub fn from_probability(p: f32) -> Self {
-        if p > 0.92 {
-            Self::ImmediateCutoff { probability: p }
-        } else if p >= 0.50 {
-            Self::HesitationWait { probability: p }
-        } else {
-            Self::Incomplete { probability: p }
-        }
-    }
-
-    pub fn probability(&self) -> f32 {
-        match *self {
-            Self::ImmediateCutoff { probability }
-            | Self::HesitationWait { probability }
-            | Self::Incomplete { probability } => probability,
-        }
-    }
-
-    pub fn is_immediate(&self) -> bool {
-        matches!(self, Self::ImmediateCutoff { .. })
-    }
 }
 
 impl SmartTurnClassifier {

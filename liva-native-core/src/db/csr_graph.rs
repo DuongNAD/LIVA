@@ -67,6 +67,11 @@ impl CsrGraph {
         }
     }
 
+    /// Returns true if the graph has been mutated and requires CSR compilation.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
     /// Number of nodes in the graph.
     pub fn node_count(&self) -> usize {
         self.idx_to_node.len()
@@ -74,7 +79,11 @@ impl CsrGraph {
 
     /// Number of directed edges in the graph.
     pub fn edge_count(&self) -> usize {
-        self.col_indices.len()
+        if self.dirty {
+            self.adjacency.iter().map(|edges| edges.len()).sum()
+        } else {
+            self.col_indices.len()
+        }
     }
 
     /// Returns the node index if it exists.
@@ -345,7 +354,11 @@ impl CsrGraph {
         results
     }
 
-    /// Read-only version of Personalized PageRank if CSR is already compiled.
+    /// Read-only version of Personalized PageRank.
+    ///
+    /// If the CSR arrays are compiled (`!self.dirty`), executes via contiguous flat CSR SpMV.
+    /// If the graph is dirty (`self.dirty`), gracefully falls back to dynamic adjacency traversal
+    /// ensuring non-empty, accurate multi-hop retrieval without requiring an exclusive write lock.
     pub fn personalized_pagerank_readonly(
         &self,
         seeds: &[(&str, f32)],
@@ -354,10 +367,11 @@ impl CsrGraph {
         top_k: usize,
     ) -> Vec<(String, f32)> {
         let n = self.idx_to_node.len();
-        if n == 0 || seeds.is_empty() || self.dirty {
+        if n == 0 || seeds.is_empty() {
             return Vec::new();
         }
 
+        // 1. Build and normalize seed preference vector s
         let mut s = vec![0.0f32; n];
         let mut seed_sum = 0.0f32;
         for &(seed_id, raw_weight) in seeds {
@@ -376,6 +390,7 @@ impl CsrGraph {
             *val /= seed_sum;
         }
 
+        // 2. Power iteration: p^(0) = s
         let mut p = s.clone();
         let mut next_p = vec![0.0f32; n];
         let restart_factor = 1.0 - damping;
@@ -385,24 +400,52 @@ impl CsrGraph {
                 next_p[i] = restart_factor * s[i];
             }
 
-            for (u, &p_u) in p.iter().enumerate().take(n) {
-                if p_u <= 1e-7 {
-                    continue;
+            if !self.dirty {
+                // High-performance contiguous flat CSR SpMV path
+                for (u, &p_u) in p.iter().enumerate().take(n) {
+                    if p_u <= 1e-7 {
+                        continue;
+                    }
+
+                    let start = self.row_ptr[u];
+                    let end = self.row_ptr[u + 1];
+
+                    for e in start..end {
+                        let v = self.col_indices[e];
+                        let w = self.weights[e];
+                        next_p[v] += damping * p_u * w;
+                    }
                 }
+            } else {
+                // Graceful fallback: dynamic adjacency list traversal when uncompiled/dirty
+                for (u, &p_u) in p.iter().enumerate().take(n) {
+                    if p_u <= 1e-7 {
+                        continue;
+                    }
 
-                let start = self.row_ptr[u];
-                let end = self.row_ptr[u + 1];
+                    let edges = &self.adjacency[u];
+                    if edges.is_empty() {
+                        continue;
+                    }
 
-                for e in start..end {
-                    let v = self.col_indices[e];
-                    let w = self.weights[e];
-                    next_p[v] += damping * p_u * w;
+                    let raw_sum: f32 = edges.iter().map(|e| e.weight.max(0.0)).sum();
+                    let count = edges.len();
+
+                    for edge in edges {
+                        let norm_weight = if raw_sum > 0.0 {
+                            edge.weight.max(0.0) / raw_sum
+                        } else {
+                            1.0 / count as f32
+                        };
+                        next_p[edge.target] += damping * p_u * norm_weight;
+                    }
                 }
             }
 
             std::mem::swap(&mut p, &mut next_p);
         }
 
+        // 3. Rank entities by activation score
         let mut results: Vec<(String, f32)> = p
             .into_iter()
             .enumerate()
@@ -520,5 +563,47 @@ mod tests {
         let ids: Vec<String> = seeds.into_iter().map(|(id, _)| id).collect();
         assert!(ids.contains(&"paris".to_string()));
         assert!(ids.contains(&"eiffel".to_string()));
+    }
+
+    #[test]
+    fn test_csr_graph_dirty_fallback_and_compilation() {
+        let mut graph = CsrGraph::new();
+        assert!(!graph.is_dirty());
+
+        graph.add_edge("Alice", "Bob", "collaborates_with", 1.0, true);
+        graph.add_edge("Bob", "Charlie", "manages", 1.0, true);
+
+        // Graph is dirty because compile_csr was not called
+        assert!(graph.is_dirty());
+        assert_eq!(graph.edge_count(), 4); // Bidirectional
+
+        // Read-only PPR must execute via adjacency fallback and succeed
+        let seeds = [("Alice", 1.0f32)];
+        let ppr_dirty = graph.personalized_pagerank_readonly(&seeds, 3, 0.85, 3);
+        assert!(
+            !ppr_dirty.is_empty(),
+            "Dirty fallback must return active nodes"
+        );
+        let dirty_map: std::collections::HashMap<String, f32> = ppr_dirty.into_iter().collect();
+        assert!(
+            dirty_map.contains_key("Charlie"),
+            "Charlie must be reached across 2 hops"
+        );
+
+        // Compile CSR
+        graph.compile_csr();
+        assert!(!graph.is_dirty());
+
+        // Clean flat CSR PPR must match results
+        let ppr_clean = graph.personalized_pagerank_readonly(&seeds, 3, 0.85, 3);
+        let clean_map: std::collections::HashMap<String, f32> = ppr_clean.into_iter().collect();
+        assert_eq!(dirty_map.len(), clean_map.len());
+        for (k, v) in dirty_map {
+            let clean_v = clean_map.get(&k).expect("clean map must contain key");
+            assert!(
+                (clean_v - v).abs() < 1e-4,
+                "Scores between dirty and clean must match"
+            );
+        }
     }
 }

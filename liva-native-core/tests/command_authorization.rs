@@ -7,7 +7,6 @@ use std::sync::Arc;
 fn test_state() -> Arc<AppState> {
     let db = db::DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non-existent-model");
-    let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         64,
         64,
@@ -20,7 +19,7 @@ fn test_state() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
@@ -83,7 +82,6 @@ fn widget_duoc_hoi_thoai_nhung_khong_duoc_quan_tri() {
         "telemetry:summary",
     ] {
         duoc(CommandPrincipal::TauriWidget, command);
-        duoc(CommandPrincipal::WebSocketWidget, command);
     }
 
     for command in [
@@ -100,7 +98,6 @@ fn widget_duoc_hoi_thoai_nhung_khong_duoc_quan_tri() {
         "telegram:send_text",
     ] {
         bi_chan(CommandPrincipal::TauriWidget, command);
-        bi_chan(CommandPrincipal::WebSocketWidget, command);
     }
 }
 
@@ -125,7 +122,6 @@ fn dashboard_duoc_quan_tri_ui_nhung_khong_co_cua_thoat_native_tho() {
         "telemetry:summary",
     ] {
         duoc(CommandPrincipal::TauriDashboard, command);
-        duoc(CommandPrincipal::WebSocketDashboard, command);
     }
 
     for command in [
@@ -138,38 +134,6 @@ fn dashboard_duoc_quan_tri_ui_nhung_khong_co_cua_thoat_native_tho() {
         "integration:smart_home_control",
     ] {
         bi_chan(CommandPrincipal::TauriDashboard, command);
-        bi_chan(CommandPrincipal::WebSocketDashboard, command);
-    }
-}
-
-#[test]
-fn websocket_remote_chi_duoc_hoi_thoai_khong_doc_du_lieu_may() {
-    for command in [
-        "ping",
-        "status",
-        "llm:health_check",
-        "chat:completion",
-        "voice:stt_start",
-        "voice:stt_chunk",
-        "voice:stt_stop",
-        "voice:tts_speak",
-        "voice:tts_stop",
-    ] {
-        duoc(CommandPrincipal::WebSocketRemote, command);
-    }
-
-    for command in [
-        "get_config",
-        "get_user_profile",
-        "get_memory_data",
-        "vision:capture",
-        "vision:ask",
-        "update_config",
-        "message:confirm",
-        "setup:fetch",
-        "mcp:list_tools",
-    ] {
-        bi_chan(CommandPrincipal::WebSocketRemote, command);
     }
 }
 
@@ -179,9 +143,6 @@ fn principal_khong_tin_cay_mac_dinh_tu_choi_lenh_moi() {
         CommandPrincipal::TauriWidget,
         CommandPrincipal::TauriDashboard,
         CommandPrincipal::TauriSetup,
-        CommandPrincipal::WebSocketWidget,
-        CommandPrincipal::WebSocketDashboard,
-        CommandPrincipal::WebSocketRemote,
         CommandPrincipal::Telegram,
     ] {
         bi_chan(principal, "future:dangerous_command");

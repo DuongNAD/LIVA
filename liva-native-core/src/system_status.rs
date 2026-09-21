@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{AppState, configured_router_model_path, governor, sysinfo, telegram, websocket};
+use crate::{AppState, configured_router_model_path, governor, sysinfo, telegram};
 
 /// Bảng sức khoẻ hệ thống cho Dashboard — **chỉ số đo thật**.
 ///
@@ -27,49 +27,31 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
     use serde_json::json;
 
     // --- LLM ---------------------------------------------------------------
-    let (ai_status, ai_detail, model_name, model_loaded) = match state.llm.try_lock() {
-        Ok(m) => {
-            let name = m
-                .current_model_path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let loaded = m.engine.is_some();
-            let detail = if loaded {
-                format!(
-                    "n_ctx {} · {} lớp GPU · mmproj {}",
-                    m.n_ctx,
-                    m.n_gpu_layers,
-                    if m.mmproj_path.is_some() {
-                        "có"
-                    } else {
-                        "không"
-                    }
-                )
-            } else {
-                "chưa nạp model".to_string()
-            };
-            (
-                if loaded { "online" } else { "offline" },
-                detail,
-                Some(name),
-                Some(loaded),
-            )
-        }
-        // Lock bận = engine đang sinh chữ. Đó là "đang chạy", không phải "hỏng".
-        //
-        // Tên model vẫn báo được: lấy từ CẤU HÌNH, tức chính file mà autoload và
-        // `llm:swap_model` nạp. Nếu để `null` ở đây thì ô "Model" trên Dashboard
-        // sẽ nhấp nháy về `--` mỗi lần LIVA trả lời — mất một thông tin ổn định
-        // chỉ vì một lock tạm thời. `modelLoaded` thì vẫn `null`: cái đó đúng là
-        // không biết được khi không cầm được lock.
-        Err(_) => (
+    // --- LLM ---------------------------------------------------------------
+    let is_generating = crate::llm::engine::is_generating();
+    let meta = crate::llm::engine::get_active_metadata();
+    let (ai_status, ai_detail, model_name, model_loaded) = if is_generating {
+        (
             "busy",
             "đang sinh chữ".to_string(),
             configured_router_model_path()
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string())),
             None,
-        ),
+        )
+    } else if meta.model_loaded {
+        let name = std::path::Path::new(&meta.model_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let detail = format!("n_ctx {} · {} lớp GPU", meta.n_ctx, meta.n_gpu_layers,);
+        ("online", detail, Some(name), Some(true))
+    } else {
+        (
+            "offline",
+            "chưa nạp model".to_string(),
+            Some("".to_string()),
+            Some(false),
+        )
     };
 
     // --- STT ---------------------------------------------------------------
@@ -216,7 +198,7 @@ pub async fn system_status(state: Arc<AppState>) -> Result<serde_json::Value, St
     };
 
     // --- Cổng vào / kỹ năng / điều khiển từ xa -------------------------------
-    let ws_clients = websocket::ws_client_count();
+    let ws_clients: usize = 0;
     // Lấy độ dài từ CHÍNH mảng mà `get_skills_list` trả về, để hai lệnh không
     // bao giờ nói hai con số khác nhau.
     let skills_loaded = state.mcp_server.list_skills().len();

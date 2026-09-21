@@ -351,12 +351,6 @@
           "markdownDescription": "Enables the delete_vault_secret command without any pre-configured scope."
         },
         {
-          "description": "Enables the issue_websocket_session command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-issue-websocket-session",
-          "markdownDescription": "Enables the issue_websocket_session command without any pre-configured scope."
-        },
-        {
           "description": "Enables the native_ipc_call command without any pre-configured scope.",
           "type": "string",
           "const": "allow-native-ipc-call",
@@ -411,16 +405,34 @@
           "markdownDescription": "Enables the vault_secret_present command without any pre-configured scope."
         },
         {
+          "description": "Enables the voice_interrupt command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-voice-interrupt",
+          "markdownDescription": "Enables the voice_interrupt command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the voice_mic_chunk command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-voice-mic-chunk",
+          "markdownDescription": "Enables the voice_mic_chunk command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the voice_subscribe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-voice-subscribe",
+          "markdownDescription": "Enables the voice_subscribe command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the voice_wake_probe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-voice-wake-probe",
+          "markdownDescription": "Enables the voice_wake_probe command without any pre-configured scope."
+        },
+        {
           "description": "Denies the delete_vault_secret command without any pre-configured scope.",
           "type": "string",
           "const": "deny-delete-vault-secret",
           "markdownDescription": "Denies the delete_vault_secret command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the issue_websocket_session command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-issue-websocket-session",
-          "markdownDescription": "Denies the issue_websocket_session command without any pre-configured scope."
         },
         {
           "description": "Denies the native_ipc_call command without any pre-configured scope.",
@@ -475,6 +487,30 @@
           "type": "string",
           "const": "deny-vault-secret-present",
           "markdownDescription": "Denies the vault_secret_present command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the voice_interrupt command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-voice-interrupt",
+          "markdownDescription": "Denies the voice_interrupt command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the voice_mic_chunk command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-voice-mic-chunk",
+          "markdownDescription": "Denies the voice_mic_chunk command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the voice_subscribe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-voice-subscribe",
+          "markdownDescription": "Denies the voice_subscribe command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the voice_wake_probe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-voice-wake-probe",
+          "markdownDescription": "Denies the voice_wake_probe command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

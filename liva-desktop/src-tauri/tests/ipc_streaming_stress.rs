@@ -1,9 +1,6 @@
 use liva_native_core::crypto::EncryptionEngine;
-use liva_native_core::{
-    authorize_command, handle_command_as, websocket::WebSocketSessionAuthority, AppState,
-    CommandPrincipal,
-};
-use liva_native_core::{db, llm, stt, tts};
+use liva_native_core::{authorize_command, handle_command_as, AppState, CommandPrincipal};
+use liva_native_core::{db, stt, tts};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +9,6 @@ use tokio::sync::mpsc;
 fn test_state() -> Arc<AppState> {
     let db = db::DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non-existent-model");
-    let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         64,
         64,
@@ -25,7 +21,7 @@ fn test_state() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
@@ -416,9 +412,6 @@ fn test_adversarial_malformed_command_strings_rejected() {
         CommandPrincipal::TauriWidget,
         CommandPrincipal::TauriDashboard,
         CommandPrincipal::TauriSetup,
-        CommandPrincipal::WebSocketWidget,
-        CommandPrincipal::WebSocketDashboard,
-        CommandPrincipal::WebSocketRemote,
         CommandPrincipal::Telegram,
     ];
 
@@ -499,28 +492,4 @@ async fn test_in_process_ipc_execution_performance_and_isolation() {
     .await
     .expect_err("Setup must not be allowed to invoke chat:completion");
     assert!(setup_err.contains("TauriSetup"));
-}
-
-#[test]
-fn test_websocket_session_authority_principal_issuance() {
-    let authority = WebSocketSessionAuthority::new();
-
-    // Widget ticket
-    let widget_ticket = authority
-        .issue(CommandPrincipal::WebSocketWidget)
-        .expect("widget ticket");
-    assert_eq!(widget_ticket.token.len(), 64);
-    assert!(widget_ticket.expires_in_ms > 0);
-
-    // Dashboard ticket
-    let dash_ticket = authority
-        .issue(CommandPrincipal::WebSocketDashboard)
-        .expect("dashboard ticket");
-    assert_eq!(dash_ticket.token.len(), 64);
-    assert_ne!(widget_ticket.token, dash_ticket.token);
-
-    // Setup and other unauthorized principals must be rejected for ticket issuance
-    assert!(authority.issue(CommandPrincipal::TauriSetup).is_err());
-    assert!(authority.issue(CommandPrincipal::WebSocketRemote).is_err());
-    assert!(authority.issue(CommandPrincipal::Telegram).is_err());
 }

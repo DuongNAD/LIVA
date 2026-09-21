@@ -351,12 +351,12 @@ fn test_vision_4k_downsample_clamp() {
 }
 
 #[test]
-fn test_vision_websocket_remote_principal_rejection() {
-    // Remote WebSocket connections are NOT authorized to invoke vision:ask
-    let auth_res = authorize_command(CommandPrincipal::WebSocketRemote, "vision:ask");
+fn test_vision_unauthorized_principal_rejection() {
+    // Unauthorized remote connections are NOT authorized to invoke vision:ask
+    let auth_res = authorize_command(CommandPrincipal::Telegram, "vision:ask");
     assert!(
         auth_res.is_err(),
-        "WebSocketRemote principal must not be authorized to execute vision:ask"
+        "Telegram principal must not be authorized to execute vision:ask"
     );
 
     // Local CLI is authorized

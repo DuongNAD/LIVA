@@ -6,7 +6,6 @@
   "permissions": [
     "allow-native-ipc-call",
     "allow-native-ipc-call-stream",
-    "allow-issue-websocket-session",
     "allow-open-setup",
     "allow-vault-secret-present",
     "allow-store-vault-secret",

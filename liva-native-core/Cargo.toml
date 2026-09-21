@@ -3,8 +3,13 @@ name = "liva-native-core"
 version = "0.1.0"
 publish = false
 edition = "2024"
+autotests = false
+autobins = false
 
 [dependencies]
+anyhow = "1.0"
+liva-core-types = { path = "../crates/liva-core-types" }
+liva-llm = { path = "../crates/liva-llm" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21.0"
 # Bề mặt tương thích OpenAI (`openai_api.rs`). hyper 0.14 ĐÃ nằm trong cây phụ
@@ -112,141 +117,12 @@ vulkan = ["llama-cpp-2/vulkan"]
 openblas = []
 
 [[bin]]
-name = "verify_duplex"
-path = "src/bin/verify_duplex.rs"
-test = false
+name = "liva-native-core"
+path = "src/main.rs"
 
-[[bin]]
-name = "verify_round2"
-path = "src/bin/verify_round2.rs"
-test = false
-
-[[bin]]
-name = "voice_profile"
-path = "src/bin/voice_profile.rs"
-test = false
-
-[[bin]]
-name = "voice_stress"
-path = "src/bin/voice_stress.rs"
-test = false
-
-[[bin]]
-name = "router_stress"
-path = "src/bin/router_stress.rs"
-test = false
-
-[[bin]]
-name = "screen_vision_bench"
-path = "src/bin/screen_vision_bench.rs"
-test = false
-
-[[bin]]
-name = "stt_lang_probe"
-path = "src/bin/stt_lang_probe.rs"
-test = false
-
-[[bin]]
-name = "tts_piper_probe"
-path = "src/bin/tts_piper_probe.rs"
-test = false
-
-[[bin]]
-name = "onnx_probe"
-path = "src/bin/onnx_probe.rs"
-test = false
-
-[[bin]]
-name = "gtcrn_probe"
-path = "src/bin/gtcrn_probe.rs"
-test = false
-
-[[bin]]
-name = "wakeword_probe"
-path = "src/bin/wakeword_probe.rs"
-test = false
-
-[[bin]]
-name = "parakeet_probe"
-path = "src/bin/parakeet_probe.rs"
-test = false
-
-[[bin]]
-name = "wer_bench"
-path = "src/bin/wer_bench.rs"
-test = false
-
-[[bin]]
-name = "debug_audio"
-path = "src/bin/debug_audio.rs"
-test = false
-
-[[bin]]
-name = "gemma4_probe"
-path = "src/bin/gemma4_probe.rs"
-test = false
-
-[[bin]]
-name = "model_compare"
-path = "src/bin/model_compare.rs"
-test = false
-
-[[bin]]
-name = "ttft_bench"
-path = "src/bin/ttft_bench.rs"
-test = false
-
-[[bin]]
-name = "verify_voice"
-path = "src/bin/verify_voice.rs"
-test = false
-
-[[bin]]
-name = "wakeword_benchmark"
-path = "src/bin/wakeword_benchmark.rs"
-test = false
-
-[[bin]]
-name = "vieneu_probe"
-path = "src/bin/vieneu_probe.rs"
-test = false
-
-[[bin]]
-name = "qwen3vl_probe"
-path = "src/bin/qwen3vl_probe.rs"
-test = false
-
-# Cổng nghiệm thu G1: đường keyword và đường LLM có khớp nhau trên corpus
-# smart-home không. Là probe chứ không phải `#[test]` vì cần cả model embedding
-# (470 MB) lẫn một model LLM (2–4 GB) — cả hai bị gitignore.
-[[bin]]
-name = "tool_calling_probe"
-path = "src/bin/tool_calling_probe.rs"
-test = false
-
-# Cổng nghiệm thu U19: hai tool OS (âm lượng, phát nhạc) có được truy hồi và
-# chọn đúng khi nói tiếng Việt tự nhiên không, VÀ việc thêm chúng có làm hỏng
-# cổng smart-home của G1 không. Tách khỏi `tool_calling_probe` vì trả lời một
-# câu hỏi khác — trộn vào thì không đọc được cái nào hỏng khi số tụt.
-[[bin]]
-name = "os_control_probe"
-path = "src/bin/os_control_probe.rs"
-test = false
-
-[[bin]]
-name = "parakeet_microbench"
-path = "src/bin/parakeet_microbench.rs"
-test = false
-
-[[bin]]
-name = "liva_eval"
-path = "src/bin/liva_eval.rs"
-test = false
-
-[[bin]]
-name = "router_gate_probe"
-path = "src/bin/router_gate_probe.rs"
-test = false
+[[test]]
+name = "harness"
+path = "tests/harness.rs"
 
 [lints]
 workspace = true

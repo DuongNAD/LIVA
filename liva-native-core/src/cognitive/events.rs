@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::broadcast;
@@ -422,11 +423,14 @@ impl SessionEvent {
     }
 }
 
+/// Maximum capacity for historical events retained in the ring buffer per stream.
+pub const MAX_HISTORY_EVENTS: usize = 500;
+
 /// Append-only deterministic session event stream with multi-subscriber broadcast.
 #[derive(Clone, Debug)]
 pub struct SessionEventStream {
     pub tx: broadcast::Sender<SessionEvent>,
-    history: Arc<RwLock<Vec<SessionEvent>>>,
+    history: Arc<RwLock<VecDeque<SessionEvent>>>,
 }
 
 impl SessionEventStream {
@@ -434,7 +438,7 @@ impl SessionEventStream {
         let (tx, _) = broadcast::channel(capacity);
         Self {
             tx,
-            history: Arc::new(RwLock::new(Vec::new())),
+            history: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_HISTORY_EVENTS))),
         }
     }
 
@@ -447,7 +451,10 @@ impl SessionEventStream {
     pub async fn publish(&self, event: SessionEvent) -> Result<usize, String> {
         {
             let mut h = self.history.write().await;
-            h.push(event.clone());
+            if h.len() >= MAX_HISTORY_EVENTS {
+                h.pop_front();
+            }
+            h.push_back(event.clone());
         }
         let send_res = self.tx.send(event);
         match send_res {
@@ -465,6 +472,11 @@ impl SessionEventStream {
             .collect()
     }
 
+    /// Returns current number of events in the history buffer.
+    pub async fn history_len(&self) -> usize {
+        self.history.read().await.len()
+    }
+
     /// Clears historical events for a concluded session ID.
     pub async fn clear_session(&self, session_id: &str) {
         let mut h = self.history.write().await;
@@ -480,5 +492,40 @@ impl SessionEventStream {
 impl Default for SessionEventStream {
     fn default() -> Self {
         Self::new(256)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_session_event_stream_ring_buffer_bounded() {
+        let stream = SessionEventStream::new(128);
+        assert_eq!(stream.history_len().await, 0);
+
+        for i in 0..600 {
+            let evt = SessionEvent::content_chunk("session_1", format!("chunk_{i}"));
+            stream.publish(evt).await.expect("publish should succeed");
+        }
+
+        assert_eq!(stream.history_len().await, MAX_HISTORY_EVENTS);
+        assert_eq!(MAX_HISTORY_EVENTS, 500);
+
+        let replayed = stream.replay("session_1").await;
+        assert_eq!(replayed.len(), 500);
+
+        // The first 100 events (chunk_0 .. chunk_99) should have been evicted.
+        if let SessionEvent::ContentChunk { token, .. } = &replayed[0] {
+            assert_eq!(token, "chunk_100");
+        } else {
+            panic!("Expected ContentChunk");
+        }
+
+        if let SessionEvent::ContentChunk { token, .. } = &replayed[499] {
+            assert_eq!(token, "chunk_599");
+        } else {
+            panic!("Expected ContentChunk");
+        }
     }
 }

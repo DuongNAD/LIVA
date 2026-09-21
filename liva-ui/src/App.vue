@@ -58,6 +58,12 @@ const chatContainer = ref<HTMLElement | null>(null);
 let ws: WebSocket | null = null;
 
 const sendMsg = (event: string, payload: unknown = {}) => {
+  if (platform?.invokeBackend) {
+    platform.invokeBackend('native_ipc_call', { command: event, payload }).catch((err) => {
+      logger.warn('[App]', `Failed to send IPC message ${event}:`, err);
+    });
+    return;
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     const packed = pack({ event, payload });
     const message = new Uint8Array(1 + packed.byteLength);
@@ -74,7 +80,6 @@ let avatarModel = null as unknown as Live2DModel;
 let pixiApp: Application | null = null; // 🔒 [Memory Fix #4] Lưu handle PIXI App để destroy() khi unmount
 
 // Audio Queue — gapless OP_SPEAKER_OUT PCM; encoded JSON audio is a separate path.
-// FLUSH/barge-in (speaker.stop()/speaker.flush()) stops every scheduled source
 // and resets the scheduling cursor.
 const speaker = useSpeakerPlayback({
   channel: '[App]',

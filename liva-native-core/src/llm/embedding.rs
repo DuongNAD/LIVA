@@ -43,35 +43,14 @@ pub async fn compute_embeddings(
         .await
         .map_err(|e| format!("Decoupled embedding worker panicked: {e}"))?
     } else {
-        // Fallback path: use llama.cpp engine when no dedicated ONNX embedder is loaded.
-        let state_clone = state.clone();
-        let inputs_owned = inputs.to_vec();
-        tokio::task::spawn_blocking(move || -> Result<Vec<Vec<f32>>, String> {
-            let mut llm_manager = match state_clone.llm.try_lock() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    return Err(
-                        "LLM engine is currently busy with text generation. Use dedicated ONNX embedder for concurrent embeddings."
-                            .to_string(),
-                    );
-                }
-            };
-            if llm_manager.vocab_only {
-                return Err("Cannot compute embeddings on a vocab-only model".to_string());
-            }
-            let engine = llm_manager
-                .engine
-                .as_mut()
-                .ok_or_else(|| crate::llm::engine::ERR_NO_MODEL.to_string())?;
-            let mut results = Vec::with_capacity(inputs_owned.len());
-            for text in &inputs_owned {
-                let emb = super::embed::get_embedding(&engine.model, &mut engine.context, text)?;
-                results.push(emb);
-            }
-            Ok(results)
-        })
-        .await
-        .map_err(|e| format!("Fallback embedding worker panicked: {e}"))?
+        // Fallback path: check non-blocking is_generating flag
+        if crate::llm::engine::is_generating() {
+            return Err(
+                "LLM engine is currently busy with text generation. Use dedicated ONNX embedder for concurrent embeddings."
+                    .to_string(),
+            );
+        }
+        Err("Dedicated ONNX embedder is required for computing embeddings.".to_string())
     }
 }
 
@@ -100,9 +79,7 @@ mod tests {
             stt: tokio::sync::Mutex::new(crate::stt::SttManager::new(".")),
             tts: tokio::sync::Mutex::new(None),
             tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(
-                super::super::LlamaRouterManager::new(512, 0).expect("llm"),
-            ),
+            llm: AppState::mock_llm(),
             vad: tokio::sync::Mutex::new(None),
             denoiser: tokio::sync::Mutex::new(None),
             turn_shadow: tokio::sync::Mutex::new(None),
@@ -133,9 +110,7 @@ mod tests {
             stt: tokio::sync::Mutex::new(crate::stt::SttManager::new(".")),
             tts: tokio::sync::Mutex::new(None),
             tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(
-                super::super::LlamaRouterManager::new(512, 0).expect("llm"),
-            ),
+            llm: AppState::mock_llm(),
             vad: tokio::sync::Mutex::new(None),
             denoiser: tokio::sync::Mutex::new(None),
             turn_shadow: tokio::sync::Mutex::new(None),
@@ -153,8 +128,8 @@ mod tests {
             active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
         });
 
-        // Hold exclusive LLM lock (simulating ongoing text generation)
-        let _llm_lock = state.llm.lock().await;
+        // Hold generating guard (simulating ongoing text generation)
+        let _llm_lock = crate::llm::engine::GeneratingGuard::enter();
 
         // Embedding pipeline must NOT deadlock or wait for state.llm
         let res = compute_embeddings(&state, &[]).await.unwrap();

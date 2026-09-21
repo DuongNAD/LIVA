@@ -31,7 +31,7 @@
 //! stays in `stt_adversarial_stress.rs` and still runs in parallel on every `cargo test`, where
 //! contention does not affect the outcome.
 
-mod common;
+use crate::common;
 
 use common::{find_audio_file, load_audio_wav_16k, resolve_model_paths};
 use liva_native_core::stt::parakeet::ParakeetVi;

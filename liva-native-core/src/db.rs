@@ -48,6 +48,7 @@ impl r2d2::ManageConnection for CustomSqliteManager {
 }
 
 fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqlite::Error> {
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(5000));
     conn.execute_batch(
         "
         PRAGMA foreign_keys = ON;
@@ -72,6 +73,24 @@ fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqli
         )?;
     }
     Ok(())
+}
+
+/// Determines whether a rusqlite error represents a transient lock or concurrency contention
+/// that can be safely retried (e.g. SQLITE_LOCKED, SQLITE_BUSY, or shared-cache table locks).
+pub fn is_transient_sqlite_lock_error(err: &rusqlite::Error) -> bool {
+    match err {
+        rusqlite::Error::SqliteFailure(ffi_err, msg) => {
+            ffi_err.code == rusqlite::ErrorCode::DatabaseLocked
+                || ffi_err.code == rusqlite::ErrorCode::DatabaseBusy
+                || ffi_err.extended_code == 262 // SQLITE_LOCKED_SHAREDCACHE
+                || ffi_err.extended_code == 261 // SQLITE_BUSY_RECOVERY
+                || ffi_err.extended_code == 517 // SQLITE_BUSY_SNAPSHOT
+                || msg.as_deref().is_some_and(|m| {
+                    m.contains("locked") || m.contains("busy")
+                })
+        }
+        _ => false,
+    }
 }
 
 /// Danh sách đường dẫn thử nạp `vec0` (sqlite-vec), theo thứ tự ưu tiên. Tách
@@ -322,16 +341,23 @@ impl DatabasePool {
         })
     }
 
+    /// Check out a pooled SQLite reader connection with proper error conversion.
+    pub fn read_conn(
+        &self,
+    ) -> Result<r2d2::PooledConnection<CustomSqliteManager>, rusqlite::Error> {
+        self.readers.get().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "Failed to acquire SQLite reader connection from pool: {e}"
+            ))))
+        })
+    }
+
     /// Execute a read-only closure synchronously with a pooled reader connection.
     pub fn with_reader<F, R>(&self, f: F) -> Result<R, rusqlite::Error>
     where
         F: FnOnce(&rusqlite::Connection) -> Result<R, rusqlite::Error>,
     {
-        let conn = self.readers.get().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
-                "Failed to acquire SQLite reader connection from pool: {e}"
-            ))))
-        })?;
+        let conn = self.read_conn()?;
         f(&conn)
     }
 
@@ -416,10 +442,33 @@ impl DatabasePool {
             graph.add_node(subject.to_string(), subject.to_string(), "{}".to_string());
             graph.add_node(object.to_string(), object.to_string(), "{}".to_string());
             graph.add_edge(subject, object, predicate, weight, true);
-            graph.compile_csr();
         }
 
         Ok(())
+    }
+
+    /// Returns a read guard to CsrGraph, ensuring CSR arrays are compiled if dirty.
+    ///
+    /// Implements double-checked locking: clean graphs return immediately under
+    /// read lock with zero write lock contention and zero memory reallocation.
+    pub fn get_compiled_csr_graph(&self) -> std::sync::RwLockReadGuard<'_, csr_graph::CsrGraph> {
+        // Fast path: if already compiled and clean, return read guard directly
+        {
+            let guard = self.csr_graph.read().unwrap_or_else(|e| e.into_inner());
+            if !guard.is_dirty() {
+                return guard;
+            }
+        }
+
+        // Slow path: graph is dirty. Acquire write lock and compile.
+        {
+            let mut write_guard = self.csr_graph.write().unwrap_or_else(|e| e.into_inner());
+            if write_guard.is_dirty() {
+                write_guard.compile_csr();
+            }
+        }
+
+        self.csr_graph.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Asynchronously insert multiple L3 knowledge graph triples in a single batch transaction and update in-memory CSR cache.
@@ -2243,6 +2292,77 @@ pub fn insert_l3_edge_sync(
     if let Ok(mut graph) = pool.csr_graph.write() {
         graph.add_edge(source, target, relation, weight, true);
         graph.compile_csr();
+    }
+
+    Ok(())
+}
+
+/// Asynchronously inserts or updates an L3 knowledge graph node into SQLite and updates the In-Memory CSR Cache.
+pub async fn insert_l3_node(
+    pool: &DatabasePool,
+    id: &str,
+    label: &str,
+    properties: &str,
+) -> Result<(), rusqlite::Error> {
+    let id_owned = id.to_string();
+    let label_owned = label.to_string();
+    let properties_owned = properties.to_string();
+
+    pool.writer_actor
+        .execute(move |conn| {
+            conn.execute(
+                "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET label = excluded.label, properties = excluded.properties",
+                rusqlite::params![id_owned, label_owned, properties_owned],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "DbActor insert_l3_node failed: {e}"
+            ))))
+        })?;
+
+    if let Ok(mut graph) = pool.csr_graph.write() {
+        graph.add_node(id.to_string(), label.to_string(), properties.to_string());
+    }
+
+    Ok(())
+}
+
+/// Asynchronously inserts or updates an L3 knowledge graph edge into SQLite and updates the In-Memory CSR Cache.
+pub async fn insert_l3_edge(
+    pool: &DatabasePool,
+    source: &str,
+    target: &str,
+    relation: &str,
+    weight: f32,
+) -> Result<(), rusqlite::Error> {
+    let source_owned = source.to_string();
+    let target_owned = target.to_string();
+    let relation_owned = relation.to_string();
+
+    pool.writer_actor
+        .execute(move |conn| {
+            conn.execute(
+                "INSERT INTO l3_edges (source, target, relation, weight, obsolete) VALUES (?1, ?2, ?3, ?4, 0)
+                 ON CONFLICT(source, target, relation) DO UPDATE SET weight = excluded.weight, obsolete = 0",
+                rusqlite::params![source_owned, target_owned, relation_owned, weight as f64],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
+                "DbActor insert_l3_edge failed: {e}"
+            ))))
+        })?;
+
+    if let Ok(mut graph) = pool.csr_graph.write() {
+        graph.add_edge(source, target, relation, weight, true);
     }
 
     Ok(())

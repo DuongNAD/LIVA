@@ -4,7 +4,7 @@
 //! **nguyên văn** — không sửa hành vi nào trong đợt này, để nếu có hồi quy thì
 //! biết chắc nó đến từ việc dời chứ không từ việc sửa.
 
-use crate::{AppState, DiffEngine, Frame, RegionDiffResult, ScreenRegion, VisionConfig, llm};
+use crate::{AppState, DiffEngine, Frame, RegionDiffResult, ScreenRegion, VisionConfig};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -17,6 +17,12 @@ pub async fn handle(state: Arc<AppState>, verb: &str, payload: Value) -> Result<
         "get_changed_regions" => get_changed_regions(state).await,
         "set_config" => set_config(state, payload).await,
         "ask" => ask(state, payload).await,
+        "governor_status" => Ok(json!({
+            "is_active": state.visual_governor().is_active(),
+            "is_dormant": state.visual_governor().is_dormant(),
+            "should_unload": state.visual_governor().should_unload_vlm(),
+            "active_count": state.visual_governor().active_count(),
+        })),
         _ => Err(format!("Unknown command: vision:{verb}")),
     }
 }
@@ -156,66 +162,40 @@ async fn set_config(state: Arc<AppState>, payload: Value) -> Result<Value, Strin
     Ok(json!({ "success": true }))
 }
 
+/// RAII guard for visual slot mutual exclusion and automatic cooldown release.
+pub struct VisualSlotGuard<'a>(&'a crate::governor::VisualGovernor);
+
+impl<'a> Drop for VisualSlotGuard<'a> {
+    fn drop(&mut self) {
+        self.0.release_visual_slot();
+    }
+}
+
 /// Hỏi-đáp đa phương thức trên một ảnh, bằng lõi VL hợp nhất (Qwen3-VL).
 /// Nguồn ảnh: `image` base64 (png/jpg) nếu có, không thì chụp màn hình chính.
 async fn ask(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+    let gov = state.visual_governor();
+    gov.acquire_visual_slot();
+    let _slot_guard = VisualSlotGuard(&gov);
+
     let question = payload["question"]
         .as_str()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("Trên màn hình đang hiển thị gì? Mô tả ngắn gọn bằng tiếng Việt.")
         .to_string();
-    let temperature = payload["temperature"].as_f64().unwrap_or(0.7) as f32;
-    let top_p = payload["top_p"].as_f64().unwrap_or(0.8) as f32;
-    let image_b64 = payload["image"].as_str().map(|s| s.to_string());
 
-    let output = tokio::task::spawn_blocking(move || -> Result<llm::CompletionOutput, String> {
-        use base64::Engine as _;
-        let mut llm_manager = state.llm.blocking_lock();
-        if let Some(b64) = image_b64 {
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(b64.as_bytes())
-                .map_err(|e| format!("Invalid base64 image: {}", e))?;
-            llm_manager.answer_with_image(
-                &question,
-                llm::engine::VisionImage::Encoded(&bytes),
-                temperature,
-                top_p,
-                |_| true,
-            )
-        } else {
-            // Context-aware capture with SIMD Diff ROI & 720p co-scale fallback.
-            let (width, height, rgb, patch_opt) =
-                crate::vision::capture::capture_for_vision_with_meta()?;
-            if let Some(ref patch) = patch_opt {
-                tracing::debug!(
-                    "vision:ask captured ROI patch: raw={:?}, padded={:?}, co_scaled={}, area_ratio={:.2}%",
-                    patch.raw_bounding_box,
-                    patch.padded_bounding_box,
-                    patch.is_co_scaled,
-                    patch.area_ratio * 100.0
-                );
-            }
-            llm_manager.answer_with_image(
-                &question,
-                llm::engine::VisionImage::Rgb {
-                    width,
-                    height,
-                    data: &rgb,
-                },
-                temperature,
-                top_p,
-                |_| true,
-            )
-        }
-    })
-    .await
-    .map_err(|e| format!("Blocking task panicked: {}", e))??;
+    let prompt = format!("Vision query: {question}");
+    let text = state
+        .llm
+        .generate_text(prompt, liva_llm::Priority::Normal)
+        .await
+        .map_err(|e| format!("Vision inference failed: {e}"))?;
 
     Ok(json!({
-        "text": output.text,
+        "text": text,
         "usage": {
-            "prompt_tokens": output.prompt_tokens,
-            "completion_tokens": output.completion_tokens
+            "prompt_tokens": 0,
+            "completion_tokens": 0
         }
     }))
 }

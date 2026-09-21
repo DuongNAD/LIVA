@@ -486,13 +486,16 @@ fn process_write_batch(conn: &rusqlite::Connection, batch: Vec<DbWriteCommand>) 
     let mut current_tx_batch: Vec<DbWriteCommand> = Vec::new();
 
     for cmd in batch {
-        if matches!(cmd, DbWriteCommand::CheckpointWal { .. }) {
+        if matches!(
+            cmd,
+            DbWriteCommand::CheckpointWal { .. } | DbWriteCommand::Execute { .. }
+        ) {
             // Flush any current transactional writes first
             if !current_tx_batch.is_empty() {
                 let tx_cmds = std::mem::take(&mut current_tx_batch);
                 process_transactional_batch(conn, tx_cmds);
             }
-            // Execute checkpoint outside of transaction
+            // Execute checkpoint or standalone operation outside of ambient transaction
             let (notif, res) = execute_write_operation(conn, cmd);
             notif.respond(res);
         } else {

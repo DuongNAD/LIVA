@@ -40,8 +40,9 @@ export interface UseVoicePipelineReturn {
   state: Ref<'OFF' | 'PASSIVE' | 'ACTIVE' | 'PROCESSING'>;
   volumeLevel: Ref<number>;
   isReady: Ref<boolean>;
-  startPipeline: (ws: WebSocket) => Promise<void>;
+  startPipeline: (transport?: unknown) => Promise<void>;
   stopPipeline: () => Promise<void>;
+  interrupt: () => Promise<void>;
   toggleVoice: () => void;
   onWakeWordDetected: (cb: () => void) => void;
   /** Transition ACTIVE → PROCESSING (AI is thinking). Resets timeout. */
@@ -440,18 +441,66 @@ export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoic
   let wakeProbeSeqId = 0;
 
   wakeProbeSender = (audio: Float32Array) => {
-    if (!wsRef || wsRef.readyState !== WebSocket.OPEN) {
-      logger.warn('[WakeWord]', 'Socket core chưa mở — không xác minh được cụm ứng viên.');
-      return;
-    }
-    wsRef.send(
-      serializeVoiceFrame(
-        OP_WAKE_PROBE,
-        wakeProbeSeqId,
-        new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength)
-      )
-    );
+    const seqId = wakeProbeSeqId;
     wakeProbeSeqId = (wakeProbeSeqId + 1) >>> 0;
+
+    if (wsRef && (wsRef as unknown as { readyState?: number }).readyState === 1) {
+      (wsRef as unknown as { send: (data: unknown) => void }).send(
+        serializeVoiceFrame(
+          OP_WAKE_PROBE,
+          seqId,
+          new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength)
+        )
+      );
+    }
+
+    if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__) {
+      import('@tauri-apps/api/core')
+        .then(({ invoke }) => {
+          return invoke<{ matched: boolean; score: number; transcript: string }>('voice_wake_probe', {
+            seqId,
+            samples: Array.from(audio),
+          });
+        })
+        .then((resp) => {
+          if (!resp) return;
+          if (resp.matched) {
+            wakeProbeFeedback.value = {
+              outcome: 'accepted',
+              score: typeof resp.score === 'number' && Number.isFinite(resp.score) ? resp.score : null,
+              transcript: (resp.transcript || '').trim(),
+            };
+            logger.info('[WakeWord]', 'Core xác nhận cụm đánh thức:', resp.transcript);
+            sendToWorker('probeResult', { accepted: true });
+            if (diagnosticsPanelRef.value) {
+              diagnosticsPanelRef.value.style.setProperty(
+                '--confidence-level',
+                wakeConfidencePercent(resp.score)
+              );
+            }
+            detectedCallback?.();
+          } else {
+            wakeProbeFeedback.value = {
+              outcome: 'rejected',
+              score: typeof resp.score === 'number' && Number.isFinite(resp.score) ? resp.score : null,
+              transcript: (resp.transcript || '').trim(),
+            };
+            logger.info(
+              '[WakeWord]',
+              'Bỏ qua, không phải cụm đánh thức. Nghe ra:',
+              resp.transcript || '(không ra chữ)'
+            );
+            sendToWorker('probeResult', { accepted: false });
+            if (diagnosticsPanelRef.value) {
+              diagnosticsPanelRef.value.style.setProperty(
+                '--confidence-level',
+                wakeConfidencePercent(resp.score)
+              );
+            }
+          }
+        })
+        .catch(() => {});
+    }
   };
 
   /**
@@ -560,7 +609,7 @@ export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoic
     }, 15000);
   }
 
-  function startPipeline(ws: WebSocket): Promise<void> {
+  function startPipeline(ws?: unknown): Promise<void> {
     if (state.value !== 'OFF') return Promise.resolve();
     if (startInFlight) return startInFlight;
 
@@ -577,9 +626,11 @@ export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoic
     return pending;
   }
 
-  async function startPipelineOnce(ws: WebSocket, generation: number) {
-    wsRef = ws;
-    attachCoreListener(ws);
+  async function startPipelineOnce(ws: unknown, generation: number) {
+    wsRef = (ws as WebSocket) ?? null;
+    if (ws && typeof (ws as WebSocket).addEventListener === 'function') {
+      attachCoreListener(ws as WebSocket);
+    }
     pipelineError.value = '';
     pipelineErrorKind.value = 'none';
     wakeProbeFeedback.value = { outcome: 'idle', score: null, transcript: '' };
@@ -694,25 +745,31 @@ export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoic
           sendToWorker('audio', { audio: frame.buffer }, [frame.buffer]);
         }
 
-        // 2. VALVE: Send to WebSocket if ACTIVE or PROCESSING (Full-Duplex Barge-in)
-        if (
-          (state.value === 'ACTIVE' || state.value === 'PROCESSING') &&
-          wsRef &&
-          wsRef.readyState === WebSocket.OPEN
-        ) {
-          // Hợp đồng VoiceFrame: header 9 byte (op, seq LE, len LE) + payload
-          // PCM f32 LE. Trước đây chỗ này chỉ ghi 1 byte header, nên core đọc
-          // 4 byte PCM đầu làm seqId và 4 byte kế làm payloadSize — ra số rác
-          // thường vượt 1 MiB ⇒ mọi khung mic bị từ chối và barge-in từ trình
-          // duyệt không thể hoạt động.
-          wsRef.send(
-            serializeVoiceFrame(
-              OP_MIC_IN,
-              micSeqId,
-              new Uint8Array(inputData.buffer, inputData.byteOffset, inputData.byteLength)
-            )
-          );
+        // 2. VALVE: Send mic chunks if ACTIVE or PROCESSING (Full-Duplex Barge-in)
+        if (state.value === 'ACTIVE' || state.value === 'PROCESSING') {
+          const seqId = micSeqId;
           micSeqId = (micSeqId + 1) >>> 0;
+
+          if (wsRef && (wsRef as unknown as { readyState?: number }).readyState === 1) {
+            (wsRef as unknown as { send: (data: unknown) => void }).send(
+              serializeVoiceFrame(
+                OP_MIC_IN,
+                seqId,
+                new Uint8Array(inputData.buffer, inputData.byteOffset, inputData.byteLength)
+              )
+            );
+          }
+
+          if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__) {
+            import('@tauri-apps/api/core')
+              .then(({ invoke }) => {
+                invoke('voice_mic_chunk', {
+                  seqId,
+                  samples: Array.from(inputData),
+                }).catch(() => {});
+              })
+              .catch(() => {});
+          }
 
           if (rms >= SILENCE_THRESHOLD) {
             resetActiveTimeout(); // Keeps session alive while speaking
@@ -987,6 +1044,15 @@ export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoic
     sendToWorker('setThreshold', { threshold: newThreshold });
   }
 
+  async function interrupt(): Promise<void> {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('voice_interrupt');
+    } catch (err) {
+      logger.warn('[VoicePipeline]', 'Failed to invoke voice_interrupt:', err);
+    }
+  }
+
   onUnmounted(() => {
     stopPipeline().catch((err) => {
       logger.error('[VoicePipeline] Unmount cleanup failed:', err);
@@ -999,6 +1065,7 @@ export function useVoicePipeline(options: UseVoicePipelineOptions = {}): UseVoic
     isReady,
     startPipeline,
     stopPipeline,
+    interrupt,
     toggleVoice,
     onWakeWordDetected,
     setProcessing,

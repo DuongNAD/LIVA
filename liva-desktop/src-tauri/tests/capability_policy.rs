@@ -72,7 +72,10 @@ fn widget_khong_co_quyen_vault_setup_dialog_hay_process() {
     for required in [
         "allow-native-ipc-call",
         "allow-native-ipc-call-stream",
-        "allow-issue-websocket-session",
+        "allow-voice-subscribe",
+        "allow-voice-mic-chunk",
+        "allow-voice-wake-probe",
+        "allow-voice-interrupt",
         "allow-toggle-ghost-mode",
         "allow-set-eco-mode",
         "allow-update-interactive-zones",
@@ -111,7 +114,10 @@ fn setup_chi_co_quyen_tai_artifact_va_dong_cua_so() {
         assert!(permissions.contains(required), "setup thiếu {required}");
     }
     for forbidden in [
-        "allow-issue-websocket-session",
+        "allow-voice-subscribe",
+        "allow-voice-mic-chunk",
+        "allow-voice-wake-probe",
+        "allow-voice-interrupt",
         "allow-toggle-ghost-mode",
         "allow-update-interactive-zones",
         "allow-vault-secret-present",
@@ -130,7 +136,6 @@ fn dashboard_co_vault_nhung_khong_dieu_khien_widget() {
     for required in [
         "allow-native-ipc-call",
         "allow-native-ipc-call-stream",
-        "allow-issue-websocket-session",
         "allow-open-setup",
         "allow-vault-secret-present",
         "allow-store-vault-secret",
@@ -142,6 +147,10 @@ fn dashboard_co_vault_nhung_khong_dieu_khien_widget() {
         assert!(permissions.contains(required), "dashboard thiếu {required}");
     }
     for forbidden in [
+        "allow-voice-subscribe",
+        "allow-voice-mic-chunk",
+        "allow-voice-wake-probe",
+        "allow-voice-interrupt",
         "allow-toggle-ghost-mode",
         "allow-set-eco-mode",
         "allow-update-interactive-zones",
@@ -152,4 +161,82 @@ fn dashboard_co_vault_nhung_khong_dieu_khien_widget() {
             "dashboard thừa {forbidden}"
         );
     }
+}
+
+#[test]
+fn test_tauri_ipc_channel_commands_registered_in_build_manifest() {
+    let build_rs = fs::read_to_string(crate_root().join("build.rs")).expect("build.rs must exist");
+
+    for cmd in [
+        "\"voice_subscribe\"",
+        "\"voice_mic_chunk\"",
+        "\"voice_wake_probe\"",
+        "\"voice_interrupt\"",
+        "\"native_ipc_call\"",
+        "\"native_ipc_call_stream\"",
+    ] {
+        assert!(
+            build_rs.contains(cmd),
+            "build.rs AppManifest commands must declare {cmd}"
+        );
+    }
+}
+
+#[test]
+fn test_tauri_ipc_channel_authorized_in_capabilities() {
+    let widget_perms = string_set(&capability("widget"), "permissions");
+    for req in [
+        "allow-voice-subscribe",
+        "allow-voice-mic-chunk",
+        "allow-voice-wake-probe",
+        "allow-voice-interrupt",
+        "allow-native-ipc-call",
+        "allow-native-ipc-call-stream",
+    ] {
+        assert!(
+            widget_perms.contains(req),
+            "widget capability must contain {req}"
+        );
+    }
+}
+
+#[test]
+fn test_tauri_ipc_channel_event_serialization_contract() {
+    use liva_native_core::VoiceIpcEvent;
+
+    // 1. Test Speaker event serialization
+    let speaker_event = VoiceIpcEvent::Speaker {
+        turn_epoch: 1,
+        sample_rate: 24000,
+        samples: vec![0.0, 0.5, -0.5],
+    };
+    let json = serde_json::to_value(&speaker_event).expect("Speaker serialize");
+    assert_eq!(json["type"], "Speaker");
+    assert_eq!(json["data"]["turn_epoch"], 1);
+    assert_eq!(json["data"]["sample_rate"], 24000);
+
+    // 2. Test Viseme event serialization
+    let viseme_event = VoiceIpcEvent::Viseme {
+        turn_epoch: 1,
+        base_seq_id: 10,
+        visemes: serde_json::json!([{"time": 0.1, "viseme": "aa"}]),
+    };
+    let v_json = serde_json::to_value(&viseme_event).expect("Viseme serialize");
+    assert_eq!(v_json["type"], "Viseme");
+    assert_eq!(v_json["data"]["base_seq_id"], 10);
+
+    // 3. Test Flush event serialization
+    let flush_event = VoiceIpcEvent::Flush { seq_id: 42 };
+    let f_json = serde_json::to_value(&flush_event).expect("Flush serialize");
+    assert_eq!(f_json["type"], "Flush");
+    assert_eq!(f_json["data"]["seq_id"], 42);
+
+    // 4. Test TextEvent serialization
+    let text_event = VoiceIpcEvent::TextEvent {
+        event: "transcription".to_string(),
+        payload: serde_json::json!({"text": "test"}),
+    };
+    let t_json = serde_json::to_value(&text_event).expect("TextEvent serialize");
+    assert_eq!(t_json["type"], "TextEvent");
+    assert_eq!(t_json["data"]["event"], "transcription");
 }

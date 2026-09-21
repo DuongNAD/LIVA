@@ -15,6 +15,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Maximum pending challenge time-to-live (10 minutes = 600 seconds).
+pub const CHALLENGE_TTL_SECS: i64 = 600;
+
 #[derive(Debug, Clone)]
 pub struct PendingRecall {
     pub fact_key: String,
@@ -48,6 +51,7 @@ impl ActiveRecallConfig {
 
 pub struct ActiveRecallManager {
     pending_challenges: Mutex<HashMap<String, PendingRecall>>,
+    custom_config: Mutex<Option<ActiveRecallConfig>>,
 }
 
 impl Default for ActiveRecallManager {
@@ -98,16 +102,56 @@ impl ActiveRecallManager {
     pub fn new() -> Self {
         Self {
             pending_challenges: Mutex::new(HashMap::new()),
+            custom_config: Mutex::new(None),
         }
+    }
+
+    /// Khởi tạo ActiveRecallManager với cấu hình cố định, độc lập với `std::env`.
+    pub fn with_config(config: ActiveRecallConfig) -> Self {
+        Self {
+            pending_challenges: Mutex::new(HashMap::new()),
+            custom_config: Mutex::new(Some(config)),
+        }
+    }
+
+    /// Cập nhật cấu hình runtime hoặc trong kiểm thử.
+    pub fn set_config(&self, config: Option<ActiveRecallConfig>) {
+        let mut lock = self.custom_config.lock().unwrap_or_else(|e| e.into_inner());
+        *lock = config;
+    }
+
+    /// Dọn dẹp các pending challenges đã hết hạn TTL (10 phút = 600 giây).
+    /// Trả về số lượng thử thách đã bị loại bỏ.
+    pub fn sweep_expired(&self, now: i64) -> usize {
+        let mut lock = self
+            .pending_challenges
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let initial_len = lock.len();
+        lock.retain(|_, c| now.saturating_sub(c.asked_at_ts) < CHALLENGE_TTL_SECS);
+        initial_len - lock.len()
+    }
+
+    /// Trả về số lượng pending challenges hiện tại (phục vụ metrics/tests).
+    pub fn pending_count(&self) -> usize {
+        let lock = self
+            .pending_challenges
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        lock.len()
     }
 
     /// Kiểm tra xem Active Recall có đang được kích hoạt hay không.
     pub fn is_enabled(&self) -> bool {
-        ActiveRecallConfig::from_env().is_some()
+        self.config().is_some()
     }
 
-    /// Lấy cấu hình Active Recall hiện tại nếu bật.
+    /// Lấy cấu hình Active Recall hiện tại nếu bật (ưu tiên custom_config trước khi fallback sang std::env).
     pub fn config(&self) -> Option<ActiveRecallConfig> {
+        let lock = self.custom_config.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cfg) = &*lock {
+            return Some(cfg.clone());
+        }
         ActiveRecallConfig::from_env()
     }
 
@@ -131,12 +175,13 @@ impl ActiveRecallManager {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        // 1. Kiểm tra xem có pending challenge đang đợi người dùng trả lời không
+        // 1. Quét sạch các challenge đã quá hạn TTL (10 phút) và kiểm tra pending challenge hiện tại
         let pending = {
             let mut lock = self
                 .pending_challenges
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
+            lock.retain(|_, c| now.saturating_sub(c.asked_at_ts) < CHALLENGE_TTL_SECS);
             lock.remove(session_id)
         };
 
@@ -188,13 +233,30 @@ impl ActiveRecallManager {
                 || (expected_stripped.contains(&user_stripped) && user_stripped.len() >= 3)
         };
 
-        // Lấy fact hiện tại để cập nhật memory_strength
+        // Lấy fact hiện tại để cập nhật memory_strength với retry chống transient lock
         let current_strength = {
-            let reader = db_pool.readers.get().ok();
-            reader
-                .and_then(|r| db::get_fact(&r, crypto, &pending.fact_key).ok().flatten())
-                .map(|f| f.memory_strength)
-                .unwrap_or(1.0)
+            let mut strength = None;
+            for attempt in 0..5 {
+                if let Ok(r) = db_pool.read_conn() {
+                    match db::get_fact(&r, crypto, &pending.fact_key) {
+                        Ok(Some(f)) => {
+                            strength = Some(f.memory_strength);
+                            break;
+                        }
+                        Ok(None) => break,
+                        Err(e) if db::is_transient_sqlite_lock_error(&e) && attempt + 1 < 5 => {
+                            drop(r);
+                            std::thread::sleep(std::time::Duration::from_millis(
+                                5 * (attempt as u64 + 1),
+                            ));
+                        }
+                        _ => break,
+                    }
+                } else if attempt + 1 < 5 {
+                    std::thread::sleep(std::time::Duration::from_millis(5 * (attempt as u64 + 1)));
+                }
+            }
+            strength.unwrap_or(1.0)
         };
 
         let (new_strength, reply) = if is_correct {
@@ -236,42 +298,88 @@ impl ActiveRecallManager {
             return None;
         }
 
-        let reader = match db_pool.readers.get() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!("ActiveRecall: cannot acquire read connection: {e}");
-                return None;
-            }
-        };
+        // Bounded retry loop for transient SQLite lock contention (SQLITE_LOCKED, SQLITE_BUSY, pool exhaustion)
+        const MAX_RETRIES: usize = 8;
+        const INITIAL_BACKOFF_MS: u64 = 5;
+        const MAX_BACKOFF_MS: u64 = 50;
 
-        // Quét các fact hiện có
-        let mut stmt = match reader.prepare(
-            "SELECT key, value, memory_strength, last_accessed_at, access_count FROM facts",
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("ActiveRecall: prepare query failed: {e}");
-                return None;
-            }
-        };
+        let mut backoff = std::time::Duration::from_millis(INITIAL_BACKOFF_MS);
+        let mut candidate_facts = None;
 
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, f64>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, i64>(4)?,
-                ))
-            })
-            .ok()?;
+        for attempt in 0..MAX_RETRIES {
+            let reader = match db_pool.read_conn() {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        "ActiveRecall: cannot acquire read connection (attempt {}/{}): {}",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        e
+                    );
+                    std::thread::sleep(backoff);
+                    backoff = (backoff * 2).min(std::time::Duration::from_millis(MAX_BACKOFF_MS));
+                    continue;
+                }
+            };
+
+            let query_res =
+                (|| -> Result<Vec<(String, String, f64, i64, i64)>, rusqlite::Error> {
+                    let mut stmt = reader.prepare(
+                    "SELECT key, value, memory_strength, last_accessed_at, access_count FROM facts",
+                )?;
+                    let rows = stmt.query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, f64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    })?;
+                    let mut list = Vec::new();
+                    for r in rows {
+                        list.push(r?);
+                    }
+                    Ok(list)
+                })();
+
+            match query_res {
+                Ok(facts) => {
+                    candidate_facts = Some(facts);
+                    break;
+                }
+                Err(err) => {
+                    if db::is_transient_sqlite_lock_error(&err) && attempt + 1 < MAX_RETRIES {
+                        tracing::debug!(
+                            "ActiveRecall: transient SQLite lock on attempt {}/{}: {}. Retrying in {:?}...",
+                            attempt + 1,
+                            MAX_RETRIES,
+                            err,
+                            backoff
+                        );
+                        drop(reader); // Release reader back to pool before sleeping
+                        std::thread::sleep(backoff);
+                        backoff =
+                            (backoff * 2).min(std::time::Duration::from_millis(MAX_BACKOFF_MS));
+                    } else {
+                        tracing::warn!(
+                            "ActiveRecall: prepare/query failed after {} attempts: {}",
+                            attempt + 1,
+                            err
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+
+        let facts = candidate_facts?;
 
         // Tìm fact khớp với user_text: lọc theo access interval & key trước, chỉ giải mã AES-256-GCM theo nhu cầu
         let mut best_match = None;
         let user_stripped = strip_vietnamese_diacritics(&user_clean);
 
-        for row in rows.flatten() {
+        for row in facts {
             let (key, enc_val, memory_strength, last_accessed_at, access_count) = row;
 
             // 1. Kiểm tra giãn cách spaced repetition trước (access pattern filter)
@@ -320,12 +428,13 @@ impl ActiveRecallManager {
             .writer_actor
             .touch_fact_access(matched_key.clone(), now);
 
-        // Lưu pending challenge
+        // Lưu pending challenge (đồng thời dọn sạch các challenge cũ đã quá hạn TTL)
         {
             let mut lock = self
                 .pending_challenges
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
+            lock.retain(|_, c| now.saturating_sub(c.asked_at_ts) < CHALLENGE_TTL_SECS);
             lock.insert(
                 session_id.to_string(),
                 PendingRecall {
@@ -357,5 +466,53 @@ impl ActiveRecallManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         lock.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_active_recall_ttl_sweep() {
+        let manager = ActiveRecallManager::new();
+        assert_eq!(manager.pending_count(), 0);
+
+        let now = 100_000;
+        {
+            let mut lock = manager
+                .pending_challenges
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            // Challenge 1: asked at now - 700s (expired: 700 > 600)
+            lock.insert(
+                "sess_old".to_string(),
+                PendingRecall {
+                    fact_key: "old_key".to_string(),
+                    expected_answer: "old_ans".to_string(),
+                    asked_at_ts: now - 700,
+                },
+            );
+            // Challenge 2: asked at now - 100s (fresh: 100 < 600)
+            lock.insert(
+                "sess_fresh".to_string(),
+                PendingRecall {
+                    fact_key: "fresh_key".to_string(),
+                    expected_answer: "fresh_ans".to_string(),
+                    asked_at_ts: now - 100,
+                },
+            );
+        }
+
+        assert_eq!(manager.pending_count(), 2);
+        manager.sweep_expired(now);
+        assert_eq!(manager.pending_count(), 1);
+
+        let lock = manager
+            .pending_challenges
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(lock.contains_key("sess_fresh"));
+        assert!(!lock.contains_key("sess_old"));
     }
 }

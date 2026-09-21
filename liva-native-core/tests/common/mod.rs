@@ -8,6 +8,11 @@
 use rodio::{Decoder, Source};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+/// Global environment mutex ensuring serialized execution of integration tests
+/// that mutate process-wide environment variables (`std::env::set_var` / `remove_var`).
+pub static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// Resolve the Parakeet model and vocab paths, whether the test runs from the crate directory
 /// or from the workspace root.

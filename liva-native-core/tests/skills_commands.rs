@@ -29,7 +29,7 @@ fn state_test() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt::SttManager::new("non-existent-model")),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm::LlamaRouterManager::new(2048, 0).expect("LLM manager")),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),

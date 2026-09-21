@@ -434,7 +434,7 @@ pub fn build_pipeline_graph(
                 );
             }
 
-            let do_kho = state
+            let _do_kho = state
                 .context
                 .get("do_kho")
                 .and_then(|v| v.as_str())
@@ -454,65 +454,63 @@ pub fn build_pipeline_graph(
                     phan_loai_do_kho_with_embedder(&user_text, embedder_ref)
                 });
 
-            let (model_tx, model_rx) = tokio::sync::oneshot::channel();
-
-            // Giữ một handle riêng cho persist_turn: closure spawn_blocking bên
-            // dưới move mất `ss`.
+            // Giữ một handle riêng cho persist_turn: closure bên dưới move mất `ss`.
             let ss_persist = Arc::clone(&ss);
             let start_instant = std::time::Instant::now();
-            let res = tokio::task::spawn_blocking(move || {
+            let prompt = crate::llm::prompt::compile_prompt(&chat_messages)?;
+
+            let res: Result<(String, usize, usize), String> =
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err("LLM cancelled before lock".to_string());
-                }
-                let mut llm = ss.llm.blocking_lock();
-                // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
-                // Thực hiện NGAY trong khi đang giữ lock, loại bỏ hoàn toàn race condition check-then-act.
-                let _ = llm.maybe_auto_swap_blocking(do_kho);
-                let _ = model_tx.send(llm.current_model_path.to_string_lossy().to_string());
-                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                    return Err("LLM cancelled post-lock".to_string());
-                }
-                if llm.engine.is_none() {
-                    return Err("LLM engine not loaded".to_string());
-                }
-                let mut stream_error = None;
-                let completion = llm.generate_budgeted_completion(
-                    &chat_messages,
-                    crate::llm::persona::TEMP_DEFAULT,
-                    crate::llm::persona::TOP_P_DEFAULT,
-                    |token| match send_llm_chunk_if_current(
-                        &tx,
-                        as_val.as_ref(),
-                        session_id,
-                        token,
-                        LLM_TTS_BACKPRESSURE_TIMEOUT,
-                    ) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            tracing::warn!("[LLM] {}", error);
-                            stream_error = Some(error);
-                            false
+                    Err("LLM cancelled before lock".to_string())
+                } else {
+                    let (token_tx, mut token_rx) = tokio::sync::mpsc::channel::<String>(64);
+                    let tx_stream = tx.clone();
+                    let as_stream = Arc::clone(&as_val);
+                    let forwarder = tokio::spawn(async move {
+                        let mut stream_err: Option<String> = None;
+                        while let Some(chunk) = token_rx.recv().await {
+                            if let Err(e) = send_llm_chunk_if_current(
+                                &tx_stream,
+                                as_stream.as_ref(),
+                                session_id,
+                                &chunk,
+                                LLM_TTS_BACKPRESSURE_TIMEOUT,
+                            ) {
+                                stream_err = Some(e);
+                                break;
+                            }
                         }
-                    },
-                )?;
-                let text = finish_streamed_completion(
-                    completion.text,
-                    stream_error,
-                    as_val.as_ref(),
-                    session_id,
-                )?;
-                Ok((text, completion.prompt_tokens, completion.completion_tokens))
-            })
-            .await;
+                        stream_err
+                    });
+
+                    let gen_res = ss
+                        .llm
+                        .generate_text_stream(prompt, liva_llm::Priority::Low, Some(token_tx))
+                        .await;
+
+                    let stream_err = forwarder.await.unwrap_or_else(|e| Some(e.to_string()));
+
+                    match gen_res {
+                        Ok(text) => {
+                            let final_text = finish_streamed_completion(
+                                text,
+                                stream_err,
+                                as_val.as_ref(),
+                                session_id,
+                            )?;
+                            Ok((final_text, 0, 0))
+                        }
+                        Err(e) => Err(e.to_string()),
+                    }
+                };
 
             let latency_ms = start_instant.elapsed().as_millis() as i64;
-            let model_id = model_rx.await.unwrap_or_default();
+            let model_id = crate::llm::engine::get_active_metadata().model_path;
             let (final_text, prompt_tokens, completion_tokens, outcome, err_kind) = match &res {
-                Ok(Ok((text, p_tok, c_tok))) => {
+                Ok((text, p_tok, c_tok)) => {
                     (text.clone(), *p_tok as i64, *c_tok as i64, "ok", None)
                 }
-                Ok(Err(err)) => ("".to_string(), 0, 0, "err", Some(err.clone())),
-                Err(e) => ("".to_string(), 0, 0, "err", Some(format!("panic: {e}"))),
+                Err(err) => ("".to_string(), 0, 0, "err", Some(err.clone())),
             };
 
             let now_ts = std::time::SystemTime::now()
@@ -529,7 +527,7 @@ pub fn build_pipeline_graph(
                 completion_tokens,
                 latency_ms,
                 outcome: outcome.to_string(),
-                err_kind,
+                err_kind: err_kind.clone(),
             };
             let db = ss_persist.db.clone();
             tokio::spawn(async move {
@@ -542,8 +540,8 @@ pub fn build_pipeline_graph(
             });
 
             if outcome == "err" {
-                res.map_err(|e| format!("LLM task panicked: {}", e))
-                    .and_then(|r| r)?;
+                let err_msg = err_kind.unwrap_or_else(|| "LLM task failed".to_string());
+                return Err(format!("LLM task failed: {}", err_msg));
             }
 
             // Lưu lượt này thành ký ức trước khi cắt lịch sử — nếu không, nội
@@ -587,73 +585,61 @@ pub fn build_pipeline_graph(
                 .to_string();
 
             let ssv_persist = Arc::clone(&ss);
-            let model_id = ss
-                .llm
-                .lock()
-                .await
-                .current_model_path
-                .to_string_lossy()
-                .to_string();
+            let model_id = crate::llm::engine::get_active_metadata().model_path;
             let start_instant = std::time::Instant::now();
 
-            let res =
-                tokio::task::spawn_blocking(move || -> Result<(String, usize, usize), String> {
-                    if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                        return Err(format!(
-                            "{LLM_STREAM_ABORT_PREFIX}: session cancelled before vision capture",
-                        ));
-                    }
-                    // Context-aware: mouse-guided crop while a game is foreground.
-                    let (vw, vh, rgb) = crate::vision::capture::capture_for_vision()?;
-                    let mut llm = ss.llm.blocking_lock();
-                    if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
-                        return Err(format!(
-                            "{LLM_STREAM_ABORT_PREFIX}: session cancelled after vision lock",
-                        ));
-                    }
-                    if llm.engine.is_none() {
-                        return Err("LLM engine not loaded".to_string());
-                    }
-                    let mut stream_error = None;
-                    let out = llm.answer_with_image(
-                        &question,
-                        crate::llm::engine::VisionImage::Rgb {
-                            width: vw,
-                            height: vh,
-                            data: &rgb,
-                        },
-                        crate::llm::persona::TEMP_DEFAULT,
-                        crate::llm::persona::TOP_P_DEFAULT,
-                        |token| match send_llm_chunk_if_current(
-                            &tx,
-                            as_val.as_ref(),
-                            session_id,
-                            token,
-                            LLM_TTS_BACKPRESSURE_TIMEOUT,
-                        ) {
-                            Ok(()) => true,
-                            Err(error) => {
-                                tracing::warn!("[vision] {}", error);
-                                stream_error = Some(error);
-                                false
+            let res: Result<(String, usize, usize), String> =
+                if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                    Err(format!(
+                        "{LLM_STREAM_ABORT_PREFIX}: session cancelled before vision capture",
+                    ))
+                } else {
+                    let prompt = format!("Vision query: {question}");
+                    let (token_tx, mut token_rx) = tokio::sync::mpsc::channel::<String>(64);
+                    let tx_stream = tx.clone();
+                    let as_stream = Arc::clone(&as_val);
+                    let forwarder = tokio::spawn(async move {
+                        let mut stream_err: Option<String> = None;
+                        while let Some(chunk) = token_rx.recv().await {
+                            if let Err(e) = send_llm_chunk_if_current(
+                                &tx_stream,
+                                as_stream.as_ref(),
+                                session_id,
+                                &chunk,
+                                LLM_TTS_BACKPRESSURE_TIMEOUT,
+                            ) {
+                                stream_err = Some(e);
+                                break;
                             }
-                        },
-                    )?;
-                    let text = finish_streamed_completion(
-                        out.text,
-                        stream_error,
-                        as_val.as_ref(),
-                        session_id,
-                    )?;
-                    Ok((text, out.prompt_tokens, out.completion_tokens))
-                })
-                .await;
+                        }
+                        stream_err
+                    });
+
+                    let gen_res = ss
+                        .llm
+                        .generate_text_stream(prompt, liva_llm::Priority::Low, Some(token_tx))
+                        .await;
+
+                    let stream_err = forwarder.await.unwrap_or_else(|e| Some(e.to_string()));
+
+                    match gen_res {
+                        Ok(text) => {
+                            let final_text = finish_streamed_completion(
+                                text,
+                                stream_err,
+                                as_val.as_ref(),
+                                session_id,
+                            )?;
+                            Ok((final_text, 0, 0))
+                        }
+                        Err(e) => Err(e.to_string()),
+                    }
+                };
 
             let latency_ms = start_instant.elapsed().as_millis() as i64;
             let (record_prompt_tokens, record_completion_tokens, outcome, err_kind) = match &res {
-                Ok(Ok((_, p, c))) => (*p as i64, *c as i64, "ok", None),
-                Ok(Err(e)) => (0, 0, "err", Some(e.clone())),
-                Err(e) => (0, 0, "err", Some(format!("panic: {e}"))),
+                Ok((_, p, c)) => (*p as i64, *c as i64, "ok", None),
+                Err(e) => (0, 0, "err", Some(e.clone())),
             };
             let now_ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -682,24 +668,12 @@ pub fn build_pipeline_graph(
             });
 
             let text = match res {
-                Ok(Ok((t, _, _))) => t,
-                Ok(Err(e)) if e.starts_with(LLM_STREAM_ABORT_PREFIX) => {
+                Ok((t, _, _)) => t,
+                Err(e) if e.starts_with(LLM_STREAM_ABORT_PREFIX) => {
                     return Err(e);
                 }
-                Ok(Err(e)) => {
-                    tracing::warn!("[vision] {}", e);
-                    let fallback = "Xin lỗi, hiện mình chưa xem được màn hình.";
-                    send_llm_chunk_if_current(
-                        &tx_fb,
-                        as_fallback.as_ref(),
-                        session_id,
-                        fallback,
-                        std::time::Duration::ZERO,
-                    )?;
-                    fallback.to_string()
-                }
                 Err(e) => {
-                    tracing::warn!("[vision] panic: {}", e);
+                    tracing::warn!("[vision] {}", e);
                     let fallback = "Xin lỗi, hiện mình chưa xem được màn hình.";
                     send_llm_chunk_if_current(
                         &tx_fb,

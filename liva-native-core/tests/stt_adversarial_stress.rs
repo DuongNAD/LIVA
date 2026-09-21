@@ -6,7 +6,7 @@ use liva_native_core::stt::{StreamingTranscript, SttManager};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-mod common;
+use crate::common;
 
 use common::{find_audio_file, load_audio_wav_16k, resolve_model_paths};
 

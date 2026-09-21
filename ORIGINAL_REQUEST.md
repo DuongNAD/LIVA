@@ -999,3 +999,74 @@ Tiến hành cập nhật, refactor và viết lại mã nguồn theo kiến tr�
 - [ ] Phải có các file README hoặc tài liệu cập nhật hướng dẫn cách chạy dự án theo cấu trúc mới.
 - [ ] Code mới phải biên dịch/chạy được mà không bị lỗi syntax cơ bản.
 
+## 2026-09-20T05:17:31Z
+
+> Status: Launched
+> Requested team: Use a very large team of agents.
+
+Execute the remaining steps of the LIVA-REMAKE-2026 architecture refactoring. Focus on replacing WebSocket with Tauri v2 IPC channels, finalizing the LLM priority queue actor, and unifying the integration tests into a single CLI tool to make the system highly performant and stable. Use a very large team of agents.
+
+Working directory: e:\Project\01_AI_Agents\LIVA
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Tauri v2 IPC Migration
+Remove all traces of `websocket.rs` and the local TCP socket from `liva-native-core` and the Vue frontend. Replace it with Native Tauri v2 `Channel` IPC for zero-latency audio and frame transmission.
+
+### R2. LLM Priority Queue Integration
+Wire up the newly created `liva-llm` priority actor (High/Normal/Low) into the `liva-native-core` `AppState`, completely replacing the old `tokio::sync::Mutex` blocking router manager.
+
+### R3. CI and CLI Unification
+Consolidate the existing integration tests and probe scripts into the `liva-tools` CLI and `tests/harness.rs` to massively reduce the target directory footprint.
+
+## Verification Resources
+The team must write new automated test scripts (e.g., using `cargo test`, `vitest`, or bash probe scripts) specifically designed to verify that the IPC Channels and LLM Priority queues are functioning correctly.
+
+## Acceptance Criteria
+
+### Code Quality and Integrity
+- [ ] `cargo check --workspace` must pass with code 0 without any warnings about unresolved imports.
+- [ ] No occurrences of `std::net::TcpListener` or `tungstenite::WebSocket` should remain in the `liva-native-core` codebase related to the UI communication bridge.
+
+### Programmatic Verification
+- [ ] A new automated test or harness script must exist and successfully execute to verify that a message can be queued and processed by the `LlmActor`.
+- [ ] A new test or script must exist to verify that the Tauri IPC Channel is registered correctly in the command endpoints.
+
+## 2026-09-20T18:02:12Z
+
+Nghiên cứu, nâng cấp và tối ưu hoá toàn diện hệ điều hành trợ lý ảo cá nhân LIVA (Local Intelligent Virtual Assistant) theo tiêu chuẩn Production-ready: tối ưu hiệu năng và kiểm soát cứng trần tài nguyên (RAM ≤ 4.0 GB) cho Rust Core Engine, hoàn thiện trải nghiệm tương tác 3D Avatar (VRM OffscreenCanvas worker/Tauri v2), và củng cố độ tin cậy của toàn bộ hệ sinh thái tác tử (Agentic Workflows).
+
+Working directory: e:/Project/01_AI_Agents/LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Tối ưu hoá Runtime & Kiểm soát Tài nguyên Core Engine
+Tối ưu hiệu năng thông lượng (throughput) và giảm thiểu tối đa độ trễ của các crate backend trong workspace Rust (crates/liva-*), đảm bảo hệ thống vận hành ổn định trong giới hạn RAM ≤ 4.0 GB (mục tiêu steady-state ~ 3.0 GB) và VRAM ≤ 5.1 GB. Loại bỏ triệt để hiện tượng lock contention, memory leak và các điểm nghẽn SSD I/O.
+
+### R2. Hoàn thiện Trải nghiệm Giao diện & Avatar 3D
+Tối ưu hóa pipeline render Three.js/VRM chạy độc lập trong Web Worker thông qua OffscreenCanvas, duy trì ổn định 60 FPS mà không làm nghẽn main UI thread. Đồng bộ hóa streaming token, viseme khẩu hình và phản hồi âm thanh qua kênh native IPC Tauri v2 độ trễ thấp.
+
+### R3. Củng cố Hệ sinh thái Agentic Workflows & Xử lý Nợ Kỹ thuật
+Hoàn thiện kiến trúc luồng tác tử (DAG workflows), giải quyết triệt để các tồn đọng và nợ kỹ thuật được ghi nhận trong backlog (VAN-DE-CAN-XU-LY.md và PROJECT.md), đảm bảo các tính năng hoạt động gắn kết, tin cậy và không tạo cảnh báo giả.
+
+### R4. Tuân thủ Quy chuẩn Hạ tầng & An toàn Git
+Tất cả các tác vụ biên dịch và kiểm thử phải thực thi tuần tự với tài nguyên giới hạn (cargo với cờ -j 2, -- --test-threads 2). Tuyệt đối tuân thủ ranh giới an toàn: không tự ý thực hiện các lệnh remote Git (git push, git pull, git commit).
+
+## Acceptance Criteria
+
+### Hiệu năng & Ràng buộc Tài nguyên
+- [ ] Mức tiêu thụ RAM toàn hệ thống ở trạng thái hoạt động bình thường không vượt quá 4.0 GB.
+- [ ] Vòng lặp render Avatar 3D duy trì 60 FPS, không drop frame khi nhận streaming token hoặc thực thi tác vụ nền.
+
+### Kiểm thử Tự động & Mã nguồn
+- [ ] 100% các bài test trong workspace (cargo test --workspace) vượt qua thành công với 0 lỗi fail.
+- [ ] Bộ kiểm tra linter Rust (cargo clippy --workspace --all-targets -- -D warnings) đạt 0 cảnh báo.
+- [ ] Mã nguồn Rust tuân thủ định dạng chuẩn (cargo fmt --all -- --check pass).
+- [ ] Không có lỗi typecheck giao diện (npx vue-tsc --noEmit -p tsconfig.app.json exit 0).
+- [ ] Toàn bộ bài test frontend (npm run test:coverage -w liva-ui) vượt qua thành công.
+
+### Kiểm định Hệ thống & Trợ lý
+- [ ] Bộ công cụ chuẩn đoán hệ sinh thái (npm run doctor và npm run skills:audit) đạt trạng thái hợp lệ 100%.
+- [ ] Các điểm nghẽn hoặc cảnh báo giả trong VAN-DE-CAN-XU-LY.md được giải quyết dứt điểm và có báo cáo đối soát cụ thể.

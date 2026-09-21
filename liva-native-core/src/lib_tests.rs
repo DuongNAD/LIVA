@@ -505,9 +505,7 @@ mod system_status_tests {
             stt: tokio::sync::Mutex::new(stt_manager),
             tts: tokio::sync::Mutex::new(None),
             tts_player: tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(
-                llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
-            ),
+            llm: AppState::mock_llm(),
             vad: tokio::sync::Mutex::new(None),
             denoiser: tokio::sync::Mutex::new(None),
             turn_shadow: tokio::sync::Mutex::new(None),
@@ -718,7 +716,7 @@ mod system_status_tests {
     #[tokio::test]
     async fn lock_ban_thi_bao_busy_chu_khong_dung_cho() {
         let state = state_toi_thieu();
-        let giu = state.llm.lock().await; // mô phỏng một lượt sinh chữ đang chạy
+        let giu = crate::llm::engine::GeneratingGuard::enter(); // mô phỏng một lượt sinh chữ đang chạy
 
         let s = tokio::time::timeout(
             std::time::Duration::from_secs(5),

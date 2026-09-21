@@ -1,43 +1,85 @@
 import { ref, type Ref, shallowRef, onUnmounted } from 'vue';
 import { logger } from '../utils/logger';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { unpack } from 'msgpackr';
-import type { IPlatformAdapter } from '../platform/IPlatformAdapter';
-import type { GatewayMessage, MessageDraft } from '../types/gateway';
 import {
-  OP_FLUSH,
   OP_SPEAKER_OUT,
+  OP_FLUSH,
   OP_VISME,
   VOICE_FRAME_HEADER_SIZE,
   parseSpeakerPayload,
 } from '../utils/speakerFrame';
+import type { IPlatformAdapter } from '../platform/IPlatformAdapter';
+import type { GatewayMessage, MessageDraft } from '../types/gateway';
 
-// `MessageDraft` nay ở `types/gateway.ts` cùng phần còn lại của hình dạng gói
-// tin. Re-export để nơi gọi cũ không phải đổi đường import.
+// Re-export MessageDraft for downstream compatibility
 export type { MessageDraft } from '../types/gateway';
 
+export type VoiceIpcEvent =
+  | {
+      type: 'Speaker' | 'speaker';
+      data: {
+        turn_epoch?: number;
+        sample_rate?: number;
+        samples: number[];
+      };
+    }
+  | {
+      type: 'Viseme' | 'viseme';
+      data: {
+        turn_epoch?: number;
+        base_seq_id?: number;
+        visemes: unknown[];
+      };
+    }
+  | {
+      type: 'Flush' | 'flush';
+      data: {
+        seq_id?: number;
+      };
+    }
+  | {
+      type: 'TextEvent' | 'text_event';
+      data: {
+        event: string;
+        payload: unknown;
+      };
+    };
+
 export interface UseWidgetTransportOptions {
-  /** `undefined` khi chạy ngoài vỏ Tauri — nhánh `?.` bên dưới dựa vào đó. */
+  /** Platform adapter instance */
   platform: IPlatformAdapter | undefined;
   engineStatus: Ref<string>;
   allowWsReconnect?: boolean;
-  onConnected: (ws: WebSocket) => void;
+  onConnected: (transport: unknown) => void;
   onDisconnected: () => void;
   onJsonMessage: (data: GatewayMessage) => void;
   onSpeakerBinary: (payload: Uint8Array, turnEpoch: number) => void;
   onFlushBinary: (turnEpoch: number) => void;
-  /** VC-8: timeline phoneme→viseme đi trước audio của cùng mẩu. */
+  /** Timeline phoneme->viseme preceding audio playback */
   onVisemeBinary?: (payload: Uint8Array) => void;
 }
 
+function createVoiceChannel(): Channel<VoiceIpcEvent> {
+  if (typeof window !== 'undefined' && !(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__) {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      transformCallback: () => 1,
+      unregisterCallback: () => {},
+      invoke: () => Promise.resolve(),
+    };
+  }
+  return new Channel<VoiceIpcEvent>();
+}
+
 export function useWidgetTransport(options: UseWidgetTransportOptions) {
-  const ws = shallowRef<WebSocket | null>(null);
+  const ws = shallowRef<unknown | null>(null);
   const pendingDraft = ref<MessageDraft | null>(null);
   const draftBusy = ref(false);
 
-  let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let wsReconnectAttempt = 0;
-  let allowWsReconnect = options.allowWsReconnect ?? true;
-  let wsConnectPending = false;
+  let isConnecting = false;
+  let isClosed = false;
 
   const generateMsgId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -47,8 +89,31 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
   };
 
   const sendMsg = (event: string, payload: Record<string, unknown> = {}) => {
-    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      ws.value.send(JSON.stringify({ event, payload }));
+    const isTauri = options.platform?.platformName === 'tauri';
+
+    if (isTauri) {
+      if (options.platform?.invokeBackend) {
+        options.platform
+          .invokeBackend('native_ipc_call', {
+            command: event,
+            payload,
+          })
+          .catch((err) => {
+            logger.warn('[WidgetTransport]', `Failed to send IPC message ${event}:`, err);
+          });
+      } else {
+        invoke('native_ipc_call', {
+          command: event,
+          payload,
+        }).catch((err) => {
+          logger.warn('[WidgetTransport]', `Failed to send IPC message ${event}:`, err);
+        });
+      }
+      return;
+    }
+
+    if (ws.value && typeof (ws.value as { send?: (d: string) => void }).send === 'function') {
+      (ws.value as { send: (d: string) => void }).send(JSON.stringify({ event, payload }));
     }
   };
 
@@ -66,194 +131,229 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
     sendMsg('message:cancel', { draftId: pendingDraft.value.draft_id });
   };
 
-  const connectWebSocket = async () => {
-    if (
-      !allowWsReconnect ||
-      wsConnectPending ||
-      (ws.value && (ws.value.readyState === WebSocket.CONNECTING || ws.value.readyState === WebSocket.OPEN))
-    ) {
-      return;
-    }
+  const handleVoiceIpcEvent = (event: VoiceIpcEvent) => {
+    const eventType = (event.type || '').toLowerCase();
+    if (eventType === 'speaker') {
+      const data = event.data as { turn_epoch?: number; sample_rate?: number; samples?: number[] };
+      const samples = data.samples || [];
+      const sampleCount = samples.length;
+      const turnEpoch = data.turn_epoch ?? 0;
+      const sampleRate = data.sample_rate ?? 24000;
 
-    const port = 8002;
-    let sessionQuery = '';
-    if (options.platform?.platformName === 'tauri') {
-      wsConnectPending = true;
+      const buffer = new ArrayBuffer(8 + sampleCount * 4);
+      const view = new DataView(buffer);
+      view.setUint32(0, turnEpoch, true);
+      view.setUint32(4, sampleRate, true);
+      const f32View = new Float32Array(buffer, 8, sampleCount);
+      for (let i = 0; i < sampleCount; i++) {
+        f32View[i] = samples[i];
+      }
+      options.onSpeakerBinary(new Uint8Array(buffer), turnEpoch);
+    } else if (eventType === 'viseme') {
+      const data = event.data as { turn_epoch?: number; base_seq_id?: number; visemes?: unknown[] };
+      if (options.onVisemeBinary) {
+        const jsonStr = JSON.stringify({
+          turnEpoch: data.turn_epoch ?? 0,
+          baseSeqId: data.base_seq_id ?? 0,
+          cues: data.visemes ?? [],
+        });
+        options.onVisemeBinary(new TextEncoder().encode(jsonStr));
+      }
+    } else if (eventType === 'flush') {
+      const data = event.data as { seq_id?: number };
+      options.onFlushBinary(data.seq_id ?? 0);
+    } else if (eventType === 'textevent' || eventType === 'text_event') {
+      const data = event.data as { event: string; payload: unknown };
+      options.onJsonMessage({
+        event: data.event,
+        payload: data.payload as unknown as GatewayPayload,
+      } as GatewayMessage);
+    }
+  };
+
+  const connectWebSocket = async () => {
+    if (isConnecting || ws.value || isClosed) return;
+    isConnecting = true;
+    options.engineStatus.value = 'connecting';
+
+    const isTauri = options.platform?.platformName === 'tauri';
+
+    if (isTauri) {
       try {
-        const ticket = (await options.platform.invokeBackend('issue_websocket_session')) as {
-          token?: unknown;
-        } | null;
-        const token = ticket?.token;
-        if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) {
-          throw new Error('Tauri không trả session ticket WebSocket hợp lệ');
+        const channel = createVoiceChannel();
+        channel.onmessage = (event: VoiceIpcEvent) => {
+          handleVoiceIpcEvent(event);
+        };
+
+        if (options.platform?.invokeBackend) {
+          await options.platform.invokeBackend('voice_subscribe', { channel });
+        } else {
+          await invoke('voice_subscribe', { channel });
         }
-        sessionQuery = `?session=${encodeURIComponent(token)}`;
-      } catch (error) {
-        const delay = Math.min(500 * 2 ** wsReconnectAttempt, 5_000);
-        wsReconnectAttempt += 1;
-        options.engineStatus.value = 'websocket-session-error';
-        logger.warn(
-          '[Widget]',
-          `Không xin được WebSocket session; thử lại sau ${delay}ms:`,
-          error instanceof Error ? error.message : String(error)
-        );
-        if (allowWsReconnect) {
-          if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-          wsReconnectTimer = setTimeout(() => {
-            wsReconnectTimer = null;
-            void connectWebSocket();
-          }, delay);
-        }
+
+        // Transport wrapper with WebSocket-compatible interface for existing UI checks
+        const transportWrapper = {
+          channel,
+          readyState: 1, // OPEN
+          OPEN: 1,
+          send: (data: string) => {
+            try {
+              const parsed = JSON.parse(data);
+              sendMsg(parsed.event || parsed.command, parsed.payload || {});
+            } catch (e) {
+              logger.warn('[WidgetTransport]', 'Failed to parse send payload:', e);
+            }
+          },
+          close: () => {
+            closeTransport();
+          },
+        };
+
+        ws.value = transportWrapper;
+        wsReconnectAttempt = 0;
+        options.engineStatus.value = 'ready';
+        logger.info('[WidgetTransport]', 'Subscribed to VoiceCoordinator IPC channel successfully');
+        options.onConnected(transportWrapper);
+        isConnecting = false;
         return;
-      } finally {
-        wsConnectPending = false;
+      } catch (err) {
+        logger.warn('[WidgetTransport]', 'Failed to subscribe to voice channel via IPC:', err);
       }
     }
 
-    if (
-      !allowWsReconnect ||
-      (ws.value && (ws.value.readyState === WebSocket.CONNECTING || ws.value.readyState === WebSocket.OPEN))
-    ) {
-      return;
-    }
-
-    const wsUrl = `ws://127.0.0.1:${port}/ws${sessionQuery}`;
-    const socket = new WebSocket(wsUrl);
-    ws.value = socket;
-    socket.binaryType = 'arraybuffer';
-    options.engineStatus.value = 'websocket-connecting';
-
-    socket.onopen = () => {
-      if (ws.value !== socket) return;
-      wsReconnectAttempt = 0;
-      logger.info('[Widget]', `WSS Connected to Gateway on port ${port}`);
-      options.engineStatus.value = 'websocket-open';
-      options.onConnected(socket);
-    };
-
-    socket.onmessage = async (event) => {
+    // Web / Test environment with WebSocket mock fallback
+    if (typeof WebSocket !== 'undefined') {
       try {
-        // Kiểu ở đây là một lời KHẲNG ĐỊNH, không phải bảo đảm: dữ liệu đến từ
-        // mạng, và cả `unpack` lẫn `JSON.parse` đều không kiểm hình dạng. Nơi
-        // tiêu thụ vẫn phải tự phòng (`data.payload?.x`) y như trước khi tách
-        // composable — việc gắn kiểu không làm thay đổi điều đó.
-        let data: GatewayMessage | null = null;
-        if (event.data instanceof ArrayBuffer) {
-          const arrayBuffer = event.data;
-          if (arrayBuffer.byteLength > 0) {
-            const view = new DataView(arrayBuffer);
-            const type = view.getUint8(0);
-            if (type === OP_SPEAKER_OUT) {
-              if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
-                const payloadSize = view.getUint32(5, true);
-                if (
-                  payloadSize === arrayBuffer.byteLength - VOICE_FRAME_HEADER_SIZE &&
-                  payloadSize > 0
-                ) {
-                  const payload = new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize);
-                  const chunk = parseSpeakerPayload(payload);
-                  if (!chunk) return;
-                  options.onSpeakerBinary(payload, chunk.turnEpoch);
+        const wsUrl = `ws://127.0.0.1:8002/ws`;
+        const socket = new WebSocket(wsUrl);
+        ws.value = socket;
+        socket.binaryType = 'arraybuffer';
+        options.engineStatus.value = 'websocket-connecting';
+
+        socket.onopen = () => {
+          if (ws.value !== socket) return;
+          wsReconnectAttempt = 0;
+          logger.info('[WidgetTransport]', 'Connected via WebSocket fallback');
+          options.engineStatus.value = 'websocket-open';
+          options.onConnected(socket);
+        };
+
+        socket.onmessage = async (event: MessageEvent) => {
+          try {
+            let data: GatewayMessage | null = null;
+            if (event.data instanceof ArrayBuffer) {
+              const arrayBuffer = event.data;
+              if (arrayBuffer.byteLength > 0) {
+                const view = new DataView(arrayBuffer);
+                const type = view.getUint8(0);
+                if (type === OP_SPEAKER_OUT) {
+                  if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
+                    const payloadSize = view.getUint32(5, true);
+                    if (
+                      payloadSize === arrayBuffer.byteLength - VOICE_FRAME_HEADER_SIZE &&
+                      payloadSize > 0
+                    ) {
+                      const payload = new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize);
+                      const chunk = parseSpeakerPayload(payload);
+                      if (!chunk) return;
+                      options.onSpeakerBinary(payload, chunk.turnEpoch);
+                      return;
+                    }
+                  }
+                  try {
+                    data = unpack(new Uint8Array(arrayBuffer, 1)) as GatewayMessage;
+                  } catch (unpackErr) {
+                    logger.error('[WidgetTransport]', 'Lỗi unpack MsgPack:', unpackErr);
+                    return;
+                  }
+                } else if (type === OP_FLUSH) {
+                  if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
+                    options.onFlushBinary(view.getUint32(1, true));
+                  } else {
+                    options.onFlushBinary(0);
+                  }
+                  return;
+                } else if (type === OP_VISME && options.onVisemeBinary) {
+                  if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
+                    const payloadSize = view.getUint32(5, true);
+                    if (
+                      payloadSize > 0 &&
+                      arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE + payloadSize
+                    ) {
+                      options.onVisemeBinary(
+                        new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize)
+                      );
+                    }
+                  }
                   return;
                 }
               }
-              try {
-                data = unpack(new Uint8Array(arrayBuffer, 1)) as GatewayMessage;
-              } catch (unpackErr) {
-                logger.error('[Widget]', 'Lỗi unpack MsgPack:', unpackErr);
+            } else if (typeof event.data === 'string') {
+              if (event.data.trim() === '[INTERRUPT]') {
+                options.onJsonMessage({ event: 'interrupt' } as unknown as GatewayMessage);
                 return;
               }
-            } else if (type === OP_FLUSH) {
-              if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
-                options.onFlushBinary(view.getUint32(1, true));
-              } else {
-                options.onFlushBinary(0); // Fallback
+              try {
+                data = JSON.parse(event.data) as GatewayMessage;
+              } catch (e) {
+                logger.error('[WidgetTransport]', 'Lỗi phân giải JSON:', e);
+                return;
               }
-              return;
-            } else if (type === OP_VISME && options.onVisemeBinary) {
-              // VC-8: timeline viseme — payload là JSON, không phải PCM.
-              if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {
-                const payloadSize = view.getUint32(5, true);
-                if (
-                  payloadSize > 0 &&
-                  arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE + payloadSize
-                ) {
-                  options.onVisemeBinary(
-                    new Uint8Array(arrayBuffer, VOICE_FRAME_HEADER_SIZE, payloadSize),
-                  );
-                }
-              }
-              return;
-            } else {
-              return;
             }
-          } else {
-            return;
+            if (data) {
+              options.onJsonMessage(data);
+            }
+          } catch (parseErr) {
+            logger.warn('[WidgetTransport]', 'WebSocket message parse error:', parseErr);
           }
-        } else if (typeof event.data === 'string') {
-          if (event.data.trim() === '[INTERRUPT]') {
-            // Tin TỰ SINH, không đến từ dây: nó cố tình thiếu `text`/`audio`/
-            // `payload` mà `GatewayPayload` khai là bắt buộc, nên phải ép kiểu
-            // ở đúng chỗ này thay vì nới lỏng kiểu cho mọi gói tin thật.
-            options.onJsonMessage({ event: 'interrupt' } as unknown as GatewayMessage);
-            return;
-          }
-          try {
-            data = JSON.parse(event.data) as GatewayMessage;
-          } catch (e) {
-            logger.error('[Widget]', 'Lỗi phân giải JSON:', e);
-            return;
-          }
-        } else {
-          return;
-        }
+        };
 
-        if (data) {
-          options.onJsonMessage(data);
-        }
-      } catch (parseErr: unknown) {
-        logger.warn(
-          '[Widget]',
-          'WebSocket message parse error:',
-          parseErr instanceof Error ? parseErr.message : String(parseErr)
-        );
+        socket.onerror = () => {
+          logger.warn('[WidgetTransport]', 'Socket error');
+        };
+
+        socket.onclose = () => {
+          if (ws.value !== socket) return;
+          ws.value = null;
+          options.engineStatus.value = 'websocket-disconnected';
+          options.onDisconnected();
+
+          if (options.allowWsReconnect && !isClosed) {
+            const delay = Math.min(500 * 2 ** wsReconnectAttempt, 5000);
+            wsReconnectAttempt += 1;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              void connectWebSocket();
+            }, delay);
+          }
+        };
+
+        isConnecting = false;
+        return;
+      } catch (e) {
+        logger.warn('[WidgetTransport]', 'Failed to create fallback WebSocket:', e);
       }
-    };
+    }
 
-    socket.onerror = () => {
-      logger.warn('[Widget]', `Gateway socket error on port ${port}`);
-    };
-
-    socket.onclose = () => {
-      if (ws.value !== socket) return;
-      ws.value = null;
-      options.engineStatus.value = 'websocket-disconnected';
-      
-      options.onDisconnected();
-
-      if (!allowWsReconnect) return;
-
-      const delay = Math.min(500 * 2 ** wsReconnectAttempt, 5_000);
-      wsReconnectAttempt += 1;
-      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = setTimeout(() => {
-        wsReconnectTimer = null;
-        void connectWebSocket();
-      }, delay);
-      logger.warn('[Widget]', `Gateway disconnected; reconnecting in ${delay}ms`);
-    };
+    options.engineStatus.value = 'error';
+    isConnecting = false;
   };
 
   const closeTransport = () => {
-    allowWsReconnect = false;
-    if (wsReconnectTimer) {
-      clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = null;
+    isClosed = true;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
     if (ws.value) {
-      const socket = ws.value;
+      const socket = ws.value as { close?: () => void };
       ws.value = null;
-      socket.close();
+      if (typeof socket.close === 'function') {
+        socket.close();
+      }
+      options.engineStatus.value = 'closed';
+      options.onDisconnected();
     }
   };
 

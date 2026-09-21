@@ -11,9 +11,6 @@ pub enum CommandPrincipal {
     TauriWidget,
     TauriDashboard,
     TauriSetup,
-    WebSocketWidget,
-    WebSocketDashboard,
-    WebSocketRemote,
     Telegram,
 }
 
@@ -125,25 +122,12 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "telemetry:summary",
 ];
 
-const REMOTE_COMMANDS: &[&str] = &[
-    "ping",
-    "status",
-    "llm:health_check",
-    "chat:completion",
-    "voice:stt_start",
-    "voice:stt_chunk",
-    "voice:stt_stop",
-    "voice:tts_speak",
-    "voice:tts_stop",
-];
-
 const TELEGRAM_COMMANDS: &[&str] = &["ping", "status", "chat:completion"];
 
 pub fn is_known_command(command: &str) -> bool {
     SETUP_COMMANDS.contains(&command)
         || WIDGET_COMMANDS.contains(&command)
         || DASHBOARD_COMMANDS.contains(&command)
-        || REMOTE_COMMANDS.contains(&command)
         || TELEGRAM_COMMANDS.contains(&command)
 }
 
@@ -151,13 +135,8 @@ pub fn authorize_command(principal: CommandPrincipal, command: &str) -> Result<(
     let allowed = match principal {
         CommandPrincipal::LocalCli | CommandPrincipal::Test => true,
         CommandPrincipal::TauriSetup => SETUP_COMMANDS.contains(&command),
-        CommandPrincipal::TauriWidget | CommandPrincipal::WebSocketWidget => {
-            WIDGET_COMMANDS.contains(&command)
-        }
-        CommandPrincipal::TauriDashboard | CommandPrincipal::WebSocketDashboard => {
-            DASHBOARD_COMMANDS.contains(&command)
-        }
-        CommandPrincipal::WebSocketRemote => REMOTE_COMMANDS.contains(&command),
+        CommandPrincipal::TauriWidget => WIDGET_COMMANDS.contains(&command),
+        CommandPrincipal::TauriDashboard => DASHBOARD_COMMANDS.contains(&command),
         CommandPrincipal::Telegram => TELEGRAM_COMMANDS.contains(&command),
     };
 
@@ -179,13 +158,7 @@ mod tests {
         assert!(
             authorize_command(CommandPrincipal::TauriDashboard, "get_preflight_status").is_ok()
         );
-        assert!(
-            authorize_command(CommandPrincipal::WebSocketDashboard, "get_preflight_status").is_ok()
-        );
         assert!(authorize_command(CommandPrincipal::TauriWidget, "get_preflight_status").is_err());
-        assert!(
-            authorize_command(CommandPrincipal::WebSocketRemote, "get_preflight_status").is_err()
-        );
     }
 
     #[test]
@@ -193,16 +166,7 @@ mod tests {
         assert!(
             authorize_command(CommandPrincipal::TauriDashboard, "import_avatar_folder").is_ok()
         );
-        assert!(
-            authorize_command(CommandPrincipal::WebSocketDashboard, "import_avatar_folder").is_ok()
-        );
         assert!(authorize_command(CommandPrincipal::TauriWidget, "import_avatar_folder").is_err());
-        assert!(
-            authorize_command(CommandPrincipal::WebSocketWidget, "import_avatar_folder").is_err()
-        );
-        assert!(
-            authorize_command(CommandPrincipal::WebSocketRemote, "import_avatar_folder").is_err()
-        );
         assert!(authorize_command(CommandPrincipal::Telegram, "import_avatar_folder").is_err());
     }
 
@@ -210,10 +174,7 @@ mod tests {
     fn toggle_skills_chi_mo_cho_dashboard() {
         for cmd in ["toggle_skill", "toggle_all_skills"] {
             assert!(authorize_command(CommandPrincipal::TauriDashboard, cmd).is_ok());
-            assert!(authorize_command(CommandPrincipal::WebSocketDashboard, cmd).is_ok());
             assert!(authorize_command(CommandPrincipal::TauriWidget, cmd).is_err());
-            assert!(authorize_command(CommandPrincipal::WebSocketWidget, cmd).is_err());
-            assert!(authorize_command(CommandPrincipal::WebSocketRemote, cmd).is_err());
             assert!(authorize_command(CommandPrincipal::Telegram, cmd).is_err());
         }
     }
@@ -226,10 +187,7 @@ mod tests {
             "delete_avatar_model",
         ] {
             assert!(authorize_command(CommandPrincipal::TauriDashboard, cmd).is_ok());
-            assert!(authorize_command(CommandPrincipal::WebSocketDashboard, cmd).is_ok());
             assert!(authorize_command(CommandPrincipal::TauriWidget, cmd).is_err());
-            assert!(authorize_command(CommandPrincipal::WebSocketWidget, cmd).is_err());
-            assert!(authorize_command(CommandPrincipal::WebSocketRemote, cmd).is_err());
             assert!(authorize_command(CommandPrincipal::Telegram, cmd).is_err());
         }
     }

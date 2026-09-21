@@ -343,7 +343,7 @@ fn state_test() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt::SttManager::new("non-existent-model")),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm::LlamaRouterManager::new(2048, 0).expect("LLM manager")),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
@@ -409,6 +409,7 @@ async fn ba_lenh_mcp_client_da_noi_vao_dispatch() {
     // Hai ca dưới đây chứng minh nối dây mà không cần server nào chạy: guard nổ
     // TRƯỚC khi spawn/kết nối, nên nếu nó không được gọi thì lỗi trả về sẽ là
     // "không có server MCP tên..." chứ không phải lỗi allowlist.
+    unsafe { std::env::remove_var("LIVA_MCP_AUTOEXEC") };
     let loi = handle_command(
         Arc::clone(&state),
         "mcp_client:call_tool",

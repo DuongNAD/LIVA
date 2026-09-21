@@ -5,7 +5,7 @@ mod tests {
     use super::*;
     // Các module này chỉ còn TEST cần (test tự dựng AppState tối thiểu); mã
     // production dựng state qua `boot::build_app_state`.
-    use liva_native_core::{AppState, crypto, db, llm, stt, tts};
+    use liva_native_core::{AppState, crypto, db, stt, tts};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -91,7 +91,6 @@ mod tests {
         }
         let db = db::DatabasePool::new_in_memory().unwrap();
         let stt_manager = stt::SttManager::new("data/models/nemotron-asr");
-        let llm_manager = llm::LlamaRouterManager::new(2048, 0).unwrap();
         let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
             1920,
             1080,
@@ -107,7 +106,7 @@ mod tests {
             stt: tokio::sync::Mutex::new(stt_manager),
             tts: tokio::sync::Mutex::new(None),
             tts_player: tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(llm_manager),
+            llm: AppState::mock_llm(),
             vad: tokio::sync::Mutex::new(None),
             denoiser: tokio::sync::Mutex::new(None),
             turn_shadow: tokio::sync::Mutex::new(None),

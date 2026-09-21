@@ -74,6 +74,7 @@ const voiceMock = {
   pipelineErrorKind: ref('none'),
   startPipeline: vi.fn().mockResolvedValue(undefined),
   stopPipeline: vi.fn().mockResolvedValue(undefined),
+  interrupt: vi.fn().mockResolvedValue(undefined),
   setPassive: vi.fn(),
   setProcessing: vi.fn(),
   keepAlive: vi.fn(),
@@ -151,6 +152,7 @@ vi.mock('../../src/composables/use3DModel', () => ({
     dispose: vi.fn(),
     updateLookAt: vi.fn(),
     updateExpressions: vi.fn(),
+    setThinking: vi.fn(),
   }),
 }));
 
@@ -647,11 +649,8 @@ describe('WidgetApp.vue', () => {
     wrapper.unmount();
   });
 
-  it('xin session ticket Tauri trước khi mở WebSocket đặc quyền', async () => {
-    const invokeBackend = vi.fn().mockResolvedValue({
-      token: 'a'.repeat(64),
-      expires_in_ms: 30_000,
-    });
+  it('đăng ký voice_subscribe qua Tauri IPC Channel khi chạy trong môi trường Tauri', async () => {
+    const invokeBackend = vi.fn().mockResolvedValue(null);
     const wrapper = mount(WidgetApp, {
       global: {
         provide: {
@@ -669,10 +668,9 @@ describe('WidgetApp.vue', () => {
       },
     });
 
-    await vi.waitFor(() => expect(mockSockets).toHaveLength(1));
-
-    expect(invokeBackend).toHaveBeenCalledWith('issue_websocket_session');
-    expect(mockSockets[0].url).toBe(`ws://127.0.0.1:8002/ws?session=${'a'.repeat(64)}`);
+    await vi.waitFor(() =>
+      expect(invokeBackend).toHaveBeenCalledWith('voice_subscribe', expect.anything())
+    );
 
     wrapper.unmount();
   });
@@ -811,7 +809,7 @@ describe('WidgetApp.vue', () => {
     vm.toggleCollapse();
     vm.snapToEdge();
     vm.interruptLIVA();
-    expect(socket.send).toHaveBeenCalledWith('[INTERRUPT]');
+    expect(voiceMock.interrupt).toHaveBeenCalled();
 
     wrapper.unmount();
   });
@@ -861,7 +859,7 @@ describe('WidgetApp.vue', () => {
     vm.isThinking = true;
     await nextTick();
     await wrapper.get('button[title="wg_interrupt"]').trigger('click');
-    expect(socket.send).toHaveBeenCalledWith('[INTERRUPT]');
+    expect(voiceMock.interrupt).toHaveBeenCalled();
     expect(avatarEngineMock.triggerMotion).toHaveBeenCalled();
     wrapper.unmount();
   });

@@ -13,9 +13,7 @@ async fn test_verify_handle_commands() {
     let stt = tokio::sync::Mutex::new(SttManager::new("non_existent_dir"));
     let tts = tokio::sync::Mutex::new(None);
     let tts_player = TtsAudioPlayer::new(None);
-    let llm = tokio::sync::Mutex::new(
-        LlamaRouterManager::new(2048, 0).expect("failed to create LLM manager"),
-    );
+    let llm = AppState::mock_llm();
     let mcp_server = Arc::new(liva_native_core::mcp::server::NativeMcpServer::new(
         "data/vault",
     ));

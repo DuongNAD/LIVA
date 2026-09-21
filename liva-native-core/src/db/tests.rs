@@ -1510,4 +1510,33 @@ mod tests {
             "operation on non-existent table must fail and trigger rollback"
         );
     }
+
+    #[tokio::test]
+    async fn test_database_pool_lazy_csr_recompilation() {
+        let pool = DatabasePool::new_in_memory().expect("in-memory db");
+        pool.insert_l3_triple("Rust", "powers", "LIVA", 1.0)
+            .await
+            .expect("insert triple");
+
+        // Pool csr_graph is dirty after insert_l3_triple
+        {
+            let raw_read = pool.csr_graph.read().unwrap();
+            assert!(raw_read.is_dirty());
+        }
+
+        // get_compiled_csr_graph compiles on demand
+        {
+            let compiled = pool.get_compiled_csr_graph();
+            assert!(!compiled.is_dirty());
+            let seeds = [("Rust", 1.0f32)];
+            let ppr = compiled.personalized_pagerank_readonly(&seeds, 3, 0.85, 2);
+            assert_eq!(ppr.len(), 2);
+        }
+
+        // Subsequent call returns clean guard immediately without recompilation
+        {
+            let compiled_second = pool.get_compiled_csr_graph();
+            assert!(!compiled_second.is_dirty());
+        }
+    }
 }

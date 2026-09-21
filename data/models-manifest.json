@@ -228,6 +228,7 @@
       "dest": "models/nemotron-asr/tokenizer.json",
       "url": "https://huggingface.co/onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4/resolve/8364d9e2dd9da23789b480bdbba9e423717e42ee/tokenizer.json",
       "bytes": 642525,
+      "altBytes": [694801],
       "note": "642 525 byte là bản GỐC (LF). Máy dev có bản 694 801 do một editor lưu lại thành CRLF — hai bản cho ra cùng một tokenizer, bản gốc dùng được.",
       "sha256": "24e1e8335c8396884a86f06880271376ae46a29381cfc35c82c6295d407acec7"
     },

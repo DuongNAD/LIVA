@@ -19,21 +19,13 @@
 //! 3. **Hạn chờ cứng.** Một tool treo sẽ kéo theo cả lượt chat, và bài học
 //!    `smart_home` trong dự án này là fail-closed nhanh hơn fail-silent chậm.
 
-use serde::{Deserialize, Serialize};
+pub use liva_core_types::WeatherArgs;
 use std::time::Duration;
 
 /// Hạn chờ mỗi lượt gọi mạng. Ngắn có chủ đích: nếu máy đang offline thì
 /// `reqwest` thường lỗi ngay, còn mạng chậm tới mức quá ngưỡng này thì việc
 /// đúng là trả lời "không lấy được" chứ không bắt người dùng chờ.
 const HAN_CHO: Duration = Duration::from_secs(6);
-
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WeatherArgs {
-    /// Tên địa điểm nếu người dùng nói rõ. Bỏ trống để dùng profile hoặc vị trí IP đã opt-in.
-    #[serde(default)]
-    pub location: Option<String>,
-}
 
 /// Mã thời tiết WMO → mô tả tiếng Việt.
 ///

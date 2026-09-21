@@ -3,7 +3,7 @@ use liva_native_core::webrtc::pipeline::{
     PipelineEvent, PipelineState, VoiceOutbound, WebRTCActor,
 };
 use liva_native_core::webrtc::vad::{VadConfig, VadEngine, VadEvent, compute_stage0_metrics};
-use liva_native_core::{AppState, crypto, db, llm, stt, tts};
+use liva_native_core::{AppState, crypto, db, stt, tts};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -151,7 +151,7 @@ async fn main() -> Result<(), String> {
     let stt = tokio::sync::Mutex::new(stt::SttManager::new("non_existent_dir"));
     let tts = tokio::sync::Mutex::new(None);
     let tts_player = tts::audio::TtsAudioPlayer::new(None);
-    let llm = tokio::sync::Mutex::new(llm::LlamaRouterManager::new(2048, 0)?);
+    let llm = AppState::mock_llm();
 
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         1920,

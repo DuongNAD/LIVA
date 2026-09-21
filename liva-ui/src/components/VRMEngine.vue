@@ -13,7 +13,7 @@
  * - Face Tracking: webcam → MediaPipe → VRM lookAt + expressions
  */
 import { ref, onMounted, onUnmounted, watch, onActivated, onDeactivated } from 'vue';
-import { use3DModel } from '../composables/use3DModel';
+import { useAvatarWorkerBridge } from '../composables/useAvatarWorkerBridge';
 import { useAvatarLocomotion } from '../composables/useAvatarLocomotion';
 import { useFaceTracking } from '../composables/useFaceTracking';
 import { logger } from '../utils/logger';
@@ -63,6 +63,8 @@ const {
   loadAnimationClips,
   setFrameUpdate,
   startRenderLoop,
+  stopRenderLoop,
+  setVisibility,
   startAutoBlink,
   startLipSync,
   stopLipSync,
@@ -74,7 +76,7 @@ const {
   updateExpressions,
   setFaceTrackingActive,
   dispose: disposeVRM,
-} = use3DModel();
+} = useAvatarWorkerBridge();
 
 const { faceData, isTracking, startTracking, stopTracking, captureFrame } = useFaceTracking();
 
@@ -429,7 +431,10 @@ let isEngineInitialized = false;
 
 const initEngine = async () => {
   if (isEngineInitializing || isEngineInitialized) {
-    logger.info('[VRMEngine]', 'Engine already initializing or initialized, skipping redundant mount');
+    logger.info(
+      '[VRMEngine]',
+      'Engine already initializing or initialized, skipping redundant mount'
+    );
     return;
   }
 
@@ -509,7 +514,8 @@ function suppressWanderTemporarily(durationMs = 30000) {
 
 function dockToCorner(corner: 'left' | 'right' | 'auto' = 'auto') {
   const current = locomotion.snapshot();
-  const targetX = corner === 'left' ? 0.08 : corner === 'right' ? 0.90 : current.x < 0.5 ? 0.08 : 0.90;
+  const targetX =
+    corner === 'left' ? 0.08 : corner === 'right' ? 0.9 : current.x < 0.5 ? 0.08 : 0.9;
   suppressWanderTemporarily(30000);
   locomotion.moveTo(targetX, 1.0, { run: true });
   triggerMotion();
@@ -552,7 +558,7 @@ function onAvatarPointerMove(e: PointerEvent) {
     const nx = Math.min(Math.max(e.clientX / width, 0.06), 0.94);
     // Điểm neo tại Gáy (nape of neck): gáy nhân vật gắn sát ngay dưới con trỏ chuột.
     // Chân nhân vật nằm phía dưới gáy khoảng 0.38 đơn vị màn hình.
-    const ny = Math.min(Math.max(e.clientY / height + 0.38, 0.40), 1.0);
+    const ny = Math.min(Math.max(e.clientY / height + 0.38, 0.4), 1.0);
 
     // Kích hoạt tư thế nhấc gáy, biểu cảm bất lực ngơ ngác & đung đưa con lắc theo vận tốc rê chuột
     setDangleState(true, pointerVelocityX);
@@ -574,13 +580,8 @@ function onAvatarPointerUp() {
     const current = locomotion.snapshot();
 
     // Ném theo quán tính hoặc vị trí thả
-    const targetX = pointerVelocityX < -250
-      ? 0.08
-      : pointerVelocityX > 250
-        ? 0.90
-        : current.x < 0.5
-          ? 0.08
-          : 0.90;
+    const targetX =
+      pointerVelocityX < -250 ? 0.08 : pointerVelocityX > 250 ? 0.9 : current.x < 0.5 ? 0.08 : 0.9;
 
     // Hạ cánh êm ái xuống mặt sàn góc màn hình
     suppressWanderTemporarily(30000);
@@ -640,13 +641,25 @@ onMounted(() => {
 });
 
 onActivated(() => {
-  // [Zombie RAM Killer] Re-init when returning from KeepAlive
-  initEngine();
+  // Resume render loop & listeners when returning from KeepAlive
+  if (isEngineInitialized) {
+    startRenderLoop();
+    setVisibility(true);
+    globalThis.addEventListener('resize', handleResize);
+  } else {
+    initEngine();
+  }
 });
 
 onDeactivated(() => {
-  // [Zombie RAM Killer] Deep Dispose when hidden by KeepAlive to release VRAM
-  cleanupEngine();
+  // Freeze rendering and detach listeners to reduce CPU/GPU usage to 0
+  // WITHOUT terminating the worker or destroying OffscreenCanvas context,
+  // preventing InvalidStateError on canvas re-transfer upon reactivation.
+  stopRenderLoop();
+  setVisibility(false);
+  globalThis.removeEventListener('resize', handleResize);
+  stopMouseLookAt();
+  stopAudioLipSync();
 });
 
 onUnmounted(() => {
@@ -690,7 +703,7 @@ defineExpose({
   <div
     class="vrm-container"
     :class="{ 'full-screen': props.fullScreen !== false }"
-    style="pointer-events: none;"
+    style="pointer-events: none"
   >
     <canvas
       ref="canvas"

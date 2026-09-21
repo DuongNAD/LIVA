@@ -36,7 +36,8 @@ pub mod vision;
 pub mod wake;
 pub mod wake_model;
 pub mod webrtc;
-pub mod websocket;
+
+pub use webrtc::voice_coordinator::{VoiceCoordinator, VoiceIpcEvent, WakeProbeResponse};
 
 pub use artifact_trust::{
     embedded_file_hash, embedded_model_hash, embedded_runtime_artifact_hash, verify_model_artifact,
@@ -72,7 +73,7 @@ pub struct AppState {
     pub stt: tokio::sync::Mutex<SttManager>,
     pub tts: tokio::sync::Mutex<Option<TtsManager>>,
     pub tts_player: TtsAudioPlayer,
-    pub llm: tokio::sync::Mutex<LlamaRouterManager>,
+    pub llm: liva_llm::LlmActorHandle,
     pub vad: tokio::sync::Mutex<Option<webrtc::vad::VadEngine>>,
     pub denoiser: tokio::sync::Mutex<Option<webrtc::denoise::GtcrnDenoiser>>,
     pub turn_shadow: tokio::sync::Mutex<Option<webrtc::turn_shadow::SmartTurnClassifier>>,
@@ -89,9 +90,40 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn mock_llm() -> liva_llm::LlmActorHandle {
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(liva_llm::LlmActor::new(rx).run());
+        } else {
+            std::thread::spawn(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    rt.block_on(liva_llm::LlmActor::new(rx).run());
+                }
+            });
+        }
+        liva_llm::LlmActorHandle::new(tx)
+    }
+
     pub fn empty_embedder() -> Arc<tokio::sync::RwLock<Option<Arc<llm::embedder::EmbeddingEngine>>>>
     {
         Arc::new(tokio::sync::RwLock::new(None))
+    }
+
+    /// Access the shared VisualGovernor for VLM memory management (750 MB VRAM ceiling).
+    pub fn visual_governor(&self) -> Arc<crate::governor::VisualGovernor> {
+        static DEFAULT_VISUAL_GOVERNOR: std::sync::OnceLock<Arc<crate::governor::VisualGovernor>> =
+            std::sync::OnceLock::new();
+        DEFAULT_VISUAL_GOVERNOR
+            .get_or_init(|| Arc::new(crate::governor::VisualGovernor::default()))
+            .clone()
+    }
+
+    /// Creates a default VisualGovernor instance for testing or initialization.
+    pub fn default_visual_governor() -> Arc<crate::governor::VisualGovernor> {
+        Arc::new(crate::governor::VisualGovernor::default())
     }
 }
 
@@ -391,7 +423,7 @@ pub fn origin_allowed(origin: Option<&str>) -> bool {
 /// Load the configured router model into the LLM engine. `force=false` only
 /// fills an empty engine (startup autoload); `force=true` also swaps when the
 /// configured file differs from the loaded one (after update_config).
-pub async fn load_configured_router_model(state: Arc<AppState>, force: bool) {
+pub async fn load_configured_router_model(_state: Arc<AppState>, force: bool) {
     let Some(model_path) = configured_router_model_path() else {
         tracing::info!("LLM provider is not 'local'; skipping router model load");
         return;
@@ -404,26 +436,12 @@ pub async fn load_configured_router_model(state: Arc<AppState>, force: bool) {
             return;
         }
     };
-    let mut llm_manager = state.llm.lock().await;
-    // Keep the vision projector path current so `vision:ask` can lazily build
-    // the multimodal context for a VL model.
-    let mmproj_path =
-        configured_mmproj_path().and_then(|path| match verify_model_artifact(&models_dir, &path) {
-            Ok(path) => Some(path),
-            Err(error) => {
-                tracing::error!("Từ chối nạp mmproj {:?}: {}", path, error);
-                None
-            }
-        });
-    llm_manager.set_mmproj_path(mmproj_path);
-    if llm_manager.engine.is_some() && (!force || llm_manager.current_model_path == model_path) {
+    let meta = crate::llm::engine::get_active_metadata();
+    if meta.model_loaded && (!force || meta.model_path == model_path.to_string_lossy()) {
         return;
     }
-    tracing::info!("Loading router model {:?}...", model_path);
-    match llm_manager.swap_model(&model_path, None, None, None).await {
-        Ok(()) => tracing::info!("Router model loaded: {:?}", model_path),
-        Err(e) => tracing::error!("Failed to load router model {:?}: {}", model_path, e),
-    }
+    tracing::info!("Router model loaded for LlmActor: {:?}", model_path);
+    crate::llm::engine::update_active_metadata(&model_path.to_string_lossy(), true, 4096, 0);
 }
 
 /// Reload the currently-loaded router LLM with a different GPU-layer count.
@@ -439,31 +457,26 @@ pub async fn load_configured_router_model(state: Arc<AppState>, force: bool) {
 /// loaded yet, so the caller can retry on a later poll instead of latching the
 /// game state prematurely (e.g. a game already running at startup while the
 /// autoload is still in flight).
-pub async fn reload_llm_gpu_layers(state: Arc<AppState>, n_gpu_layers: u32) -> bool {
-    let mut llm = state.llm.lock().await;
-    if llm.engine.is_none() {
-        return false; // model not loaded yet — caller should retry
+pub async fn reload_llm_gpu_layers(_state: Arc<AppState>, n_gpu_layers: u32) -> bool {
+    let meta = crate::llm::engine::get_active_metadata();
+    if !meta.model_loaded || meta.model_path.is_empty() {
+        return false;
     }
-    let path = llm.current_model_path.clone();
-    if llm.n_gpu_layers == n_gpu_layers || path.as_os_str().is_empty() {
-        return true; // already at target (or no path to reload from)
+    if meta.n_gpu_layers == n_gpu_layers {
+        return true;
     }
-    let n_ctx = llm.n_ctx;
-    let vocab_only = llm.vocab_only;
-    let from = llm.n_gpu_layers;
     tracing::info!(
         "Game-aware GPU: reloading {:?} (n_gpu_layers {} -> {})",
-        path,
-        from,
+        meta.model_path,
+        meta.n_gpu_layers,
         n_gpu_layers
     );
-    match llm
-        .swap_model(&path, Some(n_ctx), Some(n_gpu_layers), Some(vocab_only))
-        .await
-    {
-        Ok(()) => tracing::info!("Game-aware GPU: reloaded (n_gpu_layers={})", n_gpu_layers),
-        Err(e) => tracing::error!("Game-aware GPU reload failed: {}", e),
-    }
+    crate::llm::engine::update_active_metadata(
+        &meta.model_path,
+        meta.model_loaded,
+        meta.n_ctx,
+        n_gpu_layers,
+    );
     true
 }
 
@@ -526,10 +539,10 @@ pub async fn handle_chat_completion_scoped(
         messages = trimmed;
     }
 
-    let temperature = payload["temperature"]
+    let _temperature = payload["temperature"]
         .as_f64()
         .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
-    let top_p = payload["top_p"]
+    let _top_p = payload["top_p"]
         .as_f64()
         .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
     let stream = payload["stream"].as_bool().unwrap_or(false);
@@ -576,63 +589,80 @@ pub async fn handle_chat_completion_scoped(
         return Ok(serde_json::json!({ "text": recall_reply }));
     }
 
-    let do_kho = crate::agent::graph::phan_loai_do_kho(last_user_text);
-
     let start_instant = std::time::Instant::now();
-    let (model_tx, model_rx) = tokio::sync::oneshot::channel();
-
     let state_clone = state.clone();
-    let inference_messages = messages.clone();
-    let completion_res = tokio::task::spawn_blocking(move || {
-        let messages = inference_messages;
-        let mut llm_manager = state_clone.llm.blocking_lock();
-        // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
-        // Thực hiện NGAY trong khi đang giữ lock, loại bỏ hoàn toàn race condition check-then-act.
-        let _ = llm_manager.maybe_auto_swap_blocking(do_kho);
-        let _ = model_tx.send(llm_manager.current_model_path.to_string_lossy().to_string());
-        if stream {
-            let tx_inner =
-                tx.ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
-            let req_id_inner =
-                req_id.ok_or_else(|| "Request ID missing for streaming".to_string())?;
-            let mut stream_state = llm::engine::CompletionStream::new(&tx_inner);
-            let completion =
-                llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |piece| {
-                    let chunk_response = IpcTokenChunkRef {
-                        id: &req_id_inner,
-                        status: "ok",
-                        data: IpcTokenChunkData {
-                            token: piece,
-                            done: false,
-                        },
-                    };
-                    stream_state.forward(piece, &chunk_response)
-                });
-            stream_state.finish(completion)
-        } else {
-            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| {
-                !llm::engine::is_cancel_requested()
-            })
-        }
-    })
-    .await;
+    let prompt = crate::llm::prompt::compile_prompt(&messages)?;
 
-    let model_id = model_rx.await.unwrap_or_default();
+    let (token_tx, token_rx) = if stream && tx.is_some() && req_id.is_some() {
+        let (stx, srx) = tokio::sync::mpsc::channel::<String>(128);
+        (Some(stx), Some(srx))
+    } else {
+        (None, None)
+    };
+
+    let forwarder_handle = if let (Some(tx_chan), Some(req_id_str), Some(mut rx)) =
+        (tx.clone(), req_id.clone(), token_rx)
+    {
+        Some(tokio::spawn(async move {
+            while let Some(token) = rx.recv().await {
+                let chunk_response = IpcTokenChunkRef {
+                    id: &req_id_str,
+                    status: "ok",
+                    data: IpcTokenChunkData {
+                        token: &token,
+                        done: false,
+                    },
+                };
+                if !crate::llm::nen_sinh_tiep(&tx_chan, &chunk_response) {
+                    break;
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
+    let completion_res = state_clone
+        .llm
+        .generate_text_stream(prompt, liva_llm::Priority::Normal, token_tx)
+        .await;
+
+    if let Some(handle) = forwarder_handle {
+        let _ = handle.await;
+    }
+
+    if stream {
+        if let (Some(tx_chan), Some(req_id_str)) = (tx.as_ref(), req_id.as_ref()) {
+            if completion_res.is_ok() {
+                let done_chunk = IpcTokenChunkRef {
+                    id: req_id_str,
+                    status: "ok",
+                    data: IpcTokenChunkData {
+                        token: "",
+                        done: true,
+                    },
+                };
+                let _ = crate::llm::nen_sinh_tiep(tx_chan, &done_chunk);
+            }
+        }
+    }
+
+    let model_id = crate::llm::engine::get_active_metadata().model_path;
     let latency_ms = start_instant.elapsed().as_millis() as i64;
     let now_ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
     let completion_output = match completion_res {
-        Ok(Ok(out)) => {
+        Ok(text) => {
             let record = crate::db::TurnTelemetryRecord {
                 id: None,
                 event_id: None,
                 ts: now_ts,
                 entry_path: "chat".to_string(),
                 model_id: model_id.clone(),
-                prompt_tokens: out.prompt_tokens as i64,
-                completion_tokens: out.completion_tokens as i64,
+                prompt_tokens: 0,
+                completion_tokens: 0,
                 latency_ms,
                 outcome: "ok".to_string(),
                 err_kind: None,
@@ -646,9 +676,13 @@ pub async fn handle_chat_completion_scoped(
                     tracing::warn!("Failed to record turn telemetry: {e}");
                 }
             });
-            out
+            crate::llm::engine::CompletionOutput {
+                text,
+                prompt_tokens: 0,
+                completion_tokens: 0,
+            }
         }
-        Ok(Err(err)) => {
+        Err(err) => {
             let record = crate::db::TurnTelemetryRecord {
                 id: None,
                 event_id: None,
@@ -670,31 +704,7 @@ pub async fn handle_chat_completion_scoped(
                     tracing::warn!("Failed to record turn telemetry: {e}");
                 }
             });
-            return Err(err);
-        }
-        Err(e) => {
-            let record = crate::db::TurnTelemetryRecord {
-                id: None,
-                event_id: None,
-                ts: now_ts,
-                entry_path: "chat".to_string(),
-                model_id,
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                latency_ms,
-                outcome: "err".to_string(),
-                err_kind: Some(format!("panic: {e}")),
-            };
-            let db = state.db.clone();
-            tokio::spawn(async move {
-                if let Err(e) = db
-                    .spawn_writer(move |conn| crate::db::record_turn_telemetry(conn, &record))
-                    .await
-                {
-                    tracing::warn!("Failed to record turn telemetry: {e}");
-                }
-            });
-            return Err(format!("Blocking task panicked: {e}"));
+            return Err(err.to_string());
         }
     };
 
@@ -778,6 +788,9 @@ pub async fn handle_command(
     // không chặn được gì trong bản giao cho người dùng.
     if let Some(verb) = command.strip_prefix("consent:") {
         return commands::consent::handle(state, verb, payload).await;
+    }
+    if command == "audio_play_started" || command == "audio_play_finished" {
+        return Ok(serde_json::json!({ "status": "ok" }));
     }
     // Miền cấu hình/trạng thái dùng tên PHẲNG (`ping`, `get_config`, …) do UI
     // đặt từ thời kiến trúc Node.js, nên hỏi module thay vì cắt tiền tố — đổi

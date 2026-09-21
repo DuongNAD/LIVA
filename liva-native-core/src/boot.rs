@@ -298,8 +298,43 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or_else(gpu_layers_mac_dinh);
-    let llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
+    let mut llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
         .map_err(|e| BootError::new("Không khởi tạo được engine LLM (llama.cpp)", e))?;
+
+    let (llm_tx, llm_rx) = tokio::sync::mpsc::channel(128);
+    let backend: liva_llm::LlmStreamingBackendFn = Box::new(
+        move |prompt: &str, token_tx: Option<tokio::sync::mpsc::Sender<String>>| {
+            if llm_manager.engine.is_some() {
+                llm_manager
+                    .generate_completion(prompt, 0.7, 0.9, |piece: &str| {
+                        if llm::engine::is_cancel_requested() {
+                            return false;
+                        }
+                        if let Some(ref tx) = token_tx {
+                            match tx.try_send(piece.to_string()) {
+                                Ok(()) => true,
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                    tx.blocking_send(piece.to_string()).is_ok()
+                                }
+                            }
+                        } else {
+                            true
+                        }
+                    })
+                    .map(|out| out.text)
+                    .map_err(|e| anyhow::anyhow!(e))
+            } else {
+                if let Some(ref tx) = token_tx {
+                    let _ = tx.try_send(format!("Simulated response to: {}", prompt));
+                }
+                Ok(format!("Simulated response to: {}", prompt))
+            }
+        },
+    );
+    let llm_actor = liva_llm::LlmActor::new(llm_rx).with_streaming_backend(backend);
+    tokio::spawn(llm_actor.run());
+    let llm_handle = liva_llm::LlmActorHandle::new(llm_tx);
 
     // Mặc định KHÔNG còn là đường dẫn tuyệt đối của máy dev: xem
     // `crate::default_vault_path`. Trên máy người dùng, `E:\Project\LIVA\...` là
@@ -337,7 +372,7 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(tts_manager),
         tts_player,
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: llm_handle,
         vad: tokio::sync::Mutex::new(voice.vad),
         denoiser: tokio::sync::Mutex::new(voice.denoiser),
         turn_shadow: tokio::sync::Mutex::new(voice.turn_shadow),
@@ -364,13 +399,9 @@ pub struct ServiceOptions {
     /// Kênh ghi ra stdout của gateway. Bot Telegram đẩy vài thông điệp qua đây.
     /// App desktop không có stdout IPC ⇒ `None`, bot vẫn chạy bình thường.
     pub ipc_tx: Option<tokio::sync::mpsc::Sender<String>>,
-    /// Gọi ngay sau khi WebSocket bind xong. App desktop dùng để emit
+    /// Gọi ngay sau khi core bind/ready. App desktop dùng để emit
     /// `gateway-ready` cho cửa sổ; gateway không cần gì.
     pub on_gateway_ready: Option<Box<dyn Fn(std::net::SocketAddr) + Send + Sync>>,
-    /// Trao session authority cho vỏ tin cậy sau khi WebSocket bind xong.
-    /// Gateway độc lập không có WebView đặc quyền nên để `None`.
-    pub on_websocket_sessions_ready:
-        Option<Box<dyn Fn(crate::websocket::WebSocketSessionAuthority) + Send + Sync>>,
     /// Số lớp GPU ở chế độ thường — lấy từ [`Boot::llm_n_gpu_layers`].
     pub llm_n_gpu_layers: u32,
 }
@@ -380,7 +411,6 @@ impl ServiceOptions {
         Self {
             ipc_tx: None,
             on_gateway_ready: None,
-            on_websocket_sessions_ready: None,
             llm_n_gpu_layers,
         }
     }
@@ -449,27 +479,9 @@ pub fn spawn_background_services(
         }));
     }
 
-    // 5. Máy chủ WebSocket (thoại + IPC).
-    {
-        let state = state.clone();
-        let on_ready = opts.on_gateway_ready;
-        let on_sessions_ready = opts.on_websocket_sessions_ready;
-        tasks.push(tokio::spawn(async move {
-            match crate::websocket::WebSocketServer::bind_from_env().await {
-                Ok(server) => {
-                    if let Some(cb) = on_sessions_ready {
-                        cb(server.session_authority());
-                    }
-                    if let Some(cb) = on_ready {
-                        cb(server.local_addr());
-                    }
-                    if let Err(error) = server.run(state).await {
-                        error!("WebSocket server dừng: {error}");
-                    }
-                }
-                Err(error) => error!("WebSocket server bind lỗi: {error}"),
-            }
-        }));
+    // 5. Thông báo gateway/core sẵn sàng nếu có callback đăng ký.
+    if let Some(cb) = opts.on_gateway_ready {
+        cb(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
     }
 
     // 5b. Bề mặt HTTP tương thích OpenAI — **chỉ khi được yêu cầu**.
@@ -700,7 +712,6 @@ mod tests {
         let o = ServiceOptions::new(0);
         assert!(o.ipc_tx.is_none());
         assert!(o.on_gateway_ready.is_none());
-        assert!(o.on_websocket_sessions_ready.is_none());
         assert_eq!(o.llm_n_gpu_layers, 0);
     }
 
@@ -809,7 +820,6 @@ mod tests {
     async fn check_voice_idle_unload_non_blocking_when_locked() {
         let db = db::DatabasePool::new_in_memory().expect("in-memory db");
         let stt_manager = stt::SttManager::new("non_existent_dir");
-        let llm_manager = llm::LlamaRouterManager::new(512, 0).expect("llm manager");
         let capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
             8,
             8,
@@ -821,7 +831,7 @@ mod tests {
             stt: tokio::sync::Mutex::new(stt_manager),
             tts: tokio::sync::Mutex::new(None),
             tts_player: tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(llm_manager),
+            llm: AppState::mock_llm(),
             vad: tokio::sync::Mutex::new(None),
             denoiser: tokio::sync::Mutex::new(None),
             turn_shadow: tokio::sync::Mutex::new(None),

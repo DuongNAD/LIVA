@@ -145,8 +145,6 @@ async fn async_main() {
             ipc_tx: Some(tx.clone()),
             // Gateway không có cửa sổ để báo "đã sẵn sàng".
             on_gateway_ready: None,
-            // Gateway độc lập không sở hữu WebView Tauri tin cậy.
-            on_websocket_sessions_ready: None,
             llm_n_gpu_layers,
         },
     );

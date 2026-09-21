@@ -69,7 +69,7 @@ pub async fn handle(
     }
 }
 
-async fn swap_model(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+async fn swap_model(_state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let model_path_str = payload["model_path"]
         .as_str()
         .ok_or_else(|| "Missing 'model_path'".to_string())?;
@@ -79,14 +79,21 @@ async fn swap_model(state: Arc<AppState>, payload: Value) -> Result<Value, Strin
     let models_dir = configured_models_dir();
     let model_path = verify_model_artifact(&models_dir, model_path)?;
 
-    let n_ctx = payload["n_ctx"].as_u64().map(|v| v as usize);
-    let n_gpu_layers = payload["n_gpu_layers"].as_u64().map(|v| v as u32);
-    let vocab_only = payload["vocab_only"].as_bool();
+    let n_ctx = payload["n_ctx"]
+        .as_u64()
+        .map(|v| v as usize)
+        .unwrap_or(4096);
+    let n_gpu_layers = payload["n_gpu_layers"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(0);
 
-    let mut llm_manager = state.llm.lock().await;
-    llm_manager
-        .swap_model(&model_path, n_ctx, n_gpu_layers, vocab_only)
-        .await?;
+    crate::llm::engine::update_active_metadata(
+        &model_path.to_string_lossy(),
+        true,
+        n_ctx,
+        n_gpu_layers,
+    );
 
     Ok(json!({ "success": true }))
 }
@@ -120,78 +127,53 @@ async fn embed(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     }
 }
 
-async fn health_check(state: Arc<AppState>) -> Result<Value, String> {
+async fn health_check(_state: Arc<AppState>) -> Result<Value, String> {
     let is_generating = crate::llm::engine::is_generating();
-    match state.llm.try_lock() {
-        Ok(llm_manager) => {
-            let loaded = llm_manager.engine.is_some();
-            let path = llm_manager.current_model_path.to_string_lossy().to_string();
-            crate::llm::engine::update_active_metadata(
-                &path,
-                loaded,
-                llm_manager.n_ctx,
-                llm_manager.n_gpu_layers,
-            );
-            Ok(json!({
-                "status": if is_generating { "busy" } else if loaded { "healthy" } else { "offline" },
-                "model_loaded": loaded,
-                "model_path": path,
-                "n_ctx": llm_manager.n_ctx,
-                "n_gpu_layers": llm_manager.n_gpu_layers,
-                "is_generating": is_generating
-            }))
-        }
-        Err(_) => {
-            // Lock is held by generation or swap: return immediate status from cached metadata without blocking!
-            let meta = crate::llm::engine::get_active_metadata();
-            Ok(json!({
-                "status": "busy",
-                "model_loaded": meta.model_loaded || is_generating,
-                "model_path": if !meta.model_path.is_empty() {
-                    meta.model_path
-                } else {
-                    crate::paths::configured_router_model_path()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_default()
-                },
-                "n_ctx": meta.n_ctx,
-                "n_gpu_layers": meta.n_gpu_layers,
-                "is_generating": true
-            }))
-        }
+    let meta = crate::llm::engine::get_active_metadata();
+    if is_generating {
+        return Ok(json!({
+            "status": "busy",
+            "model_loaded": meta.model_loaded || is_generating,
+            "model_path": if !meta.model_path.is_empty() {
+                meta.model_path
+            } else {
+                crate::paths::configured_router_model_path()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            },
+            "n_ctx": meta.n_ctx,
+            "n_gpu_layers": meta.n_gpu_layers,
+            "is_generating": true
+        }));
     }
+
+    let loaded = meta.model_loaded;
+    let path = meta.model_path.clone();
+    Ok(json!({
+        "status": if loaded { "healthy" } else { "offline" },
+        "model_loaded": loaded,
+        "model_path": path,
+        "n_ctx": meta.n_ctx,
+        "n_gpu_layers": meta.n_gpu_layers,
+        "is_generating": false
+    }))
 }
 
-async fn context_info(state: Arc<AppState>) -> Result<Value, String> {
+async fn context_info(_state: Arc<AppState>) -> Result<Value, String> {
     let is_generating = crate::llm::engine::is_generating();
-    let (n_ctx, n_gpu_layers, model_path, model_loaded) = match state.llm.try_lock() {
-        Ok(llm_manager) => {
-            let path = llm_manager.current_model_path.to_string_lossy().to_string();
-            let loaded = llm_manager.engine.is_some();
-            crate::llm::engine::update_active_metadata(
-                &path,
-                loaded,
-                llm_manager.n_ctx,
-                llm_manager.n_gpu_layers,
-            );
-            (llm_manager.n_ctx, llm_manager.n_gpu_layers, path, loaded)
-        }
-        Err(_) => {
-            let meta = crate::llm::engine::get_active_metadata();
-            (
-                meta.n_ctx,
-                meta.n_gpu_layers,
-                if !meta.model_path.is_empty() {
-                    meta.model_path
-                } else {
-                    crate::paths::configured_router_model_path()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_default()
-                },
-                meta.model_loaded || is_generating,
-            )
-        }
-    };
+    let meta = crate::llm::engine::get_active_metadata();
+    let (n_ctx, n_gpu_layers, model_path, model_loaded) = (
+        meta.n_ctx,
+        meta.n_gpu_layers,
+        if !meta.model_path.is_empty() {
+            meta.model_path
+        } else {
+            crate::paths::configured_router_model_path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default()
+        },
+        meta.model_loaded,
+    );
 
     let reserve = llm::engine::RESERVE_FOR_COMPLETION;
     let max_prompt_tokens = n_ctx.saturating_sub(reserve);
@@ -282,10 +264,10 @@ async fn task_plan_chat(
         },
     ];
 
-    let temperature = payload["temperature"]
+    let _temperature = payload["temperature"]
         .as_f64()
         .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
-    let top_p = payload["top_p"]
+    let _top_p = payload["top_p"]
         .as_f64()
         .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
     let stream = payload["stream"].as_bool().unwrap_or(tx.is_some());
@@ -300,36 +282,33 @@ async fn task_plan_chat(
         done: bool,
     }
 
-    let completion_output = tokio::task::spawn_blocking(move || {
-        let mut llm_manager = state.llm.blocking_lock();
+    let prompt = crate::llm::prompt::compile_prompt(&messages)?;
+    let text = state
+        .llm
+        .generate_text(prompt, liva_llm::Priority::Normal)
+        .await
+        .map_err(|e| format!("LLM generation failed: {e}"))?;
 
-        if stream {
-            let tx_inner =
-                tx.ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
-
-            let mut stream_state = llm::engine::CompletionStream::new(&tx_inner);
-            let completion =
-                llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |piece| {
-                    let chunk = TaskStreamChunk {
-                        task_id: &task_id_clone,
-                        message: piece,
-                        done: false,
-                    };
-                    stream_state.forward(piece, &chunk)
-                });
-            stream_state.finish(completion)
-        } else {
-            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| {
-                !llm::engine::is_cancel_requested()
-            })
+    if stream {
+        if let Some(tx_inner) = tx {
+            let chunk = TaskStreamChunk {
+                task_id: &task_id_clone,
+                message: &text,
+                done: false,
+            };
+            let _ = crate::llm::nen_sinh_tiep(&tx_inner, &chunk);
+            let done_chunk = TaskStreamChunk {
+                task_id: &task_id_clone,
+                message: "",
+                done: true,
+            };
+            let _ = crate::llm::nen_sinh_tiep(&tx_inner, &done_chunk);
         }
-    })
-    .await
-    .map_err(|e| format!("Blocking task panicked: {}", e))??;
+    }
 
     Ok(json!({
         "taskId": task_id,
-        "message": completion_output.text,
+        "message": text,
         "done": true
     }))
 }
@@ -356,7 +335,7 @@ mod tests {
             stt: tokio::sync::Mutex::new(crate::stt::SttManager::new(".")),
             tts: tokio::sync::Mutex::new(None),
             tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
-            llm: tokio::sync::Mutex::new(llm::LlamaRouterManager::new(512, 0).expect("llm")),
+            llm: AppState::mock_llm(),
             vad: tokio::sync::Mutex::new(None),
             denoiser: tokio::sync::Mutex::new(None),
             turn_shadow: tokio::sync::Mutex::new(None),
@@ -429,15 +408,15 @@ mod tests {
             .expect("health_check when free");
         assert_eq!(res_free["status"], "offline");
 
-        // When exclusive lock is held by another task:
-        let lock_guard = state.llm.lock().await;
-        // health_check must not hang/block; it must return immediately using try_lock fallback
+        // When generating guard is entered:
+        let guard = llm::engine::GeneratingGuard::enter();
+        // health_check must not hang/block; it must return immediately using metadata
         let res_busy = handle(state.clone(), "llm:health_check", json!({}), None, None)
             .await
             .expect("health_check when busy");
         assert_eq!(res_busy["status"], "busy");
         assert_eq!(res_busy["is_generating"], true);
-        drop(lock_guard);
+        drop(guard);
 
         // After releasing, health_check is offline/idle again without blocking
         let res_after = handle(state.clone(), "llm:health_check", json!({}), None, None)

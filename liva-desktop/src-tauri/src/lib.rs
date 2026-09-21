@@ -1,18 +1,17 @@
 use liva_native_core::{
-    authorize_command, handle_command_as, websocket::WebSocketSessionAuthority,
-    websocket::WebSocketSessionTicket, AppState, CommandPrincipal,
+    authorize_command, handle_command_as, AppState, CommandPrincipal, VoiceCoordinator,
+    VoiceIpcEvent, WakeProbeResponse,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::OnceLock;
 use tauri::Emitter;
 use tauri::Manager;
 
 struct NativeCoreState(Arc<AppState>);
 
-#[derive(Default)]
-struct WebSocketSessionState(OnceLock<WebSocketSessionAuthority>);
+#[derive(Clone)]
+pub struct VoiceCoordinatorState(pub Arc<tokio::sync::Mutex<Option<Arc<VoiceCoordinator>>>>);
 
 /// [Phase 5.1] LIVA Tauri Host — Multi-Window Desktop Shell (Optimized)
 /// =========================================================
@@ -545,27 +544,83 @@ fn authorize_tauri_principal(
     Ok(principal)
 }
 
-fn websocket_principal_for_window(window_label: &str) -> Result<CommandPrincipal, String> {
-    match window_label {
-        "widget" => Ok(CommandPrincipal::WebSocketWidget),
-        "dashboard" => Ok(CommandPrincipal::WebSocketDashboard),
-        _ => Err(format!(
-            "Cửa sổ Tauri không được cấp WebSocket session: {window_label}"
-        )),
+#[tauri::command]
+async fn voice_subscribe(
+    window: tauri::Window,
+    channel: tauri::ipc::Channel<VoiceIpcEvent>,
+    coordinator_state: tauri::State<'_, VoiceCoordinatorState>,
+    core_state: tauri::State<'_, NativeCoreState>,
+) -> Result<(), String> {
+    if window.label() != "widget" {
+        return Err("Chỉ cửa sổ widget được đăng ký kênh voice".to_string());
     }
+    let mut guard = coordinator_state.0.lock().await;
+    let coordinator = match guard.as_ref() {
+        Some(c) => c.clone(),
+        None => {
+            let session_id = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let conv_id = format!("widget-session-{session_id}");
+            let new_coord = Arc::new(VoiceCoordinator::new(core_state.0.clone(), conv_id).await);
+            *guard = Some(new_coord.clone());
+            new_coord
+        }
+    };
+    coordinator.subscribe(Arc::new(move |evt| {
+        let _ = channel.send(evt);
+    }));
+    Ok(())
 }
 
 #[tauri::command]
-fn issue_websocket_session(
+async fn voice_mic_chunk(
     window: tauri::Window,
-    state: tauri::State<'_, WebSocketSessionState>,
-) -> Result<WebSocketSessionTicket, String> {
-    let principal = websocket_principal_for_window(window.label())?;
-    let sessions = state
-        .0
-        .get()
-        .ok_or_else(|| "WebSocket session authority chưa sẵn sàng".to_string())?;
-    sessions.issue(principal)
+    seq_id: u32,
+    samples: Vec<f32>,
+    coordinator_state: tauri::State<'_, VoiceCoordinatorState>,
+) -> Result<(), String> {
+    if window.label() != "widget" {
+        return Err("Chỉ cửa sổ widget được gửi audio chunk".to_string());
+    }
+    let guard = coordinator_state.0.lock().await;
+    let coordinator = guard
+        .as_ref()
+        .ok_or_else(|| "VoiceCoordinator chưa sẵn sàng".to_string())?;
+    coordinator.ingest_mic_chunk(seq_id, samples).await
+}
+
+#[tauri::command]
+async fn voice_wake_probe(
+    window: tauri::Window,
+    seq_id: u32,
+    samples: Vec<f32>,
+    coordinator_state: tauri::State<'_, VoiceCoordinatorState>,
+) -> Result<WakeProbeResponse, String> {
+    if window.label() != "widget" {
+        return Err("Chỉ cửa sổ widget được gọi wake probe".to_string());
+    }
+    let guard = coordinator_state.0.lock().await;
+    let coordinator = guard
+        .as_ref()
+        .ok_or_else(|| "VoiceCoordinator chưa sẵn sàng".to_string())?;
+    coordinator.evaluate_wake_probe(seq_id, samples).await
+}
+
+#[tauri::command]
+async fn voice_interrupt(
+    window: tauri::Window,
+    coordinator_state: tauri::State<'_, VoiceCoordinatorState>,
+) -> Result<(), String> {
+    if window.label() != "widget" {
+        return Err("Chỉ cửa sổ widget được gọi voice interrupt".to_string());
+    }
+    let guard = coordinator_state.0.lock().await;
+    let coordinator = guard
+        .as_ref()
+        .ok_or_else(|| "VoiceCoordinator chưa sẵn sàng".to_string())?;
+    coordinator.interrupt()
 }
 
 #[tauri::command]
@@ -689,7 +744,9 @@ pub fn run() {
         .manage(EcoModeState::default())
         .manage(StrongholdKey(Mutex::new(None)))
         .manage(StrongholdVaultLock::default())
-        .manage(WebSocketSessionState::default())
+        .manage(VoiceCoordinatorState(Arc::new(tokio::sync::Mutex::new(
+            None,
+        ))))
         // Plugin tauri_plugin_stronghold ĐÃ GỠ (H2): closure của nó là literal
         // hardcode salt cuối cùng trên write path, và UI KHÔNG import
         // @tauri-apps/plugin-stronghold (renderer chỉ invoke present/store/delete).
@@ -737,7 +794,6 @@ pub fn run() {
             // bot Telegram ghi vào (bot vẫn chạy đủ, chỉ mất kênh phụ đó).
             let services_state = app.state::<NativeCoreState>().0.clone();
             let ready_handle = handle.clone();
-            let session_handle = handle.clone();
             // `spawn_background_services` gọi `tokio::spawn` bên trong, nhưng
             // closure `.setup()` của Tauri chạy NGOÀI runtime Tokio — gọi trực
             // tiếp sẽ panic ngay lúc khởi động:
@@ -765,14 +821,6 @@ pub fn run() {
                             }),
                         ) {
                             tracing::error!("Không emit được gateway-ready: {error}");
-                        }
-                    })),
-                    on_websocket_sessions_ready: Some(Box::new(move |sessions| {
-                        let state = session_handle.state::<WebSocketSessionState>();
-                        if state.0.set(sessions).is_err() {
-                            tracing::error!(
-                                "WebSocket session authority đã được khởi tạo trước đó"
-                            );
                         }
                     })),
                     llm_n_gpu_layers,
@@ -889,7 +937,10 @@ pub fn run() {
             vault_secret_present,
             store_vault_secret,
             delete_vault_secret,
-            issue_websocket_session,
+            voice_subscribe,
+            voice_mic_chunk,
+            voice_wake_probe,
+            voice_interrupt,
             native_ipc_call,
             native_ipc_call_stream
         ])
@@ -901,7 +952,7 @@ pub fn run() {
 mod h2_migration_tests {
     use super::{
         authorize_tauri_principal, derive_vault_key, legacy_vault_key, migrate_legacy_vault,
-        validate_vault_secret_input, websocket_principal_for_window,
+        validate_vault_secret_input,
     };
     use liva_native_core::CommandPrincipal;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1044,20 +1095,6 @@ mod h2_migration_tests {
         assert!(authorize_tauri_principal("widget", "update_config").is_err());
         assert!(authorize_tauri_principal("setup", "get_memory_data").is_err());
         assert!(authorize_tauri_principal("dashboard", "mcp:call_tool").is_err());
-    }
-
-    #[test]
-    fn chi_widget_va_dashboard_duoc_cap_websocket_session() {
-        assert_eq!(
-            websocket_principal_for_window("widget").unwrap(),
-            CommandPrincipal::WebSocketWidget
-        );
-        assert_eq!(
-            websocket_principal_for_window("dashboard").unwrap(),
-            CommandPrincipal::WebSocketDashboard
-        );
-        assert!(websocket_principal_for_window("setup").is_err());
-        assert!(websocket_principal_for_window("unknown").is_err());
     }
 
     #[test]

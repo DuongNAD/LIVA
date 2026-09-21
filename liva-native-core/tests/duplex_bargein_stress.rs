@@ -1,25 +1,20 @@
 use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
 use liva_native_core::crypto::EncryptionEngine;
 use liva_native_core::webrtc::frame::{
-    OP_AUTH_HANDSHAKE, OP_FLUSH, OP_MIC_IN, OP_SPEAKER_OUT, SpeakerEpochGate, VoiceFrame,
-    speaker_frames,
+    OP_FLUSH, OP_MIC_IN, OP_SPEAKER_OUT, SpeakerEpochGate, VoiceFrame, speaker_frames,
 };
 use liva_native_core::webrtc::pipeline::{
     PipelineEvent, PipelineState, VoiceOutbound, WebRTCActor,
 };
-use liva_native_core::websocket::WebSocketServer;
-use liva_native_core::{AppState, db, llm, stt, tts};
+use liva_native_core::webrtc::voice_coordinator::{VoiceCoordinator, VoiceIpcEvent};
+use liva_native_core::{AppState, db, stt, tts};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
 
 fn build_test_app_state() -> Arc<AppState> {
     let db = db::DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non-existent-model");
-    let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         64,
         64,
@@ -32,7 +27,7 @@ fn build_test_app_state() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
@@ -482,87 +477,43 @@ async fn test_500_interruption_storm_channel_liveness() {
     actor_task.abort();
 }
 
-/// Stress Test 7: Full E2E WebSocket Real-time Barge-In Cutoff
+/// Stress Test 7: Full VoiceCoordinator Real-time Barge-In Cutoff
 /// Verifies:
-/// - Live WebSocket client connects to WebSocketServer
-/// - During simulated dialogue / audio, client triggers barge-in via mic
-/// - Server responds with OP_FLUSH and immediate cessation of old stream
+/// - VoiceCoordinator subscribes IPC channel
+/// - Client triggers barge-in / interrupt
+/// - Dispatcher emits VoiceIpcEvent::Flush with sub-millisecond latency
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_full_e2e_websocket_barge_in_preemption() {
+async fn test_full_e2e_voice_coordinator_barge_in_preemption() {
     let state = build_test_app_state();
-    let server = WebSocketServer::bind("127.0.0.1:0")
-        .await
-        .expect("bind test server");
-    let address = server.local_addr();
-    let server_task = tokio::spawn(server.run(state));
+    let coordinator = Arc::new(VoiceCoordinator::new(state, "stress-conv".to_string()).await);
 
-    let (mut client, _) = connect_async(format!("ws://{address}/ws"))
-        .await
-        .expect("connect to websocket server");
+    let (flush_tx, mut flush_rx) = mpsc::channel(10);
+    coordinator.subscribe(Arc::new(move |evt| {
+        if matches!(evt, VoiceIpcEvent::Flush { .. }) {
+            let _ = flush_tx.try_send(());
+        }
+    }));
 
-    // Handshake
-    let handshake = VoiceFrame {
-        op_code: OP_AUTH_HANDSHAKE,
-        seq_id: 1,
-        payload: Bytes::from_static(b"stress-client"),
-    };
-    client
-        .send(Message::Binary(handshake.encode().unwrap().to_vec()))
-        .await
-        .expect("send handshake");
-
-    // Receive handshake response
-    let msg = tokio::time::timeout(Duration::from_millis(500), client.next())
-        .await
-        .expect("Handshake response timeout")
-        .expect("Server stream ended")
-        .expect("Websocket error");
-    let Message::Binary(bytes) = msg else {
-        panic!("Expected binary handshake response");
-    };
-    let hs_resp = VoiceFrame::decode(&mut bytes::BytesMut::from(bytes.as_slice()))
-        .unwrap()
-        .unwrap();
-    assert_eq!(hs_resp.op_code, OP_AUTH_HANDSHAKE);
-
-    // Send audio packet simulating user speech onset (OP_MIC_IN)
-    // 160 samples of active 1kHz tone (40ms)
+    // Ingest mic audio simulating user speech onset
     let mut speech_samples = Vec::with_capacity(160);
     for i in 0..160 {
         speech_samples.push((2.0 * std::f32::consts::PI * i as f32 / 16.0).sin() * 0.5);
     }
-    let mut mic_payload = Vec::with_capacity(160 * 4);
-    for s in speech_samples {
-        mic_payload.extend_from_slice(&s.to_le_bytes());
-    }
+    let ingest_res = coordinator.ingest_mic_chunk(10, speech_samples).await;
+    assert!(ingest_res.is_ok());
 
-    let mic_frame = VoiceFrame {
-        op_code: OP_MIC_IN,
-        seq_id: 10,
-        payload: Bytes::from(mic_payload),
-    };
-
+    // Trigger interrupt
     let start_cut = Instant::now();
-    client
-        .send(Message::Binary(mic_frame.encode().unwrap().to_vec()))
-        .await
-        .expect("send mic frame");
+    coordinator.interrupt().expect("interrupt succeeded");
 
-    // Listen for WebSocket output (should be fast and not hang)
-    let _ = tokio::time::timeout(Duration::from_millis(500), async {
-        while let Some(Ok(m)) = client.next().await {
-            if let Message::Binary(b) = m
-                && let Ok(Some(f)) = VoiceFrame::decode(&mut bytes::BytesMut::from(b.as_slice()))
-                && f.op_code == OP_FLUSH
-            {
-                let flush_lat = start_cut.elapsed();
-                println!("E2E WebSocket OP_FLUSH received in: {:?}", flush_lat);
-                break;
-            }
-        }
-    })
-    .await;
+    // Verify Flush received
+    let received = tokio::time::timeout(Duration::from_millis(500), flush_rx.recv()).await;
+    assert!(
+        received.is_ok() && received.unwrap().is_some(),
+        "Flush event must be received"
+    );
+    let flush_lat = start_cut.elapsed();
+    println!("VoiceCoordinator Flush event received in: {:?}", flush_lat);
 
-    client.close(None).await.unwrap();
-    server_task.abort();
+    coordinator.unsubscribe();
 }

@@ -5,3 +5,4 @@ pub mod pipeline;
 pub mod session;
 pub mod turn_shadow;
 pub mod vad;
+pub mod voice_coordinator;

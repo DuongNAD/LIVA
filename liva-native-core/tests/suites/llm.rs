@@ -1,0 +1,34 @@
+//! LLM and Router Test Suite
+
+#[path = "../budgeted_completion_entry_tests.rs"]
+pub mod budgeted_completion_entry_tests;
+#[path = "../completion_stream_tests.rs"]
+pub mod completion_stream_tests;
+#[path = "../complexity_adversarial_challenge.rs"]
+pub mod complexity_adversarial_challenge;
+#[path = "../cot_streaming_tests.rs"]
+pub mod cot_streaming_tests;
+#[path = "../dynamic_prompt_assembly_tests.rs"]
+pub mod dynamic_prompt_assembly_tests;
+#[path = "../dynamic_prompt_regression_tests.rs"]
+pub mod dynamic_prompt_regression_tests;
+#[path = "../empirical_m2_challenger_tests.rs"]
+pub mod empirical_m2_challenger_tests;
+#[path = "../llm_code_agent_tests.rs"]
+pub mod llm_code_agent_tests;
+#[path = "../m1_llm_priority_actor_challenge.rs"]
+pub mod m1_llm_priority_actor_challenge;
+#[path = "../prompt_budget_runtime.rs"]
+pub mod prompt_budget_runtime;
+#[path = "../reflex_lane_tests.rs"]
+pub mod reflex_lane_tests;
+#[path = "../routellm_complexity_tests.rs"]
+pub mod routellm_complexity_tests;
+#[path = "../routellm_empirical_challenge.rs"]
+pub mod routellm_empirical_challenge;
+#[path = "../router_expert_autoswap_tests.rs"]
+pub mod router_expert_autoswap_tests;
+#[path = "../scoped_tool_registry_tests.rs"]
+pub mod scoped_tool_registry_tests;
+#[path = "../skills_commands.rs"]
+pub mod skills_commands;

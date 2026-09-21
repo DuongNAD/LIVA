@@ -281,7 +281,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: liva_native_core::tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: liva_native_core::AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
@@ -588,9 +588,7 @@ fn build_test_state(vault_path: &str) -> Arc<liva_native_core::AppState> {
         stt: tokio::sync::Mutex::new(liva_native_core::SttManager::new("non_existent_dir")),
         tts: tokio::sync::Mutex::new(None),
         tts_player: liva_native_core::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(
-            liva_native_core::LlamaRouterManager::new(512, 0).expect("llm manager"),
-        ),
+        llm: liva_native_core::AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
@@ -625,9 +623,14 @@ async fn test_mcp_di_qua_handle_command() {
     //
     // An toàn để đặt env ở đây: mỗi file trong `tests/` biên dịch thành một
     // binary RIÊNG, nên biến này không rò sang test của `lib` (nơi
-    // `ghi_file_khong_bao_gio_tu_chay_theo_mac_dinh` khẳng định mặc định là chặn).
-    // Trong chính binary này, nới quyền không làm sai khẳng định nào của test khác.
+    struct EnvGuard(&'static str);
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe { std::env::remove_var(self.0) };
+        }
+    }
     unsafe { std::env::set_var("LIVA_MCP_AUTOEXEC", "native/write_markdown") };
+    let _env_guard = EnvGuard("LIVA_MCP_AUTOEXEC");
 
     let rand_val = rand::random::<u32>();
     let vault_path = std::env::temp_dir().join(format!("mcp_cmd_vault_{}", rand_val));

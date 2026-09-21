@@ -214,9 +214,7 @@ pub(crate) fn state_khong_co_embedder() -> std::sync::Arc<crate::AppState> {
         stt: tokio::sync::Mutex::new(crate::stt::SttManager::new("non_existent_dir")),
         tts: tokio::sync::Mutex::new(None),
         tts_player: crate::tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(
-            crate::llm::LlamaRouterManager::new(512, 0).expect("llm manager"),
-        ),
+        llm: crate::AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),

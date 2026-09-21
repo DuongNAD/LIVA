@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-voice-wake-probe"
+description = "Enables the voice_wake_probe command without any pre-configured scope."
+commands.allow = ["voice_wake_probe"]
+
+[[permission]]
+identifier = "deny-voice-wake-probe"
+description = "Denies the voice_wake_probe command without any pre-configured scope."
+commands.deny = ["voice_wake_probe"]

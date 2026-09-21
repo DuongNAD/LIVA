@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-voice-interrupt"
+description = "Enables the voice_interrupt command without any pre-configured scope."
+commands.allow = ["voice_interrupt"]
+
+[[permission]]
+identifier = "deny-voice-interrupt"
+description = "Denies the voice_interrupt command without any pre-configured scope."
+commands.deny = ["voice_interrupt"]

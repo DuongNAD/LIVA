@@ -335,7 +335,6 @@ mod tests {
         // 3. Modifying file invalidates cache and detects mismatch
         {
             let mut file = std::fs::OpenOptions::new()
-                .write(true)
                 .append(true)
                 .open(&file_path)
                 .expect("open file for append");

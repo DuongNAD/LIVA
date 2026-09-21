@@ -15,22 +15,16 @@
 //!    - Proof that the server accept loop remains alive and continues serving valid clients.
 
 use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
 use liva_native_core::crypto::EncryptionEngine;
 use liva_native_core::db::{self, DatabasePool, MEMORY_VECTOR_DIM};
-use liva_native_core::webrtc::frame::{OP_AUTH_HANDSHAKE, VoiceFrame};
-use liva_native_core::websocket::WebSocketServer;
-use liva_native_core::{AppState, llm, stt, tts};
+use liva_native_core::webrtc::voice_coordinator::VoiceCoordinator;
+use liva_native_core::{AppState, stt, tts};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 fn create_test_state() -> Arc<AppState> {
     let db = DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non-existent-model");
-    let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         64,
         64,
@@ -43,7 +37,7 @@ fn create_test_state() -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),
@@ -713,101 +707,38 @@ fn test_upsert_vector_respects_outer_transaction_rollback() {
 }
 
 // =========================================================================
-// 3. WEBSOCKET ACCEPT RECOVERY & FAULT RESILIENCE
+// 3. VOICE COORDINATOR RESILIENCE & FAULT RESILIENCE
 // =========================================================================
 
 #[tokio::test]
-async fn test_websocket_accept_resilience_to_tcp_garbage_and_abrupt_disconnects() {
-    let server = WebSocketServer::bind("127.0.0.1:0")
-        .await
-        .expect("bind reusable WebSocket server");
-    let address = server.local_addr();
+async fn test_voice_coordinator_resilience_to_garbage_and_abrupt_drops() {
     let state = create_test_state();
-    let server_task = tokio::spawn(server.run(state));
+    let coordinator = Arc::new(VoiceCoordinator::new(state, "resilience-conv".to_string()).await);
 
-    // 1. Initial valid client connects successfully
-    let (mut client_1, _) = connect_async(format!("ws://{address}/ws"))
-        .await
-        .expect("initial valid client must connect");
+    // 1. Ingest garbage samples (NaN, Inf, empty, massive chunks)
+    let nan_chunk = vec![f32::NAN; 128];
+    assert!(coordinator.ingest_mic_chunk(1, nan_chunk).await.is_ok());
 
-    let expected = VoiceFrame {
-        op_code: OP_AUTH_HANDSHAKE,
-        seq_id: 1,
-        payload: Bytes::from_static(b"embedded-tauri"),
-    };
-    client_1
-        .send(Message::Binary(
-            expected.encode().expect("encode handshake").to_vec(),
-        ))
-        .await
-        .expect("send handshake");
-    let reply = tokio::time::timeout(Duration::from_secs(2), client_1.next())
-        .await
-        .expect("handshake reply timeout");
-    assert!(reply.is_some(), "server responded to initial valid client");
-    client_1.close(None).await.unwrap();
+    let inf_chunk = vec![f32::INFINITY; 128];
+    assert!(coordinator.ingest_mic_chunk(2, inf_chunk).await.is_ok());
 
-    // 2. Flood with 20 raw TCP connections sending garbage data, reset, or abrupt close
-    for i in 0..20 {
-        let mut stream = TcpStream::connect(address).await.expect("tcp connect");
-        match i % 4 {
-            0 => {
-                // Send raw HTTP junk that is not a valid WebSocket handshake
-                let _ = stream.write_all(b"GARBAGE_PAYLOAD_NOT_HTTP\r\n\r\n").await;
-                let _ = stream.shutdown().await;
-            }
-            1 => {
-                // Send partial HTTP GET and abruptly close
-                let _ = stream
-                    .write_all(b"GET /ws HTTP/1.1\r\nHost: localhost\r\n")
-                    .await;
-                drop(stream); // TCP RST / immediate drop
-            }
-            2 => {
-                // Connect and immediately close without sending anything
-                drop(stream);
-            }
-            3 => {
-                // Send random binary noise
-                let _ = stream
-                    .write_all(&[0xFF, 0xFE, 0x00, 0x12, 0x34, 0x56])
-                    .await;
-                let _ = stream.shutdown().await;
-            }
-            _ => unreachable!(),
-        }
-    }
+    let empty_chunk = vec![];
+    assert!(coordinator.ingest_mic_chunk(3, empty_chunk).await.is_ok());
 
-    // Small delay to allow connection JoinSet tasks to process and complete
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    // 2. Evaluate wake probe with edge case inputs
+    let res1 = coordinator.evaluate_wake_probe(4, vec![0.0; 64]).await;
+    assert!(res1.is_ok());
 
-    // Verify the server task has NOT exited or panicked
-    assert!(
-        !server_task.is_finished(),
-        "Server accept loop died from client anomalies!"
-    );
+    // 3. Subscribe events and verify rapid drop/cancellation doesn't panic
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    coordinator.subscribe(Arc::new(move |evt| {
+        let _ = tx.try_send(evt);
+    }));
+    drop(rx); // Drop receiver immediately
 
-    // 3. Second valid client connects cleanly after the assault
-    let (mut client_2, _) = connect_async(format!("ws://{address}/ws"))
-        .await
-        .expect("server must remain receptive to new valid clients after network anomalies");
+    // Dispatch interrupt and text event
+    assert!(coordinator.interrupt().is_ok());
+    coordinator.send_text_event("status", serde_json::json!({"ok": true}));
 
-    let expected_2 = VoiceFrame {
-        op_code: OP_AUTH_HANDSHAKE,
-        seq_id: 2,
-        payload: Bytes::from_static(b"embedded-tauri"),
-    };
-    client_2
-        .send(Message::Binary(
-            expected_2.encode().expect("encode handshake").to_vec(),
-        ))
-        .await
-        .expect("send handshake 2");
-    let reply_2 = tokio::time::timeout(Duration::from_secs(2), client_2.next())
-        .await
-        .expect("handshake 2 reply timeout");
-    assert!(reply_2.is_some(), "server successfully serviced client 2");
-
-    client_2.close(None).await.unwrap();
-    server_task.abort();
+    coordinator.unsubscribe();
 }

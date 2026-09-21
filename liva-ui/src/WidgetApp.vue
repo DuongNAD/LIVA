@@ -326,13 +326,11 @@ voice.onWakeWordDetected(handleWakeWordDetection);
 
 const forceTriggerWakeWord = async () => {
   if (voice.state.value === 'OFF') {
-    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      try {
-        await voice.startPipeline(ws.value);
-      } catch (e) {
-        logger.warn('[Widget]', 'Failed to start voice pipeline on force trigger:', e);
-        return;
-      }
+    try {
+      await voice.startPipeline();
+    } catch (e) {
+      logger.warn('[Widget]', 'Failed to start voice pipeline on force trigger:', e);
+      return;
     }
   }
   handleWakeWordDetection();
@@ -747,8 +745,6 @@ const {
     void (async () => {
       await voice.startPipeline(socket);
       if (
-        ws.value === socket &&
-        socket.readyState === WebSocket.OPEN &&
         !voice.isReady.value &&
         !voice.pipelineError.value
       ) {
@@ -974,9 +970,7 @@ const handleKeydown = async (e: KeyboardEvent) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
     isSensing.value = true;
     try {
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-        ws.value.send(JSON.stringify({ event: 'vision:capture' }));
-      }
+      sendMsg('vision:capture');
     } catch {
       // ignore
     }
@@ -993,21 +987,17 @@ const handleKeydown = async (e: KeyboardEvent) => {
 // ═══════════════════════════════════════════════════════
 const toggleVoice = () => {
   if (voice.state.value === 'OFF') {
-    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      logger.info('[Widget]', 'Manually starting voice pipeline...');
-      voice
-        .startPipeline(ws.value)
-        .then(() => {
-          if (voice.state.value === 'PASSIVE') {
-            voice.toggleVoice();
-          }
-        })
-        .catch((e: unknown) => {
-          logger.warn('[Widget]', 'Failed to start voice pipeline on toggle:', e);
-        });
-    } else {
-      logger.warn('[Widget]', 'Cannot start voice pipeline: WebSocket not ready');
-    }
+    logger.info('[Widget]', 'Manually starting voice pipeline...');
+    voice
+      .startPipeline()
+      .then(() => {
+        if (voice.state.value === 'PASSIVE') {
+          voice.toggleVoice();
+        }
+      })
+      .catch((e: unknown) => {
+        logger.warn('[Widget]', 'Failed to start voice pipeline on toggle:', e);
+      });
   } else {
     voice.toggleVoice();
   }
@@ -1016,17 +1006,15 @@ const toggleVoice = () => {
 // Interrupt: if user clicks mic while LIVA is speaking
 const interruptLIVA = () => {
   speaker.stop();
-
-  if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-    ws.value.send('[INTERRUPT]');
-  }
+  voice.interrupt();
+  sendMsg('interrupt');
 };
 
 // ═══════════════════════════════════════════════════════
 //  Send Message
 // ═══════════════════════════════════════════════════════
 const sendMessage = () => {
-  if (!inputText.value.trim() || !ws.value || ws.value.readyState !== WebSocket.OPEN) return;
+  if (!inputText.value.trim() || !ws.value) return;
 
   speaker.stop();
 
@@ -1034,12 +1022,7 @@ const sendMessage = () => {
   messages.value = [...messages.value, { id: generateMsgId(), role: 'user', text }];
   triggerRef(messages);
 
-  ws.value.send(
-    JSON.stringify({
-      event: 'user_voice_command',
-      payload: { text },
-    })
-  );
+  sendMsg('user_voice_command', { text });
 
   inputText.value = '';
   scrollToBottom();
@@ -1085,7 +1068,7 @@ onMounted(() => {
 
   // Expose global helper for clickable bubble buttons
   (window as LivaWindow).sendLIVAMessage = (text: string) => {
-    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+    if (ws.value) {
       speaker.stop();
       messages.value = [...messages.value, { id: generateMsgId(), role: 'user', text }];
       triggerRef(messages);

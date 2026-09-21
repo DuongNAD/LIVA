@@ -26,7 +26,6 @@ use tokio::sync::{Mutex, mpsc};
 fn create_test_state() -> Arc<AppState> {
     let db = db::DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non_existent_model");
-    let llm_manager = llm::LlamaRouterManager::new(512, 0).expect("LLM manager");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
         64,
         64,
@@ -39,7 +38,7 @@ fn create_test_state() -> Arc<AppState> {
         stt: Mutex::new(stt_manager),
         tts: Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: Mutex::new(None),
         denoiser: Mutex::new(None),
         turn_shadow: Mutex::new(None),

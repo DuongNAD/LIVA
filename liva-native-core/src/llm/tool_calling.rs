@@ -983,18 +983,12 @@ pub async fn select_tool(
     };
     let raw = {
         let state = std::sync::Arc::clone(state);
-        let prompt_clone = prompt.clone();
-        let completion_res = tokio::task::spawn_blocking(move || {
-            let mut llm = state.llm.blocking_lock();
-            // temperature 0 + top_p 1: đây là quyết định phân loại, không phải sáng
-            // tác. Sampling ngẫu nhiên ở đây chỉ tạo ra kết quả không lặp lại được.
-            llm.generate_completion(&prompt_clone, 0.0, 1.0, |_| true)
-        })
-        .await
-        .ok()?;
-
-        match completion_res {
-            Ok(out) => out.text,
+        match state
+            .llm
+            .generate_text(prompt, liva_llm::Priority::Normal)
+            .await
+        {
+            Ok(text) => text,
             Err(e) => {
                 tracing::warn!("chọn tool: LLM lỗi ({e}); rơi về route_intent");
                 return None;
@@ -1873,9 +1867,7 @@ mod tests {
     fn test_state() -> Arc<crate::AppState> {
         let db = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
         let stt = tokio::sync::Mutex::new(crate::stt::SttManager::new("non-existent-model"));
-        let llm = tokio::sync::Mutex::new(
-            crate::llm::LlamaRouterManager::new(2048, 0).expect("LLM manager"),
-        );
+        let llm = crate::AppState::mock_llm();
         let mock_capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
             64,
             64,

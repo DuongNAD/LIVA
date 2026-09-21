@@ -6,7 +6,10 @@
   "permissions": [
     "allow-native-ipc-call",
     "allow-native-ipc-call-stream",
-    "allow-issue-websocket-session",
+    "allow-voice-subscribe",
+    "allow-voice-mic-chunk",
+    "allow-voice-wake-probe",
+    "allow-voice-interrupt",
     "allow-toggle-ghost-mode",
     "allow-set-eco-mode",
     "allow-update-interactive-zones",

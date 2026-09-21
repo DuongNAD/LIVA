@@ -10,10 +10,54 @@
 //!    Verifying output frames contain only clean, finite floats clamped to `[-1.0, 1.0]` with 0 panics.
 
 use liva_native_core::webrtc::aec::SelfEchoCanceller;
-use liva_native_core::websocket::AbortOnDropJoinSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+pub struct AbortOnDropJoinSet<T: 'static> {
+    inner: tokio::task::JoinSet<T>,
+}
+
+impl<T: 'static> Default for AbortOnDropJoinSet<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: 'static> AbortOnDropJoinSet<T> {
+    pub fn new() -> Self {
+        Self {
+            inner: tokio::task::JoinSet::new(),
+        }
+    }
+
+    pub fn spawn<F>(&mut self, task: F)
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send,
+    {
+        while self.inner.try_join_next().is_some() {}
+        self.inner.spawn(task);
+    }
+
+    pub fn abort_all(&mut self) {
+        self.inner.abort_all();
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+impl<T: 'static> Drop for AbortOnDropJoinSet<T> {
+    fn drop(&mut self) {
+        self.inner.abort_all();
+    }
+}
 
 // =============================================================================
 // Helper Types for Task Tracking

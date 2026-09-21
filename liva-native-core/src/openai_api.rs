@@ -12,12 +12,9 @@
 //!
 //! ## Ba quyết định thiết kế, và lý do
 //!
-//! **1. Cổng RIÊNG, không dùng chung 8002 — và mặc định TẮT.**
-//! Cổng 8002 là `TcpListener` thô đưa thẳng mọi kết nối cho `tokio-tungstenite`
-//! bắt tay WebSocket; nhét HTTP thường vào đó buộc phải soi trước vài byte rồi
-//! phát lại chúng cho tungstenite — chỗ dễ sai, đổi lấy việc trùng số cổng.
+//! **1. Cổng RIÊNG và mặc định TẮT.**
 //! Bề mặt này bật bằng `LIVA_OPENAI_PORT`; không đặt biến thì **không mở socket
-//! nào**. Nó không có xác thực (giống hệt 8002), nên bật-mặc-định là mở thêm
+//! nào**. Nó không có xác thực, nên bật-mặc-định là mở thêm
 //! một cửa không khoá mà người dùng không yêu cầu.
 //!
 //! **2. Đây là LIVA, không phải một proxy LLM trung tính.**

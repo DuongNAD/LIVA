@@ -209,7 +209,8 @@ pub async fn recall_context_scoped(
 
         // 2. HippoRAG Knowledge Graph multi-hop retrieval
         let mut graph_context = String::new();
-        if let Ok(graph) = state.db.csr_graph.read() {
+        {
+            let graph = state.db.get_compiled_csr_graph();
             let seeds = graph.find_seed_nodes(&query, 3);
             if !seeds.is_empty() {
                 let seed_refs: Vec<(&str, f32)> =

@@ -1,12 +1,11 @@
+use crate::common::TEST_ENV_LOCK;
 use liva_native_core::active_recall::ActiveRecallManager;
 use liva_native_core::crypto::EncryptionEngine;
 use liva_native_core::db::{self, DatabasePool, Fact};
 use liva_native_core::{AppState, handle_command, llm, stt, tts};
 use serde_json::json;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-
-static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+use std::sync::Arc;
 
 struct TempDbGuard(PathBuf);
 impl Drop for TempDbGuard {
@@ -33,7 +32,7 @@ fn test_state() -> (Arc<AppState>, TempDbGuard) {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: tokio::sync::Mutex::new(llm_manager),
+        llm: AppState::mock_llm(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),

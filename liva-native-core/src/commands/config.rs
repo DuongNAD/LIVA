@@ -1179,9 +1179,7 @@ mod tests {
     fn test_state() -> Arc<AppState> {
         let db = crate::db::DatabasePool::new_in_memory().expect("in-memory db");
         let stt = tokio::sync::Mutex::new(crate::stt::SttManager::new("non-existent-model"));
-        let llm = tokio::sync::Mutex::new(
-            crate::llm::LlamaRouterManager::new(2048, 0).expect("LLM manager"),
-        );
+        let llm = AppState::mock_llm();
         let mock_capturer = Arc::new(crate::vision::capture::MockScreenCapturer::new(
             64,
             64,

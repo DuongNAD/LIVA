@@ -366,6 +366,38 @@ pub fn build_app_state() -> Result<Boot, BootError> {
 
     let voice = webrtc::session::VoiceRuntimeComponents::from_env(&stt_model_dir);
 
+    // Initialize native Computer-Use Agent (CUA) engine
+    let cua_config = {
+        let permission_mode = match std::env::var("LIVA_CUA_PERMISSION_MODE")
+            .ok()
+            .as_deref()
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("standard") => liva_cua::PermissionMode::Standard,
+            Some("unrestricted") => liva_cua::PermissionMode::Unrestricted,
+            _ => liva_cua::PermissionMode::Bounded,
+        };
+
+        let kill_switch_enabled = crate::env_flag("LIVA_CUA_KILL_SWITCH", true);
+        let audit_logging_enabled = crate::env_flag("LIVA_CUA_AUDIT_LOGGING", true);
+        let action_timeout_ms = std::env::var("LIVA_CUA_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(5000);
+
+        liva_cua::CuaConfig {
+            permission_mode,
+            kill_switch_enabled,
+            audit_logging_enabled,
+            action_timeout_ms,
+            ..Default::default()
+        }
+    };
+
+    let cua_db_handle = db.writer_actor.to_storage_handle();
+    let cua_engine = Arc::new(liva_cua::CuaEngine::new(cua_config, Some(cua_db_handle)));
+
     let state = Arc::new(AppState {
         db,
         crypto: boot_crypto.engine,
@@ -381,6 +413,7 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         vision: tokio::sync::Mutex::new(vision_manager),
         embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
         active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
+        cua: cua_engine,
     });
 
     Ok(Boot {
@@ -843,6 +876,7 @@ mod tests {
             )),
             embedder: AppState::empty_embedder(),
             active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
+            cua: AppState::mock_cua(),
         });
 
         // Simulate active transcription by holding state.stt lock

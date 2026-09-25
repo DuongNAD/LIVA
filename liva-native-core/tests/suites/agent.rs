@@ -16,6 +16,7 @@ pub mod m4_adversarial_stress_challenge;
 pub mod m4_checkpoint_adversarial_challenge;
 #[path = "../m4_escalation_adversarial_challenge.rs"]
 pub mod m4_escalation_adversarial_challenge;
+#[cfg(feature = "experimental")]
 #[path = "../self_correction_stress.rs"]
 pub mod self_correction_stress;
 #[path = "../swarm_stress_tests.rs"]

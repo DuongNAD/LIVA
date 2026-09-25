@@ -1070,3 +1070,42 @@ Tất cả các tác vụ biên dịch và kiểm thử phải thực thi tuần
 ### Kiểm định Hệ thống & Trợ lý
 - [ ] Bộ công cụ chuẩn đoán hệ sinh thái (npm run doctor và npm run skills:audit) đạt trạng thái hợp lệ 100%.
 - [ ] Các điểm nghẽn hoặc cảnh báo giả trong VAN-DE-CAN-XU-LY.md được giải quyết dứt điểm và có báo cáo đối soát cụ thể.
+
+## 2026-09-24T11:46:52Z
+
+Modernize LIVA's native engine architecture and integrate native Computer-Use Agent (CUA) capabilities derived from trycua/cua (cua-driver in Rust), enabling non-intrusive desktop automation, safe sandboxed execution, and fast System-1 UI action routing.
+
+Working directory: e:\Project\01_AI_Agents\LIVA
+Integrity mode: development
+Reference repository: https://github.com/trycua/cua.git (specifically libs/cua-driver/)
+
+## Requirements
+
+### R1. Native CUA Desktop Automation Engine
+Integrate and port core abstractions from trycua/cua's cua-driver into LIVA's Rust native engine (liva-native-core). Provide cross-window inspection, window targeting, and background input synthesis (mouse/keyboard events) that operates without seizing or stealing the user's primary focus or hardware cursor where OS primitives permit.
+
+### R2. Sandboxing, Permission Modes & Emergency Kill-Switch
+Implement multi-tier security boundaries (Standard, Bounded, Unrestricted) governing what actions the agent can perform on the host desktop. Ensure an instant hardware/software interrupt (Emergency Kill-Switch / Esc abort) halts any queued or running input action sequence in under 50ms, with all dispatched actions logged to a structured audit ledger.
+
+### R3. Vision-Aligned Fast Action Router (System-1 GUI Loop)
+Interface LIVA's existing multimodal screen capture / visual ROI diffing module with a low-latency System-1 action executor. Enable the agent to translate visual targets (buttons, inputs, coordinate bboxes) directly into discrete atomic actions (click, double_click, scroll, type_text, hotkey) with minimal token overhead and deterministic execution checks.
+
+### R4. LIVA Core Modularization & Performance Pruning
+Refactor and organize liva-native-core crate boundaries for maintainability and extensibility. Ensure strict sequential compilation constraints (-j 2) are respected, eliminate dead legacy pathways, and expose unified Tauri IPC commands for UI monitoring and control of the CUA subsystem.
+
+## Acceptance Criteria
+
+### Driver & Input Execution
+- [ ] Native driver module compiles cleanly within liva-native-core without external non-Rust daemon dependencies.
+- [ ] Unit & integration tests demonstrate window enumeration, coordinate translation, and simulated input dispatch.
+- [ ] Safe fallback handling when target windows are minimized, hidden, or elevated.
+
+### Safety & Emergency Halting
+- [ ] Emergency stop signal immediately aborts any executing or pending action sequence within 50ms.
+- [ ] Security boundary enforces Permission Mode restrictions, rejecting unauthorized desktop operations in Bounded mode.
+- [ ] All executed desktop actions produce structured audit events (timestamp, action_type, target_app, coordinates).
+
+### System Quality & Build Bounds
+- [ ] cargo check -j 2 --all-targets passes with zero errors.
+- [ ] cargo test -j 2 -p liva-native-core -- --test-threads 2 passes completely.
+- [ ] No regression on existing voice, memory, and LLM streaming pipelines.

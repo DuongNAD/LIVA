@@ -14,6 +14,7 @@ pub mod dynamic_prompt_assembly_tests;
 pub mod dynamic_prompt_regression_tests;
 #[path = "../empirical_m2_challenger_tests.rs"]
 pub mod empirical_m2_challenger_tests;
+#[cfg(feature = "experimental")]
 #[path = "../llm_code_agent_tests.rs"]
 pub mod llm_code_agent_tests;
 #[path = "../m1_llm_priority_actor_challenge.rs"]

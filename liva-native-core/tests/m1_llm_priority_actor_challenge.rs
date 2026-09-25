@@ -48,6 +48,7 @@ fn create_test_state_with_llm(handle: LlmActorHandle) -> Arc<AppState> {
         )),
         embedder: liva_native_core::AppState::empty_embedder(),
         active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+        cua: AppState::mock_cua(),
     })
 }
 

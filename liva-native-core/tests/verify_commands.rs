@@ -43,6 +43,7 @@ async fn test_verify_handle_commands() {
         vision: tokio::sync::Mutex::new(vision_manager),
         embedder: liva_native_core::AppState::empty_embedder(),
         active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+        cua: AppState::mock_cua(),
     });
 
     // 1. Verify standard I/O command execution for integration:smart_home_control

@@ -1,3 +1,5 @@
+#![cfg(feature = "experimental")]
+
 use liva_native_core::evolution::{
     CodeAgent, LlmCodeAgent, Sandbox, SelfCorrectionError, SelfCorrectionLoop,
     build_code_repair_prompt, extract_code_from_response,

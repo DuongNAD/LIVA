@@ -366,6 +366,7 @@ async fn test_visual_governor_ipc_status_integration() {
         )),
         embedder: liva_native_core::AppState::empty_embedder(),
         active_recall: Arc::new(ActiveRecallManager::new()),
+        cua: AppState::mock_cua(),
     });
 
     // Query governor status via vision command handler

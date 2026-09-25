@@ -10,6 +10,8 @@ autobins = false
 anyhow = "1.0"
 liva-core-types = { path = "../crates/liva-core-types" }
 liva-llm = { path = "../crates/liva-llm" }
+liva-storage = { path = "../crates/liva-storage" }
+liva-cua = { path = "../crates/liva-cua" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21.0"
 # Bề mặt tương thích OpenAI (`openai_api.rs`). hyper 0.14 ĐÃ nằm trong cây phụ

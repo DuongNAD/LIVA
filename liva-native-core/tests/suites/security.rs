@@ -16,6 +16,10 @@ pub mod cognitive_adversarial_tests;
 pub mod cognitive_runtime_tests;
 #[path = "../command_authorization.rs"]
 pub mod command_authorization;
+#[path = "../cua_ipc_integration.rs"]
+pub mod cua_ipc_integration;
+#[path = "../cua_m4_thread_leak_challenge.rs"]
+pub mod cua_m4_thread_leak_challenge;
 #[path = "../integration_tests.rs"]
 pub mod integration_tests;
 #[path = "../liva_eval_tests.rs"]
@@ -24,6 +28,8 @@ pub mod liva_eval_tests;
 pub mod m2_redaction_adversarial_challenge;
 #[path = "../m3_ipc_sync_adversarial_challenge.rs"]
 pub mod m3_ipc_sync_adversarial_challenge;
+#[path = "../m4_cua_ipc_adversarial_challenge.rs"]
+pub mod m4_cua_ipc_adversarial_challenge;
 #[path = "../mcp_client_e2e.rs"]
 pub mod mcp_client_e2e;
 #[path = "../mcp_vault_sandbox_escape.rs"]
@@ -34,6 +40,7 @@ pub mod normalizer_adversarial_stress;
 pub mod panic_cleanup;
 #[path = "../runtime_stability_tests.rs"]
 pub mod runtime_stability_tests;
+#[cfg(feature = "experimental")]
 #[path = "../sandbox_stress.rs"]
 pub mod sandbox_stress;
 #[path = "../verify_commands.rs"]

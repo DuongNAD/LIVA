@@ -3575,6 +3575,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "liva-cua"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "liva-storage",
+ "r2d2",
+ "r2d2_sqlite",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "liva-desktop"
 version = "1.0.0"
 dependencies = [
@@ -3621,7 +3639,9 @@ dependencies = [
  "hyper 0.14.32",
  "image",
  "liva-core-types",
+ "liva-cua",
  "liva-llm",
+ "liva-storage",
  "llama-cpp-2",
  "ndarray 0.15.6",
  "ndarray-npy",

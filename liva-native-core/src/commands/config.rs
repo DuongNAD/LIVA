@@ -1203,6 +1203,7 @@ mod tests {
             )),
             embedder: crate::AppState::empty_embedder(),
             active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
+            cua: AppState::mock_cua(),
         })
     }
 

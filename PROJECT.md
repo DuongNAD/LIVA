@@ -1,27 +1,20 @@
-# Project: LIVA Production-Ready Optimization & Ecosystem Hardening
+# Project: LIVA Native Engine Modernization & Native CUA Integration
 
 ## Architecture
 
-LIVA is a native Cognitive Desktop Operating System designed to run fully offline on Windows 10/11 x64 workstations within strict resource budgets:
-- **System RAM Ceiling**: ≤ 4.0 GB (operational steady-state target ~3.0 GB).
-- **GPU VRAM Ceiling**: ≤ 5.1 GB.
-- **3D Avatar Target**: 60 FPS unthrottled in dedicated Web Worker via OffscreenCanvas, isolated from Main UI thread DOM/token churn.
-- **Lip-Sync Latency**: Clock-synchronized phoneme visemes with drift < 5ms (SLA target < 30ms).
+LIVA's native engine (`liva-native-core`) is modernized to integrate native Computer-Use Agent (CUA) capabilities derived from `trycua/cua`'s `cua-driver` in Rust. The architecture enables non-intrusive desktop automation, safe sandboxed execution, and fast System-1 UI action routing with zero external non-Rust daemon dependencies, while respecting strict sequential compilation bounds (`-j 2`) and memory ceilings.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                       LIVA DESKTOP CLIENT                                        │
-│                     WebView2 / Vue 3.5 · System Tray · Windows Manager (Tauri v2)                 │
+│                 Tauri v2 · WebView2 / Vue 3.5 · Floating Widget & Dashboard UI                    │
 ├───────────────────────────────────────────────┬──────────────────────────────────────────────────┤
-│                Main UI Thread                 │           Dedicated Web Worker (Isolated)        │
-│  - WidgetApp.vue & Chat UI                    │  - Three.js WebGL2Renderer on OffscreenCanvas    │
-│  - Web Audio API (useSpeakerPlayback)         │  - VRM Model & Spring Bone Physics Engine       │
-│  - High-res Audio Clock Anchor                │  - Unified 6-Step Humanoid Additive Pose Loop    │
-│  - Tauri v2 Channel Ingestion (voice_subscribe)│ - Distance-based Locomotion & FootPlantIK       │
-│  - useAvatarWorkerBridge (postMessage)        │  - Synchronized Viseme Timeline (<5ms drift)     │
+│                  User UI                      │                CUA Control & Monitor             │
+│  - WidgetApp.vue & Chat UI                    │  - Floating Emergency Kill-Switch Button (Esc)   │
+│  - 3D Avatar (Web Worker OffscreenCanvas)     │  - Permission Mode Selector (Standard/Bounded)   │
+│  - Voice Duplex Audio (WASAPI / WebRTC AEC3)  │  - Live Audit Ledger Stream & Window Inspector   │
 └───────────────────────┬───────────────────────┴──────────────────────────▲───────────────────────┘
-                        │                                                  │
-                        │ Native Tauri v2 IPC Channels                     │ (Canvas ownership transfer)
+                        │ Native Tauri v2 IPC (`cua:*` verbs)              │
                         ▼                                                  │
 ┌──────────────────────────────────────────────────────────────────────────┴───────────────────────┐
 │                                LIVA NATIVE CORE ENGINE (Rust)                                    │
@@ -29,20 +22,26 @@ LIVA is a native Cognitive Desktop Operating System designed to run fully offlin
 ├──────────────────────┬────────────────────────┬─────────────────────┬────────────────────────────┤
 │       crates/        │        crates/         │       crates/       │          crates/           │
 │   liva-core-types    │      liva-storage      │      liva-llm       │        liva-tools          │
-│                      │                        │                     │                            │
-│  - Domain Models     │  - Micro-Batched       │  - LlmActor (OS Thr)│  - Consolidated Diagnostic │
-│  - Error Types       │    Single-Writer WAL   │  - Real-Time Token  │    Suite & CLI             │
-│  - Permissions/Auth  │  - FactTrie Search     │    Streaming Chans  │  - Benchmarks & Latency    │
-│  - IPC Event Types   │  - Thread-Safe Reads   │  - Priority Preempt │    Profilers               │
-│  - Zero Heavy Deps   │  - Clean Clippy Lint   │  - Non-blocking Host│                            │
+│  - Domain Models     │  - Micro-Batched       │  - LlmActor (OS Thr)│  - Diagnostic Suite & CLI  │
+│  - CUA Action Types  │    Single-Writer WAL   │  - Priority Queue   │  - CUA Benchmark & Test    │
+│  - Security Verdicts │  - CUA Audit Ledger    │  - Real-time Stream │    Harness                 │
 ├──────────────────────┴────────────────────────┴─────────────────────┴────────────────────────────┤
-│                                 liva-native-core Subsystems                                      │
-│  - StateGraph Asynchronous DAG Engine (68/68 unit tests passing)                                 │
-│  - SqliteCheckpointer (AES-256-GCM encrypted persistence)                                        │
-│  - VisualGovernor (750 MB VLM mutual exclusion)                                                  │
-│  - VoiceCoordinator (Audio Ingest, Silero VAD, Parakeet STT, Piper/VieNeu TTS)                   │
-│  - CsrGraph Batched Writes & Dirty-Flag Compilation                                              │
-│  - Bounded SessionEventStream Ring Buffer (max 500) & ActiveRecall TTL Eviction                  │
+│                         crates/liva-cua (Native CUA Subsystem)                                   │
+│  ┌───────────────────────┬────────────────────────┬───────────────────────────────────────────┐  │
+│  │     Driver Engine     │   Coordinate/Geometry  │            Security & Kill-Switch         │  │
+│  │  - Window Enumeration │  - VirtualDesk Norm    │  - Permission Modes (Standard/Bounded/Unr)│  │
+│  │    (EnumWindows+UIA)  │    (0..=65535, multi)  │  - Bounded Allowlist & Denylist Filter    │  │
+│  │  - Non-Intrusive Input│  - Signed LPARAM Math  │  - Emergency Kill-Switch (<50ms SLA)      │  │
+│  │    (PostMessageW, UIA │  - DWM Crop Inset      │  - Structured Audit Ledger (SQLite WAL)   │  │
+│  │     fg_bypass, Pointer│  - Per-Monitor V2 DPI  │  - UIPI & Token Integrity Guard           │  │
+│  │     Touch Injection)  │                        │                                           │  │
+│  └───────────────────────┴────────────────────────┴───────────────────────────────────────────┘  │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                           System-1 GUI Action Router & Vision                                    │
+│  - Multimodal Screen Capture (`NativeScreenCapturer` / `xcap` with WGC)                          │
+│  - Localized ROI Diff Verification (`DiffEngine::diff_region`, < 80ms)                           │
+│  - Low-Latency Reactive Action Execution (< 15ms per step, > 95% LLM token savings)             │
+│  - Deterministic Pre-Execution Checks (HWND liveness, occlusion, client bounds containment)      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -50,25 +49,20 @@ LIVA is a native Cognitive Desktop Operating System designed to run fully offlin
 
 ## Feature Inventory
 
-Every feature identified in the Survey phase is mapped below with its assigned milestone.
+Every feature from the Survey phase is mapped below with its assigned milestone.
 
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Real-Time LLM Token Streaming | Refactor `LlmCommand::GenerateText` to stream tokens incrementally over an `mpsc` channel directly to Tauri IPC and TTS chunker, eliminating full-response buffering and reducing TTFT to < 350ms | M1 | Survey R1 |
-| 2 | Non-Blocking LLM Actor Inference | Isolate synchronous `llama-cpp-2` computation onto a dedicated OS worker thread or `tokio::task::spawn_blocking`, preventing Tokio runtime worker thread starvation | M1 | Survey R1 |
-| 3 | RAM Ceiling & Resource Governor | Wire `VisualGovernor` (750 MB VLM limiter) into `AppState`/`VisionManager` and enforce dynamic STT/LLM memory mutual exclusion to guarantee RAM ≤ 4.0 GB | M1 | Survey R1 |
-| 4 | CsrGraph Batching & Lock Contention Reduction | Batch L3 knowledge graph updates with a dirty-compilation flag instead of running O(V+E) CSR compilation per triple under write locks; replace `blocking_execute` with async execution in async paths | M1 | Survey R1 |
-| 5 | Memory Leak & Ring Buffer Bounds | Cap `SessionEventStream.history` with a 500-event ring buffer and add TTL cleanup to `ActiveRecallManager.pending_challenges` to prevent unbounded memory growth | M1 | Survey R1 |
-| 6 | In-Memory FactTrie Prefix Search | Implement prefix-tree indexing in `crates/liva-storage` to eliminate full table scans of SQLite `facts` on every conversational turn | M1 | Survey R1 |
-| 7 | OffscreenCanvas Avatar Web Worker | Migrate Three.js WebGL2Renderer, `@pixiv/three-vrm`, `GLTFLoader` (ImageBitmapLoader), and 6-step pose pipeline into a dedicated Web Worker (`avatarWorker.ts`) via `canvas.transferControlToOffscreen()` | M2 | Survey R2 |
-| 8 | Avatar Worker Bridge Composable | Create `useAvatarWorkerBridge.ts` providing the standard `AvatarEngineApi` interface and postMessage protocol to `VRMEngine.vue` and `WidgetApp.vue` | M2 | Survey R2 |
-| 9 | High-Resolution Audio-Viseme Clock Sync | Synchronize Web Audio `AudioContext.currentTime` with worker `performance.now()` via a shared clock delta, ensuring viseme drift strictly < 5ms (< 30ms SLA) | M2 | Survey R2 |
-| 10 | Decoupled Interactive Zones Bounding Box | Compute projected avatar AABB bounds in worker and emit throttled `BOUNDS_UPDATED` events to Tauri for click-through window calculation | M2 | Survey R2 |
-| 11 | Agentic DAG Workflow Hardening | Validate `StateGraph` error boundaries, encrypted SQLite checkpointing, and `AgentState::trim_history` under multi-step tool and swarm execution | M3 | Survey R3 |
-| 12 | Ecosystem Diagnostic Remediation | Add required YAML frontmatter to `LIVA_SYSTEM_AUDIT_AND_ROADMAP_2026.md` for `skills:audit`, and align `data/liva-config.json` model paths for `doctor` | M3 | Survey R3 |
-| 13 | Rust Code Formatting & Clippy Hygiene | Fix formatting diffs in `voice_coordinator.rs` and test files (`cargo fmt --all`); eliminate 12 clippy warnings in `crates/liva-storage` and 1 in `embedding.rs` to reach 0 warnings with `-D warnings` | M3 | Survey R3 |
-| 14 | Test Suite Assertion & Tolerance Alignment | Adjust tolerance in Vitest `adversarialAvatarSaccadeChallenge.test.ts:273` (`toBeCloseTo(..., 3)`); fix off-by-one assertion in `voice_coordinator_adversarial_stress.rs:167` and align latency assertion in `wake_empirical_benchmark.rs:187` | M3 | Survey R3 |
-| 15 | Dual-Track Full Verification & Victory Audit | Run and verify 100% pass across all 8 quality gates (`cargo test --workspace`, `clippy`, `fmt`, `vue-tsc`, `npm run test:coverage -w liva-ui`, `doctor`, `skills:audit`, Forensic Auditor clean verdict) | M4 | Survey R1-R4 |
+| 1 | Window Enumeration & Inspection | Canonical Win32 `EnumWindows` z-order + UIA tree walker; DWM extended frame bounds with drop-shadow crop inset; UWP `ApplicationFrameHost` resolution; and state tracking | M1 | Survey R1 |
+| 2 | Coordinate Translation & Multi-Monitor Virtual Desktop | Virtual desktop normalization (`virtualdesk.rs`, 0..=65535 with negative origins), signed 16-bit packed LPARAM math (`lparam.rs`), Per-Monitor V2 DPI awareness, and bitmap-to-screen coordinate alignment | M1 | Survey R1 |
+| 3 | Non-Intrusive Background Input Synthesis | Multi-tier input actuator: UIA InvokePattern with `DisabledHwndGuard` (`EnableWindow(false)`), universal synthetic pointer (`PT_TOUCH`) injection via `InjectSyntheticPointerInput` with `NoActivateGuard` (`WS_EX_NOACTIVATE`), deepest-child `PostMessageW`, and focused-descendant keyboard routing | M1 | Survey R1 |
+| 4 | Special Window State Fallbacks & UIPI Handling | Fail-closed detection and refusal for minimized/hidden windows (`IsIconic` sentinel); UIPI detection via process token integrity RID; off-screen element scrolling recovery; and target PID guards | M1 | Survey R1 |
+| 5 | Multi-Tier Security Boundaries | Multi-tier policy engine: `Standard` (read-only/blocked input), `Bounded` (process allowlist, protected window denylist, coordinate containment, dangerous hotkey filtering), and `Unrestricted` | M2 | Survey R2 |
+| 6 | Emergency Kill-Switch Subsystem (< 50ms SLA) | Multi-trigger abort mechanism (5ms Esc key listener / hook, Tauri IPC event, physical mouse displacement > 50px) triggering atomic halt (`EMERGENCY_HALT` SeqCst), Tokio cancellation token, queue flush, and synthetic key/button release in < 15ms | M2 | Survey R2 |
+| 7 | Structured Audit Ledger Persistence | Append-only audit events (`timestamp`, `action_type`, `target_app`, `coordinates`, `permission_mode`, `security_verdict`, `latency_ms`) persisted asynchronously to SQLite WAL via `DbActor` and streaming JSONL | M2 | Survey R2 |
+| 8 | Vision-Aligned Fast Action Router (System-1 GUI Loop) | Reactive action execution loop translating visual targets into atomic action grammar (`Click`, `DoubleClick`, `Scroll`, `TypeText`, `Hotkey`, `Drag`) with > 95% token savings, deterministic pre-checks, and localized post-execution ROI diff verification (< 80ms) | M3 | Survey R3 |
+| 9 | Crate Modularization & Legacy Pruning | Establish dedicated `crates/liva-cua` workspace crate, wire into `AppState`, prune dead `src/evolution` behind `#[cfg(feature = "experimental")]`, remove empty stubs, and expose unified Tauri IPC commands (`cua:*`) with authorization | M4 | Survey R4 |
+| 10 | Comprehensive Quality Gates & Anti-Regression Verification | Sequential compilation `-j 2`, sequential test execution `-- --test-threads 2`, RAM pre-flight check >= 4GB, zero regression across voice duplex, memory, and LLM pipelines | M4 | Survey R4 |
 
 ---
 
@@ -76,90 +70,65 @@ Every feature identified in the Survey phase is mapped below with its assigned m
 
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| **M1** | **Core Engine Runtime, Streaming & Resource Guardrails (R1)** | Features 1, 2, 3, 4, 5, 6: Real-time LLM token streaming, non-blocking inference thread, RAM ≤ 4.0 GB guardrails, lock contention reduction, memory leak fixes, and `FactTrie` | none | DONE |
-| **M2** | **3D Avatar Web Worker OffscreenCanvas & Low-Latency IPC (R2)** | Features 7, 8, 9, 10: OffscreenCanvas Web Worker, bridge composable, <5ms viseme sync, and decoupled click-through zones | M1 | DONE |
-| **M3** | **Agentic Workflows Hardening & Quality Gate Remediation (R3)** | Features 11, 12, 13, 14: Agentic DAG workflows, `skills:audit` frontmatter, `cargo fmt`, `clippy` 0 warnings, and test tolerances | M1 | DONE |
-| **M4** | **Dual-Track Acceptance Verification & Forensic Victory Audit (R4)** | Feature 15: Full 8-gate automated test suite execution, adversarial stress verification, and independent Forensic Integrity clearance | M1, M2, M3 | DONE |
+| M1 | Native CUA Desktop Automation Engine | Features 1, 2, 3, 4: Port cua-driver core abstractions to Rust crate/module; window enumeration, coordinate translation, background input synthesis, UIPI detection, and fallback handling | none | DONE |
+| M2 | Sandboxing, Permission Modes & Emergency Kill-Switch | Features 5, 6, 7: Multi-tier security boundaries (Standard, Bounded, Unrestricted), < 50ms Emergency Kill-Switch (< 15ms achieved), and SQLite WAL structured audit ledger via DbActor | M1 | DONE |
+| M3 | Vision-Aligned Fast Action Router (System-1 GUI Loop) | Feature 8: Interface screen capture / visual ROI diffing with low-latency System-1 action executor; atomic action grammar; deterministic pre/post checks (< 80ms diff); > 95% token reduction | M1, M2 | DONE |
+| M4 | LIVA Core Modularization, Tauri IPC & System Quality | Features 9, 10: Crate modularization, AppState wiring, Tauri IPC commands (`cua:*`), dead legacy pruning (`src/evolution`), -j 2 sequential compilation, and zero-regression quality verification | M1, M2, M3 | DONE |
 
 ---
 
 ## Interface Contracts
 
-### 1. LLM Real-Time Streaming Contract (`crates/liva-llm` & `liva-native-core`)
+### `liva-cua` ↔ `liva-native-core`
+
 ```rust
-pub enum LlmCommand {
-    GenerateText {
-        prompt: String,
-        priority: Priority,
-        token_tx: Option<tokio::sync::mpsc::Sender<String>>,
-        responder: tokio::sync::oneshot::Sender<anyhow::Result<String>>,
-    },
-    Shutdown,
+// Core Engine Interface
+pub struct CuaEngine {
+    pub config: CuaConfig,
+    pub security_governor: Arc<SecurityGovernor>,
+    pub kill_switch: Arc<KillSwitchController>,
+    pub action_router: Arc<System1ActionRouter>,
+    pub audit_ledger: Arc<AuditLedger>,
+}
+
+impl CuaEngine {
+    pub fn new(config: CuaConfig, db: Option<DbActorHandle>) -> Self;
+    pub async fn list_windows(&self, filter_pid: Option<u32>) -> Result<Vec<CuaWindowInfo>, CuaError>;
+    pub async fn execute_action(&self, action: CuaAction) -> Result<CuaActionResult, CuaError>;
+    pub fn trigger_emergency_halt(&self) -> Result<(), CuaError>;
+    pub fn set_permission_mode(&self, mode: PermissionMode) -> Result<(), CuaError>;
+    pub fn get_status(&self) -> CuaStatus;
 }
 ```
 
-### 2. Main UI Thread $\leftrightarrow$ Avatar Worker Message Protocol (`liva-ui`)
-```typescript
-export type AvatarWorkerInbound =
-  | { type: 'INIT'; canvas: OffscreenCanvas; width: number; height: number; dpr: number; modelPath: string }
-  | { type: 'RESIZE'; width: number; height: number; dpr: number }
-  | { type: 'VISIBILITY_CHANGE'; visible: boolean }
-  | { type: 'SYNC_CLOCK'; clockOffset: number }
-  | { type: 'SCHEDULE_CHUNK'; startTimeSec: number; durationSec: number }
-  | { type: 'SET_VISEME_TIMELINE'; turnEpoch: number; cues: Array<{ tMs: number; v: string }> }
-  | { type: 'AUDIO_RMS'; bands: Float32Array }
-  | { type: 'FLUSH'; seq_id?: number }
-  | { type: 'SET_LOCOMOTION'; state: 'idle' | 'walk' | 'run' | 'dangle'; motionWeight: number }
-  | { type: 'LOOK_AT'; yaw: number; pitch: number }
-  | { type: 'DISPOSE' };
+### `liva-native-core` ↔ `Tauri IPC`
 
-export type AvatarWorkerOutbound =
-  | { type: 'READY'; format: 'vrm' | 'fbx'; hasClips: boolean }
-  | { type: 'BOUNDS_UPDATED'; bounds: { x: number; y: number; width: number; height: number } }
-  | { type: 'FPS_METRICS'; currentFps: number; drawCalls: number; frameTimeMs: number }
-  | { type: 'ERROR'; message: string; stack?: string };
+```json
+// Endpoints exposed in authorization.rs (Principal: TauriDashboard, TauriWidget)
+// "cua:list_windows"      -> { "windows": [...] }
+// "cua:execute_action"    -> { "action": CuaAction } -> { "result": CuaActionResult }
+// "cua:emergency_stop"    -> {} -> { "halted": true, "latency_ms": 12 }
+// "cua:set_mode"          -> { "mode": "Bounded", "allowlist": ["notepad.exe"] }
+// "cua:get_status"        -> { "mode": "Bounded", "halted": false, "active_actions": 0 }
+// "cua:query_audit_logs"  -> { "limit": 50 } -> { "events": [...] }
 ```
 
 ---
 
 ## Code Layout
 
-```
-LIVA/
-├── Cargo.toml                         # Master workspace manifest
-├── crates/
-│   ├── liva-core-types/               # Domain models, errors, permissions, IPC contracts
-│   ├── liva-storage/                  # SQLite WAL pools, micro-batching, FactTrie prefix search
-│   ├── liva-llm/                      # LlmActor worker with streaming token channel & 3-tier priority
-│   └── liva-tools/                    # Consolidated diagnostic, probe, and benchmark CLI
-├── liva-native-core/                  # Top-level orchestration facade
-│   ├── src/
-│   │   ├── lib.rs                     # AppState (owns LlmActorHandle, VoiceCoordinator, governors)
-│   │   ├── boot.rs                    # Bootloader initializing actors on dedicated worker threads
-│   │   ├── governor.rs                # VisualGovernor for VLM mutual exclusion
-│   │   ├── cognitive/events.rs        # SessionEventStream with ring-buffer capacity bounds
-│   │   ├── active_recall.rs           # ActiveRecallManager with TTL cleanup
-│   │   └── agent/                     # StateGraph DAG execution & SqliteCheckpointer
-│   └── tests/
-│       └── harness.rs                 # Consolidated test harness
-├── liva-desktop/                      # Tauri v2 Desktop Application Shell
-│   └── src-tauri/                     # Native Tauri commands & capabilities
-└── liva-ui/                           # Vue 3 Frontend Application
-    └── src/
-        ├── workers/
-        │   └── avatarWorker.ts        # Dedicated Web Worker running Three.js/VRM on OffscreenCanvas
-        ├── composables/
-        │   ├── useAvatarWorkerBridge.ts # Main-thread bridge wrapping worker
-        │   ├── use3DModel.ts          # Humanoid pose math & procedural kinematics
-        │   ├── useAvatarAnimation.ts  # Stride distance calibration & FootPlantIK
-        │   └── useWidgetTransport.ts  # Tauri v2 Channel subscriber
-        └── WidgetApp.vue              # Main chat & widget UI
-```
-
----
-
-## Governance & Safety Constraints
-- **Sequential Tooling Discipline**: All cargo commands must execute sequentially passing `-j 2` (`cargo check -j 2`, `cargo build -j 2`, `cargo test -j 2 -- --test-threads 2`).
-- **RAM Guardrails**: Available machine RAM must remain ≥ 4.0 GB prior to heavy test suites. Never launch background MCP indexers or heavy graph analyzers.
-- **Git Safety Boundary**: Git operations end strictly at staging (`git add`). Autonomous `git commit` or `git push` are strictly prohibited.
-- **Integrity Enforcement**: No hardcoded test passes or dummy facades. All implementations must be genuine.
+- `crates/liva-cua/Cargo.toml`: Package manifest with `windows-sys = "0.52.0"` (`Win32_Foundation`, `Win32_UI_WindowsAndMessaging`, `Win32_UI_Input_KeyboardAndMouse`, `Win32_UI_HiDpi`, `Win32_Graphics_Gdi`).
+- `crates/liva-cua/src/`:
+  - `lib.rs`: Public crate API (`CuaEngine`, `CuaConfig`, `CuaError`).
+  - `types.rs`: Data models (`CuaWindowInfo`, `CuaAction`, `CuaActionResult`, `PermissionMode`).
+  - `window.rs`: Win32 `EnumWindows` + UIA top-level window enumeration and UWP frame resolution.
+  - `geometry/`: `virtualdesk.rs` (0..=65535 multi-monitor math), `lparam.rs` (signed 16-bit packing), `dpi.rs`.
+  - `input/`: `mod.rs` (actuation router), `win32_msg.rs` (deepest-child PostMessage & focused keyboard), `pointer.rs` (synthetic pointer injection with `WS_EX_NOACTIVATE`), `uipi.rs` (token integrity check).
+  - `security.rs`: Multi-tier `SecurityGovernor`, allowlist/denylist filter, coordinate containment.
+  - `kill_switch.rs`: < 50ms Emergency Kill-Switch, `AtomicBool` halt flag, Esc key listener thread, mouse thrash detector.
+  - `audit.rs`: Structured append-only audit ledger with SQLite WAL persistence.
+  - `router.rs`: Low-latency System-1 action executor, pre-execution checks, post-execution ROI diffing.
+- `liva-native-core/src/`:
+  - `lib.rs`: Wires `CuaEngine` into `AppState`, gates `evolution` behind `experimental`.
+  - `authorization.rs`: Adds `CUA_COMMANDS` to `TauriDashboard` / `TauriWidget` allowlist.
+  - `commands/cua.rs`: IPC command handlers for `cua:*` verbs.

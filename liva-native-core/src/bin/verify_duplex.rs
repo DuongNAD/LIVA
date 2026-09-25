@@ -182,6 +182,7 @@ async fn main() -> Result<(), String> {
         active_recall: std::sync::Arc::new(
             liva_native_core::active_recall::ActiveRecallManager::new(),
         ),
+        cua: AppState::mock_cua(),
     });
 
     let (speaker_tx, _speaker_rx) = mpsc::channel::<VoiceFrame>(128);

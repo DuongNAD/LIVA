@@ -10,6 +10,7 @@ pub mod crypto;
 pub mod db;
 pub mod db_actor;
 pub mod eval;
+#[cfg(feature = "experimental")]
 pub mod evolution;
 pub mod governor;
 pub mod integrations;
@@ -47,6 +48,10 @@ pub use authorization::{CommandPrincipal, authorize_command};
 pub use crypto::EncryptionEngine;
 pub use db::DatabasePool;
 pub use db_actor::{DbActorError, DbActorHandle};
+pub use liva_cua::{
+    CuaAction, CuaActionResult, CuaConfig, CuaDeliveryMode, CuaEngine, CuaError, CuaStatus,
+    CuaWindowInfo, PermissionMode,
+};
 pub use llm::LlamaRouterManager;
 pub(crate) use paths::update_config_file_at;
 pub use paths::{
@@ -87,6 +92,8 @@ pub struct AppState {
     /// `llm::embedder` để biết vì sao nó tách khỏi model chat.
     pub embedder: Arc<tokio::sync::RwLock<Option<Arc<llm::embedder::EmbeddingEngine>>>>,
     pub active_recall: Arc<active_recall::ActiveRecallManager>,
+    /// Native Computer-Use Agent (CUA) desktop automation engine.
+    pub cua: Arc<liva_cua::CuaEngine>,
 }
 
 impl AppState {
@@ -110,6 +117,16 @@ impl AppState {
     pub fn empty_embedder() -> Arc<tokio::sync::RwLock<Option<Arc<llm::embedder::EmbeddingEngine>>>>
     {
         Arc::new(tokio::sync::RwLock::new(None))
+    }
+
+    /// Creates a mock CuaEngine instance backed by MockCuaDriver for testing.
+    ///
+    /// Stops the physical Esc poller thread to avoid background OS threads in test fixtures.
+    pub fn mock_cua() -> Arc<liva_cua::CuaEngine> {
+        let driver = Arc::new(liva_cua::MockCuaDriver::new());
+        let engine = liva_cua::CuaEngine::new_with_driver(liva_cua::CuaConfig::default(), driver);
+        engine.kill_switch.stop_poller();
+        Arc::new(engine)
     }
 
     /// Access the shared VisualGovernor for VLM memory management (750 MB VRAM ceiling).
@@ -788,6 +805,10 @@ pub async fn handle_command(
     // không chặn được gì trong bản giao cho người dùng.
     if let Some(verb) = command.strip_prefix("consent:") {
         return commands::consent::handle(state, verb, payload).await;
+    }
+    // CUA desktop automation monitoring and control
+    if let Some(verb) = command.strip_prefix("cua:") {
+        return commands::cua::handle(state, verb, payload).await;
     }
     if command == "audio_play_started" || command == "audio_play_finished" {
         return Ok(serde_json::json!({ "status": "ok" }));

@@ -55,6 +55,7 @@ fn create_test_state() -> Arc<AppState> {
         vision: tokio::sync::Mutex::new(vision_manager),
         embedder: liva_native_core::AppState::empty_embedder(),
         active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+        cua: AppState::mock_cua(),
     })
 }
 

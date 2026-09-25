@@ -769,6 +769,43 @@ impl DbActorHandle {
         self.flush().await
     }
 
+    /// Constructs a `liva_storage::DbActorHandle` bridged to this DbActor instance.
+    ///
+    /// Write closures dispatched via this handle execute exclusively on the dedicated
+    /// `liva-db-writer-actor` single-writer OS thread, guaranteeing complete WAL serialization
+    /// and preventing SQLITE_BUSY concurrency conflicts.
+    pub fn to_storage_handle(&self) -> liva_storage::DbActorHandle {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<liva_storage::DbWriteCommand>(256);
+        let actor = self.clone();
+
+        tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    liva_storage::DbWriteCommand::Execute { op, result_tx } => {
+                        let res = actor.execute(move |conn| op(conn)).await;
+                        if let Some(tx) = result_tx {
+                            let _ = tx.send(res);
+                        }
+                    }
+                    liva_storage::DbWriteCommand::Flush { result_tx } => {
+                        let res = actor.flush().await.map_err(|e| e.to_string());
+                        if let Some(tx) = result_tx {
+                            let _ = tx.send(res);
+                        }
+                    }
+                    liva_storage::DbWriteCommand::CheckpointWal { result_tx } => {
+                        let res = actor.checkpoint_wal().await;
+                        if let Some(tx) = result_tx {
+                            let _ = tx.send(res);
+                        }
+                    }
+                }
+            }
+        });
+
+        liva_storage::DbActorHandle::new(tx)
+    }
+
     /// Synchronously wait for all previously queued write commands to be processed and committed to SQLite WAL.
     ///
     /// Completely safe across both single-threaded (current_thread) and multi-threaded Tokio runtimes.

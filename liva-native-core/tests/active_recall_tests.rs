@@ -46,6 +46,7 @@ fn test_state() -> (Arc<AppState>, TempDbGuard) {
             liva_native_core::vision::VisionConfig::default(),
         )),
         active_recall: Arc::new(ActiveRecallManager::new()),
+        cua: AppState::mock_cua(),
     });
 
     (state, TempDbGuard(db_path))

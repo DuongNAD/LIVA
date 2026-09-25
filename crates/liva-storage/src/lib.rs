@@ -50,6 +50,11 @@ pub struct DbActorHandle {
 }
 
 impl DbActorHandle {
+    /// Constructs a new DbActorHandle backed by the given command channel.
+    pub fn new(tx: mpsc::Sender<DbWriteCommand>) -> Self {
+        Self { tx }
+    }
+
     /// Submits a write command to the DbActor.
     pub async fn send(&self, cmd: DbWriteCommand) -> std::result::Result<(), String> {
         self.tx

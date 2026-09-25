@@ -226,6 +226,7 @@ pub(crate) fn state_khong_co_embedder() -> std::sync::Arc<crate::AppState> {
             crate::vision::VisionConfig::default(),
         )),
         active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
+        cua: crate::AppState::mock_cua(),
     })
 }
 

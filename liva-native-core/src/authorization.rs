@@ -14,6 +14,42 @@ pub enum CommandPrincipal {
     Telegram,
 }
 
+/// Canonical identifiers for CUA desktop automation IPC commands.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandName {
+    CuaListWindows,
+    CuaExecuteAction,
+    CuaEmergencyStop,
+    CuaSetMode,
+    CuaGetStatus,
+    CuaQueryAuditLogs,
+}
+
+impl CommandName {
+    #[allow(dead_code)]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::CuaListWindows => "cua:list_windows",
+            Self::CuaExecuteAction => "cua:execute_action",
+            Self::CuaEmergencyStop => "cua:emergency_stop",
+            Self::CuaSetMode => "cua:set_mode",
+            Self::CuaGetStatus => "cua:get_status",
+            Self::CuaQueryAuditLogs => "cua:query_audit_logs",
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub const CUA_COMMANDS: &[&str] = &[
+    "cua:list_windows",
+    "cua:execute_action",
+    "cua:emergency_stop",
+    "cua:set_mode",
+    "cua:get_status",
+    "cua:query_audit_logs",
+];
+
 const SETUP_COMMANDS: &[&str] = &["setup:status", "setup:paths", "setup:fetch"];
 
 const WIDGET_COMMANDS: &[&str] = &[
@@ -44,6 +80,12 @@ const WIDGET_COMMANDS: &[&str] = &[
     "message:pending",
     "messenger:status",
     "telemetry:summary",
+    // CUA Subsystem (Desktop Automation Monitoring & Control)
+    "cua:list_windows",
+    "cua:execute_action",
+    "cua:emergency_stop",
+    "cua:set_mode",
+    "cua:get_status",
 ];
 
 const DASHBOARD_COMMANDS: &[&str] = &[
@@ -120,6 +162,13 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "skills:signals",
     "skills:history",
     "telemetry:summary",
+    // CUA Subsystem (Full Management, Inspector & Audit Ledger)
+    "cua:list_windows",
+    "cua:execute_action",
+    "cua:emergency_stop",
+    "cua:set_mode",
+    "cua:get_status",
+    "cua:query_audit_logs",
 ];
 
 const TELEGRAM_COMMANDS: &[&str] = &["ping", "status", "chat:completion"];

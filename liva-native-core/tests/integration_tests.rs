@@ -290,6 +290,7 @@ async fn test_case_4_stategraph_llama_nlp() {
         vision: tokio::sync::Mutex::new(vision_manager),
         embedder: liva_native_core::AppState::empty_embedder(),
         active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+        cua: liva_native_core::AppState::mock_cua(),
     });
 
     let (llm_chunk_tx, mut llm_chunk_rx) = mpsc::channel::<String>(100);
@@ -600,6 +601,7 @@ fn build_test_state(vault_path: &str) -> Arc<liva_native_core::AppState> {
             liva_native_core::vision::VisionConfig::default(),
         )),
         active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+        cua: liva_native_core::AppState::mock_cua(),
     })
 }
 

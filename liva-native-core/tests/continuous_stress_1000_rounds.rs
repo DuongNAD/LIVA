@@ -73,6 +73,7 @@ fn build_test_app_state(pool: Arc<DatabasePool>) -> Arc<AppState> {
             liva_native_core::vision::VisionConfig::default(),
         )),
         active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+        cua: AppState::mock_cua(),
     })
 }
 

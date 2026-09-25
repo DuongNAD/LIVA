@@ -33,6 +33,7 @@ fn test_state() -> Arc<AppState> {
             liva_native_core::vision::VisionConfig::default(),
         )),
         active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+        cua: AppState::mock_cua(),
     })
 }
 
@@ -206,4 +207,49 @@ async fn dashboard_co_the_chay_projection_batch_thu_cong() {
 
     assert_eq!(response["processed"], 0);
     assert_eq!(response["consolidated"], 0);
+}
+
+#[test]
+fn dashboard_duoc_toan_quyen_cua() {
+    for cmd in [
+        "cua:list_windows",
+        "cua:execute_action",
+        "cua:emergency_stop",
+        "cua:set_mode",
+        "cua:get_status",
+        "cua:query_audit_logs",
+    ] {
+        duoc(CommandPrincipal::TauriDashboard, cmd);
+    }
+}
+
+#[test]
+fn widget_duoc_dieu_khien_cua_nhung_khong_duoc_truy_van_audit_ledger() {
+    for cmd in [
+        "cua:list_windows",
+        "cua:execute_action",
+        "cua:emergency_stop",
+        "cua:set_mode",
+        "cua:get_status",
+    ] {
+        duoc(CommandPrincipal::TauriWidget, cmd);
+    }
+
+    // Fail-closed barrier: Widget cannot perform heavy historical ledger audits
+    bi_chan(CommandPrincipal::TauriWidget, "cua:query_audit_logs");
+}
+
+#[test]
+fn setup_va_telegram_bi_chan_toan_bo_cua() {
+    for cmd in [
+        "cua:list_windows",
+        "cua:execute_action",
+        "cua:emergency_stop",
+        "cua:set_mode",
+        "cua:get_status",
+        "cua:query_audit_logs",
+    ] {
+        bi_chan(CommandPrincipal::TauriSetup, cmd);
+        bi_chan(CommandPrincipal::Telegram, cmd);
+    }
 }

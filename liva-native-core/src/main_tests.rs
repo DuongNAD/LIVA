@@ -117,6 +117,7 @@ mod tests {
             embedder: AppState::empty_embedder(),
             vision: tokio::sync::Mutex::new(vision_manager),
             active_recall: Arc::new(liva_native_core::active_recall::ActiveRecallManager::new()),
+            cua: AppState::mock_cua(),
         })
     }
 

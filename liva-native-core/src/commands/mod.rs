@@ -41,6 +41,7 @@
 
 pub mod config;
 pub mod consent;
+pub mod cua;
 pub mod integrations;
 pub mod llm;
 pub mod mcp;

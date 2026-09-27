@@ -76,7 +76,7 @@ To protect workstation stability, prevent native out-of-memory (OOM) conditions,
 | **Test Threads** | Capped at 2 worker threads | Always pass `-- --test-threads 2` to cargo test runners |
 | **RAM Pre-flight** | Free RAM $\ge 4.0\text{ GB}$ | Check via `Get-CimInstance Win32_OperatingSystem` before heavy runs |
 | **Code Search** | Lightweight native ripgrep | `grep_search` / `find_by_name` only; NO heavy graph indexers |
-| **Git Safety** | Boundary ends at staging | `git add` only; NO autonomous `git commit` or `git push` |
+| **Git Safety** | Explicit authorization | `git add` by default; NO autonomous `git commit`/`git push` without explicit user request |
 
 ---
 

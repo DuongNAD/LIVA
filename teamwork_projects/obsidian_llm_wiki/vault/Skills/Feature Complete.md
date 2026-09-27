@@ -159,7 +159,7 @@ This automated script will cleanly update:
 ## 10. Commit, Tag & Push (USER ACTION — Required)
 
 > [!IMPORTANT]
-> The AI's git boundary ends at staging. **All steps below are USER-ONLY.** The AI must explicitly call these out at the end of every `/feature-complete` run so the user knows exactly what to execute.
+> The AI stages changes (`git add`) and does not commit or push autonomously without explicit user authorization. When explicitly requested by the user, the AI may execute commit and push. Otherwise, the AI calls out the commands below for the user to execute.
 
 After the AI completes all documentation updates and stages all files, the user must run the following three commands in order:
 

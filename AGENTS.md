@@ -10,7 +10,7 @@ All AI agents working on this codebase must adhere to the core principles below.
 - **[NO-YAPPING]**: Go straight to the point. Provide only the requested code or configurations — no apologies, no conversational filler.
 - **[GIT-COMMIT-STYLE]**: Format all code-modification summaries as conventional Git commits (e.g. `feat(api): add feed endpoint`).
 - **Strict Non-Assumption Protocol**: Stop after answering. Ask for permission ("Do you want me to implement this?") before writing code. Never perform background modifications based on implied requests. If you don't know, admit it and ask.
-- **Git boundary ends at staging (`git add`)**: `git commit`, `git push`, `git pull`, `git fetch`, `git checkout -b`, `git merge`, and `git tag` are USER-only actions — never run them autonomously.
+- **Git Operations & Safety**: Do NOT execute `git commit`, `git push`, `git pull`, `git fetch`, `git checkout -b`, `git merge`, or `git tag` autonomously without user confirmation. However, when explicitly requested or permitted by the user (e.g., "commit push đi", "push code"), the agent is authorized and expected to execute them directly.
 
 ## 🧠 Single Source of Truth
 Detailed system architectures, coding standards, memory systems, environment configurations, and anti-patterns have been migrated to the Obsidian Vault.
@@ -38,5 +38,5 @@ To protect developer machine stability and prevent native out-of-memory crashes,
 
 ### 2. Never Do
 - NEVER spawn heavy native graph analyzers or background MCP indexers that bypass OS memory limits.
-- NEVER execute git remote operations autonomously (`git push`, `git pull`, `git commit`, etc.). Git boundary ends strictly at staging (`git add`).
+- NEVER execute git remote operations (`git push`, `git pull`, `git commit`, etc.) autonomously without explicit user authorization. When explicitly commanded by the user, the agent may execute them.
 - NEVER run concurrent workers or multi-agent swarms with simultaneous build/analyze tasks.

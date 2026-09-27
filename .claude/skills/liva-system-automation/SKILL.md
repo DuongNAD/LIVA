@@ -42,7 +42,7 @@ description: Automate operating system tasks, process lifecycles, and sandboxed 
 
 - **Execution Mode**: Strict Two-Phase Confirmation for process termination and filesystem modifications. Automatic execution for read-only queries and OS volume/media toggles.
 - **Prohibited Actions**: Spawning background crypto miners, modifying OS boot configurations, altering firewall/network security rules without admin token, or executing unvetted remote binaries.
-- **Git Invariant**: AI agent staging boundary ends at `git add`; remote git commands are strictly user-only.
+- **Git Invariant**: AI agent staging boundary ends at `git add` by default; committing or pushing requires explicit user authorization or instruction.
 
 ## Stop Conditions
 

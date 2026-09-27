@@ -504,9 +504,295 @@ async fn stress_test_memory_consolidation_aes_decryption_and_corrupt_payload_res
     assert!(nvidia_exists, "Decrypted node 'Nvidia' must exist");
 
     // In-memory CsrGraph Cache must be compiled with these entities
-    let csr = pool.csr_graph.read().expect("read csr_graph");
+    let csr = pool.csr_graph.load();
     assert!(csr.node_count() >= 5);
     assert!(csr.get_node_index("Elon Musk").is_some());
     assert!(csr.get_node_index("Hà Nội").is_some());
     assert!(csr.get_node_index("Nvidia").is_some());
+}
+
+// =========================================================================
+// 5. ADVERSARIAL CHALLENGER 1 TESTS: CONCURRENCY, ROLLBACK ATOMICITY & ZERO DLL
+// =========================================================================
+
+#[tokio::test]
+async fn adversarial_test_db_actor_rollback_atomicity_with_graph_mutations() {
+    let pool = DatabasePool::new_in_memory().expect("in-memory db");
+
+    // 1. Initial graph has 2 nodes: "seed_alpha" and "seed_beta"
+    pool.insert_l3_triple("seed_alpha", "connects_to", "seed_beta", 1.0)
+        .await
+        .expect("insert seed triple");
+
+    let initial_snapshot = pool.csr_graph.load();
+    assert_eq!(initial_snapshot.node_count(), 2);
+    assert_eq!(initial_snapshot.edge_count(), 2); // Bidirectional triple generates 2 directed CSR edges
+    assert!(initial_snapshot.get_node_index("seed_alpha").is_some());
+    assert!(initial_snapshot.get_node_index("seed_beta").is_some());
+
+    // 2. Adversarially stress micro-batch rollback:
+    // Fire concurrent requests: poison pills (failing operations) interleaved with insert_l3_triple.
+    // If a transaction batch aborts, pending graph mutations must be strictly discarded and NEVER stored in csr_graph.
+    let mut rolled_back_triples = Vec::new();
+    for i in 0..10 {
+        let sub = format!("poison_sub_{i}");
+        let obj = format!("poison_obj_{i}");
+
+        let pool_c1 = pool.clone();
+        let pool_c2 = pool.clone();
+
+        let poison_pill = pool_c1.writer_actor.execute(|conn| {
+            conn.execute(
+                "INSERT INTO definitely_non_existent_table_xyz VALUES (999)",
+                [],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("PoisonPillError: {e}"))
+        });
+
+        let triple_cmd = pool_c2.insert_l3_triple(&sub, "should_rollback", &obj, 1.0);
+
+        let (res_poison, res_triple) = tokio::join!(poison_pill, triple_cmd);
+        assert!(res_poison.is_err(), "Poison pill operation must fail");
+
+        if res_triple.is_err() {
+            rolled_back_triples.push((sub, obj));
+        }
+    }
+
+    // Flush actor to ensure all batches are completed
+    pool.writer_actor.flush().await.expect("flush actor");
+
+    // Assert that for EVERY triple that experienced a batch rollback:
+    // 1. It is NOT present in ArcSwap<CsrGraph>.
+    // 2. It is NOT present in the SQLite l3_nodes / l3_edges tables.
+    let current_csr = pool.csr_graph.load();
+    let conn = pool.readers.get().expect("reader connection");
+
+    for (sub, obj) in &rolled_back_triples {
+        assert!(
+            current_csr.get_node_index(sub).is_none(),
+            "ATOMICITY VIOLATION: Rolled back node '{sub}' found in in-memory CsrGraph!"
+        );
+        assert!(
+            current_csr.get_node_index(obj).is_none(),
+            "ATOMICITY VIOLATION: Rolled back node '{obj}' found in in-memory CsrGraph!"
+        );
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM l3_nodes WHERE id = ?1 OR id = ?2",
+                rusqlite::params![sub, obj],
+                |r| r.get(0),
+            )
+            .expect("query sqlite l3_nodes");
+        assert_eq!(
+            count, 0,
+            "ATOMICITY VIOLATION: Rolled back nodes found in SQLite WAL!"
+        );
+    }
+
+    // 3. Verify that a subsequent clean transaction succeeds and updates ArcSwap<CsrGraph>
+    pool.insert_l3_triple("valid_node_1", "links_to", "valid_node_2", 0.95)
+        .await
+        .expect("clean triple insertion must succeed");
+
+    let final_csr = pool.csr_graph.load();
+    assert!(final_csr.get_node_index("valid_node_1").is_some());
+    assert!(final_csr.get_node_index("valid_node_2").is_some());
+    assert!(!final_csr.is_dirty());
+}
+
+#[tokio::test]
+async fn adversarial_test_arcswap_csr_graph_concurrent_micro_batches_p95_sub_8ms() {
+    let pool = DatabasePool::new_in_memory().expect("in-memory db");
+
+    // 1. Seed initial scale-free graph (200 nodes, 600 edges)
+    for i in 0..200 {
+        let target1 = (i + 1) % 200;
+        let target2 = (i + 7) % 200;
+        pool.insert_l3_triple(
+            &format!("seed_{i}"),
+            "relates",
+            &format!("seed_{target1}"),
+            0.8,
+        )
+        .await
+        .expect("seed edge 1");
+        pool.insert_l3_triple(
+            &format!("seed_{i}"),
+            "depends",
+            &format!("seed_{target2}"),
+            0.6,
+        )
+        .await
+        .expect("seed edge 2");
+    }
+
+    // 2. Launch background writer task continuously committing micro-batches into DbActor
+    let pool_writer = pool.clone();
+    let writer_handle = tokio::spawn(async move {
+        for b in 0..30 {
+            let triples: Vec<(String, String, String, f32)> = (0..5)
+                .map(|k| {
+                    (
+                        format!("batch_{b}_node_{k}"),
+                        "dynamic_edge".to_string(),
+                        format!("seed_{}", (b * 5 + k) % 200),
+                        0.75,
+                    )
+                })
+                .collect();
+            pool_writer
+                .insert_l3_triples_batch(&triples)
+                .await
+                .expect("writer batch");
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    });
+
+    // 3. Concurrently launch 8 reader tasks hammering wait-free ArcSwap<CsrGraph> PPR
+    let num_readers = 8;
+    let reads_per_reader = 50;
+    let mut reader_handles = Vec::with_capacity(num_readers);
+
+    for r in 0..num_readers {
+        let pool_reader = pool.clone();
+        reader_handles.push(tokio::spawn(async move {
+            let mut latencies_us = Vec::with_capacity(reads_per_reader);
+            for i in 0..reads_per_reader {
+                let seed_id = format!("seed_{}", (r * 25 + i) % 200);
+                let seeds = [(seed_id.as_str(), 1.0f32)];
+
+                let start = Instant::now();
+                let graph = pool_reader.get_compiled_csr_graph();
+                assert!(!graph.is_dirty(), "CsrGraph snapshot must never be dirty");
+                let ranking = graph.personalized_pagerank_readonly(&seeds, 3, 0.85, 10);
+                let elapsed_us = start.elapsed().as_micros() as u64;
+
+                assert!(!ranking.is_empty(), "PPR traversal must return results");
+                latencies_us.push(elapsed_us);
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            latencies_us
+        }));
+    }
+
+    writer_handle.await.expect("writer finished");
+
+    let mut all_latencies_us = Vec::new();
+    for rh in reader_handles {
+        let lats = rh.await.expect("reader finished");
+        all_latencies_us.extend(lats);
+    }
+
+    all_latencies_us.sort_unstable();
+    let total_queries = all_latencies_us.len();
+    assert!(total_queries >= num_readers * reads_per_reader);
+
+    let p50_ms = all_latencies_us[total_queries * 50 / 100] as f64 / 1000.0;
+    let p90_ms = all_latencies_us[total_queries * 90 / 100] as f64 / 1000.0;
+    let p95_ms = all_latencies_us[total_queries * 95 / 100] as f64 / 1000.0;
+    let p99_ms = all_latencies_us[total_queries * 99 / 100] as f64 / 1000.0;
+    let max_ms = *all_latencies_us.last().unwrap() as f64 / 1000.0;
+
+    println!("\n=== CONCURRENT ARCSWAP PPR LATENCY BENCHMARK DURING ACTIVE MICRO-BATCHES ===");
+    println!("  Total Queries      : {total_queries}");
+    println!("  P50 Read Latency   : {p50_ms:.3} ms");
+    println!("  P90 Read Latency   : {p90_ms:.3} ms");
+    println!("  P95 Read Latency   : {p95_ms:.3} ms");
+    println!("  P99 Read Latency   : {p99_ms:.3} ms");
+    println!("  Max Read Latency   : {max_ms:.3} ms");
+
+    // EMPIRICAL SLA ASSERTION: P95 MUST BE < 8.0 ms
+    assert!(
+        p95_ms < 8.0,
+        "SLA VIOLATION: ArcSwap CsrGraph P95 read latency ({p95_ms:.3} ms) exceeded 8.0 ms SLA threshold!"
+    );
+}
+
+#[test]
+fn adversarial_test_static_sqlite_vec_zero_external_dll_in_process() {
+    // 1. Ensure static sqlite-vec registration and execution
+    liva_storage::register_sqlite_vec().expect("register_sqlite_vec should succeed");
+
+    let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+
+    let version: String = conn
+        .query_row("SELECT vec_version()", [], |r| r.get(0))
+        .expect("query vec_version");
+    assert!(
+        version.starts_with('v'),
+        "vec_version must start with 'v', got: {version}"
+    );
+
+    // 2. Perform vector table operations (virtual table vec0, quantization, kNN search)
+    conn.execute(
+        "CREATE VIRTUAL TABLE test_vec USING vec0(embedding int8[384])",
+        [],
+    )
+    .expect("create virtual table vec0");
+
+    let dummy_floats: Vec<f32> = (0..384).map(|i| (i as f32) / 384.0).collect();
+    let blob = bytemuck::cast_slice::<f32, u8>(&dummy_floats);
+
+    conn.execute(
+        "INSERT INTO test_vec(rowid, embedding) VALUES (1, vec_quantize_int8(?, 'unit'))",
+        [blob],
+    )
+    .expect("insert vector into vec0");
+
+    let matched_id: i64 = conn
+        .query_row(
+            "SELECT rowid FROM test_vec WHERE embedding MATCH vec_quantize_int8(?, 'unit') AND k = 1",
+            [blob],
+            |r| r.get(0),
+        )
+        .expect("query kNN");
+    assert_eq!(matched_id, 1);
+
+    // 3. Inspect loaded modules in current process (on Windows) to assert NO vec0.dll is loaded
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::ProcessStatus::{
+            K32EnumProcessModules, K32GetModuleFileNameExA,
+        };
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+        let process = unsafe { GetCurrentProcess() };
+        let mut modules = [0isize; 1024];
+        let mut cb_needed = 0u32;
+        let res = unsafe {
+            K32EnumProcessModules(
+                process,
+                modules.as_mut_ptr(),
+                (modules.len() * std::mem::size_of::<isize>()) as u32,
+                &mut cb_needed,
+            )
+        };
+        assert_ne!(res, 0, "K32EnumProcessModules must succeed");
+
+        let count = cb_needed as usize / std::mem::size_of::<isize>();
+        let mut loaded_modules = Vec::new();
+        for &hmod in &modules[..count] {
+            let mut name_buf = [0u8; 1024];
+            let len = unsafe {
+                K32GetModuleFileNameExA(process, hmod, name_buf.as_mut_ptr(), name_buf.len() as u32)
+            };
+            if len > 0 {
+                let name = String::from_utf8_lossy(&name_buf[..len as usize]).to_lowercase();
+                loaded_modules.push(name);
+            }
+        }
+
+        for mod_name in &loaded_modules {
+            assert!(
+                !mod_name.ends_with("vec0.dll") && !mod_name.ends_with("sqlite-vec.dll"),
+                "SECURITY/PACKAGING VIOLATION: External DLL '{mod_name}' loaded in process! Expected static C-FFI linking."
+            );
+        }
+        println!("\n=== STATIC SQLITE-VEC PROCESS MODULE AUDIT ===");
+        println!("  Total Process Modules Audited: {count}");
+        println!("  External vec0.dll Present     : FALSE (Verified Static Linking)");
+    }
 }

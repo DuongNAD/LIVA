@@ -55,9 +55,6 @@
     "test:citations": "node --test scripts/docs-citations.test.mjs",
     "test:license-policy": "node --test scripts/license-policy.test.mjs"
   },
-  "dependencies": {
-    "sqlite-vec": "^0.1.9"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "ai-devkit": "0.47.0",

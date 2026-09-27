@@ -89,8 +89,9 @@ pub enum PipelineState {
 #[derive(Debug)]
 pub enum PipelineEvent {
     VadStart,
-    VadEnd(Vec<f32>),     // Raw audio samples
-    AudioChunk(Vec<f32>), // Streaming audio chunk during speech
+    VadEnd(Vec<f32>),           // Raw audio samples
+    AudioChunk(Vec<f32>),       // Streaming audio chunk during speech
+    SpeculativePrefill(String), // Speculative prompt prefill at 140ms silence mark
     Interrupted,
     SpeakText(String),
     ResetDsp,
@@ -132,6 +133,12 @@ impl WebRTCPipelineHandle {
         self.event_tx
             .try_send(PipelineEvent::AudioChunk(chunk))
             .map_err(|e| format!("Failed to queue AudioChunk: {}", e))
+    }
+
+    pub fn on_speculative_prefill(&self, prompt: String) -> Result<(), String> {
+        self.event_tx
+            .try_send(PipelineEvent::SpeculativePrefill(prompt))
+            .map_err(|e| format!("Failed to queue SpeculativePrefill: {}", e))
     }
 
     pub fn on_vad_end(&self, audio_data: Vec<f32>) -> Result<(), String> {
@@ -186,6 +193,7 @@ pub struct WebRTCActor {
     outgoing: VoiceOutbound,
     session_aec: SessionAec,
     voice_session: Option<VoiceSessionAudio>,
+    speculative_prompt: Option<String>,
 }
 
 impl WebRTCActor {
@@ -221,6 +229,7 @@ impl WebRTCActor {
             outgoing,
             session_aec,
             voice_session: None,
+            speculative_prompt: None,
         };
 
         (handle, actor)
@@ -260,6 +269,9 @@ impl WebRTCActor {
                 }
                 PipelineEvent::VadEnd(audio_data) => {
                     self.handle_vad_end(audio_data).await;
+                }
+                PipelineEvent::SpeculativePrefill(prompt) => {
+                    self.handle_speculative_prefill(prompt).await;
                 }
                 PipelineEvent::Interrupted => {
                     self.handle_interrupted().await;
@@ -326,6 +338,17 @@ impl WebRTCActor {
             }
             let _ = manager.feed_chunk(&chunk, false);
         });
+    }
+
+    async fn handle_speculative_prefill(&mut self, prompt: String) {
+        if prompt.trim().is_empty() {
+            return;
+        }
+        info!(
+            "🔮 [SpeculativePrefill] Received early prompt (140ms mark): '{}'",
+            prompt
+        );
+        self.speculative_prompt = Some(prompt);
     }
 
     async fn handle_vad_end(&mut self, audio_data: Vec<f32>) {
@@ -668,6 +691,7 @@ impl WebRTCActor {
     }
 
     async fn cancel_active_operations(&mut self) {
+        self.speculative_prompt = None;
         self.session_id += 1;
         self.active_session_id
             .store(self.session_id, std::sync::atomic::Ordering::SeqCst);

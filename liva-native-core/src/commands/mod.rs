@@ -28,7 +28,7 @@
 //! file của miền đó.
 //!
 //! Chữ ký của `handle_command` **không đổi** — đây là điều kiện để việc tách
-//! không lan ra ngoài: mọi caller (`main.rs`, `websocket.rs`, vỏ Tauri,
+//! không lan ra ngoài: mọi caller (`main.rs`, vỏ Tauri,
 //! `telegram.rs`, `verify_integrations`, cùng 34 điểm gọi trong 4 file test)
 //! vẫn gọi y như cũ.
 //!

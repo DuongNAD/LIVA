@@ -1466,7 +1466,7 @@ onDeactivated(() => {
 
         <!-- Architecture info -->
         <div class="text-[10px] text-slate-500 leading-relaxed border-t border-white/5 pt-2">
-          💡 Model chạy local offline trong Rust core; âm thanh chỉ đi qua WebSocket nội bộ, không
+          💡 Model chạy local offline trong Rust core; âm thanh chỉ đi qua Tauri IPC nội bộ, không
           gửi lên cloud.
         </div>
       </div>

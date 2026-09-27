@@ -2,6 +2,7 @@
 name = "liva-desktop"
 version = "1.0.0"
 publish = false
+license = "MIT OR Apache-2.0"
 description = "LIVA Cognitive OS — Tauri v2 Desktop Shell"
 authors = ["DuongNAD"]
 edition = "2021"

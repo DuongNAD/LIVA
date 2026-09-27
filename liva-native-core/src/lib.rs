@@ -90,7 +90,9 @@ pub struct AppState {
     /// `None` khi chưa tải model về — khi đó recall/persist bị bỏ qua và hệ
     /// thống hành xử **đúng như trước khi có RAG**, không lỗi. Xem
     /// `llm::embedder` để biết vì sao nó tách khỏi model chat.
-    pub embedder: Arc<tokio::sync::RwLock<Option<Arc<llm::embedder::EmbeddingEngine>>>>,
+    ///
+    /// Đã loại bỏ hoàn toàn tokio::sync::RwLock: truy cập trực tiếp phi khóa với zero lock contention.
+    pub embedder: Option<Arc<llm::embedder::EmbeddingEngine>>,
     pub active_recall: Arc<active_recall::ActiveRecallManager>,
     /// Native Computer-Use Agent (CUA) desktop automation engine.
     pub cua: Arc<liva_cua::CuaEngine>,
@@ -114,9 +116,8 @@ impl AppState {
         liva_llm::LlmActorHandle::new(tx)
     }
 
-    pub fn empty_embedder() -> Arc<tokio::sync::RwLock<Option<Arc<llm::embedder::EmbeddingEngine>>>>
-    {
-        Arc::new(tokio::sync::RwLock::new(None))
+    pub fn empty_embedder() -> Option<Arc<llm::embedder::EmbeddingEngine>> {
+        None
     }
 
     /// Creates a mock CuaEngine instance backed by MockCuaDriver for testing.

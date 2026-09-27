@@ -55,7 +55,8 @@ fn challenge_continuous_noise_60s_sample_continuity_and_termination() {
             match action {
                 TurnAudioAction::Started => started_count += 1,
                 TurnAudioAction::Ended(audio) => ended_turns.push(audio),
-                TurnAudioAction::SilenceProbe { .. } => {}
+                TurnAudioAction::SilenceProbe { .. }
+                | TurnAudioAction::SpeculativePrefill { .. } => {}
             }
         }
     }
@@ -211,7 +212,8 @@ fn challenge_continuous_noise_with_vad_state_machine_60s() {
             match action {
                 TurnAudioAction::Started => started_count += 1,
                 TurnAudioAction::Ended(audio) => ended_turns.push(audio),
-                TurnAudioAction::SilenceProbe { .. } => {}
+                TurnAudioAction::SilenceProbe { .. }
+                | TurnAudioAction::SpeculativePrefill { .. } => {}
             }
         }
     }
@@ -348,7 +350,8 @@ fn challenge_intra_chunk_rapid_oscillation_500_cycles() {
                         "Ended turn must contain at least the chunk samples"
                     );
                 }
-                TurnAudioAction::SilenceProbe { .. } => {}
+                TurnAudioAction::SilenceProbe { .. }
+                | TurnAudioAction::SpeculativePrefill { .. } => {}
             }
         }
     }
@@ -474,7 +477,8 @@ fn challenge_continuous_noise_100s_stress_and_bounded_memory() {
             match action {
                 TurnAudioAction::Started => started_count += 1,
                 TurnAudioAction::Ended(audio) => ended_turns.push(audio),
-                TurnAudioAction::SilenceProbe { .. } => {}
+                TurnAudioAction::SilenceProbe { .. }
+                | TurnAudioAction::SpeculativePrefill { .. } => {}
             }
         }
     }
@@ -583,7 +587,8 @@ fn challenge_continuous_noise_100s_small_frames_256_samples() {
             match action {
                 TurnAudioAction::Started => started_count += 1,
                 TurnAudioAction::Ended(audio) => ended_turns.push(audio),
-                TurnAudioAction::SilenceProbe { .. } => {}
+                TurnAudioAction::SilenceProbe { .. }
+                | TurnAudioAction::SpeculativePrefill { .. } => {}
             }
         }
     }

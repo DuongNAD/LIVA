@@ -956,10 +956,7 @@ pub async fn select_tool(
     }
 
     let top: Vec<usize> = {
-        let engine_opt = {
-            let guard = state.embedder.read().await;
-            guard.as_ref().cloned()
-        };
+        let engine_opt = state.embedder.clone();
         let catalog = catalog.clone();
         let query = user_text.to_string();
         tokio::task::spawn_blocking(move || {

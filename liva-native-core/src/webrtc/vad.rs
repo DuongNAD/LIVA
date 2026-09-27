@@ -7,6 +7,7 @@ pub enum VadEvent {
     SpeechStart,
     SpeechEnd,
     SilenceProbe { consecutive_silence_frames: usize },
+    SpeculativeProbe { consecutive_silence_frames: usize },
     None,
 }
 
@@ -72,6 +73,7 @@ pub struct VadConfig {
     pub speech_start_threshold: usize,
     pub speech_end_threshold: usize,
     pub silence_probe_threshold: Option<usize>,
+    pub speculative_probe_threshold: Option<usize>,
     pub energy_threshold: f32,
     pub high_confidence_threshold: f32,
     pub fast_start_enabled: bool,
@@ -88,6 +90,7 @@ impl Default for VadConfig {
             speech_start_threshold: 3,
             speech_end_threshold: 45, // ~1.44s of silence at 32ms frame size
             silence_probe_threshold: None,
+            speculative_probe_threshold: None,
             energy_threshold: 0.001,
             high_confidence_threshold: 0.85,
             fast_start_enabled: true,
@@ -107,6 +110,7 @@ impl VadConfig {
             speech_start_threshold: 2,
             speech_end_threshold: 22,
             silence_probe_threshold: None,
+            speculative_probe_threshold: None,
             energy_threshold: 0.001,
             high_confidence_threshold: 0.85,
             fast_start_enabled: true,
@@ -124,6 +128,7 @@ impl VadConfig {
             speech_start_threshold: 2,
             speech_end_threshold: 22,
             silence_probe_threshold: None,
+            speculative_probe_threshold: None,
             energy_threshold: 0.001,
             high_confidence_threshold: 0.85,
             fast_start_enabled: true,
@@ -168,6 +173,13 @@ impl VadConfig {
             None
         };
 
+        let speculative_probe_threshold =
+            if crate::env_flag("LIVA_SPECULATIVE_PREFILL_ENABLED", true) {
+                Some(get_usize("LIVA_VAD_SPECULATIVE_FRAMES", 4))
+            } else {
+                None
+            };
+
         Self {
             sample_rate: std::env::var("LIVA_VAD_SAMPLE_RATE")
                 .ok()
@@ -178,6 +190,7 @@ impl VadConfig {
             speech_start_threshold: get_usize("LIVA_VAD_START_FRAMES", base.speech_start_threshold),
             speech_end_threshold: get_usize("LIVA_VAD_END_FRAMES", 14),
             silence_probe_threshold,
+            speculative_probe_threshold,
             energy_threshold: get_f32("LIVA_VAD_ENERGY_THRESHOLD", base.energy_threshold),
             high_confidence_threshold: get_f32(
                 "LIVA_VAD_HIGH_CONFIDENCE_THRESHOLD",
@@ -456,6 +469,14 @@ impl VadEngine {
             self.consecutive_speech_frames = 0;
 
             if self.is_speaking {
+                if let Some(spec_frames) = self.config.speculative_probe_threshold
+                    && self.consecutive_silence_frames == spec_frames
+                {
+                    return Some(VadEvent::SpeculativeProbe {
+                        consecutive_silence_frames: self.consecutive_silence_frames,
+                    });
+                }
+
                 if let Some(probe_frames) = self.config.silence_probe_threshold
                     && self.consecutive_silence_frames == probe_frames
                 {
@@ -842,5 +863,57 @@ mod tests {
             let ev = engine.test_update_state_machine(false);
             assert_eq!(ev, None);
         }
+    }
+
+    #[test]
+    fn test_speculative_probe_fires_at_frame_4_and_silence_probe_at_frame_6() {
+        let model_path = resolve_model_path("models/nemotron-asr");
+        if !model_path.exists() {
+            eprintln!("skip: Silero VAD model not present");
+            return;
+        }
+
+        let config = VadConfig {
+            speculative_probe_threshold: Some(4),
+            silence_probe_threshold: Some(6),
+            speech_end_threshold: 14,
+            ..VadConfig::default()
+        };
+        let mut engine = VadEngine::new(&model_path, config).expect("load Silero VAD model");
+
+        let _ = engine.test_update_state_machine_with_confidence(true, 0.90, 0.01);
+        assert!(engine.is_speaking());
+
+        // Frames 1-3: None
+        for _ in 1..=3 {
+            let ev = engine.test_update_state_machine(false);
+            assert_eq!(ev, None);
+            assert!(engine.is_speaking());
+        }
+
+        // Frame 4: SpeculativeProbe (~128-140ms mark)
+        let ev4 = engine.test_update_state_machine(false);
+        assert_eq!(
+            ev4,
+            Some(VadEvent::SpeculativeProbe {
+                consecutive_silence_frames: 4
+            })
+        );
+        assert!(engine.is_speaking());
+
+        // Frame 5: None
+        let ev5 = engine.test_update_state_machine(false);
+        assert_eq!(ev5, None);
+        assert!(engine.is_speaking());
+
+        // Frame 6: SilenceProbe (~192ms mark)
+        let ev6 = engine.test_update_state_machine(false);
+        assert_eq!(
+            ev6,
+            Some(VadEvent::SilenceProbe {
+                consecutive_silence_frames: 6
+            })
+        );
+        assert!(engine.is_speaking());
     }
 }

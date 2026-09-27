@@ -24,10 +24,7 @@ pub async fn compute_embeddings(
         return Ok(Vec::new());
     }
 
-    let embedder_opt = {
-        let guard = state.embedder.read().await;
-        guard.clone()
-    };
+    let embedder_opt = state.embedder.clone();
 
     if let Some(embedder) = embedder_opt {
         // Fast decoupled path: dedicated ORT session runs independently of LLM lock.

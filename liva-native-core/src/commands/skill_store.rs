@@ -90,10 +90,7 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                 .collect();
 
             let ranked = {
-                let engine_opt = {
-                    let guard = state.embedder.read().await;
-                    guard.as_ref().cloned()
-                };
+                let engine_opt = state.embedder.clone();
                 skills::rank_skills_with_prior(
                     &entries,
                     query,

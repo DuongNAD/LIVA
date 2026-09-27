@@ -329,7 +329,7 @@ async fn registry_loc_cau_hinh_va_noi_lai_khi_can() {
     let _ = std::fs::remove_file(&duong_dan);
 }
 
-/// `AppState` tối thiểu — sao theo `tests/websocket_transport.rs`. Không cần
+/// `AppState` tối thiểu — sao theo `tests/voice_coordinator_transport.rs`. Không cần
 /// model weights: `handle_command` chỉ chạm `state` ở các nhánh khác.
 fn state_test() -> Arc<AppState> {
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(

@@ -411,7 +411,7 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         aec: tokio::sync::Mutex::new(voice.aec),
         mcp_server,
         vision: tokio::sync::Mutex::new(vision_manager),
-        embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
+        embedder,
         active_recall: Arc::new(crate::active_recall::ActiveRecallManager::new()),
         cua: cua_engine,
     });

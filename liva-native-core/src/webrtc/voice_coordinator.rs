@@ -287,12 +287,52 @@ impl VoiceCoordinator {
                         }
                     }
                 }
+                TurnAudioAction::SpeculativePrefill { audio } => {
+                    info!(
+                        "[smart-turn:adaptive] Speculative early token flush at 140ms mark ({} samples)",
+                        audio.len()
+                    );
+                    self.emit_event(VoiceIpcEvent::TextEvent {
+                        event: "voice:turn_arbitration".to_string(),
+                        payload: serde_json::json!({
+                            "stage": "speculative_prefill",
+                            "confidence_score": 0.0,
+                            "silence_duration_ms": 140,
+                            "is_turn_complete": false
+                        }),
+                    });
+
+                    let state_stt = self.state.clone();
+                    let pipeline_handle = self.pipeline_handle.clone();
+                    let audio_for_spec = audio.clone();
+
+                    tokio::spawn(async move {
+                        let partial = tokio::task::spawn_blocking(move || {
+                            let mut stt = match state_stt.stt.try_lock() {
+                                Ok(m) => m,
+                                Err(_) => return None,
+                            };
+                            stt.feed_audio(&audio_for_spec, false).ok().flatten()
+                        })
+                        .await
+                        .ok()
+                        .flatten();
+
+                        if let Some(prompt) = partial {
+                            if !prompt.trim().is_empty() {
+                                let _ = pipeline_handle.on_speculative_prefill(prompt);
+                            }
+                        }
+                    });
+                }
                 TurnAudioAction::SilenceProbe {
                     consecutive_silence_frames,
                     audio,
                 } => {
                     let voice_session_turn = self.voice_session.clone();
                     let audio_for_turn = audio.clone();
+                    let probe_start = std::time::Instant::now();
+
                     let decision = tokio::task::spawn_blocking(move || {
                         voice_session_turn.evaluate_turn(&audio_for_turn)
                     })
@@ -300,7 +340,11 @@ impl VoiceCoordinator {
                     .ok()
                     .flatten();
 
+                    let inference_duration_ms = probe_start.elapsed().as_secs_f64() * 1000.0;
                     let silence_duration_ms = (consecutive_silence_frames as u64) * 32;
+                    let t_gate_ms = (silence_duration_ms as f64) + inference_duration_ms;
+                    let sla_met =
+                        t_gate_ms <= crate::webrtc::turn_taking::ActiveTurnGate::SLA_DEADLINE_MS;
 
                     match decision {
                         Some(Ok(
@@ -309,8 +353,12 @@ impl VoiceCoordinator {
                             },
                         )) => {
                             info!(
-                                "[smart-turn:adaptive] Stage 1 Fast Cutoff at frame {} (p={:.3} > 0.92, ~{}ms)",
-                                consecutive_silence_frames, probability, silence_duration_ms
+                                "[smart-turn:adaptive] Stage 1 Fast Cutoff at frame {} (p={:.3} > 0.92, silence: ~{}ms, T_gate: {:.2}ms, SLA: {})",
+                                consecutive_silence_frames,
+                                probability,
+                                silence_duration_ms,
+                                t_gate_ms,
+                                if sla_met { "PASS" } else { "EXCEEDED" }
                             );
 
                             self.emit_event(VoiceIpcEvent::TextEvent {
@@ -319,6 +367,9 @@ impl VoiceCoordinator {
                                     "stage": "stage_1_fast",
                                     "confidence_score": probability,
                                     "silence_duration_ms": silence_duration_ms,
+                                    "inference_duration_ms": inference_duration_ms,
+                                    "t_gate_ms": t_gate_ms,
+                                    "sla_met": sla_met,
                                     "is_turn_complete": true
                                 }),
                             });
@@ -377,7 +428,7 @@ impl VoiceCoordinator {
                             },
                         )) => {
                             info!(
-                                "[smart-turn:adaptive] Stage 2 Adaptive Hold at frame {} (p={:.3}, holding for pause/conjunction)",
+                                "[smart-turn:adaptive] Stage 2 Adaptive Hold at frame {} (p={:.3}, adaptive extension 200-450ms for Vietnamese pause)",
                                 consecutive_silence_frames, probability
                             );
                             self.emit_event(VoiceIpcEvent::TextEvent {
@@ -386,6 +437,9 @@ impl VoiceCoordinator {
                                     "stage": "stage_2_hold",
                                     "confidence_score": probability,
                                     "silence_duration_ms": silence_duration_ms,
+                                    "inference_duration_ms": inference_duration_ms,
+                                    "t_gate_ms": t_gate_ms,
+                                    "sla_met": sla_met,
                                     "is_turn_complete": false
                                 }),
                             });
@@ -405,6 +459,9 @@ impl VoiceCoordinator {
                                     "stage": "stage_2_hold",
                                     "confidence_score": probability,
                                     "silence_duration_ms": silence_duration_ms,
+                                    "inference_duration_ms": inference_duration_ms,
+                                    "t_gate_ms": t_gate_ms,
+                                    "sla_met": sla_met,
                                     "is_turn_complete": false
                                 }),
                             });
@@ -427,6 +484,9 @@ impl VoiceCoordinator {
                             "stage": "stage_3_timeout",
                             "confidence_score": 0.0,
                             "silence_duration_ms": silence_duration_ms,
+                            "inference_duration_ms": 0.0,
+                            "t_gate_ms": silence_duration_ms as f64,
+                            "sla_met": false,
                             "is_turn_complete": true
                         }),
                     });

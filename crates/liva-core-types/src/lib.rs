@@ -9,14 +9,14 @@ pub struct WeatherArgs {
 }
 
 /// Turn verdict with probability and completion flag.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TurnVerdict {
     pub probability: f32,
     pub complete: bool,
 }
 
 /// Adaptive end-of-turn decision for the Two-Stage Turn Gate.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum AdaptiveTurnDecision {
     /// Turn clearly complete (p > 0.92). Immediate cutoff at ~200ms silence.
     ImmediateCutoff { probability: f32 },

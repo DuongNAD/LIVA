@@ -102,7 +102,8 @@ fn challenge_trailing_debounce_20_05s_800_samples_residue_recycling() {
             match action {
                 TurnAudioAction::Started => started_actions.push(action),
                 TurnAudioAction::Ended(audio) => ended_actions.push(audio),
-                TurnAudioAction::SilenceProbe { .. } => {}
+                TurnAudioAction::SilenceProbe { .. }
+                | TurnAudioAction::SpeculativePrefill { .. } => {}
             }
         }
     }
@@ -207,7 +208,8 @@ async fn challenge_trailing_debounce_does_not_trigger_cancel_or_abort_stt() {
                 TurnAudioAction::Ended(audio) => {
                     turn1_completed_audio = Some(audio);
                 }
-                TurnAudioAction::SilenceProbe { .. } => {}
+                TurnAudioAction::SilenceProbe { .. }
+                | TurnAudioAction::SpeculativePrefill { .. } => {}
             }
         }
     }

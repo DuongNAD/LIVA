@@ -252,21 +252,17 @@ pub fn thu_thap() -> Vec<Muc> {
             .vi("Chỉ ảnh hưởng tin nhắn THOẠI qua Telegram; chat chữ vẫn chạy."),
     });
 
-    // ── vec0: thứ duy nhất CHẶN BOOT ────────────────────────────────────
-    let exe_dir = std::env::current_exe().ok();
-    let ung_vien = crate::db::vec0_candidate_paths(exe_dir.as_deref().and_then(|p| p.parent()));
-    let vec0_thay = ung_vien.iter().find(|c| Path::new(c).is_file());
-    muc.push(match vec0_thay {
-        Some(p) => Muc::moi("sqlite-vec (vec0)", Some(true), gon(Path::new(p))),
-        None => Muc::moi(
-            "sqlite-vec (vec0)",
-            Some(false),
-            format!("không thấy ({} chỗ đã tìm)", ung_vien.len()),
-        )
-        .vi(
-            "Đây là thứ duy nhất trong bảng này CHẶN KHỞI ĐỘNG — không có nó thì \
-             không mở được DB. Chạy `npm ci` (gói `sqlite-vec` cung cấp nó).",
-        ),
+    // ── sqlite-vec: tích hợp C-FFI tĩnh ─────────────────────────────────
+    let vec_status = (|| -> Result<String, Box<dyn std::error::Error>> {
+        liva_storage::register_sqlite_vec()?;
+        let conn = rusqlite::Connection::open_in_memory()?;
+        let ver: String = conn.query_row("SELECT vec_version()", [], |r| r.get(0))?;
+        Ok(ver)
+    })();
+    muc.push(match vec_status {
+        Ok(ver) => Muc::moi("sqlite-vec", Some(true), format!("tích hợp tĩnh ({ver})")),
+        Err(e) => Muc::moi("sqlite-vec", Some(false), format!("lỗi đăng ký: {e}"))
+            .vi("sqlite-vec C-FFI tĩnh không thể khởi tạo trong SQLite engine."),
     });
 
     // ── Khoá mã hoá ─────────────────────────────────────────────────────

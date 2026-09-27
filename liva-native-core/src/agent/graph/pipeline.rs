@@ -166,8 +166,8 @@ pub fn build_pipeline_graph(
                 // mình"), nên nó cũng chính là fallback khi vòng LLM không đọc
                 // được output. Tắt theo mặc định — xem `tool_calling::enabled`.
                 Intent::Chat => {
-                    let embedder_guard = ss.embedder.read().await;
-                    let embedder_ref = embedder_guard
+                    let embedder_ref = ss
+                        .embedder
                         .as_deref()
                         .map(|e| e as &dyn crate::llm::tool_calling::ToolEmbedder);
                     let do_kho = phan_loai_do_kho_with_embedder(&text, embedder_ref);
@@ -446,11 +446,10 @@ pub fn build_pipeline_graph(
                     }
                 })
                 .unwrap_or_else(|| {
-                    let embedder_guard = ss.embedder.try_read().ok();
-                    let embedder_ref = embedder_guard.as_ref().and_then(|g| {
-                        g.as_deref()
-                            .map(|e| e as &dyn crate::llm::tool_calling::ToolEmbedder)
-                    });
+                    let embedder_ref = ss
+                        .embedder
+                        .as_deref()
+                        .map(|e| e as &dyn crate::llm::tool_calling::ToolEmbedder);
                     phan_loai_do_kho_with_embedder(&user_text, embedder_ref)
                 });
 

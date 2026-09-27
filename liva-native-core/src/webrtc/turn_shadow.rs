@@ -1,10 +1,10 @@
 //! Smart Turn v3.2 (pipecat-ai/smart-turn, BSD-2-Clause) semantic end-of-turn
-//! classifier — **SHADOW MODE ONLY**. Runs alongside the existing
-//! frame-count VAD end-of-turn logic purely to log its verdict for
-//! comparison; nothing reads its output yet. Vietnamese is this model's
-//! weakest supported language (81.27% vs 94.31% English per the v3.0 launch
-//! benchmark), so real production logs are needed before trusting it enough
-//! to gate anything.
+//! classifier — **ACTIVE GATING & LATENCY BUDGET ENGINE**.
+//! Evaluates end-of-turn probability to power active turn gating in `VoiceCoordinator`
+//! and `turn_taking::ActiveTurnGate`.
+//! Guarantees T_gate <= 225ms for unambiguous turn completions (p > 0.92) while
+//! enforcing adaptive Vietnamese hesitation pause extension (200-450ms) for
+//! conversational particles (0.50 <= p <= 0.92).
 //!
 //! Model: `models/smart_turn_v3.2_cpu.onnx`. There are no feature-extraction
 //! ops in the ONNX graph itself (verified by inspecting the graph directly)

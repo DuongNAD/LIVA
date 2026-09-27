@@ -155,12 +155,9 @@ pub async fn recall_context_scoped(
     if query.trim().is_empty() {
         return None;
     }
-    let engine = {
-        let guard = state.embedder.read().await;
-        match guard.as_ref() {
-            Some(e) => e.clone(),
-            None => return None,
-        }
+    let engine = match state.embedder.as_ref() {
+        Some(e) => e.clone(),
+        None => return None,
     };
     let state = Arc::clone(state);
     let query = query.to_string();
@@ -304,12 +301,9 @@ pub async fn persist_turn_scoped(
     let scope = scope.clone();
     let content = format!("Người dùng: {}\nLIVA: {}", user_text.trim(), reply.trim());
 
-    let engine = {
-        let guard = state.embedder.read().await;
-        match guard.as_ref() {
-            Some(e) => e.clone(),
-            None => return,
-        }
+    let engine = match state.embedder.as_ref() {
+        Some(e) => e.clone(),
+        None => return,
     };
 
     let content_for_embed = content.clone();

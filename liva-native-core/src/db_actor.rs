@@ -7,6 +7,8 @@
 use crate::agent::graph::ConversationMemoryScope;
 use crate::crypto::EncryptionEngine;
 use crate::db::CustomSqliteManager;
+use crate::db::csr_graph::CsrGraph;
+use arc_swap::ArcSwap;
 use r2d2::Pool;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -76,6 +78,45 @@ pub enum DbWriteCommand {
     InsertL3TriplesBatch {
         triples: Vec<(String, String, String, f32)>,
         result_tx: Option<oneshot::Sender<Result<(), String>>>,
+    },
+    InsertL3Node {
+        id: String,
+        label: String,
+        properties: String,
+        result_tx: Option<oneshot::Sender<Result<(), String>>>,
+        sync_tx: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+    },
+    InsertL3Edge {
+        source: String,
+        target: String,
+        relation: String,
+        weight: f32,
+        result_tx: Option<oneshot::Sender<Result<(), String>>>,
+        sync_tx: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+    },
+}
+
+#[derive(Clone, Debug)]
+enum GraphMutation {
+    Triple {
+        subject: String,
+        predicate: String,
+        object: String,
+        weight: f32,
+    },
+    TriplesBatch {
+        triples: Vec<(String, String, String, f32)>,
+    },
+    Node {
+        id: String,
+        label: String,
+        properties: String,
+    },
+    Edge {
+        source: String,
+        target: String,
+        relation: String,
+        weight: f32,
     },
 }
 
@@ -160,6 +201,26 @@ fn reject_command(cmd: DbWriteCommand, err: &str) {
         } => {
             let _ = tx.send(Err(err.to_string()));
         }
+        DbWriteCommand::InsertL3Node {
+            result_tx, sync_tx, ..
+        } => {
+            if let Some(tx) = result_tx {
+                let _ = tx.send(Err(err.to_string()));
+            }
+            if let Some(tx) = sync_tx {
+                let _ = tx.send(Err(err.to_string()));
+            }
+        }
+        DbWriteCommand::InsertL3Edge {
+            result_tx, sync_tx, ..
+        } => {
+            if let Some(tx) = result_tx {
+                let _ = tx.send(Err(err.to_string()));
+            }
+            if let Some(tx) = sync_tx {
+                let _ = tx.send(Err(err.to_string()));
+            }
+        }
         _ => {}
     }
 }
@@ -190,7 +251,11 @@ impl PendingNotification {
 fn execute_write_operation(
     conn: &rusqlite::Connection,
     cmd: DbWriteCommand,
-) -> (PendingNotification, Result<(), String>) {
+) -> (
+    PendingNotification,
+    Result<(), String>,
+    Option<GraphMutation>,
+) {
     match cmd {
         DbWriteCommand::PersistTurn {
             scope,
@@ -214,7 +279,7 @@ fn execute_write_operation(
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] persist_turn error: {}", err);
             }
-            (PendingNotification::from_result_tx(result_tx), res)
+            (PendingNotification::from_result_tx(result_tx), res, None)
         }
         DbWriteCommand::PersistTurnsBatch { turns, result_tx } => {
             let res = (|| -> Result<(), rusqlite::Error> {
@@ -269,17 +334,17 @@ fn execute_write_operation(
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] persist_turns_batch error: {err}");
             }
-            (PendingNotification::from_result_tx(result_tx), res)
+            (PendingNotification::from_result_tx(result_tx), res, None)
         }
         DbWriteCommand::Execute { op, result_tx } => {
             let res = op(conn);
-            (PendingNotification::from_result_tx(result_tx), res)
+            (PendingNotification::from_result_tx(result_tx), res, None)
         }
         DbWriteCommand::CheckpointWal { result_tx } => {
             let res = conn
                 .execute_batch("PRAGMA wal_checkpoint(PASSIVE);")
                 .map_err(|e| format!("wal_checkpoint error: {}", e));
-            (PendingNotification::from_result_tx(result_tx), res)
+            (PendingNotification::from_result_tx(result_tx), res, None)
         }
         DbWriteCommand::ReinforceMemories { vec_ids, now_ms } => {
             let refs: Vec<&str> = vec_ids.iter().map(|s| s.as_str()).collect();
@@ -295,6 +360,7 @@ fn execute_write_operation(
                     sync_tx: None,
                 },
                 res,
+                None,
             )
         }
         DbWriteCommand::SaveAgentCheckpoint {
@@ -313,7 +379,7 @@ fn execute_write_operation(
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] save_agent_checkpoint error: {err}");
             }
-            (PendingNotification::from_result_tx(result_tx), res)
+            (PendingNotification::from_result_tx(result_tx), res, None)
         }
         DbWriteCommand::UpdateFactRecallStats {
             fact_key,
@@ -327,7 +393,7 @@ fn execute_write_operation(
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] {err}");
             }
-            (PendingNotification::from_result_tx(result_tx), res)
+            (PendingNotification::from_result_tx(result_tx), res, None)
         }
         DbWriteCommand::TouchFactAccess {
             fact_key,
@@ -340,10 +406,10 @@ fn execute_write_operation(
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] {err}");
             }
-            (PendingNotification::from_result_tx(result_tx), res)
+            (PendingNotification::from_result_tx(result_tx), res, None)
         }
         DbWriteCommand::Flush { result_tx, sync_tx } => {
-            (PendingNotification { result_tx, sync_tx }, Ok(()))
+            (PendingNotification { result_tx, sync_tx }, Ok(()), None)
         }
         DbWriteCommand::InsertL3Triple {
             subject,
@@ -376,7 +442,21 @@ fn execute_write_operation(
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] insert_l3_triple error: {err}");
             }
-            (PendingNotification::from_result_tx(result_tx), res)
+            let mutation = if res.is_ok() {
+                Some(GraphMutation::Triple {
+                    subject,
+                    predicate,
+                    object,
+                    weight,
+                })
+            } else {
+                None
+            };
+            (
+                PendingNotification::from_result_tx(result_tx),
+                res,
+                mutation,
+            )
         }
         DbWriteCommand::InsertL3TriplesBatch { triples, result_tx } => {
             let res = (|| -> Result<(), rusqlite::Error> {
@@ -409,12 +489,91 @@ fn execute_write_operation(
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] insert_l3_triples_batch error: {err}");
             }
-            (PendingNotification::from_result_tx(result_tx), res)
+            let mutation = if res.is_ok() {
+                Some(GraphMutation::TriplesBatch { triples })
+            } else {
+                None
+            };
+            (
+                PendingNotification::from_result_tx(result_tx),
+                res,
+                mutation,
+            )
+        }
+        DbWriteCommand::InsertL3Node {
+            id,
+            label,
+            properties,
+            result_tx,
+            sync_tx,
+        } => {
+            let res = (|| -> Result<(), rusqlite::Error> {
+                conn.execute(
+                    "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(id) DO UPDATE SET label = excluded.label, properties = excluded.properties",
+                    rusqlite::params![id, label, properties],
+                )?;
+                Ok(())
+            })()
+            .map_err(|e| format!("insert_l3_node error: {e}"));
+
+            if let Err(ref err) = res {
+                tracing::warn!("[DbActor] insert_l3_node error: {err}");
+            }
+            let mutation = if res.is_ok() {
+                Some(GraphMutation::Node {
+                    id,
+                    label,
+                    properties,
+                })
+            } else {
+                None
+            };
+            (PendingNotification { result_tx, sync_tx }, res, mutation)
+        }
+        DbWriteCommand::InsertL3Edge {
+            source,
+            target,
+            relation,
+            weight,
+            result_tx,
+            sync_tx,
+        } => {
+            let res = (|| -> Result<(), rusqlite::Error> {
+                conn.execute(
+                    "INSERT INTO l3_edges (source, target, relation, weight, obsolete) VALUES (?1, ?2, ?3, ?4, 0)
+                     ON CONFLICT(source, target, relation) DO UPDATE SET weight = excluded.weight, obsolete = 0",
+                    rusqlite::params![source, target, relation, weight as f64],
+                )?;
+                Ok(())
+            })()
+            .map_err(|e| format!("insert_l3_edge error: {e}"));
+
+            if let Err(ref err) = res {
+                tracing::warn!("[DbActor] insert_l3_edge error: {err}");
+            }
+            let mutation = if res.is_ok() {
+                Some(GraphMutation::Edge {
+                    source,
+                    target,
+                    relation,
+                    weight,
+                })
+            } else {
+                None
+            };
+            (PendingNotification { result_tx, sync_tx }, res, mutation)
         }
     }
 }
 
-fn process_transactional_batch(conn: &rusqlite::Connection, cmds: Vec<DbWriteCommand>) {
+fn process_transactional_batch(
+    conn: &rusqlite::Connection,
+    cmds: Vec<DbWriteCommand>,
+    shared_csr_graph: &Arc<ArcSwap<CsrGraph>>,
+    csr_builder: &mut CsrGraph,
+    last_stored_arc: &mut Option<Arc<CsrGraph>>,
+) {
     if cmds.is_empty() {
         return;
     }
@@ -429,13 +588,17 @@ fn process_transactional_batch(conn: &rusqlite::Connection, cmds: Vec<DbWriteCom
     }
 
     let mut pending_notifications: Vec<PendingNotification> = Vec::with_capacity(cmds.len());
+    let mut graph_mutations: Vec<GraphMutation> = Vec::new();
     let mut iter = cmds.into_iter();
 
     while let Some(cmd) = iter.next() {
-        let (notif, res) = execute_write_operation(conn, cmd);
+        let (notif, res, mutation_opt) = execute_write_operation(conn, cmd);
         match res {
             Ok(()) => {
                 pending_notifications.push(notif);
+                if let Some(m) = mutation_opt {
+                    graph_mutations.push(m);
+                }
             }
             Err(err) => {
                 let _ = conn.execute_batch("ROLLBACK;");
@@ -462,6 +625,60 @@ fn process_transactional_batch(conn: &rusqlite::Connection, cmds: Vec<DbWriteCom
     // All operations in this batch succeeded; commit the transaction
     match conn.execute_batch("COMMIT;") {
         Ok(()) => {
+            if !graph_mutations.is_empty() {
+                // If an external store occurred (e.g. memory consolidation), re-sync builder
+                let current_arc = shared_csr_graph.load_full();
+                if let Some(ref last) = *last_stored_arc {
+                    if !Arc::ptr_eq(last, &current_arc) {
+                        *csr_builder = (*current_arc).clone();
+                    }
+                }
+                for mutation in graph_mutations {
+                    match mutation {
+                        GraphMutation::Triple {
+                            subject,
+                            predicate,
+                            object,
+                            weight,
+                        } => {
+                            csr_builder.add_node(
+                                subject.clone(),
+                                subject.clone(),
+                                "{}".to_string(),
+                            );
+                            csr_builder.add_node(object.clone(), object.clone(), "{}".to_string());
+                            csr_builder.add_edge(&subject, &object, &predicate, weight, true);
+                        }
+                        GraphMutation::TriplesBatch { triples } => {
+                            for (sub, pred, obj, weight) in triples {
+                                csr_builder.add_node(sub.clone(), sub.clone(), "{}".to_string());
+                                csr_builder.add_node(obj.clone(), obj.clone(), "{}".to_string());
+                                csr_builder.add_edge(&sub, &obj, &pred, weight, true);
+                            }
+                        }
+                        GraphMutation::Node {
+                            id,
+                            label,
+                            properties,
+                        } => {
+                            csr_builder.add_node(id, label, properties);
+                        }
+                        GraphMutation::Edge {
+                            source,
+                            target,
+                            relation,
+                            weight,
+                        } => {
+                            csr_builder.add_edge(&source, &target, &relation, weight, true);
+                        }
+                    }
+                }
+                csr_builder.compile_csr();
+                let new_snapshot = Arc::new(csr_builder.clone());
+                *last_stored_arc = Some(new_snapshot.clone());
+                shared_csr_graph.store(new_snapshot);
+            }
+
             for notif in pending_notifications {
                 notif.respond(Ok(()));
             }
@@ -477,7 +694,13 @@ fn process_transactional_batch(conn: &rusqlite::Connection, cmds: Vec<DbWriteCom
     }
 }
 
-fn process_write_batch(conn: &rusqlite::Connection, batch: Vec<DbWriteCommand>) {
+fn process_write_batch(
+    conn: &rusqlite::Connection,
+    batch: Vec<DbWriteCommand>,
+    shared_csr_graph: &Arc<ArcSwap<CsrGraph>>,
+    csr_builder: &mut CsrGraph,
+    last_stored_arc: &mut Option<Arc<CsrGraph>>,
+) {
     if batch.is_empty() {
         return;
     }
@@ -493,10 +716,16 @@ fn process_write_batch(conn: &rusqlite::Connection, batch: Vec<DbWriteCommand>) 
             // Flush any current transactional writes first
             if !current_tx_batch.is_empty() {
                 let tx_cmds = std::mem::take(&mut current_tx_batch);
-                process_transactional_batch(conn, tx_cmds);
+                process_transactional_batch(
+                    conn,
+                    tx_cmds,
+                    shared_csr_graph,
+                    csr_builder,
+                    last_stored_arc,
+                );
             }
             // Execute checkpoint or standalone operation outside of ambient transaction
-            let (notif, res) = execute_write_operation(conn, cmd);
+            let (notif, res, _) = execute_write_operation(conn, cmd);
             notif.respond(res);
         } else {
             current_tx_batch.push(cmd);
@@ -504,12 +733,22 @@ fn process_write_batch(conn: &rusqlite::Connection, batch: Vec<DbWriteCommand>) 
     }
 
     if !current_tx_batch.is_empty() {
-        process_transactional_batch(conn, current_tx_batch);
+        process_transactional_batch(
+            conn,
+            current_tx_batch,
+            shared_csr_graph,
+            csr_builder,
+            last_stored_arc,
+        );
     }
 }
 
 impl DbActorHandle {
-    pub fn new(writer_pool: Pool<CustomSqliteManager>) -> Self {
+    pub fn new(
+        writer_pool: Pool<CustomSqliteManager>,
+        shared_csr_graph: Arc<ArcSwap<CsrGraph>>,
+        mut csr_builder: CsrGraph,
+    ) -> Self {
         let (tx, mut rx) = mpsc::channel::<DbWriteCommand>(1024);
 
         let join_handle = std::thread::Builder::new()
@@ -527,6 +766,9 @@ impl DbActorHandle {
                         None
                     }
                 };
+
+                let initial_snapshot = Arc::new(csr_builder.clone());
+                let mut last_stored_arc: Option<Arc<CsrGraph>> = Some(initial_snapshot);
 
                 while let Some(first_cmd) = rx.blocking_recv() {
                     let conn = match &mut persistent_conn {
@@ -588,7 +830,13 @@ impl DbActorHandle {
                         }
                     }
 
-                    process_write_batch(conn, batch);
+                    process_write_batch(
+                        conn,
+                        batch,
+                        &shared_csr_graph,
+                        &mut csr_builder,
+                        &mut last_stored_arc,
+                    );
                 }
                 tracing::info!("[DbActor] Dedicated SQLite writer thread terminated cleanly");
             })
@@ -968,5 +1216,91 @@ impl DbActorHandle {
         result_rx
             .await
             .map_err(|_| "DbActor response dropped".to_string())?
+    }
+
+    /// Asynchronously insert an L3 knowledge graph node via DbActor.
+    pub async fn insert_l3_node_async(
+        &self,
+        id: String,
+        label: String,
+        properties: String,
+    ) -> Result<(), String> {
+        let (result_tx, result_rx) = oneshot::channel();
+        self.send(DbWriteCommand::InsertL3Node {
+            id,
+            label,
+            properties,
+            result_tx: Some(result_tx),
+            sync_tx: None,
+        })
+        .await?;
+        result_rx
+            .await
+            .map_err(|_| "DbActor response dropped".to_string())?
+    }
+
+    /// Synchronously insert an L3 knowledge graph node via DbActor.
+    pub fn insert_l3_node_sync(
+        &self,
+        id: String,
+        label: String,
+        properties: String,
+    ) -> Result<(), String> {
+        let (sync_tx, sync_rx) = std::sync::mpsc::sync_channel(1);
+        self.blocking_send(DbWriteCommand::InsertL3Node {
+            id,
+            label,
+            properties,
+            result_tx: None,
+            sync_tx: Some(sync_tx),
+        })?;
+        sync_rx
+            .recv()
+            .map_err(|_| "DbActor thread dropped sender without responding".to_string())?
+    }
+
+    /// Asynchronously insert an L3 knowledge graph edge via DbActor.
+    pub async fn insert_l3_edge_async(
+        &self,
+        source: String,
+        target: String,
+        relation: String,
+        weight: f32,
+    ) -> Result<(), String> {
+        let (result_tx, result_rx) = oneshot::channel();
+        self.send(DbWriteCommand::InsertL3Edge {
+            source,
+            target,
+            relation,
+            weight,
+            result_tx: Some(result_tx),
+            sync_tx: None,
+        })
+        .await?;
+        result_rx
+            .await
+            .map_err(|_| "DbActor response dropped".to_string())?
+    }
+
+    /// Synchronously insert an L3 knowledge graph edge via DbActor.
+    pub fn insert_l3_edge_sync(
+        &self,
+        source: String,
+        target: String,
+        relation: String,
+        weight: f32,
+    ) -> Result<(), String> {
+        let (sync_tx, sync_rx) = std::sync::mpsc::sync_channel(1);
+        self.blocking_send(DbWriteCommand::InsertL3Edge {
+            source,
+            target,
+            relation,
+            weight,
+            result_tx: None,
+            sync_tx: Some(sync_tx),
+        })?;
+        sync_rx
+            .recv()
+            .map_err(|_| "DbActor thread dropped sender without responding".to_string())?
     }
 }

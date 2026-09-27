@@ -482,15 +482,12 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                     v
                 }
                 _ => {
-                    let engine = {
-                        let guard = state.embedder.read().await;
-                        guard.as_ref().cloned().ok_or_else(|| {
-                            "Thieu 'query_vector' va khong co model embedding de tu tinh. \
-                          Tai model vao models/embedding/ (node scripts/fetch-embedding-model.mjs) \
-                          hoac tu cap vector 384 chieu."
-                                .to_string()
-                        })?
-                    };
+                    let engine = state.embedder.clone().ok_or_else(|| {
+                        "Thieu 'query_vector' va khong co model embedding de tu tinh. \
+                      Tai model vao models/embedding/ (node scripts/fetch-embedding-model.mjs) \
+                      hoac tu cap vector 384 chieu."
+                            .to_string()
+                    })?;
                     let q = query_text.clone();
                     tokio::task::spawn_blocking(move || engine.embed_query(&q))
                         .await

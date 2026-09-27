@@ -28,7 +28,10 @@ impl VoiceRuntimeConfig {
         Self {
             vad_enabled: crate::env_flag("LIVA_VAD_ENABLED", true),
             denoise_enabled: crate::env_flag("LIVA_DENOISE_ENABLED", true),
-            turn_shadow_enabled: crate::env_flag("LIVA_TURN_SHADOW_ENABLED", true),
+            turn_shadow_enabled: crate::env_flag(
+                "LIVA_TURN_GATE_ENABLED",
+                crate::env_flag("LIVA_TURN_SHADOW_ENABLED", true),
+            ),
             aec_enabled: crate::env_flag("LIVA_AEC_ENABLED", DEFAULT_AEC_ENABLED),
         }
     }
@@ -131,6 +134,9 @@ pub enum TurnAudioAction {
         consecutive_silence_frames: usize,
         audio: Vec<f32>,
     },
+    SpeculativePrefill {
+        audio: Vec<f32>,
+    },
 }
 
 /// Assembles one utterance at chunk granularity and retains bounded idle audio
@@ -139,6 +145,7 @@ pub struct TurnAudioBuffer {
     pre_roll: VecDeque<f32>,
     active: Option<Vec<f32>>,
     pre_roll_capacity: usize,
+    speculative_triggered: bool,
 }
 
 impl TurnAudioBuffer {
@@ -150,6 +157,7 @@ impl TurnAudioBuffer {
             pre_roll: VecDeque::with_capacity(pre_roll_capacity),
             active: None,
             pre_roll_capacity,
+            speculative_triggered: false,
         }
     }
 
@@ -161,7 +169,25 @@ impl TurnAudioBuffer {
             match event {
                 VadEvent::SpeechStart if self.active.is_none() => {
                     self.active = Some(self.pre_roll.drain(..).collect());
+                    self.speculative_triggered = false;
                     actions.push(TurnAudioAction::Started);
+                }
+                VadEvent::SpeculativeProbe { .. }
+                | VadEvent::SilenceProbe {
+                    consecutive_silence_frames: 4,
+                } if self.active.is_some() && !self.speculative_triggered => {
+                    self.speculative_triggered = true;
+                    if !chunk_attached && let Some(active) = self.active.as_mut() {
+                        active.extend_from_slice(chunk);
+                        chunk_attached = true;
+                    }
+                    if let Some(active) = self.active.as_ref()
+                        && active.len() >= Self::MIN_TURN_SAMPLES
+                    {
+                        actions.push(TurnAudioAction::SpeculativePrefill {
+                            audio: active.clone(),
+                        });
+                    }
                 }
                 VadEvent::SilenceProbe {
                     consecutive_silence_frames,
@@ -180,6 +206,7 @@ impl TurnAudioBuffer {
                     }
                 }
                 VadEvent::SpeechEnd if self.active.is_some() => {
+                    self.speculative_triggered = false;
                     if !chunk_attached && let Some(active) = self.active.as_mut() {
                         active.extend_from_slice(chunk);
                         chunk_attached = true;
@@ -256,6 +283,7 @@ impl TurnAudioBuffer {
     /// Immediately force the current turn to end and extract accumulated speech audio.
     /// Used by Stage 1 Fast Cutoff when Smart Turn confirms turn completion at ~200ms.
     pub fn force_end(&mut self) -> Option<Vec<f32>> {
+        self.speculative_triggered = false;
         if let Some(turn_data) = self.active.take() {
             if turn_data.len() >= Self::MIN_TURN_SAMPLES {
                 Some(turn_data)
@@ -555,6 +583,7 @@ mod tests {
                     TurnAudioAction::Started => started_count += 1,
                     TurnAudioAction::Ended(audio) => ended_turns.push(audio),
                     TurnAudioAction::SilenceProbe { .. } => {}
+                    TurnAudioAction::SpeculativePrefill { .. } => {}
                 }
             }
         }
@@ -686,5 +715,60 @@ mod tests {
         let forced_audio = forced.unwrap();
         assert_eq!(forced_audio.len(), 1760);
         assert!(buffer.active.is_none());
+    }
+
+    #[test]
+    fn test_turn_audio_buffer_speculative_prefill_trigger() {
+        let mut buffer = TurnAudioBuffer::new(800);
+        // Start speech
+        let started = buffer.ingest(&vec![1.0; 800], &[VadEvent::SpeechStart]);
+        assert_eq!(started, vec![TurnAudioAction::Started]);
+
+        // Mid speech
+        let mid = buffer.ingest(&vec![2.0; 800], &[]);
+        assert!(mid.is_empty());
+
+        // At frame 4 (~128-140ms silence mark), SpeculativeProbe fires
+        let spec = buffer.ingest(
+            &vec![0.0; 160],
+            &[VadEvent::SpeculativeProbe {
+                consecutive_silence_frames: 4,
+            }],
+        );
+        assert_eq!(spec.len(), 1);
+        let TurnAudioAction::SpeculativePrefill { ref audio } = spec[0] else {
+            panic!("Expected SpeculativePrefill action at frame 4");
+        };
+        // 800 + 800 + 160 = 1760 samples
+        assert_eq!(audio.len(), 1760);
+        assert!(
+            buffer.active.is_some(),
+            "Buffer must remain active during speculative prefill"
+        );
+
+        // Next frame (frame 5) with empty events does NOT re-trigger speculative prefill
+        let mid2 = buffer.ingest(&vec![0.0; 160], &[]);
+        assert!(mid2.is_empty());
+
+        // At frame 6 (~192ms mark), SilenceProbe fires
+        let probe = buffer.ingest(
+            &vec![0.0; 160],
+            &[VadEvent::SilenceProbe {
+                consecutive_silence_frames: 6,
+            }],
+        );
+        assert_eq!(probe.len(), 1);
+        assert!(matches!(
+            probe[0],
+            TurnAudioAction::SilenceProbe {
+                consecutive_silence_frames: 6,
+                ..
+            }
+        ));
+
+        // Fast cutoff ends turn
+        let ended = buffer.force_end();
+        assert!(ended.is_some());
+        assert_eq!(ended.unwrap().len(), 2080);
     }
 }

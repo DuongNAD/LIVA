@@ -105,16 +105,9 @@ test('bắt được licenseFile trỏ vào chỗ không có', () => {
   assert.ok(cham(loi, 'licenseFile'), loi.join('\n'))
 })
 
-test('bắt được thiếu vec0.dll — thứ chặn khởi động', () => {
-  const { loi } = chay((c) => {
-    c.bundle.resources = { '../../data/models-manifest.json': 'data/models-manifest.json' }
-  })
-  assert.ok(cham(loi, 'vec0.dll'), loi.join('\n'))
-})
-
 test('bắt được thiếu manifest model — màn hình chuẩn bị sẽ rỗng', () => {
   const { loi } = chay((c) => {
-    c.bundle.resources = { '../../node_modules/sqlite-vec-windows-x64/vec0.dll': 'vec0.dll' }
+    c.bundle.resources = { 'cuda-redist': './' }
   })
   assert.ok(cham(loi, 'models-manifest.json'), loi.join('\n'))
 })

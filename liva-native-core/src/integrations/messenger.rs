@@ -39,8 +39,10 @@
 //! hỏng ở chặng nào thay vì để [`send`] thất bại mù.
 
 use serde_json::{Value, json};
+#[cfg(feature = "messenger")]
 use std::time::Duration;
 
+#[cfg(feature = "messenger")]
 use futures_util::{SinkExt, StreamExt};
 
 fn cong() -> u16 {
@@ -50,6 +52,7 @@ fn cong() -> u16 {
         .unwrap_or(9222)
 }
 
+#[cfg(feature = "messenger")]
 fn han_cho() -> Duration {
     let ms = std::env::var("LIVA_MESSENGER_TIMEOUT_MS")
         .ok()
@@ -69,6 +72,7 @@ fn cach_mo_trinh_duyet() -> String {
 }
 
 /// Một phiên CDP đã nối tới **một tab**.
+#[cfg(feature = "messenger")]
 struct Phien {
     ws: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -76,6 +80,7 @@ struct Phien {
     id_ke_tiep: u64,
 }
 
+#[cfg(feature = "messenger")]
 impl Phien {
     async fn noi(ws_url: &str) -> Result<Self, String> {
         let (ws, _) = tokio::time::timeout(han_cho(), tokio_tungstenite::connect_async(ws_url))
@@ -146,6 +151,7 @@ impl Phien {
 ///
 /// `SystemInfo.getProcessInfo` không gọi được trên session của một tab; phải nối
 /// vào `webSocketDebuggerUrl` lấy từ `/json/version`.
+#[cfg(feature = "messenger")]
 async fn pid_trinh_duyet() -> Result<u32, String> {
     let cong = cong();
     // Bọc CẢ get lẫn .text() vào MỘT timeout: nếu chỉ bọc get, phía server giữ kết nối mở
@@ -202,7 +208,7 @@ async fn pid_trinh_duyet() -> Result<u32, String> {
 /// Cái giá: nó cướp foreground của bạn trong khoảnh khắc gửi. Không tránh được
 /// khi lái một trình duyệt thật, và đây là lý do bước xác nhận đứng trước —
 /// người dùng biết trước sắp có gì xảy ra.
-#[cfg(windows)]
+#[cfg(all(windows, feature = "messenger"))]
 fn dua_cua_so_ra_truoc(pid: u32) -> Result<(), String> {
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -251,18 +257,20 @@ fn dua_cua_so_ra_truoc(pid: u32) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), feature = "messenger"))]
 fn dua_cua_so_ra_truoc(_pid: u32) -> Result<(), String> {
     Err("Chỉ hỗ trợ Windows: chưa có đường đưa cửa sổ ra foreground trên nền này".to_string())
 }
 
 /// Một tab đang mở, đọc từ `/json/list`.
+#[cfg(feature = "messenger")]
 #[derive(Debug, Clone)]
 struct Tab {
     url: String,
     ws_url: String,
 }
 
+#[cfg(feature = "messenger")]
 async fn liet_ke_tab() -> Result<Vec<Tab>, String> {
     let cong = cong();
     // Bọc CẢ get lẫn .text() vào MỘT timeout tương tự pid_trinh_duyet() để tránh treo khi đọc body.
@@ -303,11 +311,13 @@ async fn liet_ke_tab() -> Result<Vec<Tab>, String> {
         .unwrap_or_default())
 }
 
+#[cfg(any(test, feature = "messenger"))]
 fn la_tab_messenger(url: &str) -> bool {
     url.contains("messenger.com") || url.contains("facebook.com/messages")
 }
 
 /// Tìm tab Messenger đang mở; nếu chưa có thì lấy tab bất kỳ để điều hướng.
+#[cfg(feature = "messenger")]
 async fn tim_tab() -> Result<Tab, String> {
     let tabs = liet_ke_tab().await?;
     if tabs.is_empty() {
@@ -325,6 +335,7 @@ async fn tim_tab() -> Result<Tab, String> {
 
 /// JS kiểm tra trạng thái trang. Trả chuỗi để lớp Rust khỏi đoán qua URL —
 /// messenger.com khi chưa đăng nhập vẫn giữ nguyên đường dẫn `/t/…`.
+#[cfg(feature = "messenger")]
 const JS_TRANG_THAI: &str = r#"
 (() => {
   if (document.querySelector('input[name="pass"], #login_form, [data-testid="royal_login_form"]')) {
@@ -351,6 +362,7 @@ const JS_TRANG_THAI: &str = r#"
 "#;
 
 /// Chờ tới khi trang ở trạng thái gửi được, hoặc kết luận vì sao không.
+#[cfg(feature = "messenger")]
 async fn cho_san_sang(phien: &mut Phien) -> Result<(), String> {
     let han = tokio::time::Instant::now() + han_cho();
     let mut cuoi = String::from("dang_tai");
@@ -389,6 +401,7 @@ async fn cho_san_sang(phien: &mut Phien) -> Result<(), String> {
 }
 
 /// Báo cáo tiền kiểm: nói rõ hỏng ở chặng nào.
+#[cfg(feature = "messenger")]
 pub async fn status() -> Result<Value, String> {
     let tabs = match liet_ke_tab().await {
         Ok(t) => t,
@@ -431,6 +444,7 @@ pub async fn status() -> Result<Value, String> {
 /// Gửi `text` cho hội thoại `handle` (id số hoặc username trong URL).
 ///
 /// **Chỉ được gọi từ `messaging::send`**, tức sau khi bản nháp đã qua xác nhận.
+#[cfg(feature = "messenger")]
 pub async fn send(handle: &str, text: &str) -> Result<(), String> {
     if text.trim().is_empty() {
         return Err("Nội dung rỗng, không gửi".to_string());
@@ -638,6 +652,27 @@ pub async fn send(handle: &str, text: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(not(feature = "messenger"))]
+pub async fn status() -> Result<Value, String> {
+    Ok(json!({
+        "reachable": false,
+        "detail": "Tính năng Messenger chưa được kích hoạt trong bản build này (cần bật feature 'messenger').",
+        "disabled": true,
+        "howto": cach_mo_trinh_duyet(),
+    }))
+}
+
+#[cfg(not(feature = "messenger"))]
+pub async fn send(_handle: &str, text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("Nội dung rỗng, không gửi".to_string());
+    }
+    Err(
+        "Tính năng gửi Messenger chưa được bật trong bản build này (cần feature 'messenger')"
+            .to_string(),
+    )
 }
 
 #[cfg(test)]

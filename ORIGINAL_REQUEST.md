@@ -1109,3 +1109,105 @@ Refactor and organize liva-native-core crate boundaries for maintainability and 
 - [ ] cargo check -j 2 --all-targets passes with zero errors.
 - [ ] cargo test -j 2 -p liva-native-core -- --test-threads 2 passes completely.
 - [ ] No regression on existing voice, memory, and LLM streaming pipelines.
+
+## 2026-09-25T03:15:24Z
+
+<USER_REQUEST>
+Nghiên cứu toàn diện các công trình khoa học và dự án mã nguồn mở tiên tiến nhất trên thế giới để đánh giá, định vị và thiết lập chiến lược tối ưu hóa, nâng cấp kiến trúc và tích hợp/remake công nghệ cho hệ thống trợ lý AI cá nhân LIVA.
+
+Working directory: e:/Project/01_AI_Agents/LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. State-of-the-Art Ecosystem Survey & Comparative Benchmarking
+Khảo sát, thu thập và phân tích các dự án mã nguồn mở và nghiên cứu đột phá mới nhất liên quan đến 4 trụ cột cốt lõi của LIVA:
+1. **Multi-Agent Orchestration & Planning**: Tự lập kế hoạch DAG, suy luận phân tầng, tự phục hồi lỗi (Self-Healing), cơ chế biểu quyết đồng thuận (Voting Consensus) và Dead Letter Queue (DLQ).
+2. **Local Memory & Hybrid Retrieval**: Bộ nhớ ngữ cảnh dài hạn, đồ thị tri thức cá nhân (PKM/Obsidian integration), vector-FTS hybrid search tối ưu hóa trên SQLite WAL.
+3. **Multimodal & Real-time Duplex**: Nhận diện ngữ cảnh màn hình (Screen ROI/Computer Use), giao tiếp giọng nói hai chiều độ trễ cực thấp (Audio Duplex), điều khiển Avatar 3D.
+4. **Sandboxed System Automation & Security**: Thực thi công cụ hệ điều hành an toàn, kiểm soát quyền hạn phân cấp (Two-phase confirmation), bảo vệ dữ liệu nhạy cảm (PII Sanitization).
+
+### R2. LIVA Architectural Fit & Native Rust Alignment
+Phân tích khoảng trống kiến trúc (Gap Analysis) của LIVA hiện tại so với các giải pháp hàng đầu thế giới:
+- Đánh giá khả năng chuyển đổi hoặc tích hợp trực tiếp vào lõi Rust (`liva-native-core`) kết nối Tauri IPC.
+- Đảm bảo tuân thủ nghiêm ngặt các tiêu chuẩn an toàn bộ nhớ (RAM Guardrail < 4GB, không gây giật lag khi chạy nền trên máy người dùng cá nhân).
+- Kiểm tra tính tương thích về giấy phép mã nguồn (MIT, Apache 2.0 vs GPL/AGPL).
+
+### R3. Open-Source Candidates for Integration vs. Remake
+Lựa chọn và phân loại các dự án / thư viện mã nguồn mở tiềm năng nhất thành hai nhóm rõ ràng:
+- **Tích hợp trực tiếp (Integrate)**: Các thư viện Rust crates hoặc dịch vụ phụ trợ gọn nhẹ có thể nhúng ngay.
+- **Tái thiết kế (Remake/Adapt)**: Các ý tưởng, thuật toán hoặc module viết bằng Python/TypeScript cần được viết lại hoàn toàn bằng Rust để tối ưu hiệu năng và bảo mật.
+
+### R4. Strategic Technical Roadmap & Concrete Recommendations
+Tổng hợp báo cáo kỹ thuật hoàn chỉnh gồm:
+- Ma trận so sánh tính năng (Feature & Performance Matrix).
+- Sơ đồ kiến trúc đề xuất nâng cấp (Mermaid diagrams).
+- Lộ trình triển khai chia theo giai đoạn: Ngắn hạn (Quick-wins), Trung hạn (Nâng cấp kiến trúc nền tảng), và Dài hạn (Các tính năng đột phá).
+
+## Acceptance Criteria
+
+### Coverage & Depth
+- [ ] Báo cáo khảo sát tối thiểu 10 dự án mã nguồn mở hoặc công trình nghiên cứu nổi bật liên quan trực tiếp đến AI Agent / Local Engine.
+- [ ] Phân tích đầy đủ cả 4 trụ cột: Swarm/Planning, Local Memory/RAG, Multimodal/Duplex, Sandboxed Automation.
+
+### Technical Feasibility & Alignment
+- [ ] Mọi đề xuất công nghệ đều có đánh giá cụ thể về tính khả thi khi triển khai trên nền tảng Rust (`liva-native-core`) và ứng dụng desktop Tauri.
+- [ ] Có phân tích tác động tài nguyên phần硬件 (độ trễ phản hồi, mức tiêu thụ RAM, GPU/CPU footprint) bảo đảm trải nghiệm mượt mà trên desktop thông thường.
+- [ ] Kiểm tra và ghi chú rõ giấy phép phần mềm (License) cho từng dự án được đề xuất tham khảo.
+
+### Deliverables Quality
+- [ ] Báo cáo hoàn chỉnh được lưu trữ có cấu trúc rõ ràng dưới dạng Markdown trong thư mục tài liệu dự án (`docs/` hoặc Obsidian Vault).
+- [ ] Kèm theo sơ đồ kiến trúc Mermaid minh họa luồng dữ liệu trước và sau nâng cấp.
+- [ ] Kế hoạch hành động cụ thể với các đầu việc kỹ thuật sẵn sàng đưa vào backlog thực thi.
+</USER_REQUEST>
+
+## 2026-09-25T04:55:46Z
+
+<USER_REQUEST>
+Triển khai thực thi mã nguồn hoàn chỉnh cho 5 vé kỹ thuật cốt lõi thuộc Giai đoạn 1 (Quick-Wins & Nút thắt cốt lõi) theo Lộ trình Nâng cấp SOTA 2026 trong `crates/liva-storage`, `liva-native-core` và `liva-desktop`.
+
+Working directory: e:/Project/01_AI_Agents/LIVA
+Integrity mode: development
+
+## Requirements
+
+### R1. Tích Hợp C C-FFI Biên Dịch Tĩnh `sqlite-vec` (TICKET-01)
+- Viết `build.rs` trong `crates/liva-storage` sử dụng crate `cc` để biên dịch trực tiếp mã nguồn C `sqlite-vec.c` với cờ tối ưu hóa phần cứng trên MSVC x64.
+- Đăng ký hàm khởi tạo bảng ảo `sqlite3_vec_init` trực tiếp vào kết nối `rusqlite` thông qua FFI an toàn.
+- Loại bỏ cơ chế nạp động `vec0.dll` và các phụ thuộc npm/ngoại lai khỏi `db.rs`.
+
+### R2. Tái Cấu Trúc Khóa Đồng Quy & Đổi Đệm Kép Phi Khóa (TICKET-02 & TICKET-03)
+- Tối ưu hóa `EmbeddingEngine` trong `AppState` sang cơ chế `Arc<EmbeddingEngine>` phi khóa, tận dụng API `&self` không làm biến đổi trạng thái nội bộ của ONNX Runtime Session (`ort`).
+- Triển khai `ArcSwap<CsrGraph>` làm giao diện đọc chỉ-đọc (read-only handle) cho thuật toán HippoRAG PPR (`.load()`), bảo đảm luồng truy vấn bộ nhớ RAG hoàn toàn phi khóa.
+- Tuần tự hóa các thao tác đột biến đồ thị tri thức thông qua `DbActor`, micro-batching cập nhật `BEGIN IMMEDIATE` trên SQLite WAL và cập nhật in-place snapshot đồ thị.
+
+### R3. Kích Hoạt Cổng Ngắt Lượt Thích Ứng `Smart Turn v3.2` & Ngân Sách Độ Trễ Thoại (TICKET-04)
+- Chuyển đổi mô hình `Smart Turn v3.2` từ shadow mode thành cổng ngắt lượt chủ động trong máy trạng thái `turn_taking.rs` và `session.rs`.
+- Khống chế thời gian quyết định ngắt lượt $T_{\text{gate}} \le 225\text{ ms}$ (Silero VAD 200ms silence + ONNX 12ms inference), áp dụng giãn đệm thích ứng $200 - 450\text{ ms}$ cho tiếng Việt khi $0.50 \le p \le 0.92$.
+- Chuẩn bị cơ chế xả sớm token STT sang SLM (`speculative_eval`) tại mốc 140ms để prefill KV cache ngầm.
+
+### R4. Chuẩn Hóa IPC và Khai Tử Máy Chủ Loopback WebSocket Nội Bộ (TICKET-05)
+- Dọn dẹp module `websocket.rs` và loại bỏ phụ thuộc `tokio-tungstenite` không cần thiết.
+- Chuẩn hóa toàn bộ việc truyền nhận viseme và token văn bản thông qua `tauri::ipc::Channel` và cơ chế streaming sự kiện bản địa.
+- Đảm bảo không còn bất kỳ cổng TCP loopback nào bị chiếm dụng bởi tiến trình LIVA trên Windows.
+
+### R5. Quy Chuẩn Kỹ Thuật, An Toàn & Kiểm Thử
+- **Sequential Execution**: Chạy các lệnh kiểm thử và biên dịch tuần tự.
+- **Resource Constraints**: Luôn truyền `-j 2` cho `cargo check`, `cargo build`, `cargo test`, và `-- --test-threads 2` cho bộ chạy kiểm thử. Đảm bảo RAM khả dụng $\ge 4\text{GB}$.
+- **Git Safety Boundary**: Mọi thay đổi kết thúc nghiêm ngặt ở tầng Staging (`git add`), tuyệt đối không tự ý commit hay push.
+- **Unit & Integration Tests**: Viết các bài kiểm thử tự động xác minh tính năng cho từng ticket.
+
+## Acceptance Criteria
+
+### Verification & Compilation
+- [ ] `cargo check -j 2 --workspace` biên dịch thành công với exit code `0`.
+- [ ] Toàn bộ bài kiểm thử đơn vị và tích hợp chạy với `cargo test -j 2 -- --test-threads 2` đều đạt trạng thái `PASS`.
+- [ ] Kiểm toán bản quyền `cargo deny` đạt kết quả `licenses ok`.
+
+### Functional Performance
+- [ ] Truy vấn vector `SELECT * FROM vec_idx` thực thi thành công không cần nạp tệp `vec0.dll` ngoại lai.
+- [ ] Kiểm thử đồng quy truy cập `EmbeddingEngine` và đọc đồ thị `CsrGraph` đạt lock contention = 0.
+- [ ] Thời gian quyết định ngắt lượt âm thanh $T_{\text{gate}}$ duy trì $\le 225\text{ ms}$.
+- [ ] Không còn cổng TCP loopback WebSocket nào mở trên hệ thống.
+</USER_REQUEST>
+

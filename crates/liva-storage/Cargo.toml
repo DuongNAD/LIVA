@@ -2,9 +2,13 @@
 name = "liva-storage"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+build = "build.rs"
 
 [dependencies]
 rusqlite = { workspace = true }
+libsqlite3-sys = { version = "0.28.0", features = ["bundled"] }
 r2d2 = { workspace = true }
 r2d2_sqlite = { workspace = true }
 tokio = { workspace = true }
@@ -13,3 +17,9 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
+
+[build-dependencies]
+cc = "1.2"
+
+[dev-dependencies]
+bytemuck = "1.16"

@@ -1,6 +1,8 @@
-//! Deprecated: Retained for backward compatibility.
-//! Real implementation moved to `voice_coordinator_transport.rs`
-//! reflecting retirement of loopback WebSocket servers in favor of native VoiceCoordinator IPC.
+//! Voice Coordinator IPC Transport Tests
+//!
+//! Verifies event dispatching, audio chunk ingestion, wake probe,
+//! and barge-in interruption via native VoiceCoordinator and VoiceIpcEvent,
+//! confirming complete retirement of loopback WebSocket servers.
 
 use liva_native_core::crypto::EncryptionEngine;
 use liva_native_core::webrtc::voice_coordinator::{VoiceCoordinator, VoiceIpcEvent};

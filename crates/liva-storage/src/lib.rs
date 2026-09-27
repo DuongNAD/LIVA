@@ -75,6 +75,9 @@ impl DbActorHandle {
 }
 
 pub mod pragmas;
+pub mod sqlite_vec;
+
+pub use sqlite_vec::{register_connection_sqlite_vec, register_sqlite_vec, sqlite3_vec_init};
 
 /// The main loop for the micro-batched DbActor.
 /// It collects commands from the channel and executes them in transactions

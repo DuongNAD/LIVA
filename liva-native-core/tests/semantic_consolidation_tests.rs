@@ -222,7 +222,7 @@ async fn test_async_consolidation_updates_in_memory_csr_cache() {
 
     // Before consolidation: graph in pool should be empty
     {
-        let graph = pool.csr_graph.read().expect("read lock");
+        let graph = pool.csr_graph.load();
         assert_eq!(graph.node_count(), 0);
     }
 
@@ -235,7 +235,7 @@ async fn test_async_consolidation_updates_in_memory_csr_cache() {
 
     // After consolidation: CsrGraph in pool must be automatically populated and compiled!
     {
-        let graph = pool.csr_graph.read().expect("read lock");
+        let graph = pool.csr_graph.load();
         assert!(
             graph.node_count() >= 3,
             "Expected >= 3 nodes in CsrGraph cache, found {}",

@@ -1,4 +1,5 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use std::sync::Arc;
 
 const MAX_BATCH_SIZE: usize = 100;
 const MAX_RETRIES: i64 = 3;
@@ -37,8 +38,9 @@ pub async fn consume_pending_once(
             // Re-synchronize In-Memory CsrGraph with newly extracted L3 knowledge triples
             #[allow(clippy::collapsible_if)]
             if result.l3_triples_extracted > 0 {
-                if let Ok(graph) = crate::db::csr_graph::CsrGraph::from_db(conn) {
-                    let _ = csr_graph.write().map(|mut g_lock| *g_lock = graph);
+                if let Ok(mut graph) = crate::db::csr_graph::CsrGraph::from_db(conn) {
+                    graph.compile_csr();
+                    csr_graph.store(Arc::new(graph));
                 }
             }
 

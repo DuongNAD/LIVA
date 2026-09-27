@@ -812,6 +812,7 @@ pub fn run() {
                 services_state,
                 liva_native_core::boot::ServiceOptions {
                     ipc_tx: None,
+                    // Port 0 signifies native Tauri IPC mode (no TCP loopback WebSocket server opened)
                     on_gateway_ready: Some(Box::new(move |address| {
                         if let Err(error) = ready_handle.emit(
                             "gateway-ready",

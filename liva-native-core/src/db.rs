@@ -9,6 +9,7 @@ pub use deletion::{
 };
 
 use crate::crypto::EncryptionEngine;
+use arc_swap::ArcSwap;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{
@@ -30,6 +31,7 @@ impl r2d2::ManageConnection for CustomSqliteManager {
     type Error = rusqlite::Error;
 
     fn connect(&self) -> Result<Self::Connection, Self::Error> {
+        liva_storage::register_sqlite_vec()?;
         let conn = self.inner.connect()?;
         if let Err(e) = load_sqlite_vec(&conn) {
             eprintln!("Warning: Failed to load sqlite-vec: {:?}", e);
@@ -93,95 +95,7 @@ pub fn is_transient_sqlite_lock_error(err: &rusqlite::Error) -> bool {
     }
 }
 
-/// Danh sách đường dẫn thử nạp `vec0` (sqlite-vec), theo thứ tự ưu tiên. Tách
-/// THUẦN (nhận `exe_dir`) để test được mà không phụ thuộc môi trường.
-///
-/// Bao ba tình huống:
-/// - **dev** (chạy từ repo): `node_modules/…/vec0.dll` quanh cwd;
-/// - **đóng gói** (app Tauri cài đặt, KHÔNG có node_modules): cạnh executable và
-///   trong `resources/` — nơi `bundle.resources` của Tauri đặt file. Đây là lý do
-///   H5 (thiếu vec0 → DB sập lúc boot): candidate cũ chỉ dựa vào cwd, còn app cài
-///   đặt thì cwd không phải thư mục exe;
-/// - **hệ thống**: `vec0` trần để `load_extension` dùng tìm kiếm DLL của OS (trên
-///   Windows có kèm thư mục exe).
-pub fn vec0_candidate_paths(exe_dir: Option<&std::path::Path>) -> Vec<String> {
-    let ext = if cfg!(target_os = "windows") {
-        ".dll"
-    } else if cfg!(target_os = "macos") {
-        ".dylib"
-    } else {
-        ".so"
-    };
-    let platform_dirs: &[&str] = if cfg!(target_os = "windows") {
-        &["sqlite-vec-windows-x64", "sqlite-vec-windows-arm64"]
-    } else if cfg!(target_os = "macos") {
-        &["sqlite-vec-darwin-x64", "sqlite-vec-darwin-arm64"]
-    } else {
-        &["sqlite-vec-linux-x64", "sqlite-vec-linux-arm64"]
-    };
-
-    let dev_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")));
-    let mut candidates = Vec::new();
-    for dir in platform_dirs {
-        candidates.push(
-            dev_root
-                .join("node_modules")
-                .join(dir)
-                .join(format!("vec0{ext}"))
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
-    // đóng gói: cạnh exe + resources/ (Tauri bundle) — không phụ thuộc cwd
-    if let Some(dir) = exe_dir {
-        let s = |p: std::path::PathBuf| p.to_string_lossy().into_owned();
-        candidates.push(s(dir.join(format!("vec0{ext}"))));
-        candidates.push(s(dir.join("resources").join(format!("vec0{ext}"))));
-    }
-    candidates
-}
-
-fn vec0_trust_candidates(
-    exe_dir: Option<&std::path::Path>,
-) -> Vec<(std::path::PathBuf, std::path::PathBuf)> {
-    let paths = vec0_candidate_paths(exe_dir);
-    let dev_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
-        .to_path_buf();
-    paths
-        .into_iter()
-        .map(std::path::PathBuf::from)
-        .filter_map(|path| {
-            if let Ok(relative) = path.strip_prefix(&dev_root) {
-                Some((dev_root.clone(), relative.to_path_buf()))
-            } else if let Some(root) = exe_dir {
-                if let Ok(relative) = path.strip_prefix(root) {
-                    Some((root.to_path_buf(), relative.to_path_buf()))
-                } else if let Some(parent) = path.parent() {
-                    let rel = path
-                        .file_name()
-                        .map(std::path::PathBuf::from)
-                        .unwrap_or_default();
-                    Some((parent.to_path_buf(), rel))
-                } else {
-                    None
-                }
-            } else if let Some(parent) = path.parent() {
-                let rel = path
-                    .file_name()
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_default();
-                Some((parent.to_path_buf(), rel))
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
+/// Loads sqlite-vec by ensuring it is registered statically and initialized on the connection.
 pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Check if vec0 functions are already loaded
     if conn
@@ -191,62 +105,8 @@ pub fn load_sqlite_vec(conn: &Connection) -> Result<(), rusqlite::Error> {
         return Ok(());
     }
 
-    unsafe {
-        conn.load_extension_enable()?;
-
-        let exe_dir = std::env::current_exe().ok();
-        let candidates = vec0_trust_candidates(exe_dir.as_deref().and_then(|p| p.parent()));
-        let expected_hash = crate::embedded_runtime_artifact_hash("vec0").map_err(|error| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error)))
-        })?;
-
-        let mut success = false;
-        let mut last_err = None::<String>;
-
-        for (root, relative) in &candidates {
-            let path = match crate::verify_trusted_file(root, relative, &expected_hash) {
-                Ok(path) => path,
-                Err(error) => {
-                    last_err = Some(error);
-                    continue;
-                }
-            };
-            match conn.load_extension(&path, None) {
-                Ok(_) => {
-                    success = true;
-                    break;
-                }
-                Err(e) => {
-                    last_err = Some(e.to_string());
-                }
-            }
-        }
-
-        conn.load_extension_disable()?;
-
-        if success {
-            Ok(())
-        } else {
-            // Thông báo phải nói được cách khắc phục: khi thiếu vec0 thì lỗi kế
-            // tiếp mà người dùng thấy là "no such module: vec0" ở tận lúc tạo
-            // bảng `vec_idx` — hoàn toàn không gợi ý được nguyên nhân thật.
-            let err_msg = format!(
-                "khong nap duoc sqlite-vec (vec0). Da thu {n} duong dan: {tried}. \
-                 Nguyen nhan thuong gap: chua chay `npm ci` o thu muc goc repo — \
-                 vec0 do goi npm `sqlite-vec` cung cap. Loi cuoi cung: {last}",
-                n = candidates.len(),
-                tried = candidates
-                    .iter()
-                    .map(|(root, relative)| root.join(relative).display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                last = last_err.unwrap_or_else(|| "khong ro".to_string()),
-            );
-            Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                std::io::Error::other(err_msg),
-            )))
-        }
-    }
+    liva_storage::register_sqlite_vec()?;
+    liva_storage::register_connection_sqlite_vec(conn)
 }
 
 pub fn get_reader_pool_size() -> u32 {
@@ -263,7 +123,7 @@ pub struct DatabasePool {
     pub writer: Pool<CustomSqliteManager>,
     pub readers: Pool<CustomSqliteManager>,
     pub writer_actor: crate::db_actor::DbActorHandle,
-    pub csr_graph: Arc<std::sync::RwLock<csr_graph::CsrGraph>>,
+    pub csr_graph: Arc<ArcSwap<csr_graph::CsrGraph>>,
 }
 
 impl DatabasePool {
@@ -289,9 +149,11 @@ impl DatabasePool {
         let conn = writer.get()?;
         init_schemas(&conn)?;
 
-        let writer_actor = crate::db_actor::DbActorHandle::new(writer.clone());
-        let graph = csr_graph::CsrGraph::from_db(&conn)?;
-        let csr_graph = Arc::new(std::sync::RwLock::new(graph));
+        let mut graph = csr_graph::CsrGraph::from_db(&conn)?;
+        graph.compile_csr();
+        let csr_graph = Arc::new(ArcSwap::from_pointee(graph.clone()));
+        let writer_actor =
+            crate::db_actor::DbActorHandle::new(writer.clone(), csr_graph.clone(), graph);
 
         Ok(DatabasePool {
             writer,
@@ -329,9 +191,11 @@ impl DatabasePool {
         let conn = writer.get()?;
         init_schemas(&conn)?;
 
-        let writer_actor = crate::db_actor::DbActorHandle::new(writer.clone());
-        let graph = csr_graph::CsrGraph::from_db(&conn)?;
-        let csr_graph = Arc::new(std::sync::RwLock::new(graph));
+        let mut graph = csr_graph::CsrGraph::from_db(&conn)?;
+        graph.compile_csr();
+        let csr_graph = Arc::new(ArcSwap::from_pointee(graph.clone()));
+        let writer_actor =
+            crate::db_actor::DbActorHandle::new(writer.clone(), csr_graph.clone(), graph);
 
         Ok(DatabasePool {
             writer,
@@ -436,39 +300,17 @@ impl DatabasePool {
                 object.to_string(),
                 weight,
             )
-            .await?;
-
-        if let Ok(mut graph) = self.csr_graph.write() {
-            graph.add_node(subject.to_string(), subject.to_string(), "{}".to_string());
-            graph.add_node(object.to_string(), object.to_string(), "{}".to_string());
-            graph.add_edge(subject, object, predicate, weight, true);
-        }
-
-        Ok(())
+            .await
     }
 
-    /// Returns a read guard to CsrGraph, ensuring CSR arrays are compiled if dirty.
+    /// Returns an atomic wait-free reference guard to the pre-compiled CsrGraph snapshot.
     ///
-    /// Implements double-checked locking: clean graphs return immediately under
-    /// read lock with zero write lock contention and zero memory reallocation.
-    pub fn get_compiled_csr_graph(&self) -> std::sync::RwLockReadGuard<'_, csr_graph::CsrGraph> {
-        // Fast path: if already compiled and clean, return read guard directly
-        {
-            let guard = self.csr_graph.read().unwrap_or_else(|e| e.into_inner());
-            if !guard.is_dirty() {
-                return guard;
-            }
-        }
-
-        // Slow path: graph is dirty. Acquire write lock and compile.
-        {
-            let mut write_guard = self.csr_graph.write().unwrap_or_else(|e| e.into_inner());
-            if write_guard.is_dirty() {
-                write_guard.compile_csr();
-            }
-        }
-
-        self.csr_graph.read().unwrap_or_else(|e| e.into_inner())
+    /// Invariants guaranteed:
+    /// - Zero lock contention (ArcSwap load).
+    /// - Snapshot is always pre-compiled and clean (is_dirty() == false) because compilation
+    ///   happens in DbActor immediately after SQLite WAL commit.
+    pub fn get_compiled_csr_graph(&self) -> arc_swap::Guard<Arc<csr_graph::CsrGraph>> {
+        self.csr_graph.load()
     }
 
     /// Asynchronously insert multiple L3 knowledge graph triples in a single batch transaction and update in-memory CSR cache.
@@ -481,18 +323,7 @@ impl DatabasePool {
         }
         self.writer_actor
             .insert_l3_triples_batch(triples.to_vec())
-            .await?;
-
-        if let Ok(mut graph) = self.csr_graph.write() {
-            for (sub, pred, obj, weight) in triples {
-                graph.add_node(sub.clone(), sub.clone(), "{}".to_string());
-                graph.add_node(obj.clone(), obj.clone(), "{}".to_string());
-                graph.add_edge(sub, obj, pred, *weight, true);
-            }
-            graph.compile_csr();
-        }
-
-        Ok(())
+            .await
     }
 }
 
@@ -2233,32 +2064,13 @@ pub fn insert_l3_node_sync(
     label: &str,
     properties: &str,
 ) -> Result<(), rusqlite::Error> {
-    let id_owned = id.to_string();
-    let label_owned = label.to_string();
-    let properties_owned = properties.to_string();
-
     pool.writer_actor
-        .blocking_execute(move |conn| {
-            conn.execute(
-                "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(id) DO UPDATE SET label = excluded.label, properties = excluded.properties",
-                rusqlite::params![id_owned, label_owned, properties_owned],
-            )
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-        })
+        .insert_l3_node_sync(id.to_string(), label.to_string(), properties.to_string())
         .map_err(|e| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
                 "DbActor insert_l3_node_sync failed: {e}"
             ))))
-        })?;
-
-    if let Ok(mut graph) = pool.csr_graph.write() {
-        graph.add_node(id.to_string(), label.to_string(), properties.to_string());
-        graph.compile_csr();
-    }
-
-    Ok(())
+        })
 }
 
 /// Inserts or updates an L3 knowledge graph edge into SQLite and updates the In-Memory CSR Cache.
@@ -2269,32 +2081,18 @@ pub fn insert_l3_edge_sync(
     relation: &str,
     weight: f32,
 ) -> Result<(), rusqlite::Error> {
-    let source_owned = source.to_string();
-    let target_owned = target.to_string();
-    let relation_owned = relation.to_string();
-
     pool.writer_actor
-        .blocking_execute(move |conn| {
-            conn.execute(
-                "INSERT INTO l3_edges (source, target, relation, weight, obsolete) VALUES (?1, ?2, ?3, ?4, 0)
-                 ON CONFLICT(source, target, relation) DO UPDATE SET weight = excluded.weight, obsolete = 0",
-                rusqlite::params![source_owned, target_owned, relation_owned, weight as f64],
-            )
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-        })
+        .insert_l3_edge_sync(
+            source.to_string(),
+            target.to_string(),
+            relation.to_string(),
+            weight,
+        )
         .map_err(|e| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
                 "DbActor insert_l3_edge_sync failed: {e}"
             ))))
-        })?;
-
-    if let Ok(mut graph) = pool.csr_graph.write() {
-        graph.add_edge(source, target, relation, weight, true);
-        graph.compile_csr();
-    }
-
-    Ok(())
+        })
 }
 
 /// Asynchronously inserts or updates an L3 knowledge graph node into SQLite and updates the In-Memory CSR Cache.
@@ -2304,32 +2102,14 @@ pub async fn insert_l3_node(
     label: &str,
     properties: &str,
 ) -> Result<(), rusqlite::Error> {
-    let id_owned = id.to_string();
-    let label_owned = label.to_string();
-    let properties_owned = properties.to_string();
-
     pool.writer_actor
-        .execute(move |conn| {
-            conn.execute(
-                "INSERT INTO l3_nodes (id, label, properties) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(id) DO UPDATE SET label = excluded.label, properties = excluded.properties",
-                rusqlite::params![id_owned, label_owned, properties_owned],
-            )
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-        })
+        .insert_l3_node_async(id.to_string(), label.to_string(), properties.to_string())
         .await
         .map_err(|e| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
                 "DbActor insert_l3_node failed: {e}"
             ))))
-        })?;
-
-    if let Ok(mut graph) = pool.csr_graph.write() {
-        graph.add_node(id.to_string(), label.to_string(), properties.to_string());
-    }
-
-    Ok(())
+        })
 }
 
 /// Asynchronously inserts or updates an L3 knowledge graph edge into SQLite and updates the In-Memory CSR Cache.
@@ -2340,32 +2120,19 @@ pub async fn insert_l3_edge(
     relation: &str,
     weight: f32,
 ) -> Result<(), rusqlite::Error> {
-    let source_owned = source.to_string();
-    let target_owned = target.to_string();
-    let relation_owned = relation.to_string();
-
     pool.writer_actor
-        .execute(move |conn| {
-            conn.execute(
-                "INSERT INTO l3_edges (source, target, relation, weight, obsolete) VALUES (?1, ?2, ?3, ?4, 0)
-                 ON CONFLICT(source, target, relation) DO UPDATE SET weight = excluded.weight, obsolete = 0",
-                rusqlite::params![source_owned, target_owned, relation_owned, weight as f64],
-            )
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-        })
+        .insert_l3_edge_async(
+            source.to_string(),
+            target.to_string(),
+            relation.to_string(),
+            weight,
+        )
         .await
         .map_err(|e| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(format!(
                 "DbActor insert_l3_edge failed: {e}"
             ))))
-        })?;
-
-    if let Ok(mut graph) = pool.csr_graph.write() {
-        graph.add_edge(source, target, relation, weight, true);
-    }
-
-    Ok(())
+        })
 }
 
 // ── Cognitive Runtime v1: Idempotency and Audit Ledger DB Accessors ──

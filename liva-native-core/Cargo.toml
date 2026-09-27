@@ -2,6 +2,7 @@
 name = "liva-native-core"
 version = "0.1.0"
 publish = false
+license = "MIT OR Apache-2.0"
 edition = "2024"
 autotests = false
 autobins = false
@@ -13,7 +14,8 @@ liva-llm = { path = "../crates/liva-llm" }
 liva-storage = { path = "../crates/liva-storage" }
 liva-cua = { path = "../crates/liva-cua" }
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.21.0"
+arc-swap = { workspace = true }
+tokio-tungstenite = { workspace = true, optional = true }
 # Bề mặt tương thích OpenAI (`openai_api.rs`). hyper 0.14 ĐÃ nằm trong cây phụ
 # thuộc từ trước qua `reqwest` — bật thêm feature server không kéo về crate mới
 # nào: httparse/http/http-body/tower-service/want/h2 đều đã có trong Cargo.lock.
@@ -114,6 +116,7 @@ default = []
 #
 # Bật để phát triển tiếp: cargo test --features experimental
 experimental = []
+messenger = ["dep:tokio-tungstenite"]
 cuda = ["llama-cpp-2/cuda"]
 vulkan = ["llama-cpp-2/vulkan"]
 openblas = []

@@ -45,5 +45,5 @@ pub mod runtime_stability_tests;
 pub mod sandbox_stress;
 #[path = "../verify_commands.rs"]
 pub mod verify_commands;
-#[path = "../websocket_transport.rs"]
-pub mod websocket_transport;
+#[path = "../voice_coordinator_transport.rs"]
+pub mod voice_coordinator_transport;

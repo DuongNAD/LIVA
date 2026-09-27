@@ -110,9 +110,6 @@ export function kiemTra(root = ROOT) {
     }
   }
   const dich = Object.values(res)
-  if (!dich.some((d) => d.endsWith('vec0.dll'))) {
-    loi.push('bundle.resources thiếu vec0.dll — thiếu nó là KHÔNG MỞ ĐƯỢC database, chặn khởi động')
-  }
   if (!dich.some((d) => d.endsWith('models-manifest.json'))) {
     loi.push(
       'bundle.resources thiếu data/models-manifest.json — không có nó thì màn hình ' +

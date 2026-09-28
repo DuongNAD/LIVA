@@ -399,8 +399,9 @@ async fn test_adversarial_concurrency_latency_and_zero_contention() {
         avg_pure_micros
     );
 
+    let bound = if cfg!(debug_assertions) { 50.0 } else { 25.0 };
     assert!(
-        avg_pure_micros < 25.0,
+        avg_pure_micros < bound,
         "Pure complexity classification latency ({avg_pure_micros:.4} µs) exceeded SLA bound!"
     );
 

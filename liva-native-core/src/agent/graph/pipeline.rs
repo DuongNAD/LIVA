@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 const LLM_STREAM_ABORT_PREFIX: &str = "LLM stream aborted";
 const LLM_TTS_BACKPRESSURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-pub(super) fn send_llm_chunk_if_current(
+pub async fn send_llm_chunk_if_current(
     tx: &mpsc::Sender<String>,
     active_session_id: &std::sync::atomic::AtomicU64,
     session_id: u64,
@@ -49,11 +49,12 @@ pub(super) fn send_llm_chunk_if_current(
                         timeout.as_millis(),
                     ));
                 }
-                std::thread::sleep(
+                tokio::time::sleep(
                     deadline
                         .saturating_duration_since(now)
                         .min(std::time::Duration::from_millis(1)),
-                );
+                )
+                .await;
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 return Err(format!(
@@ -64,7 +65,7 @@ pub(super) fn send_llm_chunk_if_current(
     }
 }
 
-pub(super) fn finish_streamed_completion(
+pub fn finish_streamed_completion(
     text: String,
     stream_error: Option<String>,
     active_session_id: &std::sync::atomic::AtomicU64,
@@ -474,7 +475,9 @@ pub fn build_pipeline_graph(
                                 session_id,
                                 &chunk,
                                 LLM_TTS_BACKPRESSURE_TIMEOUT,
-                            ) {
+                            )
+                            .await
+                            {
                                 stream_err = Some(e);
                                 break;
                             }
@@ -606,7 +609,9 @@ pub fn build_pipeline_graph(
                                 session_id,
                                 &chunk,
                                 LLM_TTS_BACKPRESSURE_TIMEOUT,
-                            ) {
+                            )
+                            .await
+                            {
                                 stream_err = Some(e);
                                 break;
                             }
@@ -680,7 +685,8 @@ pub fn build_pipeline_graph(
                         session_id,
                         fallback,
                         std::time::Duration::ZERO,
-                    )?;
+                    )
+                    .await?;
                     fallback.to_string()
                 }
             };

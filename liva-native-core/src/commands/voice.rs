@@ -202,16 +202,94 @@ async fn tts_speak(state: Arc<AppState>, payload: Value) -> Result<Value, String
 
     let flush = payload["flush"].as_bool().unwrap_or(false);
 
-    let mut tts = state.tts.lock().await;
-    if let Some(ref mut tts_mgr) = *tts {
-        tts_mgr.speak(text).await?;
-        if flush {
-            tts_mgr.flush().await?;
+    // Push text to chunker with brief lock, then release lock between chunk syntheses
+    let (chunks, initial_stop_id) = {
+        let mut tts = state.tts.lock().await;
+        let Some(ref mut tts_mgr) = *tts else {
+            return Err("TTS engine not initialized".to_string());
+        };
+        let c = tts_mgr.chunker.push(text);
+        let sid = tts_mgr.player.get_stop_id();
+        (c, sid)
+    };
+
+    let mut current_stop_id = initial_stop_id;
+    for chunk in chunks {
+        if state.tts_player.get_stop_id() != initial_stop_id {
+            break;
         }
-        Ok(json!({ "success": true }))
-    } else {
-        Err("TTS engine not initialized".to_string())
+
+        // Clone player and plan with brief lock, synthesizing outside the lock
+        let plan_and_player = {
+            let tts = state.tts.lock().await;
+            let Some(ref tts_mgr) = *tts else {
+                return Err("TTS engine not initialized".to_string());
+            };
+            if tts_mgr.player.get_stop_id() != current_stop_id {
+                break;
+            }
+            tts_mgr
+                .synthesis_plan(&chunk)
+                .map(|p| (p, tts_mgr.player.clone()))
+        };
+
+        if let Some((plan, player)) = plan_and_player {
+            let cancellation_player = player.clone();
+            let initial_sid = current_stop_id;
+            let outcome = tokio::task::spawn_blocking(move || {
+                plan.synthesize(|| cancellation_player.get_stop_id() != initial_sid)
+            })
+            .await
+            .map_err(|e| format!("TTS fallback task panicked: {}", e))??;
+
+            if player.get_stop_id() == current_stop_id {
+                tracing::info!(
+                    backend = outcome.backend.as_str(),
+                    fallback_count = outcome.fallback_count,
+                    sample_rate = outcome.sample_rate,
+                    "TTS clause synthesized"
+                );
+                current_stop_id = player.play_with_rate(outcome.samples, outcome.sample_rate);
+            } else {
+                break;
+            }
+        }
     }
+
+    if flush {
+        let remainder_plan = {
+            let mut tts = state.tts.lock().await;
+            if let Some(ref mut tts_mgr) = *tts {
+                if tts_mgr.player.get_stop_id() == current_stop_id {
+                    tts_mgr.chunker.flush().and_then(|rem| {
+                        tts_mgr
+                            .synthesis_plan(&rem)
+                            .map(|p| (p, tts_mgr.player.clone()))
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some((plan, player)) = remainder_plan {
+            let cancellation_player = player.clone();
+            let initial_sid = current_stop_id;
+            let outcome = tokio::task::spawn_blocking(move || {
+                plan.synthesize(|| cancellation_player.get_stop_id() != initial_sid)
+            })
+            .await
+            .map_err(|e| format!("TTS fallback task panicked: {}", e))??;
+
+            if player.get_stop_id() == current_stop_id {
+                player.play_with_rate(outcome.samples, outcome.sample_rate);
+            }
+        }
+    }
+
+    Ok(json!({ "success": true }))
 }
 
 async fn tts_stop(state: Arc<AppState>) -> Result<Value, String> {

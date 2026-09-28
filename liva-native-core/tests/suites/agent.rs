@@ -2,8 +2,12 @@
 
 #[path = "../agent_graph_checkpoint_tests.rs"]
 pub mod agent_graph_checkpoint_tests;
+#[path = "../agent_orchestration_flow_integration_tests.rs"]
+pub mod agent_orchestration_flow_integration_tests;
 #[path = "../anti_hallucination_adversarial_stress.rs"]
 pub mod anti_hallucination_adversarial_stress;
+#[path = "../challenger_agent_router_empirical_tests.rs"]
+pub mod challenger_agent_router_empirical_tests;
 #[path = "../continuous_stress_1000_rounds.rs"]
 pub mod continuous_stress_1000_rounds;
 #[path = "../m1_challenger2_integration.rs"]

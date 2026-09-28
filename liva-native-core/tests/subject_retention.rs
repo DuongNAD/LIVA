@@ -2,12 +2,24 @@ use liva_native_core::db::{self, Fact};
 use liva_native_core::{DatabasePool, EncryptionEngine};
 use rusqlite::{Connection, params};
 
+static SUBJ_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 fn temp_db_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "liva-{label}-{}-{}.db",
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let counter = SUBJ_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "liva-{label}-{}-{}-{}.db",
         std::process::id(),
-        rand::random::<u64>()
-    ))
+        nanos,
+        counter
+    ));
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    path
 }
 
 fn seed_conversation(

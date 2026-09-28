@@ -9,9 +9,9 @@
 //!   - Client coordinate containment (clamping to client rect, preventing title-bar/close-button clicks).
 //!   - Engine-level UIPI enforcement across all actions.
 
+use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::RwLock;
 
 use tracing::warn;
 
@@ -90,38 +90,35 @@ impl SecurityGovernor {
 
     /// Set permission mode at runtime.
     pub fn set_permission_mode(&self, mode: PermissionMode) {
-        let mut lock = self.permission_mode.write().unwrap();
+        let mut lock = self.permission_mode.write();
         *lock = mode;
     }
 
     /// Get current permission mode.
     pub fn get_permission_mode(&self) -> PermissionMode {
-        *self.permission_mode.read().unwrap()
+        *self.permission_mode.read()
     }
 
     /// Update process allowlist.
     pub fn set_allowlist(&self, allowlist: Vec<String>) {
-        let mut lock = self.process_allowlist.write().unwrap();
+        let mut lock = self.process_allowlist.write();
         *lock = allowlist;
     }
 
     /// Get current process allowlist.
     pub fn get_allowlist(&self) -> Vec<String> {
-        self.process_allowlist.read().unwrap().clone()
+        self.process_allowlist.read().clone()
     }
 
     /// Update custom protected denylist.
     pub fn set_denylist(&self, denylist: Vec<String>) {
-        let mut lock = self.protected_denylist.write().unwrap();
+        let mut lock = self.protected_denylist.write();
         *lock = denylist;
     }
 
     /// Register simulated UIPI RID for a window (used in unit tests and mock harness).
     pub fn set_simulated_uipi(&self, hwnd: u64, target_rid: u32) {
-        self.simulated_uipi_rids
-            .write()
-            .unwrap()
-            .insert(hwnd, target_rid);
+        self.simulated_uipi_rids.write().insert(hwnd, target_rid);
     }
 
     /// Set simulated agent RID (used in unit tests).
@@ -285,7 +282,7 @@ impl SecurityGovernor {
         }
 
         // 8. Custom configured denylist
-        let custom_denylist = self.protected_denylist.read().unwrap();
+        let custom_denylist = self.protected_denylist.read();
         if let Some(ref proc_name) = target.process_name {
             let base = extract_base_filename(proc_name).to_ascii_lowercase();
             if custom_denylist
@@ -304,7 +301,7 @@ impl SecurityGovernor {
 
     /// Evaluates target process against the configured Bounded mode allowlist.
     pub fn evaluate_process_allowlist(&self, target: &CuaWindowInfo) -> Result<(), CuaError> {
-        let allowlist = self.process_allowlist.read().unwrap();
+        let allowlist = self.process_allowlist.read();
         if allowlist.is_empty() {
             return Err(CuaError::PermissionDenied(
                 "Bounded permission mode requires a non-empty process allowlist.".into(),
@@ -498,7 +495,7 @@ impl SecurityGovernor {
     /// Evaluates whether synthetic input is permitted under Windows UIPI rules.
     pub fn evaluate_uipi(&self, target_hwnd: u64, _target_pid: u32) -> Result<(), CuaError> {
         // 1. Check simulated overrides (for test harness)
-        if let Some(&target_rid) = self.simulated_uipi_rids.read().unwrap().get(&target_hwnd) {
+        if let Some(&target_rid) = self.simulated_uipi_rids.read().get(&target_hwnd) {
             let agent_rid = self.simulated_agent_rid.load(Ordering::SeqCst);
             if target_rid > agent_rid {
                 warn!(

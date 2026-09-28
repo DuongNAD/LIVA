@@ -774,10 +774,7 @@ impl DbActorHandle {
                     let conn = match &mut persistent_conn {
                         Some(c) => c,
                         None => match writer_pool.get() {
-                            Ok(c) => {
-                                persistent_conn = Some(c);
-                                persistent_conn.as_mut().unwrap()
-                            }
+                            Ok(c) => persistent_conn.insert(c),
                             Err(e) => {
                                 let err_msg = format!("DB pool checkout error: {}", e);
                                 tracing::error!(
@@ -795,35 +792,28 @@ impl DbActorHandle {
 
                     let mut batch = Vec::with_capacity(50);
                     let is_flush = matches!(first_cmd, DbWriteCommand::Flush { .. });
+                    let is_execute = matches!(first_cmd, DbWriteCommand::Execute { .. });
                     batch.push(first_cmd);
 
-                    if !is_flush {
-                        let start = std::time::Instant::now();
-                        let time_limit = std::time::Duration::from_millis(5);
-
+                    if !is_flush && !is_execute {
+                        // Greedily drain immediately pending writes without sleeping.
+                        // If no further commands are waiting in the queue, process the batch immediately
+                        // with sub-millisecond latency instead of incurring Windows 15.6ms sleep penalty.
                         while batch.len() < 50 {
-                            let elapsed = start.elapsed();
-                            if elapsed >= time_limit {
-                                break;
-                            }
                             match rx.try_recv() {
                                 Ok(next_cmd) => {
                                     let has_flush =
                                         matches!(next_cmd, DbWriteCommand::Flush { .. });
+                                    let is_next_exec =
+                                        matches!(next_cmd, DbWriteCommand::Execute { .. });
                                     batch.push(next_cmd);
-                                    if has_flush {
+                                    if has_flush || is_next_exec {
                                         break;
                                     }
                                 }
                                 Err(mpsc::error::TryRecvError::Empty) => {
-                                    let remaining = time_limit.saturating_sub(elapsed);
-                                    if remaining.is_zero() {
-                                        break;
-                                    }
-                                    std::thread::sleep(std::cmp::min(
-                                        remaining,
-                                        std::time::Duration::from_micros(250),
-                                    ));
+                                    // Queue is currently empty; commit immediately for sub-millisecond latency.
+                                    break;
                                 }
                                 Err(mpsc::error::TryRecvError::Disconnected) => break,
                             }

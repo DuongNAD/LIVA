@@ -168,3 +168,60 @@ async fn test_llm_actor_with_custom_streaming_backend() {
     assert_eq!(res, "Done: hello");
     assert_eq!(tokens, vec!["Chunk 1: ", "Chunk 2: ", "hello"]);
 }
+
+#[tokio::test]
+async fn test_llm_actor_cancellation_token() {
+    use std::sync::atomic::AtomicBool;
+
+    let (tx, rx) = mpsc::channel(16);
+    let actor = LlmActor::new(rx);
+    tokio::spawn(actor.run());
+    let handle = LlmActorHandle::new(tx);
+
+    let cancel_token = Arc::new(AtomicBool::new(true)); // Pre-cancelled
+    let (token_tx, _token_rx) = mpsc::channel(16);
+
+    let res = handle
+        .generate_text_stream_cancellable(
+            "will be cancelled",
+            Priority::Normal,
+            Some(token_tx),
+            Some(cancel_token),
+        )
+        .await;
+
+    assert!(res.is_err(), "Pre-cancelled task must return an error");
+    let err_msg = res.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("cancelled by preemption"),
+        "Expected cancellation error, got: {err_msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_llm_actor_in_flight_preemption() {
+    let (tx, rx) = mpsc::channel(16);
+    let actor = LlmActor::new(rx);
+    tokio::spawn(actor.run());
+    let handle = LlmActorHandle::new(tx);
+
+    let (token_tx, _token_rx) = mpsc::channel(1); // Small channel so sending causes yield
+    let h1 = handle.clone();
+    let low_fut = tokio::spawn(async move {
+        h1.generate_text_stream("slow_low_task", Priority::Low, Some(token_tx))
+            .await
+    });
+
+    let h2 = handle.clone();
+    let high_fut =
+        tokio::spawn(async move { h2.generate_text("urgent_high_task", Priority::High).await });
+
+    let (low_res, high_res) = tokio::join!(low_fut, high_fut);
+    assert!(
+        high_res.unwrap().is_ok(),
+        "High priority task must complete successfully"
+    );
+    // Low task either completed or was preempted safely
+    let low_val = low_res.unwrap();
+    assert!(low_val.is_ok() || low_val.unwrap_err().to_string().contains("cancelled"));
+}

@@ -457,13 +457,14 @@ impl G2PEngine {
                 }
 
                 if let Some(phone) = self.resolve_segment_phone(&segment, lang) {
-                    let prev = dp[i].as_ref().unwrap();
-                    let new_phone = if prev.is_empty() {
-                        phone
-                    } else {
-                        format!("{} {}", prev, phone)
-                    };
-                    dp[j] = dp[j].take().or(Some(new_phone));
+                    if let Some(prev) = dp[i].as_ref() {
+                        let new_phone = if prev.is_empty() {
+                            phone
+                        } else {
+                            format!("{} {}", prev, phone)
+                        };
+                        dp[j] = dp[j].take().or(Some(new_phone));
+                    }
                 }
             }
         }

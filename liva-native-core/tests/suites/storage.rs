@@ -16,11 +16,17 @@ pub mod hipporag_m1_adversarial_benchmark;
 pub mod m1_memory_bounds_storage_invariants_challenge;
 #[path = "../m2_memory_idle_adversarial_challenge.rs"]
 pub mod m2_memory_idle_adversarial_challenge;
+#[path = "../m4_concurrency_stress_challenger1.rs"]
+pub mod m4_concurrency_stress_challenger1;
 #[path = "../messaging_outbox_persistence.rs"]
 pub mod messaging_outbox_persistence;
 #[path = "../semantic_consolidation_tests.rs"]
 pub mod semantic_consolidation_tests;
 #[path = "../sqlite_backup_restore.rs"]
 pub mod sqlite_backup_restore;
+#[path = "../storage_and_routing_performance_benchmarks.rs"]
+pub mod storage_and_routing_performance_benchmarks;
+#[path = "../storage_wal_pool_integration_tests.rs"]
+pub mod storage_wal_pool_integration_tests;
 #[path = "../subject_retention.rs"]
 pub mod subject_retention;

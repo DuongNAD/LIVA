@@ -786,7 +786,11 @@ fn load_audio_wav(path: &Path) -> anyhow::Result<Vec<f32>> {
     let mut samples = Vec::new();
     while pos + 8 <= bytes.len() {
         let chunk_id = &bytes[pos..pos + 4];
-        let chunk_size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+        let Some(chunk_size_bytes) = bytes.get(pos + 4..pos + 8).and_then(|s| s.try_into().ok())
+        else {
+            break;
+        };
+        let chunk_size = u32::from_le_bytes(chunk_size_bytes) as usize;
         let body_start = pos + 8;
         if chunk_id == b"data" {
             let body = &bytes[body_start..(body_start + chunk_size).min(bytes.len())];

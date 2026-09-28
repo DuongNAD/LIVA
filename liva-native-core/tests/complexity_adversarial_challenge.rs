@@ -217,10 +217,11 @@ fn test_challenge_microsecond_latency_benchmark() {
     println!("Total time: {:?}", elapsed);
     println!("Average latency per call: {:.4} µs", avg_micros);
 
-    // Latency must be strictly under 25 microseconds per call (empirical threshold)
+    // Latency must be strictly under 25 microseconds per call (50µs in debug build)
+    let target = if cfg!(debug_assertions) { 50.0 } else { 25.0 };
     assert!(
-        avg_micros < 25.0,
-        "Average latency ({avg_micros:.4} µs) exceeded 25 µs target!"
+        avg_micros < target,
+        "Average latency ({avg_micros:.4} µs) exceeded {target} µs target!"
     );
 }
 

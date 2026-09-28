@@ -71,3 +71,38 @@ pub fn find_audio_file(rel: &str) -> PathBuf {
         PathBuf::from("..").join(rel)
     }
 }
+
+/// Shared RAII Temporary Database Guard to ensure clean teardown of disk-backed SQLite files (.sqlite/.db, -wal, -shm).
+#[derive(Debug)]
+pub struct TempDbGuard(pub PathBuf);
+
+impl Drop for TempDbGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(format!("{}-wal", self.0.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", self.0.display()));
+    }
+}
+
+/// Generate a guaranteed conflict-free temporary SQLite database path combining PID,
+/// monotonic nanosecond epoch timestamp, and an atomic counter.
+///
+/// Pre-removes any existing stale database files (.sqlite, -wal, -shm) to ensure an empty instance.
+pub fn make_unique_temp_db_path(prefix: &str) -> PathBuf {
+    static COMMON_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let counter = COMMON_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "{prefix}_{}_{}_{}.sqlite",
+        std::process::id(),
+        nanos,
+        counter
+    ));
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    path
+}

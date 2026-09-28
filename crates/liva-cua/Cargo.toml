@@ -28,6 +28,7 @@ async-trait = { workspace = true }
 liva-storage = { path = "../liva-storage" }
 rusqlite = { workspace = true }
 uuid = { workspace = true }
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }

@@ -11,8 +11,11 @@ use crate::crypto::EncryptionEngine;
 use crate::db::{self, DatabasePool};
 use crate::env_flag;
 use crate::llm::persona::sanitize_untrusted;
+use liva_storage::FactTrie;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Maximum pending challenge time-to-live (10 minutes = 600 seconds).
@@ -23,6 +26,15 @@ pub struct PendingRecall {
     pub fact_key: String,
     pub expected_answer: String,
     pub asked_at_ts: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FactRecord {
+    pub key: String,
+    pub enc_value: String,
+    pub memory_strength: f64,
+    pub last_accessed_at: i64,
+    pub access_count: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +64,10 @@ impl ActiveRecallConfig {
 pub struct ActiveRecallManager {
     pending_challenges: Mutex<HashMap<String, PendingRecall>>,
     custom_config: Mutex<Option<ActiveRecallConfig>>,
+    trie: RwLock<FactTrie>,
+    facts: RwLock<HashMap<String, FactRecord>>,
+    initialized: AtomicBool,
+    cached_db_count: AtomicUsize,
 }
 
 impl Default for ActiveRecallManager {
@@ -103,6 +119,10 @@ impl ActiveRecallManager {
         Self {
             pending_challenges: Mutex::new(HashMap::new()),
             custom_config: Mutex::new(None),
+            trie: RwLock::new(FactTrie::new()),
+            facts: RwLock::new(HashMap::new()),
+            initialized: AtomicBool::new(false),
+            cached_db_count: AtomicUsize::new(0),
         }
     }
 
@@ -111,6 +131,10 @@ impl ActiveRecallManager {
         Self {
             pending_challenges: Mutex::new(HashMap::new()),
             custom_config: Mutex::new(Some(config)),
+            trie: RwLock::new(FactTrie::new()),
+            facts: RwLock::new(HashMap::new()),
+            initialized: AtomicBool::new(false),
+            cached_db_count: AtomicUsize::new(0),
         }
     }
 
@@ -118,6 +142,101 @@ impl ActiveRecallManager {
     pub fn set_config(&self, config: Option<ActiveRecallConfig>) {
         let mut lock = self.custom_config.lock().unwrap_or_else(|e| e.into_inner());
         *lock = config;
+    }
+
+    /// Read guard for in-memory FactTrie (sub-50µs prefix lookup).
+    pub fn trie(&self) -> std::sync::RwLockReadGuard<'_, FactTrie> {
+        self.trie.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Insert or update a fact directly in the in-memory FactTrie and cache.
+    pub fn insert_fact_in_memory(&self, key: &str, record: FactRecord) {
+        let norm_key = key.replace(['_', '-'], " ").to_lowercase();
+        let norm_key_stripped = strip_vietnamese_diacritics(&norm_key);
+        let key_lower = key.to_lowercase();
+        let key_stripped = strip_vietnamese_diacritics(&key_lower);
+
+        {
+            let mut trie = self.trie.write().unwrap_or_else(|e| e.into_inner());
+            trie.insert(&key_lower, key);
+            trie.insert(&norm_key, key);
+            trie.insert(&key_stripped, key);
+            trie.insert(&norm_key_stripped, key);
+            for part in norm_key_stripped.split_whitespace() {
+                if part.len() >= 2 {
+                    trie.insert(part, key);
+                }
+            }
+            for part in norm_key.split_whitespace() {
+                if part.len() >= 2 {
+                    trie.insert(part, key);
+                }
+            }
+        }
+        {
+            let mut facts = self.facts.write().unwrap_or_else(|e| e.into_inner());
+            facts.insert(key.to_string(), record);
+            self.cached_db_count.store(facts.len(), Ordering::Release);
+        }
+    }
+
+    /// Refresh the in-memory FactTrie and facts index from SQLite WAL.
+    pub fn refresh_from_db(&self, db_pool: &DatabasePool) -> Result<(), rusqlite::Error> {
+        let facts_vec = db_pool.with_reader(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT key, value, memory_strength, last_accessed_at, access_count FROM facts",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(FactRecord {
+                    key: row.get(0)?,
+                    enc_value: row.get(1)?,
+                    memory_strength: row.get(2)?,
+                    last_accessed_at: row.get(3)?,
+                    access_count: row.get(4)?,
+                })
+            })?;
+            let mut list = Vec::new();
+            for r in rows {
+                list.push(r?);
+            }
+            Ok(list)
+        })?;
+
+        let mut trie = FactTrie::new();
+        let mut facts_map = HashMap::with_capacity(facts_vec.len());
+
+        for f in facts_vec {
+            let norm_key = f.key.replace(['_', '-'], " ").to_lowercase();
+            let norm_key_stripped = strip_vietnamese_diacritics(&norm_key);
+            let key_lower = f.key.to_lowercase();
+            let key_stripped = strip_vietnamese_diacritics(&key_lower);
+
+            trie.insert(&key_lower, &f.key);
+            trie.insert(&norm_key, &f.key);
+            trie.insert(&key_stripped, &f.key);
+            trie.insert(&norm_key_stripped, &f.key);
+
+            for part in norm_key_stripped.split_whitespace() {
+                if part.len() >= 2 {
+                    trie.insert(part, &f.key);
+                }
+            }
+            for part in norm_key.split_whitespace() {
+                if part.len() >= 2 {
+                    trie.insert(part, &f.key);
+                }
+            }
+
+            facts_map.insert(f.key.clone(), f);
+        }
+
+        self.cached_db_count
+            .store(facts_map.len(), Ordering::Release);
+        *self.trie.write().unwrap_or_else(|e| e.into_inner()) = trie;
+        *self.facts.write().unwrap_or_else(|e| e.into_inner()) = facts_map;
+        self.initialized.store(true, Ordering::Release);
+
+        Ok(())
     }
 
     /// Dọn dẹp các pending challenges đã hết hạn TTL (10 phút = 600 giây).
@@ -233,30 +352,19 @@ impl ActiveRecallManager {
                 || (expected_stripped.contains(&user_stripped) && user_stripped.len() >= 3)
         };
 
-        // Lấy fact hiện tại để cập nhật memory_strength với retry chống transient lock
+        // Lấy fact hiện tại từ RAM cache để cập nhật memory_strength (không block luồng)
         let current_strength = {
-            let mut strength = None;
-            for attempt in 0..5 {
-                if let Ok(r) = db_pool.read_conn() {
-                    match db::get_fact(&r, crypto, &pending.fact_key) {
-                        Ok(Some(f)) => {
-                            strength = Some(f.memory_strength);
-                            break;
-                        }
-                        Ok(None) => break,
-                        Err(e) if db::is_transient_sqlite_lock_error(&e) && attempt + 1 < 5 => {
-                            drop(r);
-                            std::thread::sleep(std::time::Duration::from_millis(
-                                5 * (attempt as u64 + 1),
-                            ));
-                        }
-                        _ => break,
-                    }
-                } else if attempt + 1 < 5 {
-                    std::thread::sleep(std::time::Duration::from_millis(5 * (attempt as u64 + 1)));
-                }
+            let facts_guard = self.facts.read().unwrap_or_else(|e| e.into_inner());
+            if let Some(f) = facts_guard.get(&pending.fact_key) {
+                f.memory_strength
+            } else {
+                db_pool
+                    .with_reader(|r| match db::get_fact(r, crypto, &pending.fact_key) {
+                        Ok(Some(f)) => Ok(f.memory_strength),
+                        _ => Ok(1.0),
+                    })
+                    .unwrap_or(1.0)
             }
-            strength.unwrap_or(1.0)
         };
 
         let (new_strength, reply) = if is_correct {
@@ -276,6 +384,16 @@ impl ActiveRecallManager {
                 ),
             )
         };
+
+        // Cập nhật RAM cache ngay lập tức
+        {
+            let mut facts_mut = self.facts.write().unwrap_or_else(|e| e.into_inner());
+            if let Some(f) = facts_mut.get_mut(&pending.fact_key) {
+                f.memory_strength = new_strength;
+                f.last_accessed_at = now;
+                f.access_count += 1;
+            }
+        }
 
         db_pool
             .writer_actor
@@ -298,130 +416,136 @@ impl ActiveRecallManager {
             return None;
         }
 
-        // Bounded retry loop for transient SQLite lock contention (SQLITE_LOCKED, SQLITE_BUSY, pool exhaustion)
-        const MAX_RETRIES: usize = 8;
-        const INITIAL_BACKOFF_MS: u64 = 5;
-        const MAX_BACKOFF_MS: u64 = 50;
-
-        let mut backoff = std::time::Duration::from_millis(INITIAL_BACKOFF_MS);
-        let mut candidate_facts = None;
-
-        for attempt in 0..MAX_RETRIES {
-            let reader = match db_pool.read_conn() {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(
-                        "ActiveRecall: cannot acquire read connection (attempt {}/{}): {}",
-                        attempt + 1,
-                        MAX_RETRIES,
-                        e
-                    );
-                    std::thread::sleep(backoff);
-                    backoff = (backoff * 2).min(std::time::Duration::from_millis(MAX_BACKOFF_MS));
-                    continue;
-                }
-            };
-
-            let query_res =
-                (|| -> Result<Vec<(String, String, f64, i64, i64)>, rusqlite::Error> {
-                    let mut stmt = reader.prepare(
-                    "SELECT key, value, memory_strength, last_accessed_at, access_count FROM facts",
-                )?;
-                    let rows = stmt.query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, f64>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, i64>(4)?,
-                        ))
-                    })?;
-                    let mut list = Vec::new();
-                    for r in rows {
-                        list.push(r?);
-                    }
-                    Ok(list)
-                })();
-
-            match query_res {
-                Ok(facts) => {
-                    candidate_facts = Some(facts);
-                    break;
-                }
-                Err(err) => {
-                    if db::is_transient_sqlite_lock_error(&err) && attempt + 1 < MAX_RETRIES {
-                        tracing::debug!(
-                            "ActiveRecall: transient SQLite lock on attempt {}/{}: {}. Retrying in {:?}...",
-                            attempt + 1,
-                            MAX_RETRIES,
-                            err,
-                            backoff
-                        );
-                        drop(reader); // Release reader back to pool before sleeping
-                        std::thread::sleep(backoff);
-                        backoff =
-                            (backoff * 2).min(std::time::Duration::from_millis(MAX_BACKOFF_MS));
-                    } else {
-                        tracing::warn!(
-                            "ActiveRecall: prepare/query failed after {} attempts: {}",
-                            attempt + 1,
-                            err
-                        );
-                        return None;
-                    }
-                }
-            }
+        // Đảm bảo nạp dữ liệu từ SQLite vào FactTrie lần đầu tiên
+        if !self.initialized.load(Ordering::Acquire) {
+            let _ = self.refresh_from_db(db_pool);
         }
 
-        let facts = candidate_facts?;
-
-        // Tìm fact khớp với user_text: lọc theo access interval & key trước, chỉ giải mã AES-256-GCM theo nhu cầu
-        let mut best_match = None;
         let user_stripped = strip_vietnamese_diacritics(&user_clean);
 
-        for row in facts {
-            let (key, enc_val, memory_strength, last_accessed_at, access_count) = row;
-
-            // 1. Kiểm tra giãn cách spaced repetition trước (access pattern filter)
-            let interval = (config.min_interval_secs as f64 * memory_strength) as i64;
-            if now - last_accessed_at < interval {
-                continue;
+        // Tra cứu tiền tố / xâu con siêu tốc trong RAM bằng FactTrie (< 50µs SLA)
+        let mut candidate_keys = {
+            let trie = self.trie.read().unwrap_or_else(|e| e.into_inner());
+            let mut keys = trie.search(&user_clean);
+            for k in trie.search(&user_stripped) {
+                if !keys.contains(&k) {
+                    keys.push(k);
+                }
             }
-
-            // 2. So khớp từ khóa trước khi giải mã
-            let norm_key = key.replace(['_', '-'], " ").to_lowercase();
-            let norm_key_stripped = strip_vietnamese_diacritics(&norm_key);
-            let key_lower = key.to_lowercase();
-            let key_stripped = strip_vietnamese_diacritics(&key_lower);
-
-            let matches_key = user_clean.contains(&key_lower)
-                || user_clean.contains(&norm_key)
-                || user_stripped.contains(&key_stripped)
-                || user_stripped.contains(&norm_key_stripped)
-                || (norm_key_stripped.len() >= 3
-                    && norm_key_stripped
-                        .split_whitespace()
-                        .all(|part| part.len() >= 2 && user_stripped.contains(part)));
-
-            if !matches_key {
-                continue;
+            if keys.is_empty() {
+                for k in trie.search_prefix(&user_clean) {
+                    if !keys.contains(&k) {
+                        keys.push(k);
+                    }
+                }
+                for k in trie.search_prefix(&user_stripped) {
+                    if !keys.contains(&k) {
+                        keys.push(k);
+                    }
+                }
             }
+            keys
+        };
 
-            // 3. Giải mã AES-256-GCM theo nhu cầu (on-demand) CHỈ cho fact ứng viên đã khớp
-            let fr = crypto.read_fact(&enc_val);
-            if fr.is_locked() {
-                continue;
-            }
-            let plain_val = fr.into_value();
-            if plain_val.trim().is_empty() {
-                continue;
-            }
+        // Nếu không khớp trong RAM, kiểm tra xem DB có fact mới bổ sung không
+        if candidate_keys.is_empty() {
+            let db_count = db_pool
+                .with_reader(|conn| {
+                    conn.query_row("SELECT count(*) FROM facts", [], |r| r.get::<_, usize>(0))
+                })
+                .unwrap_or(0);
 
-            best_match = Some((key, plain_val, memory_strength, access_count));
-            break;
+            if db_count != self.cached_db_count.load(Ordering::Relaxed) {
+                let _ = self.refresh_from_db(db_pool);
+                let trie = self.trie.read().unwrap_or_else(|e| e.into_inner());
+                candidate_keys = trie.search(&user_clean);
+                for k in trie.search(&user_stripped) {
+                    if !candidate_keys.contains(&k) {
+                        candidate_keys.push(k);
+                    }
+                }
+                if candidate_keys.is_empty() {
+                    for k in trie.search_prefix(&user_clean) {
+                        if !candidate_keys.contains(&k) {
+                            candidate_keys.push(k);
+                        }
+                    }
+                    for k in trie.search_prefix(&user_stripped) {
+                        if !candidate_keys.contains(&k) {
+                            candidate_keys.push(k);
+                        }
+                    }
+                }
+            }
         }
 
+        if candidate_keys.is_empty() {
+            // Không khớp bất kỳ fact nào — thoát ngay mà không quét đĩa
+            return None;
+        }
+
+        let facts_guard = self.facts.read().unwrap_or_else(|e| e.into_inner());
+        let mut best_match = None;
+
+        for key in candidate_keys {
+            if let Some(fact) = facts_guard.get(&key) {
+                // 1. Kiểm tra giãn cách spaced repetition
+                let interval = (config.min_interval_secs as f64 * fact.memory_strength) as i64;
+                if now - fact.last_accessed_at < interval {
+                    continue;
+                }
+
+                // 2. So khớp từ khóa trước khi giải mã
+                let norm_key = fact.key.replace(['_', '-'], " ").to_lowercase();
+                let norm_key_stripped = strip_vietnamese_diacritics(&norm_key);
+                let key_lower = fact.key.to_lowercase();
+                let key_stripped = strip_vietnamese_diacritics(&key_lower);
+
+                let matches_key = user_clean.contains(&key_lower)
+                    || user_clean.contains(&norm_key)
+                    || user_stripped.contains(&key_stripped)
+                    || user_stripped.contains(&norm_key_stripped)
+                    || (norm_key_stripped.len() >= 3
+                        && norm_key_stripped
+                            .split_whitespace()
+                            .all(|part| part.len() >= 2 && user_stripped.contains(part)));
+
+                if !matches_key {
+                    continue;
+                }
+
+                // 3. Giải mã AES-256-GCM theo nhu cầu CHỈ cho fact ứng viên đã khớp
+                let fr = crypto.read_fact(&fact.enc_value);
+                if fr.is_locked() {
+                    continue;
+                }
+                let plain_val = fr.into_value();
+                if plain_val.trim().is_empty() {
+                    continue;
+                }
+
+                best_match = Some((
+                    fact.key.clone(),
+                    plain_val,
+                    fact.memory_strength,
+                    fact.access_count,
+                ));
+                break;
+            }
+        }
+
+        drop(facts_guard);
+
         let (matched_key, expected_answer, _, _) = best_match?;
+
+        // Cập nhật thống kê truy xuất trong RAM
+        {
+            let mut facts_mut = self.facts.write().unwrap_or_else(|e| e.into_inner());
+            if let Some(f) = facts_mut.get_mut(&matched_key) {
+                f.last_accessed_at = now;
+                f.access_count += 1;
+            }
+        }
 
         // Ghi nhận truy xuất trên DB (touch access)
         db_pool
@@ -466,6 +590,13 @@ impl ActiveRecallManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         lock.clear();
+        self.trie.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.facts
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.initialized.store(false, Ordering::Release);
+        self.cached_db_count.store(0, Ordering::Release);
     }
 }
 
@@ -514,5 +645,36 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         assert!(lock.contains_key("sess_fresh"));
         assert!(!lock.contains_key("sess_old"));
+    }
+
+    #[test]
+    fn test_active_recall_fact_trie_in_memory_sla() {
+        let manager = ActiveRecallManager::new();
+
+        // Populate in-memory FactTrie
+        for i in 0..100 {
+            manager.insert_fact_in_memory(
+                &format!("user_fact_{i}"),
+                FactRecord {
+                    key: format!("user_fact_{i}"),
+                    enc_value: format!("encrypted_val_{i}"),
+                    memory_strength: 1.0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                },
+            );
+        }
+
+        let start = std::time::Instant::now();
+        let trie = manager.trie();
+        let res = trie.search_prefix("user_fact_5");
+        let elapsed = start.elapsed();
+
+        assert!(!res.is_empty(), "Prefix search must find matches");
+        assert!(
+            elapsed < std::time::Duration::from_micros(50),
+            "FactTrie prefix lookup must be sub-50µs SLA, took {:?}",
+            elapsed
+        );
     }
 }

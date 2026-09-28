@@ -28,10 +28,20 @@ impl Drop for TempDbGuard {
     }
 }
 
+static CKPT_DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Helper to create a file-backed SQLite database operating in full WAL mode.
 fn create_test_db() -> (Arc<DatabasePool>, EncryptionEngine, TempDbGuard) {
-    let rand_id = uuid::Uuid::new_v4();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let counter = CKPT_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let rand_id = format!("{}_{}_{}", std::process::id(), nanos, counter);
     let db_path = std::env::temp_dir().join(format!("liva_test_ckpt_{rand_id}.sqlite"));
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
     let db = DatabasePool::new(&db_path).expect("failed to create test SQLite database pool");
     let crypto = EncryptionEngine::new("checkpoint-m4-test-key-32-bytes");
     (Arc::new(db), crypto, TempDbGuard(db_path))

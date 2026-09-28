@@ -14,6 +14,7 @@ pub struct StateGraph {
     entry_point: String,
     checkpointer: Option<Arc<SqliteCheckpointer>>,
     thread_id: Option<String>,
+    pub max_iterations: usize,
 }
 
 impl Default for StateGraph {
@@ -30,7 +31,12 @@ impl StateGraph {
             entry_point: "START".to_string(),
             checkpointer: None,
             thread_id: None,
+            max_iterations: 25,
         }
+    }
+
+    pub fn set_max_iterations(&mut self, max: usize) {
+        self.max_iterations = max;
     }
 
     pub fn add_node<F, Fut>(&mut self, name: &str, node: F)
@@ -107,7 +113,16 @@ impl StateGraph {
             state.current_node = self.entry_point.clone();
         }
 
+        let mut iterations = 0;
         while state.current_node != "__END__" {
+            iterations += 1;
+            if iterations > self.max_iterations {
+                return Err(format!(
+                    "StateGraph recursion limit reached: exceeded max iterations ({})",
+                    self.max_iterations
+                ));
+            }
+
             let current = state.current_node.clone();
             let node_fn = self
                 .nodes
@@ -191,14 +206,12 @@ pub use memory_scope::{
     ConversationMemoryScope, memory_system_message, persist_turn, persist_turn_scoped,
     recall_context, recall_context_scoped,
 };
-pub use pipeline::build_pipeline_graph;
+pub use pipeline::{build_pipeline_graph, finish_streamed_completion, send_llm_chunk_if_current};
 
 #[cfg(test)]
 use intent::tach_nhan_tin;
 #[cfg(test)]
 use memory_scope::{persist_embedded_turn, rag_top_k, recall_embedded_context};
-#[cfg(test)]
-use pipeline::{finish_streamed_completion, send_llm_chunk_if_current};
 
 #[cfg(test)]
 pub(crate) fn state_khong_co_embedder() -> std::sync::Arc<crate::AppState> {
@@ -370,8 +383,8 @@ mod stream_backpressure_tests {
     use std::time::{Duration, Instant};
     use tokio::sync::mpsc;
 
-    #[test]
-    fn llm_chunk_queue_day_dung_sau_deadline() {
+    #[tokio::test]
+    async fn llm_chunk_queue_day_dung_sau_deadline() {
         let (tx, mut rx) = mpsc::channel(1);
         tx.try_send("first".to_string()).expect("fill queue");
         let active_session_id = AtomicU64::new(7);
@@ -383,7 +396,8 @@ mod stream_backpressure_tests {
             7,
             "second",
             Duration::from_millis(5),
-        );
+        )
+        .await;
 
         assert!(result.is_err());
         assert!(
@@ -394,12 +408,13 @@ mod stream_backpressure_tests {
         assert!(rx.try_recv().is_err());
     }
 
-    #[test]
-    fn heartbeat_reasoning_rong_kiem_epoch_nhung_khong_chiem_tts_queue() {
+    #[tokio::test]
+    async fn heartbeat_reasoning_rong_kiem_epoch_nhung_khong_chiem_tts_queue() {
         let (tx, mut rx) = mpsc::channel(1);
         let active_session_id = AtomicU64::new(7);
 
         send_llm_chunk_if_current(&tx, &active_session_id, 7, "", Duration::from_millis(5))
+            .await
             .expect("heartbeat cua turn hien tai");
 
         assert!(
@@ -410,6 +425,7 @@ mod stream_backpressure_tests {
         active_session_id.store(8, Ordering::SeqCst);
         assert!(
             send_llm_chunk_if_current(&tx, &active_session_id, 7, "", Duration::from_millis(5),)
+                .await
                 .expect_err("heartbeat epoch cu phai bi huy")
                 .contains("cancelled"),
         );
@@ -422,7 +438,7 @@ mod stream_backpressure_tests {
         let active_session_id = Arc::new(AtomicU64::new(7));
         let active_session_for_send = Arc::clone(&active_session_id);
 
-        let send = tokio::task::spawn_blocking(move || {
+        let send = tokio::spawn(async move {
             send_llm_chunk_if_current(
                 &tx,
                 &active_session_for_send,
@@ -430,6 +446,7 @@ mod stream_backpressure_tests {
                 "second",
                 Duration::from_secs(1),
             )
+            .await
         });
         tokio::time::sleep(Duration::from_millis(5)).await;
         active_session_id.store(8, Ordering::SeqCst);
@@ -437,7 +454,7 @@ mod stream_backpressure_tests {
         let result = tokio::time::timeout(Duration::from_millis(100), send)
             .await
             .expect("barge-in must interrupt backpressure wait")
-            .expect("join blocking sender");
+            .expect("join sender");
         assert!(
             result
                 .expect_err("cancelled session must reject the chunk")

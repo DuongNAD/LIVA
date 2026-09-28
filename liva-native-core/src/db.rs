@@ -133,14 +133,18 @@ impl DatabasePool {
         let read_manager = SqliteConnectionManager::file(path.as_ref())
             .with_flags(OpenFlags::SQLITE_OPEN_READ_ONLY);
 
-        let writer = Pool::builder().max_size(2).build(CustomSqliteManager {
-            inner: Arc::new(write_manager),
-            read_only: false,
-        })?;
+        let writer = Pool::builder()
+            .max_size(2)
+            .connection_timeout(std::time::Duration::from_secs(3))
+            .build(CustomSqliteManager {
+                inner: Arc::new(write_manager),
+                read_only: false,
+            })?;
 
         let readers_size = get_reader_pool_size();
         let readers = Pool::builder()
             .max_size(readers_size)
+            .connection_timeout(std::time::Duration::from_secs(3))
             .build(CustomSqliteManager {
                 inner: Arc::new(read_manager),
                 read_only: true,
@@ -175,14 +179,18 @@ impl DatabasePool {
         let read_manager = SqliteConnectionManager::file(&db_uri)
             .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI);
 
-        let writer = Pool::builder().max_size(2).build(CustomSqliteManager {
-            inner: Arc::new(write_manager),
-            read_only: false,
-        })?;
+        let writer = Pool::builder()
+            .max_size(2)
+            .connection_timeout(std::time::Duration::from_secs(3))
+            .build(CustomSqliteManager {
+                inner: Arc::new(write_manager),
+                read_only: false,
+            })?;
 
         let readers_size = get_reader_pool_size();
         let readers = Pool::builder()
             .max_size(readers_size)
+            .connection_timeout(std::time::Duration::from_secs(3))
             .build(CustomSqliteManager {
                 inner: Arc::new(read_manager),
                 read_only: true,

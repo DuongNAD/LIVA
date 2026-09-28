@@ -577,12 +577,19 @@ fn adversarial_sqlite_wal_extreme_concurrency_and_sub_millisecond_reader_checkou
     use liva_native_core::db::Fact;
     use std::sync::atomic::AtomicBool;
 
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let db_path = std::env::temp_dir().join(format!(
-        "liva_adv_wal_stress_{}_{}.sqlite",
+        "liva_adv_wal_stress_{}_{}_{}.sqlite",
         std::process::id(),
+        nanos,
         rand::random::<u64>()
     ));
     let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
 
     let pool = Arc::new(DatabasePool::new(&db_path).expect("create file-backed db"));
     let engine = Arc::new(EncryptionEngine::new("adv-wal-stress-test-key-32bytes"));

@@ -11,12 +11,24 @@ struct TempDbGuard(PathBuf);
 impl Drop for TempDbGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(format!("{}-wal", self.0.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", self.0.display()));
     }
 }
 
+static AR_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 fn test_state() -> (Arc<AppState>, TempDbGuard) {
-    let rand_id = uuid::Uuid::new_v4();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let counter = AR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let rand_id = format!("{}_{}_{}", std::process::id(), nanos, counter);
     let db_path = std::env::temp_dir().join(format!("liva_test_ar_{rand_id}.sqlite"));
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
     let db = DatabasePool::new(&db_path).expect("file-backed database pool");
     let stt_manager = stt::SttManager::new("non-existent-model");
     let llm_manager = llm::LlamaRouterManager::new(2048, 0).expect("LLM manager");

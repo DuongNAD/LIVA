@@ -1,12 +1,24 @@
 use liva_native_core::messaging::{contacts::Platform, outbox};
 use liva_native_core::{DatabasePool, EncryptionEngine};
 
+static OUTBOX_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 fn temp_db_path() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "liva-outbox-persistence-{}-{}.db",
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let counter = OUTBOX_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "liva-outbox-persistence-{}-{}-{}.db",
         std::process::id(),
-        rand::random::<u64>()
-    ))
+        nanos,
+        counter
+    ));
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    path
 }
 
 #[test]
@@ -55,5 +67,7 @@ fn encrypted_draft_survives_pool_restart_and_is_consumed_once() {
 
     drop(conn);
     drop(pool);
-    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
 }

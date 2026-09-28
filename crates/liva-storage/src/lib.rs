@@ -94,10 +94,7 @@ pub async fn run_db_actor(
         let conn_guard = match &mut persistent_conn {
             Some(c) => c,
             None => match pool.get() {
-                Ok(c) => {
-                    persistent_conn = Some(c);
-                    persistent_conn.as_mut().unwrap()
-                }
+                Ok(c) => persistent_conn.insert(c),
                 Err(e) => {
                     let err_msg = format!("DB pool checkout error: {}", e);
                     tracing::error!("{}", err_msg);

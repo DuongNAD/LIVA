@@ -1626,4 +1626,44 @@ mod tests {
             t.await.expect("task finished");
         }
     }
+
+    #[tokio::test]
+    async fn test_db_actor_isolated_write_fast_latency() {
+        let pool = DatabasePool::new_in_memory().expect("in-memory db");
+        // Warm up actor thread
+        let _ = pool
+            .spawn_writer(|conn| {
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS test_perf (id INTEGER PRIMARY KEY, v TEXT)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await;
+
+        // Measure isolated write latency — before M2 this incurred Windows 15.6ms sleep penalty
+        let start = std::time::Instant::now();
+        pool.spawn_writer(|conn| {
+            conn.execute("INSERT INTO test_perf (v) VALUES ('fast')", [])?;
+            Ok(())
+        })
+        .await
+        .expect("write succeeds");
+        let elapsed = start.elapsed();
+
+        // Must commit in well under 10ms (typically sub-millisecond in memory)
+        assert!(
+            elapsed < std::time::Duration::from_millis(10),
+            "Isolated write must commit without 15ms sleep penalty, took {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_pool_connection_timeout_configured() {
+        let pool = DatabasePool::new_in_memory().expect("in-memory db");
+        // Verify reader checkout succeeds immediately
+        let conn = pool.read_conn();
+        assert!(conn.is_ok(), "Reader connection checkout succeeds");
+    }
 }

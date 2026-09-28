@@ -205,3 +205,6 @@ models/embedding/
 *.vrm
 # Repo history-rewrite backups
 *.bundle
+
+# Scratch & backup test fixtures
+challenger_scratch_backup/

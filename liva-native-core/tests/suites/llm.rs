@@ -1,5 +1,7 @@
 //! LLM and Router Test Suite
 
+#[path = "../ai_router_integration_tests.rs"]
+pub mod ai_router_integration_tests;
 #[path = "../budgeted_completion_entry_tests.rs"]
 pub mod budgeted_completion_entry_tests;
 #[path = "../completion_stream_tests.rs"]

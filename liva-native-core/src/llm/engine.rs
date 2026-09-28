@@ -344,8 +344,8 @@ impl LlamaRouterManager {
             self.last_tokens.clear();
         }
 
-        // 2. Yield to Tokio to let GPU drivers settle VRAM allocations
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // 2. Yield to Tokio runtime without artificial sleep penalty
+        tokio::task::yield_now().await;
 
         // 3. Load parameters (enforce use_mmap=true, use_mlock=false)
         let target_n_gpu_layers = n_gpu_layers.unwrap_or(self.n_gpu_layers);
@@ -452,8 +452,8 @@ impl LlamaRouterManager {
             self.last_tokens.clear();
         }
 
-        // 2. Yield briefly to let GPU drivers settle VRAM allocations
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        // 2. Yield briefly without artificial sleep penalty
+        std::thread::yield_now();
 
         // 3. Load parameters (enforce use_mmap=true, use_mlock=false)
         let target_n_gpu_layers = n_gpu_layers.unwrap_or(self.n_gpu_layers);

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
@@ -20,6 +21,7 @@ pub enum LlmCommand {
         priority: Priority,
         token_tx: Option<mpsc::Sender<String>>,
         responder: oneshot::Sender<anyhow::Result<String>>,
+        cancel_token: Option<Arc<AtomicBool>>,
     },
     /// Command to shut down the actor gracefully
     Shutdown,
@@ -153,14 +155,17 @@ impl LlmActor {
         match cmd {
             LlmCommand::GenerateText {
                 prompt,
-                priority: _,
+                priority: current_priority,
                 token_tx,
                 responder,
+                cancel_token,
             } => {
                 debug!("LlmActor processing GenerateText command via spawn_blocking.");
                 let backend_opt = self.backend.clone();
+                let cancel = cancel_token.unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+                let cancel_for_worker = cancel.clone();
 
-                let join_res = tokio::task::spawn_blocking(move || {
+                let mut worker_task = tokio::task::spawn_blocking(move || {
                     if let Some(backend_arc) = backend_opt {
                         let mut backend = match backend_arc.lock() {
                             Ok(guard) => guard,
@@ -176,19 +181,46 @@ impl LlmActor {
                         if let Some(ref tx) = token_tx {
                             let pieces = ["Simulated ", "response ", "to: ", &prompt];
                             for piece in pieces {
+                                if cancel_for_worker.load(Ordering::Relaxed) {
+                                    return Err(anyhow::anyhow!(
+                                        "Operation cancelled by preemption"
+                                    ));
+                                }
                                 let _ = tx.try_send(piece.to_string());
                             }
                         }
+                        if cancel_for_worker.load(Ordering::Relaxed) {
+                            return Err(anyhow::anyhow!("Operation cancelled by preemption"));
+                        }
                         Ok(format!("Simulated response to: {}", prompt))
                     }
-                })
-                .await;
+                });
 
-                let final_result = match join_res {
-                    Ok(inner) => inner,
-                    Err(join_err) => Err(anyhow::anyhow!(
-                        "LLM blocking inference task failed: {join_err}"
-                    )),
+                // While worker_task is running, monitor self.receiver for higher priority commands or shutdown
+                let final_result = loop {
+                    tokio::select! {
+                        join_res = &mut worker_task => {
+                            break match join_res {
+                                Ok(inner) => inner,
+                                Err(join_err) => Err(anyhow::anyhow!(
+                                    "LLM blocking inference task failed: {join_err}"
+                                )),
+                            };
+                        }
+                        Some(new_cmd) = self.receiver.recv() => {
+                            let new_priority = new_cmd.priority();
+                            let is_shutdown = matches!(new_cmd, LlmCommand::Shutdown);
+                            self.queue.push(new_cmd);
+
+                            if is_shutdown || new_priority > current_priority {
+                                info!(
+                                    "LlmActor: Preempting active {:?} generation with {:?} command",
+                                    current_priority, new_priority
+                                );
+                                cancel.store(true, Ordering::SeqCst);
+                            }
+                        }
+                    }
                 };
 
                 let _ = responder.send(final_result);
@@ -229,12 +261,25 @@ impl LlmActorHandle {
         priority: Priority,
         token_tx: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<String> {
+        self.generate_text_stream_cancellable(prompt, priority, token_tx, None)
+            .await
+    }
+
+    /// Sends a prompt to be processed by the LLM actor with optional token streaming and cancellation token.
+    pub async fn generate_text_stream_cancellable(
+        &self,
+        prompt: impl Into<String>,
+        priority: Priority,
+        token_tx: Option<mpsc::Sender<String>>,
+        cancel_token: Option<Arc<AtomicBool>>,
+    ) -> anyhow::Result<String> {
         let (tx, rx) = oneshot::channel();
         let cmd = LlmCommand::GenerateText {
             prompt: prompt.into(),
             priority,
             token_tx,
             responder: tx,
+            cancel_token,
         };
 
         self.sender

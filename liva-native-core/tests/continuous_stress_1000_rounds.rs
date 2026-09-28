@@ -37,10 +37,20 @@ impl Drop for TempDbGuard {
     }
 }
 
+static DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 fn create_temp_wal_db() -> (Arc<DatabasePool>, TempDbGuard) {
-    let rand_id = uuid::Uuid::new_v4();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let counter = DB_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let rand_id = format!("{}_{}_{}", std::process::id(), nanos, counter);
     let db_path =
         std::env::temp_dir().join(format!("liva_continuous_1000_stress_{rand_id}.sqlite"));
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
     let pool = DatabasePool::new(&db_path).expect("open on-disk database with WAL");
     (Arc::new(pool), TempDbGuard(db_path))
 }

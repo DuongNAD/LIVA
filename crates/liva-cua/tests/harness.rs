@@ -48,3 +48,6 @@ pub mod cua_m3_challenger_1;
 
 #[path = "suites/cua_m4_challenger2_tests.rs"]
 pub mod cua_m4_challenger2_tests;
+
+#[path = "suites/cua_lock_poison_stress.rs"]
+pub mod cua_lock_poison_stress;

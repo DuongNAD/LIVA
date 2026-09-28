@@ -28,7 +28,7 @@
 //! digits, so later numeric rules cannot re-match earlier output.
 
 use regex::Regex;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 // ---------------------------------------------------------------------------
 // Number reading core
@@ -204,10 +204,9 @@ fn read_number_string(s: &str) -> String {
 const NUM: &str = r"[0-9]+(?:\.[0-9]{3})*(?:,[0-9]+)?";
 
 fn re_phone() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // VN mobile prefixes 09/03/05/07/08 + 8-9 more digits, optionally
-    // separated by spaces, dots or dashes ("0912345678", "0901 234 567").
-    RE.get_or_init(|| Regex::new(r"\b0[35789](?:[\s.\-]?[0-9]){8,9}\b").unwrap())
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\b0[35789](?:[\s.\-]?[0-9]){8,9}\b").expect("valid regex"));
+    &RE
 }
 
 // Both date patterns capture an optional preceding literal "ngày" (group 1).
@@ -216,118 +215,122 @@ fn re_phone() -> &'static Regex {
 // "ngày ngày hai mươi lăm …".
 
 fn re_date_dmy() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\b(?:((?i:ngày))\s+)?([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})\b").unwrap()
-    })
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\b(?:((?i:ngày))\s+)?([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})\b")
+            .expect("valid regex")
+    });
+    &RE
 }
 
 fn re_date_dm() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\b(?:((?i:ngày))\s+)?([0-9]{1,2})/([0-9]{1,2})\b").unwrap())
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\b(?:((?i:ngày))\s+)?([0-9]{1,2})/([0-9]{1,2})\b").expect("valid regex")
+    });
+    &RE
 }
 
 fn re_month_year() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // "tháng 12/2026" → "tháng … năm …". M/YYYY is only a date when the
-    // literal word "tháng" precedes it, so the word is required (captured and
-    // re-emitted with its original case).
-    RE.get_or_init(|| Regex::new(r"\b((?i:tháng))\s+([0-9]{1,2})/([0-9]{4})\b").unwrap())
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\b((?i:tháng))\s+([0-9]{1,2})/([0-9]{4})\b").expect("valid regex")
+    });
+    &RE
 }
 
 fn re_time() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\b([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?\b").unwrap())
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\b([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?\b").expect("valid regex")
+    });
+    &RE
 }
 
 fn re_dong() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(&format!(r"\b({NUM})\s*(?:(?i:vnđ|vnd|đồng|đ)\b|₫)")).unwrap())
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(&format!(r"\b({NUM})\s*(?:(?i:vnđ|vnd|đồng|đ)\b|₫)")).expect("valid regex")
+    });
+    &RE
 }
 
 fn re_dollar() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(&format!(r"\$\s?({NUM})")).unwrap())
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(&format!(r"\$\s?({NUM})")).expect("valid regex"));
+    &RE
 }
 
 fn re_percent() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(&format!(r"\b({NUM})\s*%")).unwrap())
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(&format!(r"\b({NUM})\s*%")).expect("valid regex"));
+    &RE
 }
 
 fn re_number_unit() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // Longest alternatives first so "km" wins over "k"/"m".
-    RE.get_or_init(|| {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(&format!(
             r"\b({NUM})\s*((?i:km|kg|kb|gb|mb|ml|mm|cm|m|l|g|k))\b"
         ))
-        .unwrap()
-    })
+        .expect("valid regex")
+    });
+    &RE
 }
 
 fn re_composite_number() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // Any digit run containing separators — semantics decided in
-    // `read_number_string` (thousands vs decimal vs version-style).
-    RE.get_or_init(|| Regex::new(r"\b[0-9]+(?:[.,][0-9]+)+\b").unwrap())
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\b[0-9]+(?:[.,][0-9]+)+\b").expect("valid regex"));
+    &RE
 }
 
 fn re_integer() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\b[0-9]+\b").unwrap())
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[0-9]+\b").expect("valid regex"));
+    &RE
 }
 
 fn re_dotted_abbr() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // "TP.HCM" before "TP." so the longer form wins at the same position.
-    RE.get_or_init(|| {
-        Regex::new(r"(?i)\b(tp\.hcm|tp\.|ths\.|ts\.|pgs\.|gs\.|bs\.|ks\.|kts\.|v\.v\.?)").unwrap()
-    })
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(tp\.hcm|tp\.|ths\.|ts\.|pgs\.|gs\.|bs\.|ks\.|kts\.|v\.v\.?)")
+            .expect("valid regex")
+    });
+    &RE
 }
 
 fn re_quan_phuong() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // "Q.1" / "P.5" — only with a trailing number, so a stray "q."/"p." in
-    // running text is left alone. Runs before number expansion.
-    RE.get_or_init(|| Regex::new(r"(?i)\b([qp])\.\s?([0-9]{1,2})\b").unwrap())
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\b([qp])\.\s?([0-9]{1,2})\b").expect("valid regex"));
+    &RE
 }
 
 fn re_word_abbr() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?i)\b(tphcm|ubnd|thpt|thcs|hdmi|hcm|hn|đh|vn|bt|vs|vip|web|app|cpu|gpu|ram|hdd|ssd|usb|vga|dv|pt|km|kg|cm|mm|ml|kb|mb|gb)\b",
         )
-        .unwrap()
-    })
+        .expect("valid regex")
+    });
+    &RE
 }
 
 fn re_upper_abbr() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // Case-SENSITIVE: lowercase "ai" ("who") and "it" are real Vietnamese
-    // words; only the fully-uppercase acronyms are expanded.
-    RE.get_or_init(|| Regex::new(r"\b(AI|IT)\b").unwrap())
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(AI|IT)\b").expect("valid regex"));
+    &RE
 }
 
 fn re_foreign() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?i)\b(live stream|livestream|instagram|messenger|bluetooth|facebook|download|chatgpt|youtube|twitter|windows|android|offline|tiktok|google|upload|online|wi-fi|macos|linux|wifi|zalo|zoom|gpt|usd|eur|gbp|jpy|cny|ceo|cfo|cto|ios|no1|ok)\b",
         )
-        .unwrap()
-    })
+        .expect("valid regex")
+    });
+    &RE
 }
 
 fn re_multi_space() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\s+").unwrap())
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("valid regex"));
+    &RE
 }
 
 fn re_space_before_punct() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\s+([.,!?;:])").unwrap())
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\s+([.,!?;:])").expect("valid regex"));
+    &RE
 }
 
 // ---------------------------------------------------------------------------

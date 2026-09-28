@@ -17,9 +17,14 @@ static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn tmp_dir(tag: &str) -> std::path::PathBuf {
     static N: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!(
-        "liva_e2e_{}_{}_{}",
+        "liva_e2e_{}_{}_{}_{}",
         std::process::id(),
+        nanos,
         N.fetch_add(1, Ordering::SeqCst),
         tag
     ));

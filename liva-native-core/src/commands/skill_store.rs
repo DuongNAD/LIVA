@@ -51,7 +51,10 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
         }
 
         "skills:list" => {
-            let entries = skills::SkillStore::new(&state.db).list()?;
+            let db = state.db.clone();
+            let entries = tokio::task::spawn_blocking(move || skills::SkillStore::new(&db).list())
+                .await
+                .map_err(|e| format!("Blocking task panicked: {e}"))??;
             Ok(json!({
                 "count": entries.len(),
                 "skills": entries.iter().map(|skill| json!({
@@ -78,7 +81,13 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             let root = skills_root();
             let entries = skills::load_skill_tree(&root)?;
             let ids: Vec<String> = entries.iter().map(|skill| skill.skill_id.clone()).collect();
-            let tallies = skills::SkillStore::new(&state.db).signal_tallies(&ids)?;
+            let db = state.db.clone();
+            let ids_clone = ids.clone();
+            let tallies = tokio::task::spawn_blocking(move || {
+                skills::SkillStore::new(&db).signal_tallies(&ids_clone)
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
             let penalties: Vec<f32> = entries
                 .iter()
                 .map(|skill| {
@@ -151,15 +160,24 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             let skill_id = payload
                 .get("skillId")
                 .and_then(Value::as_str)
-                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
-            let store = skills::SkillStore::new(&state.db);
-            let tally = store
-                .signal_tallies(&[skill_id.to_string()])?
-                .remove(skill_id)
-                .unwrap_or_default();
+                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?
+                .to_string();
+            let db = state.db.clone();
+            let skill_id_clone = skill_id.clone();
+            let (tally, observations) = tokio::task::spawn_blocking(move || {
+                let store = skills::SkillStore::new(&db);
+                let tally = store
+                    .signal_tallies(&[skill_id_clone.clone()])?
+                    .remove(&skill_id_clone)
+                    .unwrap_or_default();
+                let counts = store.signal_counts(&skill_id_clone)?;
+                Ok::<_, String>((tally, counts))
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
             Ok(json!({
                 "skillId": skill_id,
-                "observations": store.signal_counts(skill_id)?
+                "observations": observations
                     .into_iter()
                     .map(|(kind, count)| json!({ "kind": kind, "count": count }))
                     .collect::<Vec<_>>(),
@@ -177,8 +195,15 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             let skill_id = payload
                 .get("skillId")
                 .and_then(Value::as_str)
-                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?;
-            let history = skills::SkillStore::new(&state.db).history(skill_id)?;
+                .ok_or("Thiếu 'skillId'. Dùng skills:list để xem danh sách.")?
+                .to_string();
+            let db = state.db.clone();
+            let skill_id_clone = skill_id.clone();
+            let history = tokio::task::spawn_blocking(move || {
+                skills::SkillStore::new(&db).history(&skill_id_clone)
+            })
+            .await
+            .map_err(|e| format!("Blocking task panicked: {e}"))??;
             Ok(json!({
                 "skillId": skill_id,
                 "versions": history.iter().map(|version| json!({

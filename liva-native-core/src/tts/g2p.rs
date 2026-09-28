@@ -1,4 +1,26 @@
 use regex::Regex;
+use std::sync::LazyLock;
+
+static RE_ABBREV_DR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bdr\.").expect("valid regex"));
+static RE_ABBREV_MR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bmr\.").expect("valid regex"));
+static RE_ABBREV_MS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bms\.").expect("valid regex"));
+static RE_ABBREV_MRS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bmrs\.").expect("valid regex"));
+static RE_ABBREV_ETC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\betc\.").expect("valid regex"));
+
+static RE_FALLBACK_SPLIT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\s*[;:,.!?¡¿—…\x22«»“”()]+\s*)+").expect("valid regex"));
+
+static RE_HUNDRED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([a-zɹː])hˈʌndɹɪd").expect("valid regex"));
+static RE_Z: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r" z([;:,.!?¡¿—…\x22«»“” ])").expect("valid regex"));
+static RE_FLAP: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"nˈaɪnti([^ː])").expect("valid regex"));
 
 pub struct G2p;
 
@@ -31,12 +53,12 @@ impl G2p {
 
         // Expand abbreviations
         let mut t = t;
-        let abbrevs = [
-            (Regex::new(r"(?i)\bdr\.").unwrap(), "Doctor"),
-            (Regex::new(r"(?i)\bmr\.").unwrap(), "Mister"),
-            (Regex::new(r"(?i)\bms\.").unwrap(), "Miss"),
-            (Regex::new(r"(?i)\bmrs\.").unwrap(), "Misses"),
-            (Regex::new(r"(?i)\betc\.").unwrap(), "etcetera"),
+        let abbrevs: [(&LazyLock<Regex>, &str); 5] = [
+            (&RE_ABBREV_DR, "Doctor"),
+            (&RE_ABBREV_MR, "Mister"),
+            (&RE_ABBREV_MS, "Miss"),
+            (&RE_ABBREV_MRS, "Misses"),
+            (&RE_ABBREV_ETC, "etcetera"),
         ];
 
         for (re, repl) in abbrevs.iter() {
@@ -52,12 +74,10 @@ impl G2p {
 
     fn fallback_phonemize(text: &str) -> String {
         // Split into words and punctuation
-        let re = Regex::new(r"(\s*[;:,.!?¡¿—…\x22«»“”()]+\s*)+").unwrap();
-
         let mut parts = Vec::new();
         let mut last_idx = 0;
 
-        for mat in re.find_iter(text) {
+        for mat in RE_FALLBACK_SPLIT.find_iter(text) {
             let start = mat.start();
             let end = mat.end();
 
@@ -180,19 +200,16 @@ impl G2p {
         s = s.replace("ɬ", "l");
 
         // Regex for space before hˈʌndɹɪd
-        let re_hundred = Regex::new(r"([a-zɹː])hˈʌndɹɪd").unwrap();
-        s = re_hundred.replace_all(&s, "$1 hˈʌndɹɪd").to_string();
+        s = RE_HUNDRED.replace_all(&s, "$1 hˈʌndɹɪd").to_string();
 
         // Regex for z before punctuation or end
-        let re_z = Regex::new(r" z([;:,.!?¡¿—…\x22«»“” ])").unwrap();
-        s = re_z.replace_all(&s, "z$1").to_string();
+        s = RE_Z.replace_all(&s, "z$1").to_string();
         if s.ends_with(" z") {
             s = s[..s.len() - 2].to_string() + "z";
         }
 
         // American English flap-t (ti -> di after nˈaɪn)
-        let re_flap = Regex::new(r"nˈaɪnti([^ː])").unwrap();
-        s = re_flap.replace_all(&s, "nˈaɪndi$1").to_string();
+        s = RE_FLAP.replace_all(&s, "nˈaɪndi$1").to_string();
         if s.ends_with("nˈaɪnti") {
             s = s[..s.len() - "nˈaɪnti".len()].to_string() + "nˈaɪndi";
         }

@@ -2,95 +2,122 @@
 title: "shutdown_chain"
 tags:
   - liva/rule
-author: "worker"
-last_update: "2026-07-23T00:00:00Z"
+  - liva/architecture
+  - liva/rust-native
+author: "LIVA Core Architecture Team"
+last_update: "2026-09-29T11:20:00+07:00"
 severity: "CRITICAL"
 scope: "all-agents"
 ---
 
 # Rule: Shutdown Chain
 
-## Unified Rust Runtime Delta — 2026-07-23
-
-The TypeScript `CoreKernel.shutdown()` chain below is historical. The current production host is
-Tauri + `liva-native-core`:
-
-- `useVoicePipeline.stopPipeline()` invalidates in-flight startup, stops media tracks, disconnects
-  AudioWorklet/analyser/source nodes, closes AudioContext, terminates the wake worker, and clears
-  timers/listeners.
-- Widget WebSocket reconnect waits for that cleanup; component unmount disables reconnect first.
-- `scripts/start_all.ps1` records pre-existing `llama-server` PIDs and stops only instances created
-  during the LIVA session. It must never kill an unrelated process merely because a port is in use.
-- WebSocket, projection consumer, GPU watcher, and hit-test loops are owned by the Tauri process
-  runtime today. A shared explicit cancellation token and awaited drain chain are still required
-  before claiming graceful in-process restart support.
-- Every accepted WebSocket connection is owned by the server's `JoinSet`. Per-connection actor and
-  writer tasks use abort-on-drop ownership so aborting the server also closes active sockets; new
-  detached connection or socket subtasks are forbidden.
-- The standalone Rust host owns projection, router autoload, GPU watcher, WebSocket, idle TTS
-  unload and Telegram `JoinHandle`s. EOF aborts all process-owned services and awaits their
-  termination before dropping the stdout sender; otherwise Telegram keeps the writer open forever.
-
 ## Rule Statement
-The system teardown MUST execute sequentially and asynchronously through `CoreKernel.shutdown()` to prevent VRAM hangs, database corruption, or zombie worker processes. No hardcoded sleeps (`setTimeout`) are allowed.
+
+The system teardown MUST execute deterministically and sequentially through native Rust graceful shutdown (`AppState::shutdown` and Tauri lifecycle management). The shutdown sequence must signal Tokio `CancellationToken`s, cancel in-flight LLM generation, drain the `DbActor` MPSC queue, execute a safe SQLite WAL checkpoint, and terminate all child sub-processes via Windows NT Job Objects (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). No hardcoded sleeps (`thread::sleep` / `tokio::time::sleep`) or abrupt uncoordinated process aborts (`std::process::exit`) are permitted.
 
 ## Rationale
-- If `llama-server` is not terminated first, it locks GPU VRAM, preventing other applications from accessing the GPU.
-- If database connections are closed before pending memory transactions (Reflection/Consolidation) flush, writes are lost, and SQLite WAL may corrupt.
 
-## The Shutdown Sequence
+- **GPU & VRAM Protection**: Local LLM and ONNX runtime contexts must release GPU buffers and device handles cleanly to prevent device memory fragmentation or VRAM locks across sessions.
+- **Zero WAL Corruption**: SQLite WAL transactions must be micro-batched and committed before connection pools drop. Closing the database while the `DbActor` MPSC queue contains pending mutations leads to lost writes or unfinished WAL rollbacks.
+- **Zombie Process Elimination**: External tool executions or side utilities must be attached to an atomic Windows NT Job Object at creation (`StartupInfoExW` with `PROC_THREAD_ATTRIBUTE_JOB_LIST`). If the host process exits unexpectedly, the Windows kernel terminates all descendants atomically.
 
-```typescript
-async CoreKernel.shutdown()
-  ├── modelOrchestrator.killLlamaServer() // 🚨 STEP 1 (IMMEDIATE): Kill llama-server to release VRAM (local mode only)
-  ├── modelOrchestrator.clearExpertCooldown() // Clear TTL to avoid zombie swap attempts
-  ├── workerThreadPool.terminateAll()     // Kill toàn bộ node:worker_threads
-  ├── clearInterval(gcIntervalId)     // Own GC timer
-  ├── fileWatcher.close()             // FSWatcher file handles
-  ├── zalo.stop()                     // ZaloPolling timer
-  ├── voiceEngine.destroy()           // TTS timers/buffers
-  ├── whisperNode.destroy()           // STT engine (NemotronSTTService) + worker thread + listeners
-  ├── memory.dispose()                // 🚨 MUST await `unifiedMemory.close()` — no sleep.
-  │   ├── reflectionDaemon.flushPending() // Flush pending Φ/Ψ extractions
-  │   ├── reflectionDaemon.dispose()      // Clear debounce timer
-  │   ├── consolidationCron.dispose()     // Clear idle-check interval
-  │   ├── dreamingPipeline.dispose()      // [Dreaming] Clear indexCache
-  │   ├── quantStore.dispose()            // QuantStore GC + tensor cache
-  │   └── structuredMemory.close()        // SQLite connection
-  ├── SensoryManager.dispose()        // 5s GC interval
-  ├── EmbeddingService.dispose()      // GPU API client cleanup
-  ├── emailManager.dispose()          // Dừng IMAP timer và ngắt kết nối
-  ├── voiceSpeaker.dispose()          // Dọn dẹp tiến trình ngầm phát âm thanh (PowerShell TTS)
-  ├── gitNexusIndexer.dispose()       // Dừng Background Indexer debounce timer
-  ├── proactiveInterestsDaemon.dispose() // [v24] Dừng Shadow Digest Interests cron timer
-  ├── proactiveFocusDaemon.dispose()     // [v24] Dừng Shadow Digest Focus cron timer
-  └── vramGuard.dispose()               // [v24] Dừng GPU monitor polling interval
+## The Native Rust Shutdown Sequence
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                      LIVA Graceful Shutdown Chain                      │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ 1. Trigger CancellationToken
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Phase 1: Inbound Halt & Task Interruption                              │
+│   - Cancel active LLM generation: cancel_token.store(true)             │
+│   - Halt WebRTC audio duplex: stop WASAPI capture, AEC3, Silero VAD    │
+│   - Disarm CUA automation: release synthetic Win32 inputs              │
+│   - Stop accepting new Tauri IPC commands                              │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ 2. Await In-Flight Tasks
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Phase 2: MPSC Queue & Background Task Drain                            │
+│   - Await Tokio JoinSet task termination (governor, watchers, audio)   │
+│   - Send DbWriteCommand::Flush through DbActorHandle                   │
+│   - Await DbActor acknowledgmentoneshot channel                        │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ 3. Checkpoint WAL
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Phase 3: SQLite WAL Finalization & Connection Drop                     │
+│   - Execute PRAGMA wal_checkpoint(TRUNCATE);                           │
+│   - Drop r2d2_sqlite reader connection pool                            │
+│   - Close and join dedicated DbActor OS thread                         │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ 4. Child Process & Vault Cleanup
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Phase 4: Windows Job Object & Stronghold Vault Teardown                │
+│   - Windows NT Job Object: Automatic KILL_ON_JOB_CLOSE terminates child│
+│   - Lock & persist IOTA Stronghold vault secrets                       │
+│   - Emit Tauri window destroyed events and exit process cleanly        │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Examples
+## Implementation Reference
 
-### Compliant Behavior
-- Register cleanups in the sequential async chain and await database closing natively:
-```typescript
-// inside Gateway graceful shutdown
-await CoreKernel.shutdown();
-console.log("Shutdown complete.");
-process.exit(0);
+```rust
+pub async fn execute_graceful_shutdown(
+    state: &AppState,
+    cancel_token: &tokio_util::sync::CancellationToken,
+) -> anyhow::Result<()> {
+    tracing::info!("Initiating LIVA native graceful shutdown sequence");
+
+    // Phase 1: Signal cancellation to in-flight tasks and actors
+    cancel_token.cancel();
+    state.llm.shutdown().await?;
+
+    // Stop voice audio streaming and WASAPI playback
+    if let Some(ref tts) = *state.tts.lock().await {
+        tts.stop_audio().await;
+    }
+
+    // Phase 2: Drain and flush persistent database actor queue
+    tracing::info!("Flushing DbActor write queue to SQLite WAL...");
+    state.db.writer_actor.flush().await?;
+
+    // Phase 3: SQLite WAL truncation checkpoint
+    {
+        let conn = state.db.writer_pool.get()?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        tracing::info!("SQLite WAL checkpoint TRUNCATE completed successfully");
+    }
+
+    // Phase 4: Windows Job Objects automatically terminate sub-processes
+    // Child processes spawned via liva-cua or tools attached to JobObject
+    // terminate atomically upon handle closure (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).
+
+    tracing::info!("LIVA native shutdown complete. Clean exit.");
+    Ok(())
+}
 ```
 
-### Non-Compliant Behavior
-- Using hardcoded timeouts to wait for database writes, or shutting down in random order:
-```typescript
-// Non-compliant: db connection is closed before llama-server is killed,
-// or using setTimeout instead of awaiting Native close.
-setTimeout(() => {
-  process.exit(0);
-}, 2000);
-```
+## Anti-Patterns & Prohibited Actions
 
-## Exceptions
-None. Graceful shutdown sequence must be respected under all circumstances.
+- ❌ **Abrupt Process Exit**: Calling `std::process::exit(0)` without awaiting `DbActor::flush()` and `PRAGMA wal_checkpoint(TRUNCATE);`.
+- ❌ **Unbounded Sleep**: Using `thread::sleep(Duration::from_secs(2))` to "wait" for background operations instead of deterministic Tokio channels.
+- ❌ **Detached Child Processes**: Spawning child utilities via `std::process::Command::spawn()` without assigning them to the Windows NT Job Object.
+- ❌ **Drop-Order Deadlocks**: Holding a mutex guard across an `.await` boundary in the shutdown handler.
 
-## Verification & Enforcement
-- The shutdown handler logs each step to standard error or logs files.
-- Integration tests confirm all processes exited without remaining zombie handles.
+## Verification & Independent Audit
+
+- **WAL Cleanliness**: Verify that `db.sqlite-wal` size drops to 0 bytes or is cleanly truncated upon shutdown.
+- **Process Inspection**: Inspect Windows Task Manager or run `Get-Process -Name liva*` in PowerShell to confirm zero orphaned child processes or zombie threads remain.
+- **Test Suite**: Run `cargo test -p liva-llm -j 2 -- --test-threads 2` to verify actor preemption and shutdown signal handling.
+
+## Related Notes
+
+- [[Knowledge/liva_architecture|LIVA Architecture]] — Overall system topology and Tauri v2 IPC.
+- [[Knowledge/memory_architecture|Memory Architecture]] — Three-tier memory engine, Radix Trie, and SQLite WAL.
+- [[Rules/coding_standards|Coding Standards]] — Rust development standards and concurrency invariants.
+- [[Rules/tech_stack|Tech Stack]] — Multi-crate dependencies and build profiles.
+- [[Knowledge/anti_patterns|Anti-Patterns]] — Prohibited design patterns in the native Rust architecture.

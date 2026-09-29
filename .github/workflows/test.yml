@@ -30,7 +30,7 @@ jobs:
         components: rustfmt
 
     - name: Check Documentation
-      run: node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia
+      run: node scripts/docs-check.mjs --strict-stale=docs/01-kien-truc,docs/02-crates
 
     - name: Check Documentation Citations
       run: node scripts/docs-citations.mjs --max-unchecked=207

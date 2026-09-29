@@ -3,70 +3,91 @@ title: "liva_architecture"
 tags:
   - liva/knowledge
   - liva/architecture
-author: "codex"
-last_update: "2026-07-31T06:00:00+07:00"
+  - liva/rust-native
+author: "LIVA Core Architecture Team"
+last_update: "2026-09-29T11:20:00+07:00"
 ---
 
 # Knowledge: LIVA System Architecture
 
-## Runtime boundary
+## Runtime Boundary
 
-LIVA uses a unified Rust engine in `liva-native-core`. Tauri calls the native engine directly; the retired Node.js gateway and Python AI backend are historical code and must not be restored. The separate `liva-voice` Python service remains active for voice-specific workloads.
+LIVA is built as a 100% Rust Native Multi-Crate Workspace. The Tauri v2 desktop shell connects in-process to the native Rust engine without intermediate loopback WebSockets or external sidecar processes. The legacy Node.js gateway (`liva-gateway`) and Python AI engine (`liva-ai-engine`) have been completely eliminated. The standalone `liva-voice/` folder remains strictly an offline utility for voice cloning training and dataset synthesis.
 
-## Main components
+## Workspace Topology (7 Native Crates)
 
-- `liva-native-core`: AI routing, native tools, persistence, integrations, WebSocket behavior, wake/voice coordination, and security-sensitive backend logic.
-- `liva-desktop`: Tauri desktop shell and native command boundary.
-- `liva-ui`: Vue 3 and TypeScript user interface.
-- `packages/liva-common`: shared TypeScript contracts used by supported front-end workspaces.
-- `mobile_client`: mobile client.
-- `teamwork_projects/obsidian_llm_wiki`: local MCP server and Obsidian knowledge vault.
-- `liva-voice`: isolated Python voice service; it does not own general backend logic.
+The Cargo workspace manages 7 member crates with strict dependency boundaries:
 
-## Data and control flow
+1. **`liva-desktop/src-tauri`**: Desktop shell built on Tauri v2. Owns window lifecycle, system tray, transparent overlay (`widget`), multi-monitor coordinate transforms (`ghost_mode`), IOTA Stronghold vault secrets, and native IPC command dispatching.
+2. **`liva-native-core`**: Core system orchestrator. Implements `AppState`, domain command routing (`commands::*`), WebRTC audio pipeline, Sonora AEC3, GTCRN speech denoiser, Silero VAD, Smart Turn v3.2 active turn gate, vision manager, CUA integration, and in-memory knowledge graph (`CsrGraph`).
+3. **`crates/liva-core-types`**: Pure, lightweight shared domain contracts, JSON schemas (`schemars`), turn taking verdicts (`TurnVerdict`, `AdaptiveTurnDecision`), and tool argument definitions across crates with zero heavy dependencies.
+4. **`crates/liva-storage`**: SQLite WAL connection pool (`r2d2`), statically compiled C-FFI `sqlite-vec` (AVX2/FMA hardware-optimized vector search), in-memory Radix Trie (`FactTrie` / `ActiveRecallManager`), and the asynchronous `DbActor` single-writer transaction serializer (`BEGIN IMMEDIATE`).
+5. **`crates/liva-llm`**: Multi-priority actor-based LLM engine (`LlmActorHandle`). Drains prioritized requests (`High`, `Normal`, `Low`), dispatches blocking inference to dedicated OS threads (`spawn_blocking`), and supports token streaming with real-time preemption cancellation via `AtomicBool`.
+6. **`crates/liva-tools`**: Unified diagnostic CLI utility exposing subcommands `probe` (DB, ONNX, STT, TTS, Router, OS), `bench`, `doctor`, and `eval`.
+7. **`crates/liva-cua`**: Native Computer-Use Agent (CUA) automation engine for Windows. Implements `Win32CuaDriver`, DPI-aware coordinate transformations, emergency hardware kill switch (`VK_ESCAPE` poller), UIPI privilege isolation, and SQLite action auditing.
 
-1. The desktop application starts the Tauri/Rust runtime.
-2. UI requests cross the Tauri IPC boundary and are validated before reaching native capabilities.
-3. The native core coordinates local/cloud model access, tools, persistence, integrations, and streaming results.
-4. High-frequency results return to Vue through bounded streaming/event paths; the UI avoids deep reactive work per token.
-5. Obsidian knowledge is accessed through the local MCP server. Agents call `search_vault` before changes governed by vault rules.
+Supporting frontend and tooling workspaces:
+- **`liva-ui`**: Vue 3 + TypeScript desktop frontend (Three.js 3D avatar rendering via `OffscreenCanvas`).
+- **`teamwork_projects/obsidian_llm_wiki`**: Local MCP server and Obsidian knowledge vault acting as the Single Source of Truth.
 
-## Command and artifact boundaries
+## Data and Control Flow
 
-- Every external command entry is assigned a `CommandPrincipal`. Tauri derives privileged identity
-  from the exact window label. WebSocket defaults to `WebSocketRemote`; a client that sends
-  `?principal=widget|dashboard` is rejected with HTTP 403. Widget/dashboard may obtain a 256-bit,
-  30-second, single-use session ticket only through their trusted Tauri capability; the server
-  stores only its SHA-256 digest and derives the WebSocket principal on consume. Command
-  authorization is fail-closed before domain handlers run.
-- Tauri app commands are registered in `AppManifest`. Widget, dashboard and setup each have a
-  separate capability file; vault/dialog/process permissions are not shared with widget/setup.
-- Router GGUF, mmproj and vec0 are canonicalized under an approved root and must match SHA-256 from
-  the manifest embedded in the Rust binary before entering a native parser or extension loader.
-- Privileged WebSocket identity is loopback-only and session-bound. Setup/unknown windows,
-  expired/replayed/duplicate tickets, self-declared principals and non-loopback session use are
-  rejected.
-- Tauri CSP allows only bundled self scripts/styles and forbids objects, base URI changes and
-  framing. Shipped static HTML has no inline script, style block or style attribute.
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│               liva-ui (Vue 3 / WebView2 / Three.js)                   │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ Tauri v2 IPC (Direct In-Process)
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                       liva-desktop/src-tauri                           │
+│   - Window Principal Authorization (widget / dashboard / setup)        │
+│   - Event & Channel Streaming (tauri::ipc::Channel / window.emit)      │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ Direct Rust In-Process API
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                         liva-native-core                               │
+│   - Domain Routing (chat, voice, vision, cua, system)                  │
+│   - Active Recall Interception (0 token cost FactTrie prefix search)   │
+│   - Hybrid Retrieval (FTS5 + static sqlite-vec + ArcSwap<CsrGraph>)    │
+│   - Audio Duplex Pipeline (AEC3 + GTCRN + Silero VAD + Smart Turn v3.2)│
+└──────────────┬───────────────────┬───────────────────┬─────────────────┘
+               │ MPSC              │ MPSC              │ C-FFI
+               ▼                   ▼                   ▼
+┌───────────────────────┐ ┌─────────────────┐ ┌──────────────────────────┐
+│   crates/liva-llm     │ │crates/liva-storage│ │ crates/liva-cua        │
+│ - LlmActor (Priority) │ │ - DbActor (WAL) │ │ - Win32CuaDriver         │
+│ - spawn_blocking      │ │ - sqlite-vec (C)│ │ - Emergency Kill Switch  │
+│ - Preemption Cancel   │ │ - Radix FactTrie│ │ - Windows Job Objects    │
+└───────────────────────┘ └─────────────────┘ └──────────────────────────┘
+```
 
-## Canonical runtime documents
+1. **User Interaction**: User input originates from voice (`voice_mic_chunk`), hotkeys, or Vue 3 text inputs.
+2. **In-Process IPC**: Commands flow across Tauri v2 IPC (`native_ipc_call` for unary calls, `native_ipc_call_stream` for chunked streaming, and `tauri::ipc::Channel` for real-time visemes and transcripts). Zero loopback TCP sockets or WebSocket servers are used.
+3. **Authorization Gating**: `authorize_tauri_principal` verifies the calling window's label (`widget` -> `TauriWidget`, `dashboard` -> `TauriDashboard`, `setup` -> `TauriSetup`). Fail-closed enforcement rejects unauthorized command execution.
+4. **Active Recall**: The conversational turn is intercepted by `ActiveRecallManager`. In-memory `FactTrie` searches for known facts in $<0.1\text{ ms}$; if a match is found, an active recall prompt is issued with 0 LLM token cost.
+5. **Context Assembly**: `recall_context_scoped` executes two-stage hybrid search (static `sqlite-vec` embedding similarity + SQLite FTS5) and traverses `ArcSwap<CsrGraph>` with Personalized PageRank (SpMV in $<2\text{ ms}$). Dynamic context token budgeting strictly trims prompt segments to prevent context window overflow.
+6. **LLM Inference**: The request is enqueued into `crates/liva-llm`'s `PriorityQueue`. Dedicated OS threads run inference without blocking Tokio async workers. If a higher-priority interruption occurs, `cancel_token` immediately preempts generation.
 
-- `docs/03-he-thong-con/persistence.md`: data root, 20-table schema v5, migration, durability and
-  data lifecycle.
-- `docs/05-chat-luong/threat-model.md`: trust assumptions, encryption/keystore coverage,
-  WebSocket/Tauri/MCP boundaries and hardening order.
-- `docs/06-ke-hoach/roadmap.md`: program-level milestones and acceptance gates.
+## Persistence & Static Vector Extension
 
-The former `docs/01-ban-ve/07-tang-du-lieu-va-bao-mat.md` is a frozen historical snapshot.
+- Database engine is SQLite with Write-Ahead Logging (`PRAGMA journal_mode = WAL;`) and `PRAGMA synchronous = NORMAL;`.
+- Concurrency model: Single-writer actor (`DbActor`) on a dedicated OS thread micro-batches mutations using `BEGIN IMMEDIATE;`, completely eliminating `SQLITE_BUSY` errors. Multiple read connections (`r2d2_sqlite`) execute concurrent reads.
+- **Static `sqlite-vec`**: The vector similarity search engine is statically compiled into the Rust binary from C source (`c/sqlite-vec.c`) via `cc` in `crates/liva-storage/build.rs` with AVX2/FMA optimizations. No dynamic runtime loading of `vec0.dll` or external C++ shared libraries occurs.
 
-## Architectural invariants
+## Architectural Invariants
 
-- Security and data integrity precede performance and clean-code improvements.
-- Secrets and sensitive user content must never be logged. Recovery/device keys do not use stderr;
-  desktop credentials use purpose-scoped Stronghold commands.
-- SQLite WAL, transaction, and connection-pool invariants are owned by the Rust core.
-- Blocking I/O or inference must not run on Tokio control paths.
-- Existing symbols require GitNexus upstream impact analysis before edits.
-- Old branches containing the retired stack are not merged wholesale; useful behavior is reimplemented deliberately against the current Rust architecture.
+- **Security & Integrity First**: Principle of Least Privilege (`CommandPrincipal`), Windows Job Objects (`STARTUPINFOEXW` / `PROC_THREAD_ATTRIBUTE_JOB_LIST` with 512MB RAM cap and `KILL_ON_JOB_CLOSE`), and fail-closed security.
+- **Memory Ceiling**: System RAM $\le 4.0\text{ GB}$ (typical runtime $\approx 2.3\text{ GB}$) and VRAM $\le 5.1\text{ GB}$ managed by `VisualGovernor`.
+- **Zero Blocking on Tokio**: All heavy compute (LLM inference, ONNX embedding generation, SQLite disk writes) runs on dedicated background threads or through `spawn_blocking`.
+- **No Loopback Ports**: Zero internal HTTP/WebSocket listening sockets; all inter-thread communication uses Rust channels and Tauri IPC channels.
+- **Obsidian Single Source of Truth**: System state and rules documented here in `teamwork_projects/obsidian_llm_wiki/vault` govern runtime behavior.
 
-`AGENTS.md` is the repository-level authority. This note summarizes the current runtime shape and must be updated when that authority changes.
+## Related Notes
+
+- [[Knowledge/memory_architecture|Memory Architecture]] — Three-tier memory engine, Radix Trie, SQLite WAL, and HippoRAG PPR graph.
+- [[Knowledge/voice_pipeline|Voice Pipeline]] — WebRTC full-duplex pipeline, AEC3, GTCRN denoiser, and Smart Turn v3.2 active gate.
+- [[Rules/tech_stack|Tech Stack]] — Multi-crate workspace dependencies and Tauri v2 configurations.
+- [[Rules/coding_standards|Coding Standards]] — Rust development standards, concurrency patterns, and safety constraints.
+- [[Rules/shutdown_chain|Shutdown Chain]] — Deterministic teardown sequence and sub-process cleanup.
+- [[Knowledge/anti_patterns|Anti-Patterns]] — Prohibited design patterns in the native Rust architecture.

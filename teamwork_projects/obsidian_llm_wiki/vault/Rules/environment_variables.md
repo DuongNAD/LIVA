@@ -25,7 +25,7 @@ vault primitive exists.
 
 The complete, source-verified variable registry is:
 
-- `docs/02-van-hanh/01-cau-hinh-va-bien-moi-truong.md`
+- `docs/03-phat-trien-van-hanh/01-cau-hinh-va-bien-moi-truong.md`
 - Rust readers under `liva-native-core/src/`
 - security decisions in `docs/05-chat-luong/threat-model.md`
 
@@ -40,10 +40,12 @@ Do not copy the full list into Vault; a second list will drift.
 | `LIVA_DB_IN_MEMORY` | ephemeral DB mode | test/development; no durability promise |
 | `LIVA_ENCRYPTION_KEY` | DB fact key override | secret; never log; Windows on-disk DB otherwise uses DPAPI device key |
 | `LIVA_ENCRYPTION_KEY_OLD` | one-time rekey source | migration-only; remove after verified rekey |
-| `LIVA_SERVER_HOST` / `LIVA_SERVER_PORT` | WebSocket bind | non-loopback is forbidden until authentication is configured |
-| `LIVA_WS_ALLOWED_ORIGINS` | additional browser origins | exact origins only; not an authentication mechanism |
 | `LIVA_MCP_AUTOEXEC` | widens external-tool execution | security-sensitive operator policy |
 | Telegram token/allowlist variables | bot identity and callers | token is secret; empty allowlist stays fail-closed |
+
+## Deprecated / Retired variables
+
+- `LIVA_SERVER_HOST`, `LIVA_SERVER_PORT`, and `LIVA_WS_ALLOWED_ORIGINS`: Deprecated and retired. Tauri v2 in-process IPC Channels (`tauri::ipc::Channel`) have completely replaced the loopback TCP/WebSocket server. Zero loopback ports are opened.
 
 ## Required behavior
 
@@ -55,7 +57,7 @@ Do not copy the full list into Vault; a second list will drift.
    - a default/failure policy;
    - documentation in the canonical operations registry;
    - tests for security-sensitive values.
-5. Do not restore legacy `AI_PROVIDER`, `AI_API_KEY`, Zalo, Node gateway or Python-core variables
+5. Do not restore legacy `AI_PROVIDER`, `AI_API_KEY`, Zalo, WebSocket (`LIVA_SERVER_HOST` / `LIVA_SERVER_PORT`), Node gateway or Python-core variables
    unless a new implementation and approved contract explicitly require them.
 
 ## Known gap

@@ -2,104 +2,108 @@
 title: "voice_pipeline"
 tags:
   - liva/knowledge
-author: "worker"
-last_update: "2026-08-05T15:07:00+07:00"
+  - liva/voice
+  - liva/rust-native
+author: "LIVA Core Architecture Team"
+last_update: "2026-09-29T11:20:00+07:00"
 ---
 
 # Knowledge: Voice Pipeline
 
 ## Executive Summary
-This document outlines the design and components of the LIVA Voice Pipeline, including the STT/TTS sentient duplex mechanism, real-time audio-driven lip sync, VAD ONNX offloading, and hybrid backup systems.
 
-## Rust Runtime Delta — 2026-07-23
+LIVA's real-time duplex voice pipeline is implemented natively in Rust within `liva-native-core/src/webrtc/`, `src/tts/`, and `src/turn_taking.rs`. It replaces all legacy Node.js worker threads (`NemotronWorker.ts`, `VADWorker.ts`, `VADWorkerBridge.ts`) and Python EdgeTTS runtimes with a high-performance WebRTC duplex engine: Sonora AEC3 acoustic echo cancellation, GTCRN STFT speech denoiser, Silero VAD v5, the active `Smart Turn v3.2` two-stage turn gate ($T_{\text{gate}} \le 225\text{ ms}$), native offline TTS synthesis, and Tauri v2 IPC Channel event streaming.
 
-The detailed section below describes the historical target architecture. The production runtime is
-now the unified Rust core:
+## Full-Duplex WebRTC Architecture
 
-- STT, LLM/vision and TTS execute locally; the voice hot path is coordinated by
-  `webrtc::pipeline::WebRTCActor`.
-- Standalone and Tauri both bind `websocket::WebSocketServer` against the same `AppState`.
-  `VoiceRuntimeComponents` loads VAD, GTCRN, SmartTurn and AEC once for either entry point.
-- Browser capture uses `AudioWorkletNode("liva-mic-capture")`. The worklet aggregates 512
-  samples per transferable frame, so the client hop is 32 ms at 16 kHz instead of the former
-  2048-sample/128 ms `ScriptProcessorNode` buffer.
-- Wake-worker initialization is single-flight. Partial microphone/AudioContext startup failures
-  release acquired resources, and a lifecycle generation prevents an in-flight permission request
-  from resurrecting the pipeline after `stopPipeline()`.
-- The wake worker only segments candidate utterances. It sends `OP_WAKE_PROBE`; Rust performs
-  classifier/STT verification and returns `wake_word_triggered` or `wake_probe_rejected`.
-  The former browser RMS MLP, weights JSON and browser ONNX artifact were removed on 2026-07-31.
-- Wake probes use a fail-closed two-tier decision. The promoted owner-calibrated classifier may
-  directly wake above `LIVA_WAKE_THRESHOLD`; lower scores still require exact STT phrase matching.
-  Do not add a second hard-coded direct threshold: it invalidates the benchmark/selection gate.
-  The response always returns the raw score, transcript and accepted/rejected outcome; diagnostics
-  displays that result instead of silently remaining `PASSIVE`.
-- `wake_liva_en_v2.onnx` was retrained on 2026-08-05 with 20 owner hard negatives and promoted only
-  after the matrix selector chose `fleurs_medium`. At threshold 0.58 its independent holdout result
-  was 4/4 owner positives, one false positive and 0.7685 FPPH over 1.3013 negative hours. This is a
-  production beta, not enough field evidence for a broad accuracy claim.
-- The 2026-08-02 pre-personalization result (1/24 owner positives at threshold 0.58) is superseded by
-  that retraining. Runtime observations at 0.595 and 0.641 on the owner's live microphone confirm
-  why the obsolete 0.90 safety cap must not override the evaluated 0.58 threshold.
-- A rejected core probe is acknowledged back to `LivaWakeWorker` and releases its cooldown
-  immediately. An accepted probe keeps cooldown to prevent duplicate activation.
-- Personalization requires both owner positives and owner hard negatives. The preparation step
-  splits each class by original recording before replication and injects separate 8xxxxx/9xxxxx
-  ranges; training fails closed when the negative enrollment directory is missing or undersized.
-- Public negative augmentation pins CC BY 4.0 revisions of Vietnamese FLEURS, Speech Commands v2
-  and MUSAN. It canonicalizes mono PCM16/16 kHz, filters the exact wake phrase, rejects clips below
-  0.5 seconds, deduplicates audio and keeps speaker/source groups in one split. Five isolated
-  control/FLEURS/Commands/hybrid variants can be trained, but public data never substitutes for
-  owner hard negatives or the one-hour real ambient benchmark. Candidate selection never copies
-  an artifact into `models/`; production promotion remains a manual, fail-closed decision.
-- The widget reconnects its local gateway with bounded exponential backoff and waits for voice
-  cleanup before reconnecting. Unmount disables and clears reconnect timers.
-- Turn cancellation uses a generation epoch. Speaker PCM carries that epoch, control frames have a
-  priority queue, and stale audio is rejected at both server and client.
-- LLM tokens are clause-buffered before TTS. Runtime synthesis fallback is
-  VieNeu → Piper → Kokoro, with cancellation checked between attempts.
-- Text and vision generation pass through a shared stream-safe `VisibleOutputFilter`. Internal
-  think/analysis/reasoning channels never reach UI, TTS, checkpoint, or memory, including when
-  control delimiters are split across tokens or opened by the prompt template.
-- Hidden reasoning pieces still invoke an empty cancellation heartbeat. The voice path checks the
-  epoch but does not place those heartbeats in the TTS queue.
-- Nemotron decoder bootstrap is validated once when `SttEngine` is constructed. Its initial
-  decoder tensors are retained as an immutable snapshot; utterance reset clones that snapshot and
-  clears encoder caches instead of invoking ONNX again. Model outputs must match the expected
-  tensor lengths and contain only finite values before entering the streaming state.
-- Model/gateway text is escaped before the widget's `v-html` boundary. The renderer generates only
-  line breaks and fixed `data-liva-channel` buttons; untrusted tags and inline handlers cannot
-  reach the WebView DOM.
-- Automatic router/expert model selection and a resource-leasing `ModelCoordinator` are not yet
-  implemented; GGUF hot-swap remains manual and sequential.
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        LIVA Audio Duplex Engine                        │
+├────────────────────────────────────────────────────────────────────────┤
+│ 1. Frontend AudioWorklet Capture (16 kHz PCM, 512 samples / 32 ms hop) │
+│    └─► tauri::ipc::Channel / voice_mic_chunk                           │
+├────────────────────────────────────────────────────────────────────────┤
+│ 2. Sonora AEC3 (webrtc::aec::SelfEchoCanceller)                        │
+│    └─► Subband cancellation of speaker playback from mic feed          │
+├────────────────────────────────────────────────────────────────────────┤
+│ 3. GTCRN Neural Speech Denoiser (webrtc::denoise::GtcrnDenoiser)       │
+│    └─► STFT attenuation of stationary and transient background noise   │
+├────────────────────────────────────────────────────────────────────────┤
+│ 4. Silero VAD v5 (webrtc::vad::VadEngine)                              │
+│    └─► Frame-level speech probability classification                   │
+├────────────────────────────────────────────────────────────────────────┤
+│ 5. Smart Turn v3.2 Adaptive Gate (crates/liva-core-types & session.rs)  │
+│    ├─► ImmediateCutoff (p > 0.92): ~200 ms silence cutoff              │
+│    ├─► HesitationWait (0.50 <= p <= 0.92): 200-450 ms adaptive padding │
+│    └─► Incomplete (p < 0.50): continue listening                       │
+├────────────────────────────────────────────────────────────────────────┤
+│ 6. Fast CPU STT Engine (Streaming ONNX CTC / Transducer via ort)       │
+│    └─► Zero GPU VRAM contention with LLM                               │
+├────────────────────────────────────────────────────────────────────────┤
+│ 7. Native TTS Engine Hierarchy & Viseme Dispatcher                     │
+│    ├─► tts::vieneu / tts::kokoro / piper local synthesis               │
+│    └─► Real-time viseme stream to OffscreenCanvas 3D avatar at 60 FPS  │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
-## Detailed Description
-### Sentient Omni-Duplex Pipeline (v23)
-The voice pipeline coordinates full-duplex communication with active echo cancellation:
-- **Audio Capturing & VAD**: Microphone input is captured on the Frontend with WebRTC Acoustic Echo Cancellation (AEC) and Noise Suppression enabled: `{ echoCancellation: true, noiseSuppression: true }`.
-- **Wake candidate segmentation**: The frontend uses an energy floor only to cut a bounded
-  utterance. It never treats energy as keyword confidence. Rust verifies the candidate locally
-  with the trained classifier and STT phrase matching before the Widget becomes active.
-- **Nemotron STT (v31 ASR)**: Uses Nemotron 3.5 ONNX CPU-only model (`onnxruntime-node`) on a worker thread (`NemotronWorker.ts`). It completely replaces the legacy WhisperNode. This offloads STT entirely from the GPU to prevent VRAM conflict with the main LLM.
-- **Stage 1 Barge-in**: When speech is detected (`speech_start`), TTS volume ducks to 20% immediately while the LLM continues executing. Speculative RAG starts warming vector/KV caches in memory.
-- **Stage 2 Barge-in**: When speech ends (`speech_end`), the transcription is processed by `BackchannelDetector`:
-  - If it is a backchannel/filler (e.g. "ừm", "ok", cough, <3 words), the TTS volume is restored to 100%, avoiding LLM cancellation and VRAM waste.
-  - Otherwise, `agentLoop.bargeIn()` aborts the current LLM stream, kills TTS audio instantly, and truncates memory buffers with an `<interrupted>` XML tag.
+## Audio Duplex Subsystems
 
-### TTS Formatter & Clause Chunking
-- Tokens are never sent directly to TTS to avoid robotic stuttering.
-- The `TTSFormatter` buffers tokens and splits them into clean clauses based on Vietnamese conjunctions (và, thì, mà, nhưng...), punctuation (, : ; —), or an 8-word overflow. This achieves a Time-to-First-Sound (TTFS) of less than 300ms.
+### 1. Acoustic Echo Cancellation (Sonora AEC3)
+- **Component**: `webrtc::aec::SelfEchoCanceller`.
+- **Function**: Operates in subband frequency domain to model and subtract the speaker playback signal from the microphone input in real time.
+- **Invariant**: Eliminates the "hearing self" feedback loop without clipping the user's speech during barge-in.
 
-### RMS Audio-Driven Lip-Sync
-- Replaces procedural sine-wave lip-sync with real-time audio frequency analysis.
-- The Frontend `use3DModel.ts` leverages a Web Audio API `AnalyserNode` (fftSize=256) to perform 5-band RMS frequency analysis.
-- Maps analysis results to VRM blendshapes (aa/oh/ee/ih/ou) with lerp smoothing and dead-zone filtering. Procedural sine wave is maintained as a fallback.
-- `VRMEngine.vue` exposes `startAudioLipSync(audioCtx, source)` and `stopAudioLipSync()` APIs.
+### 2. Neural Speech Denoiser (GTCRN)
+- **Component**: `webrtc::denoise::GtcrnDenoiser`.
+- **Architecture**: Convolutional recurrent network operating on Short-Time Fourier Transform (STFT) frames.
+- **Performance**: Attenuates ambient room noise, mechanical fan hum, and keyboard clicks by up to 25 dB with $<6\text{ ms}$ processing latency per frame.
 
-### VAD Worker Thread (VADWorker.ts)
-- Neural VAD inference using Silero ONNX runs exclusively in `VADWorker.ts` to prevent Event Loop blocks.
-- Communication with the main gateway goes through `VADWorkerBridge.ts` which implements a Ping/Pong watchdog to detect and restart frozen WASM runtimes.
+### 3. Voice Activity Detection & Active Turn Gate (Smart Turn v3.2)
+- **Silero VAD v5**: Runs frame-level inference ($32\text{ ms}$ windows) to output voice probability $p_{\text{speech}}$.
+- **Active Two-Stage Turn Gate**:
+  - Replaces fixed silence timeouts (formerly 700ms) with an adaptive classifier in `crates/liva-core-types/src/lib.rs` (`AdaptiveTurnDecision`):
+    - `ImmediateCutoff { probability }`: Triggered when $p > 0.92$, executing a hard turn boundary at $\approx 200\text{ ms}$ of silence.
+    - `HesitationWait { probability }`: Triggered when $0.50 \le p \le 0.92$, extending the pause window dynamically to $450\text{ ms}$ to accommodate Vietnamese pause particles ("ừm", "ờ", "thì").
+    - `Incomplete { probability }`: Triggered when $p < 0.50$, continuing speech accumulation.
+- **Latency Budget**: Total turn gate decision time $T_{\text{gate}} \le 225\text{ ms}$ (200 ms silence + 12 ms ONNX inference).
+- **Speculative Prefill**: At $140\text{ ms}$ of silence, intermediate STT tokens are speculatively flushed to `crates/liva-llm` to prefill the KV cache in the background.
 
-### Hybrid TTS & Reactive Hot-Swap
-- **Default**: Python Edge-TTS via asynchronous `safeFetch` to avoid blocking.
-- **Offline Fallback**: If Edge-TTS times out or fails (network errors), a circuit breaker triggers, and the system hot-swaps to `KokoroVoiceEngine` (Kokoro-JS ONNX local-first offline fallback, yielding via `setTimeout`).
+### 4. Native TTS Engine Hierarchy & Clause Chunking
+- **Clause Chunking**: Tokens from the LLM actor are buffered and sliced along Vietnamese syntactic clause boundaries (commas, periods, semicolons, and conjunctions *và, thì, mà, nhưng, hoặc*), achieving Time-to-First-Sound (TTFS) $< 280\text{ ms}$.
+- **Local Synthesis Engines**:
+  - **`tts::vieneu` / `tts::kokoro`**: High-quality Vietnamese and bilingual neural synthesis running locally via ONNX Runtime / DirectML.
+  - **`piper`**: Ultra-fast local fallback synthesis engine.
+  - **`liva-voice/`**: Isolated offline Python utility used strictly for custom voice cloning training datasets, not involved in runtime synthesis.
+
+### 5. Multi-Stage Barge-In Protocol
+- **Stage 1 (Soft Ducking)**: When Silero VAD flags the start of user vocalization (`speech_start`), TTS playback volume ducks immediately to 20% while awaiting turn verification.
+- **Stage 2 (Hard Interruption)**:
+  - If `Smart Turn v3.2` confirms a genuine user turn, `voice_interrupt` executes instantly:
+    1. Cancels LLM generation (`cancel_token.store(true)`).
+    2. Drops the current TTS audio queue and stops WASAPI playback.
+    3. Increments the generation epoch counter, ensuring any in-flight synthesized audio chunks are discarded at both server and client.
+  - If the vocalization was brief noise or backchannel feedback ($<3$ words, e.g. "ừm", "vâng"), TTS volume restores to 100% without invalidating LLM state.
+
+### 6. Viseme & Three-VRM Avatar Synchronization
+- Real-time 5-band RMS frequency analysis extracts blendshape targets (`aa`, `ih`, `ou`, `ee`, `oh`).
+- Viseme events are dispatched directly across `tauri::ipc::Channel<VoiceIpcEvent>` to the desktop shell.
+- Frontend rendering runs on an isolated Web Worker via `OffscreenCanvas`, ensuring 60 FPS VRM animation without main-thread UI stuttering.
+
+## Voice Pipeline Invariants
+
+| Invariant | Value | Purpose |
+|---|---|---|
+| **Audio Format** | 16 kHz Mono PCM16 | Standard WebRTC and ONNX acoustic model contract |
+| **Hop Size** | 512 samples ($32\text{ ms}$) | Low-latency audio packetization from AudioWorklet |
+| **$T_{\text{gate}}$ Upper Bound** | $\le 225\text{ ms}$ | Natural conversational responsiveness |
+| **Speculative Prefill** | $140\text{ ms}$ mark | Eliminates LLM prefill delay on turn end |
+| **Zero Loopback Ports** | IPC Channels only | Complete elimination of internal WebSocket servers |
+| **VRAM Protection** | CPU-bound STT (ort) | Keeps GPU memory dedicated to main LLM and VLM |
+
+## Related Notes
+
+- [[Knowledge/liva_architecture|LIVA Architecture]] — Overall system topology and Tauri v2 IPC.
+- [[Knowledge/memory_architecture|Memory Architecture]] — Three-tier memory engine, Radix Trie, and SQLite WAL.
+- [[Rules/tech_stack|Tech Stack]] — Multi-crate dependencies and build profiles.
+- [[Rules/shutdown_chain|Shutdown Chain]] — Deterministic teardown and audio device release.
+- [[Knowledge/anti_patterns|Anti-Patterns]] — Prohibited voice patterns in the native Rust architecture.

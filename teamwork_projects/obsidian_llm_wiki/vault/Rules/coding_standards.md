@@ -12,7 +12,7 @@ scope: "all-agents"
 
 ## Current architecture
 
-LIVA's application core is the Rust `liva-native-core`, called directly by Tauri. The former Node.js gateway and Python AI engine are retired and must not be restored. `liva-voice` remains an active, separate Python voice service. The UI is Vue 3 with TypeScript.
+LIVA's application core is the Rust `liva-native-core`, called directly by Tauri. The former Node.js gateway and Python AI engine are retired and must not be restored. All active runtime voice/audio DSP is compiled natively into `liva-native-core`, while `liva-voice` is an offline utility for voice model training. The UI is Vue 3 with TypeScript.
 
 ## Required priorities
 
@@ -38,10 +38,10 @@ Apply this order to design and review: security and data integrity, performance,
 - Repository scripts must use asynchronous filesystem APIs and cross-platform Node paths.
 - Scripts must have deterministic non-zero exit codes for invalid state and machine-readable output when used by CI.
 
-### Python voice service
+### Python offline voice training utility
 
-- Python changes are limited to the active `liva-voice` service; they must not recreate legacy backend responsibilities.
-- Keep inference off request/control loops and clean up model, audio, and temporary-file resources deterministically.
+- Python changes are limited to the offline `liva-voice` training utility; they must not recreate legacy backend or runtime service responsibilities.
+- Keep dataset processing and training workflows isolated, and clean up model, audio, and temporary-file resources deterministically.
 
 ### Windows and PowerShell
 

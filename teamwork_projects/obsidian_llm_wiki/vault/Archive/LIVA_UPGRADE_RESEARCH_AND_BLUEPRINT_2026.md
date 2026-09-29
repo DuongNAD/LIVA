@@ -1,3 +1,13 @@
+---
+title: "LIVA_UPGRADE_RESEARCH_AND_BLUEPRINT_2026"
+tags:
+  - liva/research
+  - liva/blueprint
+  - liva/architecture
+author: "Lead Systems Architect Worker & Multi-Agent Research Swarm"
+last_update: "2026-09-06T00:00:00+07:00"
+---
+
 # Báo Cáo Nghiên Cứu Chuyên Sâu & Bản Thiết Kế Kiến Trúc Nâng Cấp Hệ Thống LIVA 2026
 **Mã tài liệu**: `LIVA-ARCH-BLUEPRINT-2026`  
 **Cấp độ bảo mật**: Tài liệu kiến trúc chuẩn (Architectural Single Source of Truth)  
@@ -163,7 +173,7 @@ Hệ thống kiến trúc nâng cấp của LIVA được thiết lập trên n�
     Trong đó: $e_C$ là số cạnh nội bộ cộng đồng $C$, $K_C$ là tổng bậc các nút trong $C$, $m$ là tổng số cạnh đồ thị, và $\gamma$ là tham số phân giải (resolution parameter).
   - Tự động sinh bản tóm tắt (community summary) cho từng cấp độ cộng đồng. Khi người dùng hỏi câu hỏi mang tính tổng quan ("Đâu là 3 chủ đề lớn nhất trong các ghi chú của tôi?"), hệ thống áp dụng cơ chế Map-Reduce gom các tóm tắt cộng đồng liên quan để trả lời trực tiếp mà không bị tràn ngữ cảnh.
 - **Bài học cốt lõi rút ra cho LIVA**:
-  - Thay vì để tác tử LIVA duyệt đĩa tìm kiếm toàn văn $O(N)$ trong Obsidian Vault (`NativeMcpServer`), tiến trình nền `memory_consolidation.rs` sẽ phân cụm các ghi chú Markdown và liên kết `[[Wikilinks]]` thành các bản tóm tắt cộng đồng lưu trong SQLite, giúp trả lời câu hỏi tổng hợp tức thì.
+  - Thay vì để tác tử LIVA duyệt đĩa tìm kiếm toàn văn $O(N)$ trong Obsidian Vault (`NativeMcpServer`), tiến trình nền `memory_consolidation.rs` sẽ phân cụm các ghi chú Markdown và liên kết wikilinks thành các bản tóm tắt cộng đồng lưu trong SQLite, giúp trả lời câu hỏi tổng hợp tức thì.
 
 ### Công trình 3: MemGPT / Letta
 - **Tên bài báo**: *MemGPT: Towards LLMs as Operating Systems*

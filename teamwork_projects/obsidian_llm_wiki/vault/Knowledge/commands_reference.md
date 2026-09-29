@@ -19,7 +19,6 @@ Run commands from the repository root unless a command includes `-w` or an expli
 | `npm run build:ui` | Type-check and build the Vue UI |
 | `npm run build:desktop` | Build the UI and desktop web assets |
 | `npm run doctor` | Validate local model configuration |
-| `npm run e2e:gateway` | Run the native gateway end-to-end harness |
 
 ## Quality gates
 
@@ -27,8 +26,8 @@ Run commands from the repository root unless a command includes `-w` or an expli
 |---|---|
 | `npm run test -w liva-ui` | Run Vue/Vitest unit tests |
 | `npm run test:coverage -w liva-ui` | Run Vue tests with coverage |
-| `cargo test --manifest-path liva-native-core/Cargo.toml` | Run native-core Rust tests |
-| `cargo check --all-targets --manifest-path liva-native-core/Cargo.toml` | Compile-check native-core targets |
+| `cargo test --workspace -j 2 -- --test-threads 2` | Run workspace Rust unit and integration tests |
+| `cargo check --workspace -j 2 --all-targets` | Compile-check all workspace targets |
 | `cargo fmt --all -- --check` | Reject Rust formatting drift across the workspace |
 | `cargo audit` | Reject known Rust vulnerabilities in `Cargo.lock` |
 | `npm audit --audit-level=high` | Reject vulnerable npm production and development tooling |

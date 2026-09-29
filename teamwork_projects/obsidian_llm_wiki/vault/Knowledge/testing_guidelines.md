@@ -13,7 +13,7 @@ last_update: "2026-07-28T00:00:00+07:00"
 - Rust native core: `cargo test` for unit and integration behavior; run `cargo check --all-targets` and Clippy for compile/lint gates.
 - Vue/TypeScript UI: Vitest for units, TypeScript type-checking, ESLint, and Playwright for user-visible end-to-end flows.
 - Obsidian MCP and Node maintenance scripts: Node's test runner or the package's existing Vitest suite.
-- Active Python voice service: Pytest with local fixtures; never call paid or live external APIs.
+- Python voice training utilities: Pytest with local fixtures for offline utilities (`liva-voice`); never call paid or live external APIs.
 
 Use the command already declared by the owning workspace instead of inventing a parallel test harness.
 

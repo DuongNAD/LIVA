@@ -46,8 +46,8 @@ This project is indexed by GitNexus as **LIVA**. Use the GitNexus MCP tools to u
 
 # Start here — what to work on
 
-- **Backlog thi hành: [`docs/03-danh-gia/05-nang-cap-toan-dien.md`](docs/03-danh-gia/05-nang-cap-toan-dien.md).** Read it before proposing work of your own. It carries a measured baseline (re-run it first — a number that dropped is a regression and outranks everything in the backlog), 15 prioritized items U1–U15 each with a *verifiable* acceptance condition, and a §8 "do NOT do this" list that exists to stop sessions burning time on plausible-looking non-work.
-- Bug-fix roadmap phases G0–G4 live separately in [`docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md`](docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md).
+- **Backlog thi hành: [`docs/99-luu-tru/bao-cao-lich-su/05-nang-cap-toan-dien.md`](docs/99-luu-tru/bao-cao-lich-su/05-nang-cap-toan-dien.md).** Read it before proposing work of your own. It carries a measured baseline (re-run it first — a number that dropped is a regression and outranks everything in the backlog), 15 prioritized items U1–U15 each with a *verifiable* acceptance condition, and a §8 "do NOT do this" list that exists to stop sessions burning time on plausible-looking non-work.
+- Bug-fix roadmap phases G0–G4 live separately in [`docs/99-luu-tru/bao-cao-lich-su/03-lo-trinh-sua-loi-va-nang-cap.md`](docs/99-luu-tru/bao-cao-lich-su/03-lo-trinh-sua-loi-va-nang-cap.md).
 - Doc conventions (front-matter schema, `[OK]`/`[MỘT PHẦN]`/`[THIẾU]` labels, the "no invented numbers" rule): [`docs/README.md`](docs/README.md). Both `docs-check.mjs` and `docs-citations.mjs` are CI gates — run them after touching anything under `docs/`, and **pass the same flag CI does** or you will not reproduce its result:
   ```bash
   node scripts/docs-check.mjs --strict-stale=docs/03-danh-gia

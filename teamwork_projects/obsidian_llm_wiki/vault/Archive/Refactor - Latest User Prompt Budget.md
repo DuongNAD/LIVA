@@ -2,7 +2,7 @@
 title: "Refactor - Latest User Prompt Budget"
 tags: [liva/knowledge, liva/refactor, code/graph]
 author: "codex"
-last_update: "2026-09-17"
+last_update: "2026-09-17T11:30:00+07:00"
 ---
 
 # fix(prompt): preserve latest user and bound estimated assembly

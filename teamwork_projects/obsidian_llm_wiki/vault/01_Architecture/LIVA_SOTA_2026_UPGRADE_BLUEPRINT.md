@@ -1,5 +1,5 @@
 ---
-title: "LIVA SOTA 2026 Architecture Upgrade Blueprint"
+title: "LIVA_SOTA_2026_UPGRADE_BLUEPRINT"
 tags:
   - liva/architecture
   - liva/sota-2026
@@ -70,7 +70,7 @@ For high-level system boundaries and historical context, refer to [[Knowledge/li
   - **Dynamic Ebbinghaus Forgetting Curve**:
     $$Final\_Score(d) = RRF\_Score(d) \times \left( 0.7 \cdot e^{-\lambda \cdot \Delta t} + 0.3 \cdot \frac{access\_count}{10 + access\_count} \right)$$
   - **Two-Stage Hybrid Retrieval**: Stage 1 Reciprocal Rank Fusion ($K=60.0$) retrieves top 50 candidates; Stage 2 Cross-Encoder (`bge-reranker-small` ONNX via `ort`) reranks to top 5 with deep query-chunk cross-attention.
-  - **Live Obsidian Integration**: Background Tokio thread with `notify` and `pulldown-cmark` streaming `[[wikilinks]]` into `l3_edges` in real time. Related skill: [[Skills/LIVA PKM Obsidian|LIVA PKM Obsidian]].
+  - **Live Obsidian Integration**: Background Tokio thread with `notify` and `pulldown-cmark` streaming `wikilinks` into `l3_edges` in real time. Related skill: [[Skills/LIVA PKM Obsidian|LIVA PKM Obsidian]].
 
 ### Pillar 3: Multimodal Perception & Full-Duplex Voice
 - **Context & Motivation**: [[Knowledge/voice_pipeline|Voice Pipeline]] had `Smart Turn v3.2` running in shadow mode (resulting in 704ms static silence lag), while Three-VRM avatar rendering on the Vue 3 main thread suffered from frame drops down to 20–35 FPS during token streaming.
@@ -174,7 +174,7 @@ flowchart TB
             VEC_SIMD & FTS_TABLE --> RRF_ENGINE
             RRF_ENGINE --> CROSS_ENCODER
             CSR_GRAPH <-->|"SpMV PageRank <10ms"| CROSS_ENCODER
-            OBSIDIAN_DAEMON -->|"Extract [[Wikilinks]]"| DB_ACTOR
+            OBSIDIAN_DAEMON -->|"Extract wikilinks"| DB_ACTOR
         end
     end
 
@@ -290,7 +290,7 @@ To establish an unassailable engineering guarantee, LIVA distinguishes between *
 - `TICKET-05`: Complete retirement of `websocket.rs` in favor of Tauri v2 IPC Channels.
 - `TICKET-06`: Two-Tier Asynchronous Swarm Orchestration Engine: L1 Strategic Workflow DAG (`petgraph` + `dagrs`) managing high-level task dependencies and L2 Autonomous Worker ReAct loops for local execution and recovery. Saves ~100k tokens per workflow.
 - `TICKET-07`: Mem0 two-phase reconciliation (`ADD`, `UPDATE`, `DELETE`, `NOOP`) + dynamic Ebbinghaus decay.
-- `TICKET-08`: Background Obsidian Vault watcher (`notify`) + AST parser (`pulldown-cmark`) mapping `[[wikilinks]]`.
+- `TICKET-08`: Background Obsidian Vault watcher (`notify`) + AST parser (`pulldown-cmark`) mapping `wikilinks`.
 - `TICKET-09`: Decouple Three-VRM avatar kinematics to OffscreenCanvas Web Worker. 60 FPS lock.
 - `TICKET-10`: Stage-2 Cross-Encoder reranker (`bge-reranker-small` ONNX via `ort`). $+18\%$ NDCG@10.
 - `TICKET-11`: Atomic Windows NT Job Object containment via `STARTUPINFOEXW` / `PROC_THREAD_ATTRIBUTE_JOB_LIST` and `CREATE_SUSPENDED` fallback (`KILL_ON_JOB_CLOSE`, 512MB RAM cap), integrated into a 3-tier security boundary.

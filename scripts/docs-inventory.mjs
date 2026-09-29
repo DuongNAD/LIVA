@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -9,7 +10,9 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const ROOT = path.resolve(import.meta.dirname, '..')
 const DOCS_ROOT = path.join(ROOT, 'docs')
-const REGISTRY_PATH = path.join(DOCS_ROOT, '_data', 'document-inventory.json')
+const REGISTRY_PATH = fsSync.existsSync(path.join(DOCS_ROOT, '99-luu-tru', 'registries-2026-07', '_data', 'document-inventory.json'))
+  ? path.join(DOCS_ROOT, '99-luu-tru', 'registries-2026-07', '_data', 'document-inventory.json')
+  : path.join(DOCS_ROOT, '_data', 'document-inventory.json')
 const OUTPUT_PATH = path.join(DOCS_ROOT, '_generated', 'kiem-ke-tai-lieu.md')
 const CHECK_ONLY = process.argv.includes('--check')
 

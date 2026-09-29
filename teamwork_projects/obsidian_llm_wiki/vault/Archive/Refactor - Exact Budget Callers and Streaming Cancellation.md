@@ -2,7 +2,7 @@
 title: "Refactor - Exact Budget Callers and Streaming Cancellation"
 tags: [liva/knowledge, liva/refactor, code/graph]
 author: "codex"
-last_update: "2026-09-17"
+last_update: "2026-09-17T11:00:00+07:00"
 ---
 
 # Exact-budget callers, streaming cancellation, vision mtmd guard â€” BÆ°á»›c 5â€“6
@@ -28,9 +28,9 @@ PhiÃªn 17/09/2026: ngÆ°á»i dÃ¹ng phÃª duyá»‡t BÆ°á»›c 5â€“6 cá»§a `implementati
 - `ChatMessage` khÃ´ng cÃ³ call IDs: grouping báº£o toÃ n turn, khÃ´ng xÃ¡c thá»±c toÃ n bá»™ giao thá»©c tool-call.
 - BÃ¡o cÃ¡o nghiá»‡m thu: `docs/03-danh-gia/vision-prompt-budget-acceptance.md`, má»¥c 8. Snapshot backup: `C:\Users\Admin\AppData\Local\Temp\liva-step56-20260917-121713`.
 
-## Bu?c 7 — runtime suites opt-in (cùng ngày)
+## Bu?c 7 ï¿½ runtime suites opt-in (cï¿½ng ngï¿½y)
 
-- `tests/prompt_budget_runtime.rs` + `tests/vision_budget_runtime.rs` (m?i, `#[ignore]` + fail-loud khi thi?u fixture: xác minh exit 101 v?i thông báo c?u hình, không fake-pass).
+- `tests/prompt_budget_runtime.rs` + `tests/vision_budget_runtime.rs` (m?i, `#[ignore]` + fail-loud khi thi?u fixture: xï¿½c minh exit 101 v?i thï¿½ng bï¿½o c?u hï¿½nh, khï¿½ng fake-pass).
 - Text-path runtime th?t: `cargo test --release --test prompt_budget_runtime -- --ignored` v?i gemma-4-E2B-it-Q4_K_M ? 1 passed / 13,51 s (inference, oversized rejection 0-token, cancellation + recovery).
-- Vision runtime BLOCKED: không có mmproj trên máy; suite s?n sàng, ch?y khi có c?p VL+mmproj.
-- rustfmt + clippy -D warnings trên 2 file m?i: exit 0. B?ng ch?ng d?y d?: `docs/03-danh-gia/vision-prompt-budget-acceptance.md` m?c 9.
+- Vision runtime BLOCKED: khï¿½ng cï¿½ mmproj trï¿½n mï¿½y; suite s?n sï¿½ng, ch?y khi cï¿½ c?p VL+mmproj.
+- rustfmt + clippy -D warnings trï¿½n 2 file m?i: exit 0. B?ng ch?ng d?y d?: `docs/03-danh-gia/vision-prompt-budget-acceptance.md` m?c 9.

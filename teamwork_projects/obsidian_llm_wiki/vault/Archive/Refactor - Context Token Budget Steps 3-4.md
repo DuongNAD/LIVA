@@ -2,7 +2,7 @@
 title: "Refactor - Context Token Budget Steps 3-4"
 tags: [liva/knowledge, liva/refactor, code/graph]
 author: "codex"
-last_update: "2026-09-17"
+last_update: "2026-09-17T10:49:54+07:00"
 ---
 
 # Context token budget — Bước 3–4

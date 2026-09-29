@@ -68,7 +68,9 @@ const DOCS = path.join(ROOT, 'docs')
 
 // Snapshot FREEZE phản ánh mã nguồn tại thời điểm lịch sử và không được sửa để khớp HEAD.
 // Document inventory là nguồn duy nhất cho disposition; registry hỏng phải làm script fail closed.
-const INVENTORY_PATH = path.join(DOCS, '_data', 'document-inventory.json')
+const INVENTORY_PATH = fs.existsSync(path.join(DOCS, '99-luu-tru', 'registries-2026-07', '_data', 'document-inventory.json'))
+  ? path.join(DOCS, '99-luu-tru', 'registries-2026-07', '_data', 'document-inventory.json')
+  : path.join(DOCS, '_data', 'document-inventory.json')
 const FROZEN = (() => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY_PATH, 'utf8'))
   if (!Array.isArray(inventory.documents)) {

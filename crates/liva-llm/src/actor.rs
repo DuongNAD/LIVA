@@ -83,8 +83,9 @@ impl PriorityQueue {
 pub type LlmBackendFn = Box<dyn FnMut(&str) -> anyhow::Result<String> + Send>;
 
 /// Real-time streaming backend closure type for LLM inference
-pub type LlmStreamingBackendFn =
-    Box<dyn FnMut(&str, Option<mpsc::Sender<String>>) -> anyhow::Result<String> + Send>;
+pub type LlmStreamingBackendFn = Box<
+    dyn FnMut(&str, Option<mpsc::Sender<String>>, Arc<AtomicBool>) -> anyhow::Result<String> + Send,
+>;
 
 /// The Actor that processes LLM requests sequentially
 pub struct LlmActor {
@@ -105,7 +106,9 @@ impl LlmActor {
     /// Attaches a custom non-streaming inference backend to the LLM actor (adapts 1-arg closure)
     pub fn with_backend(mut self, mut backend: LlmBackendFn) -> Self {
         self.backend = Some(Arc::new(std::sync::Mutex::new(Box::new(
-            move |prompt: &str, _token_tx: Option<mpsc::Sender<String>>| backend(prompt),
+            move |prompt: &str,
+                  _token_tx: Option<mpsc::Sender<String>>,
+                  _cancel: Arc<AtomicBool>| backend(prompt),
         ))));
         self
     }
@@ -176,7 +179,7 @@ impl LlmActor {
                                 poisoned.into_inner()
                             }
                         };
-                        backend(&prompt, token_tx)
+                        backend(&prompt, token_tx, cancel_for_worker)
                     } else {
                         if let Some(ref tx) = token_tx {
                             let pieces = ["Simulated ", "response ", "to: ", &prompt];

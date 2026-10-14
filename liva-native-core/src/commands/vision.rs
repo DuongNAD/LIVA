@@ -183,19 +183,62 @@ async fn ask(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("Trên màn hình đang hiển thị gì? Mô tả ngắn gọn bằng tiếng Việt.")
         .to_string();
+    let temperature = payload["temperature"].as_f64().unwrap_or(0.7) as f32;
+    let top_p = payload["top_p"].as_f64().unwrap_or(0.8) as f32;
+    let image_b64 = payload["image"].as_str().map(|s| s.to_string());
 
-    let prompt = format!("Vision query: {question}");
-    let text = state
-        .llm
-        .generate_text(prompt, liva_llm::Priority::Normal)
+    // Ảnh phải thật sự tới được model qua `answer_with_image` (mmproj). Một prompt
+    // chữ "Vision query: …" gửi cho actor thì model không hề nhìn thấy màn hình.
+    let router = state.llm.require_router()?;
+    let output =
+        tokio::task::spawn_blocking(move || -> Result<crate::llm::CompletionOutput, String> {
+            use base64::Engine as _;
+            let mut llm_manager = router.blocking_lock();
+            if let Some(b64) = image_b64 {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(b64.as_bytes())
+                    .map_err(|e| format!("Invalid base64 image: {}", e))?;
+                llm_manager.answer_with_image(
+                    &question,
+                    crate::llm::engine::VisionImage::Encoded(&bytes),
+                    temperature,
+                    top_p,
+                    |_| true,
+                )
+            } else {
+                // Context-aware capture with SIMD Diff ROI & 720p co-scale fallback.
+                let (width, height, rgb, patch_opt) =
+                    crate::vision::capture::capture_for_vision_with_meta()?;
+                if let Some(ref patch) = patch_opt {
+                    tracing::debug!(
+                        "vision:ask captured ROI patch: raw={:?}, padded={:?}, co_scaled={}, area_ratio={:.2}%",
+                        patch.raw_bounding_box,
+                        patch.padded_bounding_box,
+                        patch.is_co_scaled,
+                        patch.area_ratio * 100.0
+                    );
+                }
+                llm_manager.answer_with_image(
+                    &question,
+                    crate::llm::engine::VisionImage::Rgb {
+                        width,
+                        height,
+                        data: &rgb,
+                    },
+                    temperature,
+                    top_p,
+                    |_| true,
+                )
+            }
+        })
         .await
-        .map_err(|e| format!("Vision inference failed: {e}"))?;
+        .map_err(|e| format!("Blocking task panicked: {}", e))??;
 
     Ok(json!({
-        "text": text,
+        "text": output.text,
         "usage": {
-            "prompt_tokens": 0,
-            "completion_tokens": 0
+            "prompt_tokens": output.prompt_tokens,
+            "completion_tokens": output.completion_tokens
         }
     }))
 }

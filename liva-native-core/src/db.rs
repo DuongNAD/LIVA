@@ -49,33 +49,7 @@ impl r2d2::ManageConnection for CustomSqliteManager {
     }
 }
 
-fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqlite::Error> {
-    let _ = conn.busy_timeout(std::time::Duration::from_millis(5000));
-    conn.execute_batch(
-        "
-        PRAGMA foreign_keys = ON;
-        PRAGMA busy_timeout = 5000;
-        PRAGMA cache_size = -2000;
-        PRAGMA page_size = 4096;
-        PRAGMA mmap_size = 268435456;
-        PRAGMA temp_store = MEMORY;
-    ",
-    )?;
-
-    if read_only {
-        conn.execute("PRAGMA synchronous = NORMAL", [])?;
-    } else {
-        conn.execute_batch(
-            "
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            PRAGMA journal_size_limit = 67108864;
-            PRAGMA wal_autocheckpoint = 1000;
-        ",
-        )?;
-    }
-    Ok(())
-}
+pub use liva_storage::pragmas::configure_connection;
 
 /// Determines whether a rusqlite error represents a transient lock or concurrency contention
 /// that can be safely retried (e.g. SQLITE_LOCKED, SQLITE_BUSY, or shared-cache table locks).

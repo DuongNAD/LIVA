@@ -7,11 +7,14 @@ pub mod output_filter;
 pub mod prompt;
 pub mod sampler;
 pub mod scoped_tool_registry;
+pub mod service;
 pub mod tool_calling;
 pub mod trust_cache;
 
 pub use embed::get_embedding;
-pub use engine::{CompletionOutput, LlamaEngine, LlamaRouterManager, nen_sinh_tiep};
+pub use engine::{
+    CompletionOutput, LlamaEngine, LlamaRouterManager, nen_sinh_tiep, nen_sinh_tiep_async,
+};
 pub use expert_governor::{ExpertSwapGovernor, ModelRole, SwapDecision};
 pub use output_filter::{
     CLOSE_TAGS, OPEN_TAGS, ReasoningStreamSplitter, StreamChunk, TauriIpcChunk, VisibleOutputFilter,
@@ -25,4 +28,5 @@ pub use sampler::{create_greedy_sampler, create_sampler};
 pub use scoped_tool_registry::{
     ScopeGuard, ScopedToolRegistry, ToolError, ToolExecError, ToolScope,
 };
+pub use service::{LlmService, SharedRouter};
 pub use tool_calling::{CatalogTool, ExecPolicy, Selection, ToolCatalog};

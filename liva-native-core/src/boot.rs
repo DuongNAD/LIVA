@@ -298,16 +298,33 @@ pub fn build_app_state() -> Result<Boot, BootError> {
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or_else(gpu_layers_mac_dinh);
-    let mut llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
+    let llm_manager = llm::LlamaRouterManager::new(llm_n_ctx, llm_n_gpu_layers)
         .map_err(|e| BootError::new("Không khởi tạo được engine LLM (llama.cpp)", e))?;
+    // Một engine, hai lối vào: actor (lệnh sinh văn bản xếp hàng) và các lệnh cần
+    // chính model đó — nạp/tráo, ngân sách prompt, ảnh. Model được nạp vào ĐÚNG
+    // engine này bởi `load_configured_router_model`; trước đây actor giữ riêng một
+    // engine không bao giờ được nạp.
+    let llm_router: llm::SharedRouter = Arc::new(tokio::sync::Mutex::new(llm_manager));
 
     let (llm_tx, llm_rx) = tokio::sync::mpsc::channel(128);
+    let backend_router = Arc::clone(&llm_router);
     let backend: liva_llm::LlmStreamingBackendFn = Box::new(
-        move |prompt: &str, token_tx: Option<tokio::sync::mpsc::Sender<String>>| {
-            if llm_manager.engine.is_some() {
-                llm_manager
-                    .generate_completion(prompt, 0.7, 0.9, |piece: &str| {
-                        if llm::engine::is_cancel_requested() {
+        move |prompt: &str,
+              token_tx: Option<tokio::sync::mpsc::Sender<String>>,
+              cancel_token: Arc<std::sync::atomic::AtomicBool>| {
+            // Actor gọi backend trong `spawn_blocking` nên khoá đồng bộ ở đây hợp lệ.
+            // Chưa có model thì `generate_completion` trả "No model loaded" — KHÔNG
+            // còn trả lại chính prompt như một câu trả lời.
+            let mut llm_manager = backend_router.blocking_lock();
+            llm_manager
+                .generate_completion(
+                    prompt,
+                    llm::persona::TEMP_DEFAULT,
+                    llm::persona::TOP_P_DEFAULT,
+                    |piece: &str| {
+                        if cancel_token.load(std::sync::atomic::Ordering::SeqCst)
+                            || llm::engine::is_cancel_requested()
+                        {
                             return false;
                         }
                         if let Some(ref tx) = token_tx {
@@ -321,20 +338,15 @@ pub fn build_app_state() -> Result<Boot, BootError> {
                         } else {
                             true
                         }
-                    })
-                    .map(|out| out.text)
-                    .map_err(|e| anyhow::anyhow!(e))
-            } else {
-                if let Some(ref tx) = token_tx {
-                    let _ = tx.try_send(format!("Simulated response to: {}", prompt));
-                }
-                Ok(format!("Simulated response to: {}", prompt))
-            }
+                    },
+                )
+                .map(|out| out.text)
+                .map_err(|e| anyhow::anyhow!(e))
         },
     );
     let llm_actor = liva_llm::LlmActor::new(llm_rx).with_streaming_backend(backend);
     tokio::spawn(llm_actor.run());
-    let llm_handle = liva_llm::LlmActorHandle::new(llm_tx);
+    let llm_handle = llm::LlmService::new(liva_llm::LlmActorHandle::new(llm_tx), llm_router);
 
     // Mặc định KHÔNG còn là đường dẫn tuyệt đối của máy dev: xem
     // `crate::default_vault_path`. Trên máy người dùng, `E:\Project\LIVA\...` là

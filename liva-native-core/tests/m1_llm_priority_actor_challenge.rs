@@ -19,7 +19,9 @@ use liva_native_core::crypto::EncryptionEngine;
 use liva_native_core::db::DatabasePool;
 use liva_native_core::{AppState, stt, tts};
 
-fn create_test_state_with_llm(handle: LlmActorHandle) -> Arc<AppState> {
+fn create_test_state_with_llm(
+    handle: impl Into<liva_native_core::llm::LlmService>,
+) -> Arc<AppState> {
     let db = DatabasePool::new_in_memory().expect("in-memory database");
     let stt_manager = stt::SttManager::new("non-existent-model");
     let mock_capturer = Arc::new(liva_native_core::vision::capture::MockScreenCapturer::new(
@@ -34,7 +36,7 @@ fn create_test_state_with_llm(handle: LlmActorHandle) -> Arc<AppState> {
         stt: tokio::sync::Mutex::new(stt_manager),
         tts: tokio::sync::Mutex::new(None),
         tts_player: tts::audio::TtsAudioPlayer::new(None),
-        llm: handle,
+        llm: handle.into(),
         vad: tokio::sync::Mutex::new(None),
         denoiser: tokio::sync::Mutex::new(None),
         turn_shadow: tokio::sync::Mutex::new(None),

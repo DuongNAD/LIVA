@@ -569,7 +569,9 @@ async fn voice_subscribe(
         }
     };
     coordinator.subscribe(Arc::new(move |evt| {
-        let _ = channel.send(evt);
+        if let Err(err) = channel.send(evt) {
+            tracing::debug!("Voice IPC channel send skipped (receiver closed or dropped): {err}");
+        }
     }));
     Ok(())
 }

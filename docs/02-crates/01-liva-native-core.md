@@ -30,7 +30,7 @@ pub struct AppState {
     pub stt: tokio::sync::Mutex<SttManager>,
     pub tts: tokio::sync::Mutex<Option<TtsManager>>,
     pub tts_player: TtsAudioPlayer,
-    pub llm: liva_llm::LlmActorHandle,
+    pub llm: llm::LlmService,
     pub vad: tokio::sync::Mutex<Option<webrtc::vad::VadEngine>>,
     pub denoiser: tokio::sync::Mutex<Option<webrtc::denoise::GtcrnDenoiser>>,
     pub turn_shadow: tokio::sync::Mutex<Option<webrtc::turn_shadow::SmartTurnClassifier>>,
@@ -46,7 +46,7 @@ pub struct AppState {
 ### Các thành phần chính trong `AppState`:
 - **`db` (`DatabasePool`)**: Quản lý nhóm kết nối SQLite WAL (1 writer thông qua `DbActorHandle` và 4 readers), đồng thời duy trì ảnh chụp đồ thị tri thức trong RAM `csr_graph: Arc<ArcSwap<CsrGraph>>`.
 - **`crypto` (`EncryptionEngine`)**: Động cơ mã hóa đối xứng AES-256-GCM v2, bảo vệ dữ liệu nhạy cảm trước khi ghi xuống đĩa cứng.
-- **`llm` (`liva_llm::LlmActorHandle`)**: Kênh giao tiếp với Actor suy luận ngôn ngữ, điều phối hàng đợi ưu tiên và hỗ trợ hủy tác vụ sớm.
+- **`llm` (`llm::LlmService`)**: Deref về `liva_llm::LlmActorHandle` (hàng đợi ưu tiên cho lệnh sinh văn bản), kèm **engine llama.cpp dùng chung** (`Arc<tokio::sync::Mutex<LlamaRouterManager>>`) mà actor sinh token trên đó. Mọi việc cần chính model — nạp/tráo model, sinh có ngân sách prompt (`chat:completion`, `task_plan_chat`, nút thoại), hỏi kèm ảnh (`vision:ask`), chọn tool — đi qua engine này. Từ `f041c08` tới 10/10/2026 actor giữ riêng một engine không bao giờ được nạp model nên mọi câu trả lời là `"Simulated response to: <prompt>"`.
 - **`stt` / `tts` / `tts_player`**: Động cơ nhận dạng giọng nói tiếng Việt/Anh và phát âm thanh tổng hợp đa luồng.
 - **`vad` / `denoiser` / `turn_shadow` / `aec`**: Chuỗi xử lý tín hiệu âm thanh kỹ thuật số (DSP) phục vụ thoại hai chiều full-duplex.
 - **`vision` (`VisionManager`)**: Quản lý mô hình Qwen3-VL-2B và tác vụ chụp màn hình, được giám sát bởi `VisualGovernor`.
@@ -62,7 +62,7 @@ Quá trình khởi động `build_app_state()` diễn ra tuần tự theo các b
 2. **Khởi tạo Kho khóa (Stronghold Vault)**: Nạp hoặc tạo mới khóa mã hóa chủ (Master Key) thông qua Argon2id.
 3. **Mở kết nối Cơ sở dữ liệu và Áp dụng Migration**: Kích hoạt `DatabasePool`, áp dụng 20 bảng cơ sở dữ liệu và nạp đồ thị tri thức L3 vào `CsrGraph`.
 4. **Nạp Cây tiền tố Radix Trie**: Đọc các khóa sự kiện và tri thức chủ động vào bộ nhớ đệm L0 `FactTrie`.
-5. **Khởi động Actor LlmActor**: Tạo kênh MPSC và luồng nền cho suy luận ngôn ngữ.
+5. **Khởi động Actor LlmActor**: Tạo kênh MPSC và luồng nền cho suy luận ngôn ngữ, dùng chung engine với `LlmService`. Model router được nạp nền sau đó (`spawn_background_services` → `load_configured_router_model`) rồi **làm nóng**: prefill persona vào KV cache để câu hỏi đầu tiên không phải chịu prefill nguội (CPU: ~50 s lúc khởi động thay cho ~100 s ở câu đầu). Tắt bằng `LIVA_LLM_WARMUP=0`.
 6. **Kiểm tra tính sẵn sàng của mô hình AI**: Khởi tạo động cơ nhúng vector ONNX, mô hình VAD Silero và nhận diện giọng nói STT.
 
 ---

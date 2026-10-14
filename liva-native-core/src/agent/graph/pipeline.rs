@@ -435,7 +435,7 @@ pub fn build_pipeline_graph(
                 );
             }
 
-            let _do_kho = state
+            let do_kho = state
                 .context
                 .get("do_kho")
                 .and_then(|v| v.as_str())
@@ -457,12 +457,13 @@ pub fn build_pipeline_graph(
             // Giữ một handle riêng cho persist_turn: closure bên dưới move mất `ss`.
             let ss_persist = Arc::clone(&ss);
             let start_instant = std::time::Instant::now();
-            let prompt = crate::llm::prompt::compile_prompt(&chat_messages)?;
+            let (model_tx, model_rx) = tokio::sync::oneshot::channel();
 
             let res: Result<(String, usize, usize), String> =
                 if as_val.load(std::sync::atomic::Ordering::SeqCst) != session_id {
                     Err("LLM cancelled before lock".to_string())
                 } else {
+                    let router = ss.llm.require_router()?;
                     let (token_tx, mut token_rx) = tokio::sync::mpsc::channel::<String>(64);
                     let tx_stream = tx.clone();
                     let as_stream = Arc::clone(&as_val);
@@ -485,29 +486,51 @@ pub fn build_pipeline_graph(
                         stream_err
                     });
 
-                    let gen_res = ss
-                        .llm
-                        .generate_text_stream(prompt, liva_llm::Priority::Low, Some(token_tx))
-                        .await;
+                    // Sinh trên luồng blocking với chính engine đã nạp model. Token đi
+                    // qua kênh tới forwarder ở trên; forwarder dừng (session bị huỷ,
+                    // TTS nghẽn) thì kênh đóng và callback trả `false` để ngắt sinh.
+                    let messages_for_llm = chat_messages.clone();
+                    let as_gen = Arc::clone(&as_val);
+                    let gen_res = tokio::task::spawn_blocking(move || {
+                        let mut llm = router.blocking_lock();
+                        // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
+                        // Thực hiện NGAY trong khi đang giữ lock, loại bỏ hoàn toàn race condition check-then-act.
+                        let _ = llm.maybe_auto_swap_blocking(do_kho);
+                        let _ = model_tx.send(llm.current_model_path.to_string_lossy().to_string());
+                        if as_gen.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                            return Err("LLM cancelled post-lock".to_string());
+                        }
+                        // Ngân sách prompt: lát RAG/lịch sử bị cắt cho vừa n_ctx thay vì
+                        // để llama.cpp từ chối cả prompt.
+                        llm.generate_budgeted_completion(
+                            &messages_for_llm,
+                            crate::llm::persona::TEMP_DEFAULT,
+                            crate::llm::persona::TOP_P_DEFAULT,
+                            |piece| token_tx.blocking_send(piece.to_string()).is_ok(),
+                        )
+                    })
+                    .await
+                    .map_err(|e| format!("panic: {e}"))
+                    .and_then(|completion| completion);
 
                     let stream_err = forwarder.await.unwrap_or_else(|e| Some(e.to_string()));
 
                     match gen_res {
-                        Ok(text) => {
+                        Ok(out) => {
                             let final_text = finish_streamed_completion(
-                                text,
+                                out.text,
                                 stream_err,
                                 as_val.as_ref(),
                                 session_id,
                             )?;
-                            Ok((final_text, 0, 0))
+                            Ok((final_text, out.prompt_tokens, out.completion_tokens))
                         }
-                        Err(e) => Err(e.to_string()),
+                        Err(e) => Err(e),
                     }
                 };
 
             let latency_ms = start_instant.elapsed().as_millis() as i64;
-            let model_id = crate::llm::engine::get_active_metadata().model_path;
+            let model_id = model_rx.await.unwrap_or_default();
             let (final_text, prompt_tokens, completion_tokens, outcome, err_kind) = match &res {
                 Ok((text, p_tok, c_tok)) => {
                     (text.clone(), *p_tok as i64, *c_tok as i64, "ok", None)
@@ -596,7 +619,7 @@ pub fn build_pipeline_graph(
                         "{LLM_STREAM_ABORT_PREFIX}: session cancelled before vision capture",
                     ))
                 } else {
-                    let prompt = format!("Vision query: {question}");
+                    let router = ss.llm.require_router()?;
                     let (token_tx, mut token_rx) = tokio::sync::mpsc::channel::<String>(64);
                     let tx_stream = tx.clone();
                     let as_stream = Arc::clone(&as_val);
@@ -619,24 +642,47 @@ pub fn build_pipeline_graph(
                         stream_err
                     });
 
-                    let gen_res = ss
-                        .llm
-                        .generate_text_stream(prompt, liva_llm::Priority::Low, Some(token_tx))
-                        .await;
+                    // Ảnh màn hình phải tới được model qua `answer_with_image` (mmproj);
+                    // một prompt chữ thì model không hề nhìn thấy gì.
+                    let as_gen = Arc::clone(&as_val);
+                    let gen_res = tokio::task::spawn_blocking(move || {
+                        // Context-aware: mouse-guided crop while a game is foreground.
+                        let (vw, vh, rgb) = crate::vision::capture::capture_for_vision()?;
+                        let mut llm = router.blocking_lock();
+                        if as_gen.load(std::sync::atomic::Ordering::SeqCst) != session_id {
+                            return Err(format!(
+                                "{LLM_STREAM_ABORT_PREFIX}: session cancelled after vision lock",
+                            ));
+                        }
+                        llm.answer_with_image(
+                            &question,
+                            crate::llm::engine::VisionImage::Rgb {
+                                width: vw,
+                                height: vh,
+                                data: &rgb,
+                            },
+                            crate::llm::persona::TEMP_DEFAULT,
+                            crate::llm::persona::TOP_P_DEFAULT,
+                            |piece| token_tx.blocking_send(piece.to_string()).is_ok(),
+                        )
+                    })
+                    .await
+                    .map_err(|e| format!("panic: {e}"))
+                    .and_then(|completion| completion);
 
                     let stream_err = forwarder.await.unwrap_or_else(|e| Some(e.to_string()));
 
                     match gen_res {
-                        Ok(text) => {
+                        Ok(out) => {
                             let final_text = finish_streamed_completion(
-                                text,
+                                out.text,
                                 stream_err,
                                 as_val.as_ref(),
                                 session_id,
                             )?;
-                            Ok((final_text, 0, 0))
+                            Ok((final_text, out.prompt_tokens, out.completion_tokens))
                         }
-                        Err(e) => Err(e.to_string()),
+                        Err(e) => Err(e),
                     }
                 };
 

@@ -43,15 +43,21 @@ export class MockWebAdapter implements IPlatformAdapter {
   }
 
   onGatewayReady(callback: (port: number, token: string | null) => void) {
-    logger.info('[MockWebAdapter]', 'Emulating GATEWAY_READY handshake on port 8002');
+    logger.info('[MockWebAdapter]', 'Emulating in-process Tauri IPC readiness (port 0)');
     // Simulate slight delay for boot
     setTimeout(() => {
-      callback(8002, null);
+      callback(0, null);
     }, 1000);
   }
 
   async invokeBackend(command: string, args?: Record<string, unknown>) {
     logger.debug('[MockWebAdapter]', `Invoked command: ${command}`, args);
+    if (command === 'voice_subscribe') {
+      return { success: true };
+    }
+    if (command === 'native_ipc_call') {
+      return { success: true };
+    }
     return null;
   }
 }

@@ -69,7 +69,7 @@ pub async fn handle(
     }
 }
 
-async fn swap_model(_state: Arc<AppState>, payload: Value) -> Result<Value, String> {
+async fn swap_model(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     let model_path_str = payload["model_path"]
         .as_str()
         .ok_or_else(|| "Missing 'model_path'".to_string())?;
@@ -79,21 +79,15 @@ async fn swap_model(_state: Arc<AppState>, payload: Value) -> Result<Value, Stri
     let models_dir = configured_models_dir();
     let model_path = verify_model_artifact(&models_dir, model_path)?;
 
-    let n_ctx = payload["n_ctx"]
-        .as_u64()
-        .map(|v| v as usize)
-        .unwrap_or(4096);
-    let n_gpu_layers = payload["n_gpu_layers"]
-        .as_u64()
-        .map(|v| v as u32)
-        .unwrap_or(0);
+    let n_ctx = payload["n_ctx"].as_u64().map(|v| v as usize);
+    let n_gpu_layers = payload["n_gpu_layers"].as_u64().map(|v| v as u32);
+    let vocab_only = payload["vocab_only"].as_bool();
 
-    crate::llm::engine::update_active_metadata(
-        &model_path.to_string_lossy(),
-        true,
-        n_ctx,
-        n_gpu_layers,
-    );
+    let router = state.llm.require_router()?;
+    let mut llm_manager = router.lock().await;
+    llm_manager
+        .swap_model(&model_path, n_ctx, n_gpu_layers, vocab_only)
+        .await?;
 
     Ok(json!({ "success": true }))
 }
@@ -127,10 +121,35 @@ async fn embed(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
     }
 }
 
-async fn health_check(_state: Arc<AppState>) -> Result<Value, String> {
+async fn health_check(state: Arc<AppState>) -> Result<Value, String> {
     let is_generating = crate::llm::engine::is_generating();
+    // Engine rảnh thì đọc thẳng từ nó: metadata chỉ là ảnh chụp, và chính
+    // metadata từng báo "healthy" trong khi chưa model nào được nạp.
+    let engine_busy = match state.llm.router().map(|r| r.try_lock()) {
+        Some(Ok(llm_manager)) => {
+            let loaded = llm_manager.engine.is_some();
+            let path = llm_manager.current_model_path.to_string_lossy().to_string();
+            crate::llm::engine::update_active_metadata(
+                &path,
+                loaded,
+                llm_manager.n_ctx,
+                llm_manager.n_gpu_layers,
+            );
+            return Ok(json!({
+                "status": if is_generating { "busy" } else if loaded { "healthy" } else { "offline" },
+                "model_loaded": loaded,
+                "model_path": path,
+                "n_ctx": llm_manager.n_ctx,
+                "n_gpu_layers": llm_manager.n_gpu_layers,
+                "is_generating": is_generating
+            }));
+        }
+        // Khoá đang bị giữ bởi một lượt sinh hoặc một lần nạp model.
+        Some(Err(_)) => true,
+        None => false,
+    };
     let meta = crate::llm::engine::get_active_metadata();
-    if is_generating {
+    if is_generating || engine_busy {
         return Ok(json!({
             "status": "busy",
             "model_loaded": meta.model_loaded || is_generating,
@@ -159,21 +178,38 @@ async fn health_check(_state: Arc<AppState>) -> Result<Value, String> {
     }))
 }
 
-async fn context_info(_state: Arc<AppState>) -> Result<Value, String> {
+async fn context_info(state: Arc<AppState>) -> Result<Value, String> {
     let is_generating = crate::llm::engine::is_generating();
-    let meta = crate::llm::engine::get_active_metadata();
-    let (n_ctx, n_gpu_layers, model_path, model_loaded) = (
-        meta.n_ctx,
-        meta.n_gpu_layers,
-        if !meta.model_path.is_empty() {
-            meta.model_path
-        } else {
-            crate::paths::configured_router_model_path()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default()
-        },
-        meta.model_loaded,
-    );
+    let (n_ctx, n_gpu_layers, model_path, model_loaded) =
+        match state.llm.router().and_then(|r| r.try_lock().ok()) {
+            Some(llm_manager) => {
+                let path = llm_manager.current_model_path.to_string_lossy().to_string();
+                let loaded = llm_manager.engine.is_some();
+                crate::llm::engine::update_active_metadata(
+                    &path,
+                    loaded,
+                    llm_manager.n_ctx,
+                    llm_manager.n_gpu_layers,
+                );
+                (llm_manager.n_ctx, llm_manager.n_gpu_layers, path, loaded)
+            }
+            None => {
+                // Engine đang bận sinh/nạp: trả ảnh chụp metadata, không chặn.
+                let meta = crate::llm::engine::get_active_metadata();
+                (
+                    meta.n_ctx,
+                    meta.n_gpu_layers,
+                    if !meta.model_path.is_empty() {
+                        meta.model_path
+                    } else {
+                        crate::paths::configured_router_model_path()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    },
+                    meta.model_loaded || is_generating,
+                )
+            }
+        };
 
     let reserve = llm::engine::RESERVE_FOR_COMPLETION;
     let max_prompt_tokens = n_ctx.saturating_sub(reserve);
@@ -264,10 +300,10 @@ async fn task_plan_chat(
         },
     ];
 
-    let _temperature = payload["temperature"]
+    let temperature = payload["temperature"]
         .as_f64()
         .unwrap_or(llm::persona::TEMP_DEFAULT as f64) as f32;
-    let _top_p = payload["top_p"]
+    let top_p = payload["top_p"]
         .as_f64()
         .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
     let stream = payload["stream"].as_bool().unwrap_or(tx.is_some());
@@ -282,33 +318,49 @@ async fn task_plan_chat(
         done: bool,
     }
 
-    let prompt = crate::llm::prompt::compile_prompt(&messages)?;
-    let text = state
-        .llm
-        .generate_text(prompt, liva_llm::Priority::Normal)
-        .await
-        .map_err(|e| format!("LLM generation failed: {e}"))?;
+    let router = state.llm.require_router()?;
+    let done_tx = if stream { tx.clone() } else { None };
+    // Stream từng mẩu từ trong callback sinh token (luồng blocking), như mọi đường
+    // sinh khác — không phải đợi xong cả câu rồi gửi một cục.
+    let completion_output = tokio::task::spawn_blocking(move || {
+        let mut llm_manager = router.blocking_lock();
 
-    if stream {
-        if let Some(tx_inner) = tx {
-            let chunk = TaskStreamChunk {
-                task_id: &task_id_clone,
-                message: &text,
-                done: false,
-            };
-            let _ = crate::llm::nen_sinh_tiep(&tx_inner, &chunk);
-            let done_chunk = TaskStreamChunk {
-                task_id: &task_id_clone,
-                message: "",
-                done: true,
-            };
-            let _ = crate::llm::nen_sinh_tiep(&tx_inner, &done_chunk);
+        if stream {
+            let tx_inner =
+                tx.ok_or_else(|| "IPC output channel missing for streaming".to_string())?;
+
+            let mut stream_state = llm::engine::CompletionStream::new(&tx_inner);
+            let completion =
+                llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |piece| {
+                    let chunk = TaskStreamChunk {
+                        task_id: &task_id_clone,
+                        message: piece,
+                        done: false,
+                    };
+                    stream_state.forward(piece, &chunk)
+                });
+            stream_state.finish(completion)
+        } else {
+            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| {
+                !llm::engine::is_cancel_requested()
+            })
         }
+    })
+    .await
+    .map_err(|e| format!("Blocking task panicked: {}", e))??;
+
+    if let Some(tx_inner) = done_tx {
+        let done_chunk = TaskStreamChunk {
+            task_id: &task_id,
+            message: "",
+            done: true,
+        };
+        let _ = crate::llm::nen_sinh_tiep_async(&tx_inner, &done_chunk).await;
     }
 
     Ok(json!({
         "taskId": task_id,
-        "message": text,
+        "message": completion_output.text,
         "done": true
     }))
 }

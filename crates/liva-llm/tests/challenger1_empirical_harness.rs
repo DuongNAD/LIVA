@@ -27,7 +27,7 @@ use liva_llm::{LlmActor, LlmActorHandle, LlmStreamingBackendFn, Priority};
 async fn test_empirical_streaming_concurrency_and_ordering() {
     let (tx, rx) = mpsc::channel(64);
 
-    let backend: LlmStreamingBackendFn = Box::new(|prompt, token_tx| {
+    let backend: LlmStreamingBackendFn = Box::new(|prompt, token_tx, _cancel| {
         let task_id = prompt.to_string();
         if let Some(ref tx) = token_tx {
             for i in 0..40 {
@@ -119,12 +119,16 @@ async fn test_empirical_stream_cancellation_and_preemption() {
     let execution_order = Arc::new(Mutex::new(Vec::<String>::new()));
     let order_clone = execution_order.clone();
 
-    let backend: LlmStreamingBackendFn = Box::new(move |prompt, token_tx| {
+    let backend: LlmStreamingBackendFn = Box::new(move |prompt, token_tx, cancel| {
         let p = prompt.to_string();
         order_clone.lock().unwrap().push(format!("start:{p}"));
 
         if let Some(ref tx) = token_tx {
             for i in 0..100 {
+                if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                    order_clone.lock().unwrap().push(format!("aborted:{p}"));
+                    return Err(anyhow::anyhow!("Operation cancelled"));
+                }
                 std::thread::sleep(Duration::from_millis(5));
                 let piece = format!("{p}:tok_{i}");
                 match tx.try_send(piece) {
@@ -238,7 +242,7 @@ async fn test_empirical_spawn_blocking_prevents_tokio_starvation() {
     let (tx, rx) = mpsc::channel(16);
 
     // Backend simulates heavy CPU-bound inference (blocking for 200ms)
-    let backend: LlmStreamingBackendFn = Box::new(|prompt, _tx| {
+    let backend: LlmStreamingBackendFn = Box::new(|prompt, _tx, _cancel| {
         std::thread::sleep(Duration::from_millis(200));
         Ok(format!("computed:{prompt}"))
     });
@@ -335,7 +339,7 @@ async fn test_empirical_spawn_blocking_prevents_tokio_starvation() {
 async fn test_empirical_spawn_blocking_panic_isolation() {
     let (tx, rx) = mpsc::channel(16);
 
-    let backend: LlmStreamingBackendFn = Box::new(|prompt, _tx| {
+    let backend: LlmStreamingBackendFn = Box::new(|prompt, _tx, _cancel| {
         if prompt.contains("panic_probe") {
             panic!("Simulated fatal native panic in llama.cpp");
         }

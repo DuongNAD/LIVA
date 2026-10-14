@@ -1,7 +1,7 @@
 use rusqlite::ffi;
 use std::ffi::CStr;
 use std::os::raw::c_char;
-use std::sync::Once;
+use std::sync::OnceLock;
 
 unsafe extern "C" {
     /// C entry point defined in sqlite-vec.c
@@ -12,22 +12,27 @@ unsafe extern "C" {
     ) -> std::os::raw::c_int;
 }
 
-static INIT_ONCE: Once = Once::new();
+static REGISTRATION_RESULT: OnceLock<Result<(), (ffi::Error, String)>> = OnceLock::new();
 
 /// Registers sqlite-vec as an auto-extension for all newly opened SQLite connections.
 /// Safe to call multiple times; the registration runs exactly once.
+/// If registration fails, the error is preserved in thread-safe static storage
+/// so subsequent calls consistently return the error rather than a masked Ok(()).
 pub fn register_sqlite_vec() -> Result<(), rusqlite::Error> {
-    let mut result = Ok(());
-    INIT_ONCE.call_once(|| {
+    match REGISTRATION_RESULT.get_or_init(|| {
         let rc = unsafe { ffi::sqlite3_auto_extension(Some(sqlite3_vec_init)) };
         if rc != ffi::SQLITE_OK {
-            result = Err(rusqlite::Error::SqliteFailure(
+            Err((
                 ffi::Error::new(rc),
-                Some("Failed to register sqlite-vec via sqlite3_auto_extension".to_string()),
-            ));
+                "Failed to register sqlite-vec via sqlite3_auto_extension".to_string(),
+            ))
+        } else {
+            Ok(())
         }
-    });
-    result
+    }) {
+        Ok(()) => Ok(()),
+        Err((err, msg)) => Err(rusqlite::Error::SqliteFailure(*err, Some(msg.clone()))),
+    }
 }
 
 /// Explicitly initializes sqlite-vec on an existing SQLite connection handle.

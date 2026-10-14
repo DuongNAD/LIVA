@@ -14,9 +14,11 @@ fn test_state_with_cua() -> Arc<AppState> {
         liva_native_core::vision::capture::PixelFormat::Rgba,
     ));
 
-    let mut cua_config = liva_cua::types::CuaConfig::default();
-    cua_config.permission_mode = liva_cua::types::PermissionMode::Bounded;
-    cua_config.process_allowlist = vec!["notepad.exe".to_string(), "mock_app.exe".to_string()];
+    let cua_config = liva_cua::types::CuaConfig {
+        permission_mode: liva_cua::types::PermissionMode::Bounded,
+        process_allowlist: vec!["notepad.exe".to_string(), "mock_app.exe".to_string()],
+        ..liva_cua::types::CuaConfig::default()
+    };
 
     let mock_driver = Arc::new(liva_cua::mock::MockCuaDriver::new());
     mock_driver.insert_window(liva_cua::CuaWindowInfo {

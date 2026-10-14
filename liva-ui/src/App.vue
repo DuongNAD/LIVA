@@ -148,11 +148,12 @@ onMounted(() => {
 
   if (platform) {
     platform.onGatewayReady((port, token) => {
-      const wsUrl = token ? `ws://127.0.0.1:${port}/ws?token=${token}` : `ws://127.0.0.1:${port}/ws`;
-      ws = new WebSocket(wsUrl);
-      ws.binaryType = "arraybuffer";
-      const speakerEpochGate = new SpeakerEpochGate();
-      ws.onopen = () => logger.info('[App]', `WSS Connected LIVA on port ${port}`);
+      if (port > 0) {
+        const wsUrl = token ? `ws://127.0.0.1:${port}/ws?token=${token}` : `ws://127.0.0.1:${port}/ws`;
+        ws = new WebSocket(wsUrl);
+        ws.binaryType = "arraybuffer";
+        const speakerEpochGate = new SpeakerEpochGate();
+        ws.onopen = () => logger.info('[App]', `WSS Connected LIVA on port ${port}`);
 
       ws.onmessage = async (event) => {
         try {
@@ -329,7 +330,10 @@ onMounted(() => {
         } catch (wsErr: unknown) {
           logger.warn('[App]', 'WebSocket message error:', wsErr instanceof Error ? wsErr.message : String(wsErr));
         }
-      };
+        };
+      } else {
+        logger.info('[App]', 'Native in-process IPC mode active (no WebSocket listener required)');
+      }
     });
   }
 

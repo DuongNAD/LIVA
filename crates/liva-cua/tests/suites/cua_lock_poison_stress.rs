@@ -16,9 +16,11 @@ use std::sync::Arc;
 
 #[test]
 fn test_cua_security_governor_lock_poison_immunity() {
-    let mut config = CuaConfig::default();
-    config.permission_mode = PermissionMode::Bounded;
-    config.process_allowlist = vec!["notepad.exe".to_string(), "calc.exe".to_string()];
+    let config = CuaConfig {
+        permission_mode: PermissionMode::Bounded,
+        process_allowlist: vec!["notepad.exe".to_string(), "calc.exe".to_string()],
+        ..Default::default()
+    };
 
     let gov = Arc::new(SecurityGovernor::new(&config));
 

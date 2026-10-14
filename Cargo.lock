@@ -3575,12 +3575,8 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 name = "liva-core-types"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "schemars 0.8.22",
  "serde",
- "serde_json",
- "thiserror 2.0.18",
- "uuid",
 ]
 
 [[package]]
@@ -3692,10 +3688,7 @@ dependencies = [
  "libsqlite3-sys",
  "r2d2",
  "r2d2_sqlite",
- "rand 0.8.6",
  "rusqlite",
- "serde",
- "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

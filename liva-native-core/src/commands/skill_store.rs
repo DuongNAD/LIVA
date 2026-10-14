@@ -167,7 +167,7 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
             let (tally, observations) = tokio::task::spawn_blocking(move || {
                 let store = skills::SkillStore::new(&db);
                 let tally = store
-                    .signal_tallies(&[skill_id_clone.clone()])?
+                    .signal_tallies(std::slice::from_ref(&skill_id_clone))?
                     .remove(&skill_id_clone)
                     .unwrap_or_default();
                 let counts = store.signal_counts(&skill_id_clone)?;

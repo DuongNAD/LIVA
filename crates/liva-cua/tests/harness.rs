@@ -51,3 +51,12 @@ pub mod cua_m4_challenger2_tests;
 
 #[path = "suites/cua_lock_poison_stress.rs"]
 pub mod cua_lock_poison_stress;
+
+#[path = "suites/dispatch_actions.rs"]
+pub mod dispatch_actions;
+
+#[path = "suites/cua_m3_pointer_safety_challenge.rs"]
+pub mod cua_m3_pointer_safety_challenge;
+
+#[path = "suites/cua_m3_challenger_empirical.rs"]
+pub mod cua_m3_challenger_empirical;

@@ -157,21 +157,14 @@ fn load_synthetic_pointer_fns() -> Option<SyntheticPointerFns> {
             c"DestroySyntheticPointerDevice".as_ptr() as *const u8,
         );
 
-        if create_ptr.is_none() || inject_ptr.is_none() || destroy_ptr.is_none() {
-            return None;
+        match (create_ptr, inject_ptr, destroy_ptr) {
+            (Some(create), Some(inject), Some(destroy)) => Some(SyntheticPointerFns {
+                create_device: std::mem::transmute::<_, FnCreateSyntheticPointerDevice>(create),
+                inject_input: std::mem::transmute::<_, FnInjectSyntheticPointerInput>(inject),
+                destroy_device: std::mem::transmute::<_, FnDestroySyntheticPointerDevice>(destroy),
+            }),
+            _ => None,
         }
-
-        Some(SyntheticPointerFns {
-            create_device: std::mem::transmute::<_, FnCreateSyntheticPointerDevice>(
-                create_ptr.unwrap(),
-            ),
-            inject_input: std::mem::transmute::<_, FnInjectSyntheticPointerInput>(
-                inject_ptr.unwrap(),
-            ),
-            destroy_device: std::mem::transmute::<_, FnDestroySyntheticPointerDevice>(
-                destroy_ptr.unwrap(),
-            ),
-        })
     }
 }
 

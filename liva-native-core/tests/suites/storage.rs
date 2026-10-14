@@ -16,6 +16,8 @@ pub mod hipporag_m1_adversarial_benchmark;
 pub mod m1_memory_bounds_storage_invariants_challenge;
 #[path = "../m2_memory_idle_adversarial_challenge.rs"]
 pub mod m2_memory_idle_adversarial_challenge;
+#[path = "../m3_sqlite_pragmas_concurrency_challenge.rs"]
+pub mod m3_sqlite_pragmas_concurrency_challenge;
 #[path = "../m4_concurrency_stress_challenger1.rs"]
 pub mod m4_concurrency_stress_challenger1;
 #[path = "../messaging_outbox_persistence.rs"]

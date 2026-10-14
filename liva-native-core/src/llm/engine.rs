@@ -1,5 +1,5 @@
 use llama_cpp_2::context::LlamaContext;
-use llama_cpp_2::context::params::{KvCacheType, LlamaContextParams, LlamaPoolingType};
+use llama_cpp_2::context::params::{KvCacheType, LlamaContextParams};
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
@@ -191,6 +191,42 @@ unsafe impl Sync for LlamaRouterManager {}
 /// `decode()` hỏng giữa chừng.
 pub const RESERVE_FOR_COMPLETION: usize = 512;
 
+/// Số luồng CPU cho llama.cpp (sinh token, prefill và context đa phương thức).
+///
+/// `LIVA_LLM_THREADS` nếu đặt một số dương; không thì [`default_llm_threads`]
+/// theo số luồng logic của máy.
+pub fn llm_thread_count() -> i32 {
+    let logical = std::thread::available_parallelism().map_or(8, |n| n.get());
+    llm_thread_count_from(std::env::var("LIVA_LLM_THREADS").ok().as_deref(), logical)
+}
+
+/// Phần thuần của [`llm_thread_count`], tách ra để test không phải sửa biến môi trường.
+pub fn llm_thread_count_from(env_value: Option<&str>, logical_cpus: usize) -> i32 {
+    env_value
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or_else(|| default_llm_threads(logical_cpus))
+}
+
+/// Nửa số luồng logic, kẹp trong `[4, 8]`.
+///
+/// Đo 10/10/2026 trên i5-14600KF (6 P-core + 8 E-core, 20 luồng logic), gemma-4-E4B
+/// Q4_K_XL chạy CPU, prefill 2 220 token persona rồi ba lượt chat ngắn:
+///
+/// | luồng | prefill  | lượt 1 / 2 / 3          |
+/// |-------|----------|-------------------------|
+/// | 4     | 69,4 s   | 0,88 / 3,66 / 5,65 s    |
+/// | 6     | 55,6 s   | 0,76 / 3,48 / 4,33 s    |
+/// | 8     | 51,1 s   | 0,73 / 3,28 / 5,02 s    |
+/// | 12    | 53,0 s   | 2,03 / 5,36 / 7,78 s    |
+/// | 14    | 71,5 s   | 5,76 / 11,79 / 16,56 s  |
+///
+/// Mặc định cũ là 4 cứng. Quá số P-core thì lõi E chậm kéo cả nhóm ở mỗi rào
+/// đồng bộ của ggml, nên trần là 8 kể cả trên máy nhiều lõi hơn.
+pub fn default_llm_threads(logical_cpus: usize) -> i32 {
+    ((logical_cpus / 2) as i32).clamp(4, 8)
+}
+
 /// Kiểm tra prompt có lọt `n_ctx` không, chừa chỗ cho phần trả lời.
 ///
 /// Tách riêng khỏi `generate_completion` để test được mà không cần nạp model:
@@ -232,12 +268,27 @@ pub fn check_prompt_fits(prompt_tokens_len: usize, n_ctx: usize) -> Result<(), S
 ///
 /// Nếu lỗi ở bước serialize JSON (`serde_json::to_string` trả Err), đây là lỗi định dạng nội bộ chứ không
 /// phải client bỏ đi, nên trả `true` để không làm đứt luồng vô cớ.
+///
+/// **Chỉ gọi từ luồng đồng bộ** (callback sinh token trong `spawn_blocking`). Trong một `async fn`
+/// hay `tokio::spawn`, `blocking_send` panic ("Cannot block the current thread from within a
+/// runtime") — dùng [`nen_sinh_tiep_async`] ở đó.
 pub fn nen_sinh_tiep<T: serde::Serialize>(
     tx: &tokio::sync::mpsc::Sender<String>,
     chunk: &T,
 ) -> bool {
     match serde_json::to_string(chunk) {
         Ok(s) => tx.blocking_send(s).is_ok(),
+        Err(_) => true,
+    }
+}
+
+/// Bản async của [`nen_sinh_tiep`] cho code chạy trên runtime tokio.
+pub async fn nen_sinh_tiep_async<T: serde::Serialize>(
+    tx: &tokio::sync::mpsc::Sender<String>,
+    chunk: &T,
+) -> bool {
+    match serde_json::to_string(chunk) {
+        Ok(s) => tx.send(s).await.is_ok(),
         Err(_) => true,
     }
 }
@@ -354,10 +405,7 @@ impl LlamaRouterManager {
 
         // 4. Load weights and setup context in blocking thread pool
         let new_model_path_buf = new_model_path.to_path_buf();
-        let threads = std::env::var("LIVA_LLM_THREADS")
-            .unwrap_or_else(|_| "4".to_string())
-            .parse::<i32>()
-            .unwrap_or(4);
+        let threads = llm_thread_count();
 
         let engine = tokio::task::spawn_blocking(move || -> Result<LlamaEngine, String> {
             let mut model_params = LlamaModelParams::default();
@@ -393,14 +441,16 @@ impl LlamaRouterManager {
                 }
             );
 
-            // 5. Setup context with Q8 KV Cache compression (type_k = 8, type_v = 8)
+            // 5. Setup context with Q8 KV Cache compression (type_k = 8, type_v = 8).
+            //    KHÔNG bật embeddings: với `cparams.embeddings` llama.cpp coi MỌI token
+            //    prompt là output (llama-context.cpp `output_all`), nên LM head chạy cho
+            //    cả prompt và chép n_vocab × n_tokens logits — ~2,35 GB với 2 239 token
+            //    trên gemma-4. Embedding RAG đi qua model ONNX riêng (`llm::embedder`).
             let ctx_params = LlamaContextParams::default()
                 .with_n_ctx(Some(
                     std::num::NonZeroU32::new(target_n_ctx as u32).ok_or("Invalid n_ctx")?,
                 ))
                 .with_n_batch(target_n_ctx as u32)
-                .with_embeddings(true)
-                .with_pooling_type(LlamaPoolingType::Mean)
                 .with_type_k(KvCacheType::Q8_0)
                 .with_type_v(KvCacheType::Q8_0)
                 .with_n_threads(threads)
@@ -462,10 +512,7 @@ impl LlamaRouterManager {
 
         // 4. Load weights and setup context
         let new_model_path_buf = new_model_path.to_path_buf();
-        let threads = std::env::var("LIVA_LLM_THREADS")
-            .unwrap_or_else(|_| "4".to_string())
-            .parse::<i32>()
-            .unwrap_or(4);
+        let threads = llm_thread_count();
 
         let mut model_params = LlamaModelParams::default();
         model_params = model_params.with_n_gpu_layers(target_n_gpu_layers);
@@ -500,8 +547,7 @@ impl LlamaRouterManager {
                 std::num::NonZeroU32::new(target_n_ctx as u32).ok_or("Invalid n_ctx")?,
             ))
             .with_n_batch(target_n_ctx as u32)
-            .with_embeddings(true)
-            .with_pooling_type(LlamaPoolingType::Mean)
+            // Không bật embeddings — xem lý do ở `swap_model`.
             .with_type_k(KvCacheType::Q8_0)
             .with_type_v(KvCacheType::Q8_0)
             .with_n_threads(threads)
@@ -635,6 +681,62 @@ impl LlamaRouterManager {
         self.generate_completion(&compiled.prompt, temperature, top_p, token_callback)
     }
 
+    /// Prefill sẵn phần mở đầu chung của mọi lượt — `system_prompt` cộng phần
+    /// khung trước câu của người dùng — vào KV cache, không sinh token nào.
+    ///
+    /// [`Self::generate_completion`] chỉ prefill phần đuôi khác lượt trước, nên
+    /// làm nóng ngay sau khi nạp model biến câu hỏi đầu tiên thành một lượt "ấm".
+    /// Đo 10/10/2026 trên CPU (gemma-4-E4B, build debug, 4 luồng): lượt nguội với
+    /// persona 2 239 token mất 101–149 s, các lượt ấm sau đó 2–5 s.
+    ///
+    /// Trả về số token đã nạp. Token hoá đúng như `generate_completion`
+    /// (`compile_prompt` + `AddBos::Always`) để tiền tố khớp từng token.
+    pub fn warm_up_prefix(&mut self, system_prompt: &str) -> Result<usize, String> {
+        if self.vocab_only {
+            return Ok(0);
+        }
+        let engine = self.engine.as_mut().ok_or(ERR_NO_MODEL)?;
+
+        // Dựng một prompt thật với câu người dùng là một dấu mốc, rồi cắt ngay
+        // trước dấu mốc: phần còn lại đúng là thứ mọi prompt sau này đều mở đầu bằng.
+        const MOC: &str = "\u{E000}";
+        let compiled = super::prompt::compile_prompt(&[
+            super::ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            super::ChatMessage {
+                role: "user".to_string(),
+                content: MOC.to_string(),
+            },
+        ])?;
+        let prefix = compiled
+            .split(MOC)
+            .next()
+            .ok_or("warm-up: không dựng được tiền tố prompt")?;
+
+        let tokens = engine
+            .model
+            .str_to_token(prefix, AddBos::Always)
+            .map_err(|e| format!("StringToTokenError: {:?}", e))?;
+        check_prompt_fits(tokens.len(), self.n_ctx)?;
+
+        engine.context.clear_kv_cache();
+        self.last_tokens.clear();
+        let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(tokens.len(), 1);
+        for (pos, token) in tokens.iter().enumerate() {
+            batch
+                .add(*token, pos as i32, &[0], pos + 1 == tokens.len())
+                .map_err(|e| format!("Failed to add token: {:?}", e))?;
+        }
+        engine
+            .context
+            .decode(&mut batch)
+            .map_err(|e| format!("Decode failed: {:?}", e))?;
+        self.last_tokens = tokens;
+        Ok(self.last_tokens.len())
+    }
+
     /// Generate one assistant response.
     ///
     /// Internal reasoning/control channels are removed before both the
@@ -699,6 +801,11 @@ impl LlamaRouterManager {
                 break;
             }
         }
+        // Luôn decode lại ít nhất token cuối của prompt: token đầu tiên phải được
+        // sample từ logits của CHÍNH prompt này. Khi prompt mới trùng trọn một tiền
+        // tố của lượt trước (gửi lại đúng một request), phần đuôi rỗng, không decode
+        // nào chạy, và `sample(-1)` đọc logits còn sót của token cuối lượt trước.
+        common_len = common_len.min(prompt_tokens.len().saturating_sub(1));
 
         // 2. Clear KV cache after common prefix
         if common_len > 0 {
@@ -884,10 +991,7 @@ impl LlamaRouterManager {
             if !mmproj_path.exists() {
                 return Err(format!("mmproj not found: {:?}", mmproj_path));
             }
-            let threads = std::env::var("LIVA_LLM_THREADS")
-                .ok()
-                .and_then(|s| s.parse::<i32>().ok())
-                .unwrap_or(4);
+            let threads = llm_thread_count();
             let params = MtmdContextParams {
                 use_gpu: n_gpu_layers > 0,
                 print_timings: false,
@@ -1128,20 +1232,25 @@ mod tests {
 
     #[test]
     fn test_llm_threads_env_parsing() {
-        unsafe {
-            std::env::set_var("LIVA_LLM_THREADS", "6");
+        // Biến môi trường thắng mặc định, kể cả khi có khoảng trắng.
+        assert_eq!(llm_thread_count_from(Some("6"), 20), 6);
+        assert_eq!(llm_thread_count_from(Some(" 12 "), 20), 12);
+        // Giá trị rác, rỗng, 0 hay âm thì rơi về mặc định theo máy.
+        for bad in ["", "abc", "0", "-3"] {
+            assert_eq!(llm_thread_count_from(Some(bad), 20), 8, "{bad:?}");
         }
+        assert_eq!(llm_thread_count_from(None, 20), 8);
+    }
 
-        let threads = std::env::var("LIVA_LLM_THREADS")
-            .unwrap_or_else(|_| "4".to_string())
-            .parse::<i32>()
-            .unwrap_or(4);
-
-        assert_eq!(threads, 6);
-
-        unsafe {
-            std::env::remove_var("LIVA_LLM_THREADS");
-        }
+    #[test]
+    fn default_llm_threads_kep_trong_4_den_8() {
+        assert_eq!(default_llm_threads(1), 4);
+        assert_eq!(default_llm_threads(8), 4);
+        assert_eq!(default_llm_threads(12), 6);
+        assert_eq!(default_llm_threads(16), 8);
+        // i5-14600KF: 20 luồng logic — điểm tối ưu đo được là 8, không phải 10.
+        assert_eq!(default_llm_threads(20), 8);
+        assert_eq!(default_llm_threads(64), 8);
     }
 
     #[test]

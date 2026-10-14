@@ -18,6 +18,18 @@ pub enum StorageError {
     Actor(String),
 }
 
+impl From<String> for StorageError {
+    fn from(s: String) -> Self {
+        Self::Actor(s)
+    }
+}
+
+impl From<&str> for StorageError {
+    fn from(s: &str) -> Self {
+        Self::Actor(s.to_string())
+    }
+}
+
 // -----------------------------------------------------------------------------
 // MICRO-BATCHED DbActor
 // -----------------------------------------------------------------------------
@@ -56,21 +68,51 @@ impl DbActorHandle {
     }
 
     /// Submits a write command to the DbActor.
-    pub async fn send(&self, cmd: DbWriteCommand) -> std::result::Result<(), String> {
+    pub async fn send(&self, cmd: DbWriteCommand) -> Result<()> {
         self.tx
             .send(cmd)
             .await
-            .map_err(|_| "Actor channel closed".into())
+            .map_err(|_| StorageError::Actor("Actor channel closed".into()))
     }
 
     /// Asynchronously wait for all queued writes to be committed to SQLite WAL.
-    pub async fn flush(&self) -> std::result::Result<(), String> {
+    pub async fn flush(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.send(DbWriteCommand::Flush {
             result_tx: Some(tx),
         })
         .await?;
-        rx.await.map_err(|_| "Response dropped".to_string())?
+        rx.await
+            .map_err(|_| StorageError::Actor("Response dropped".to_string()))?
+            .map_err(StorageError::Actor)
+    }
+
+    /// Submits an arbitrary write operation and awaits its execution.
+    pub async fn execute<F>(&self, op: F) -> Result<()>
+    where
+        F: FnOnce(&Connection) -> std::result::Result<(), String> + Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        self.send(DbWriteCommand::Execute {
+            op: Box::new(op),
+            result_tx: Some(tx),
+        })
+        .await?;
+        rx.await
+            .map_err(|_| StorageError::Actor("Response dropped".to_string()))?
+            .map_err(StorageError::Actor)
+    }
+
+    /// Asynchronously triggers a passive WAL checkpoint.
+    pub async fn checkpoint_wal(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send(DbWriteCommand::CheckpointWal {
+            result_tx: Some(tx),
+        })
+        .await?;
+        rx.await
+            .map_err(|_| StorageError::Actor("Response dropped".to_string()))?
+            .map_err(StorageError::Actor)
     }
 }
 
@@ -207,7 +249,8 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
     let mut pending_notifications: Vec<oneshot::Sender<std::result::Result<(), String>>> =
         Vec::new();
 
-    for cmd in cmds {
+    let mut iter = cmds.into_iter();
+    while let Some(cmd) = iter.next() {
         match cmd {
             DbWriteCommand::Execute { op, result_tx } => {
                 let res = op(conn);
@@ -220,6 +263,9 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
                     }
                     for prev_tx in pending_notifications {
                         let _ = prev_tx.send(Err(rb_msg.clone()));
+                    }
+                    for remaining in iter {
+                        reject_cmd(remaining, &rb_msg);
                     }
                     return; // abort rest of batch
                 } else if let Some(tx) = result_tx {
@@ -459,9 +505,18 @@ impl FactTrie {
     }
 }
 
+/// A registered challenge associated with a fact key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactChallenge {
+    pub fact_key: String,
+    pub question: Option<String>,
+    pub expected_answer: String,
+}
+
 /// Manages active recall sessions using the Trie for fast lookups.
 pub struct ActiveRecallManager {
     trie: FactTrie,
+    challenges: HashMap<String, FactChallenge>,
     pending_challenges: std::sync::Mutex<HashMap<String, PendingRecall>>,
 }
 
@@ -476,6 +531,7 @@ impl ActiveRecallManager {
     pub fn new() -> Self {
         Self {
             trie: FactTrie::new(),
+            challenges: HashMap::new(),
             pending_challenges: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -490,9 +546,35 @@ impl ActiveRecallManager {
         &mut self.trie
     }
 
-    /// Insert a fact key mapping directly into the internal Trie.
+    /// Insert a fact key mapping directly into the internal Trie and register default challenge.
     pub fn insert_fact(&mut self, key: &str, fact_key: &str) {
         self.trie.insert(key, fact_key);
+        self.challenges
+            .entry(fact_key.to_string())
+            .or_insert_with(|| FactChallenge {
+                fact_key: fact_key.to_string(),
+                question: None,
+                expected_answer: fact_key.to_string(),
+            });
+    }
+
+    /// Registers a rich active recall challenge with an explicit question and expected answer.
+    pub fn register_challenge(
+        &mut self,
+        trigger: &str,
+        fact_key: &str,
+        question: Option<String>,
+        expected_answer: &str,
+    ) {
+        self.trie.insert(trigger, fact_key);
+        self.challenges.insert(
+            fact_key.to_string(),
+            FactChallenge {
+                fact_key: fact_key.to_string(),
+                question,
+                expected_answer: expected_answer.to_string(),
+            },
+        );
     }
 
     /// Update the Trie with the latest facts from an iterator of (key, fact_key) pairs.
@@ -503,7 +585,7 @@ impl ActiveRecallManager {
         S2: AsRef<str>,
     {
         for (k, fk) in facts {
-            self.trie.insert(k.as_ref(), fk.as_ref());
+            self.insert_fact(k.as_ref(), fk.as_ref());
         }
     }
 
@@ -516,14 +598,25 @@ impl ActiveRecallManager {
 
         // 1. Check if there's a pending challenge for this session.
         if let Some(challenge) = pending.remove(session_id) {
-            let is_correct = user_text
-                .trim()
-                .to_lowercase()
-                .contains(&challenge.expected_answer.trim().to_lowercase());
+            let norm_expected = challenge.expected_answer.trim().to_lowercase();
+            // Critical safeguard: empty expected_answer must never trigger a match.
+            if norm_expected.is_empty() {
+                return None;
+            }
+
+            let norm_user = user_text.trim().to_lowercase();
+            let is_correct = norm_user.contains(&norm_expected)
+                || norm_expected
+                    .split_whitespace()
+                    .all(|word| norm_user.contains(word));
+
             let reply = if is_correct {
-                format!("Chính xác! {}.", challenge.expected_answer)
+                format!("Chính xác! Đáp án là: {}.", challenge.expected_answer)
             } else {
-                format!("Đáp án là: {}.", challenge.expected_answer)
+                format!(
+                    "Chưa chính xác. Đáp án đúng là: {}.",
+                    challenge.expected_answer
+                )
             };
             return Some(reply);
         }
@@ -531,16 +624,38 @@ impl ActiveRecallManager {
         // 2. Fast-match user_text against Trie index
         let matches = self.trie.search(user_text);
         if let Some(first_match) = matches.into_iter().next() {
-            let question = format!(
-                "Trước khi trả lời, bạn thử nhớ lại xem: {} là gì?",
-                first_match
-            );
+            let (question, expected_answer) = if let Some(ch) = self.challenges.get(&first_match) {
+                let q = ch.question.clone().unwrap_or_else(|| {
+                    format!(
+                        "Trước khi trả lời, bạn thử nhớ lại xem: {} là gì?",
+                        first_match
+                    )
+                });
+                (q, ch.expected_answer.clone())
+            } else {
+                let q = format!(
+                    "Trước khi trả lời, bạn thử nhớ lại xem: {} là gì?",
+                    first_match
+                );
+                (q, first_match.clone())
+            };
+
+            // Only issue a challenge if the expected answer is non-empty
+            if expected_answer.trim().is_empty() {
+                return None;
+            }
+
+            let now_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+
             pending.insert(
                 session_id.to_string(),
                 PendingRecall {
                     fact_key: first_match,
-                    expected_answer: String::new(),
-                    asked_at_ts: 0,
+                    expected_answer,
+                    asked_at_ts: now_ts,
                 },
             );
             return Some(question);
@@ -600,5 +715,142 @@ mod tests {
         let intercepted = arm.try_intercept_turn("Món ăn yêu thích của mình là gì?", "sess_1");
         assert!(intercepted.is_some());
         assert!(intercepted.unwrap().contains("favorite_food"));
+    }
+
+    #[test]
+    fn test_active_recall_manager_custom_challenge_and_answers() {
+        let mut arm = ActiveRecallManager::new();
+        arm.register_challenge(
+            "phở",
+            "fav_food",
+            Some("Món ăn yêu thích của bạn là gì?".to_string()),
+            "Phở bò",
+        );
+
+        // Turn 1: keyword triggers question challenge
+        let q = arm.try_intercept_turn("Trưa nay mình đi ăn phở nhé", "sess_food");
+        assert_eq!(q.as_deref(), Some("Món ăn yêu thích của bạn là gì?"));
+
+        // Turn 2: User responds correctly
+        let correct_rep = arm.try_intercept_turn("Mình rất thích phở bò", "sess_food");
+        assert_eq!(
+            correct_rep.as_deref(),
+            Some("Chính xác! Đáp án là: Phở bò.")
+        );
+
+        // Turn 3: Challenge resolved, no trigger words
+        assert!(
+            arm.try_intercept_turn("Thời tiết hôm nay đẹp nhỉ", "sess_food")
+                .is_none()
+        );
+
+        // Turn 4: Trigger again
+        let q2 = arm.try_intercept_turn("Phở quán này ngon ghê", "sess_food");
+        assert_eq!(q2.as_deref(), Some("Món ăn yêu thích của bạn là gì?"));
+
+        // Turn 5: User responds incorrectly
+        let incorrect_rep = arm.try_intercept_turn("Chắc là bún đậu mắm tôm", "sess_food");
+        assert_eq!(
+            incorrect_rep.as_deref(),
+            Some("Chưa chính xác. Đáp án đúng là: Phở bò.")
+        );
+    }
+
+    #[test]
+    fn test_active_recall_manager_empty_answer_never_triggers_false_positive() {
+        let arm = ActiveRecallManager::new();
+        // Manually inject a malformed pending challenge with empty answer
+        {
+            let mut pending = arm.pending_challenges.lock().unwrap();
+            pending.insert(
+                "sess_empty".to_string(),
+                PendingRecall {
+                    fact_key: "dummy".to_string(),
+                    expected_answer: String::new(),
+                    asked_at_ts: 0,
+                },
+            );
+        }
+
+        // Crucial test: turn should return None and NOT match with empty string
+        let reply = arm.try_intercept_turn("Bất kỳ câu nói nào", "sess_empty");
+        assert!(reply.is_none(), "Empty expected answer must never match");
+    }
+
+    #[test]
+    fn test_process_transactional_batch_rollback_notifies_remaining() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("CREATE TABLE test_ledger (id INTEGER PRIMARY KEY, note TEXT);")
+            .expect("create table");
+
+        let (tx1, rx1) = oneshot::channel();
+        let (tx2, rx2) = oneshot::channel();
+        let (tx3, rx3) = oneshot::channel();
+
+        let cmd1 = DbWriteCommand::Execute {
+            op: Box::new(|c| {
+                c.execute(
+                    "INSERT INTO test_ledger (id, note) VALUES (1, 'entry 1')",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+            }),
+            result_tx: Some(tx1),
+        };
+
+        let cmd2 = DbWriteCommand::Execute {
+            op: Box::new(|_| Err("simulated constraint violation".to_string())),
+            result_tx: Some(tx2),
+        };
+
+        let cmd3 = DbWriteCommand::Execute {
+            op: Box::new(|c| {
+                c.execute(
+                    "INSERT INTO test_ledger (id, note) VALUES (3, 'entry 3')",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+            }),
+            result_tx: Some(tx3),
+        };
+
+        process_transactional_batch(&conn, vec![cmd1, cmd2, cmd3]);
+
+        // 1. First command should be notified of rollback
+        let res1 = rx1.blocking_recv().expect("rx1 should not be dropped");
+        assert!(res1.is_err());
+        assert!(res1.unwrap_err().contains("Transaction rolled back"));
+
+        // 2. Failing command should receive its direct error
+        let res2 = rx2.blocking_recv().expect("rx2 should not be dropped");
+        assert_eq!(res2.unwrap_err(), "simulated constraint violation");
+
+        // 3. Crucial: third command MUST receive rollback error and NOT be dropped!
+        let res3 = rx3
+            .blocking_recv()
+            .expect("rx3 channel must not be dropped");
+        assert!(res3.is_err());
+        assert!(res3.unwrap_err().contains("Transaction rolled back"));
+
+        // 4. Verify SQLite rollback was genuine: ledger must have 0 rows
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM test_ledger", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 0, "Ledger must be empty due to transaction rollback");
+    }
+
+    #[test]
+    fn test_storage_error_strongly_typed_conversions() {
+        let err_str = StorageError::from("actor timeout");
+        assert!(matches!(err_str, StorageError::Actor(ref s) if s == "actor timeout"));
+        assert_eq!(
+            format!("{err_str}"),
+            "Actor communication error: actor timeout"
+        );
+
+        let err_from_str: StorageError = "channel failed".into();
+        assert!(matches!(err_from_str, StorageError::Actor(ref s) if s == "channel failed"));
     }
 }

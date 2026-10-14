@@ -43,7 +43,7 @@ covers:
 |---|---|---|---|
 | `LIVA_LLM_N_GPU_LAYERS` | Số nguyên | Tự tính toán | Số lớp mạng neural được đưa lên VRAM GPU. Trên GPU 6GB, khuyến nghị đặt từ `24` đến `32` lớp để vừa vặn trong ngân sách $\le 5.1\text{ GB}$ VRAM. |
 | `LIVA_LLM_N_CTX` | Số nguyên | `4096` | Kích thước cửa sổ ngữ cảnh (Context Window). Có thể nâng lên `8192` nếu GPU có dung lượng VRAM lớn hơn. |
-| `LIVA_LLM_THREADS` | Số nguyên | Số core vật lý / 2 | Số luồng tính toán CPU dành cho suy luận LLM khi không offload hết lên GPU. |
+| `LIVA_LLM_THREADS` | Số nguyên | Nửa số luồng logic, kẹp trong `[4, 8]` | Số luồng tính toán CPU dành cho suy luận LLM khi không offload hết lên GPU. Trên CPU lai (P-core + E-core) đừng đặt quá số P-core: đo 10/10/2026 trên i5-14600KF, 8 luồng nhanh nhất, 12–14 luồng chậm hơn cả 4. |
 | `LIVA_TOKIO_WORKER_THREADS`| Số nguyên | Số logical core | Số luồng phục vụ runtime async Tokio của lõi native core. |
 
 ### 2.4. Đường ống Âm thanh và Nhận dạng Giọng nói (Voice & Audio)

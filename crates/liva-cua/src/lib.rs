@@ -571,6 +571,8 @@ impl CuaEngine {
 /// Native Win32 driver executing against live desktop primitives.
 pub struct Win32CuaDriver {
     cancel_token: std::sync::RwLock<Option<crate::kill_switch::CancellationToken>>,
+    pub mouse_controller: crate::input::MouseController,
+    pub keyboard_controller: crate::input::KeyboardController,
 }
 
 impl Default for Win32CuaDriver {
@@ -583,6 +585,8 @@ impl Win32CuaDriver {
     pub fn new() -> Self {
         Self {
             cancel_token: std::sync::RwLock::new(None),
+            mouse_controller: crate::input::MouseController::new(),
+            keyboard_controller: crate::input::KeyboardController::new(),
         }
     }
 }
@@ -626,7 +630,7 @@ impl CuaDriverTrait for Win32CuaDriver {
 
     async fn dispatch_action(&self, action: CuaAction) -> Result<CuaActionResult, CuaError> {
         let start = Instant::now();
-        let target_hwnd = CuaEngine::extract_hwnd(&action);
+        let _target_hwnd = CuaEngine::extract_hwnd(&action);
         let action_name = format!("{:?}", action);
 
         match action {
@@ -738,17 +742,100 @@ impl CuaDriverTrait for Win32CuaDriver {
                     timestamp_utc: crate::types::current_iso8601_utc(),
                 })
             }
-            _ => Ok(CuaActionResult {
-                success: true,
-                action_type: action_name,
+            CuaAction::MoveCursor {
                 target_hwnd,
-                target_pid: None,
-                delivery_used: CuaDeliveryMode::Background,
-                effect: CuaActionEffect::Completed,
-                error: None,
-                duration_ms: start.elapsed().as_millis() as u64,
-                timestamp_utc: crate::types::current_iso8601_utc(),
-            }),
+                x,
+                y,
+                delivery_mode,
+            } => {
+                let res = self
+                    .mouse_controller
+                    .move_cursor(target_hwnd, x, y, delivery_mode)?;
+                Ok(CuaActionResult {
+                    success: res.success,
+                    action_type: action_name,
+                    target_hwnd,
+                    target_pid: None,
+                    delivery_used: res.delivery_used,
+                    effect: CuaActionEffect::Completed,
+                    error: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    timestamp_utc: crate::types::current_iso8601_utc(),
+                })
+            }
+            CuaAction::Drag {
+                target_hwnd,
+                start_x,
+                start_y,
+                end_x,
+                end_y,
+                button,
+                steps,
+                delivery_mode,
+            } => {
+                let res = self.mouse_controller.drag(
+                    target_hwnd,
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                    button,
+                    steps,
+                    delivery_mode,
+                )?;
+                Ok(CuaActionResult {
+                    success: res.success,
+                    action_type: action_name,
+                    target_hwnd,
+                    target_pid: None,
+                    delivery_used: res.delivery_used,
+                    effect: CuaActionEffect::Completed,
+                    error: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    timestamp_utc: crate::types::current_iso8601_utc(),
+                })
+            }
+            CuaAction::PressKey {
+                target_hwnd,
+                key,
+                down,
+                delivery_mode,
+            } => {
+                let res =
+                    self.keyboard_controller
+                        .press_key(target_hwnd, &key, down, delivery_mode)?;
+                Ok(CuaActionResult {
+                    success: res.success,
+                    action_type: action_name,
+                    target_hwnd,
+                    target_pid: None,
+                    delivery_used: res.delivery_used,
+                    effect: CuaActionEffect::Completed,
+                    error: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    timestamp_utc: crate::types::current_iso8601_utc(),
+                })
+            }
+            CuaAction::Hotkey {
+                target_hwnd,
+                keys,
+                delivery_mode,
+            } => {
+                let res = self
+                    .keyboard_controller
+                    .hotkey(target_hwnd, &keys, delivery_mode)?;
+                Ok(CuaActionResult {
+                    success: res.success,
+                    action_type: action_name,
+                    target_hwnd,
+                    target_pid: None,
+                    delivery_used: res.delivery_used,
+                    effect: CuaActionEffect::Completed,
+                    error: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    timestamp_utc: crate::types::current_iso8601_utc(),
+                })
+            }
         }
     }
 

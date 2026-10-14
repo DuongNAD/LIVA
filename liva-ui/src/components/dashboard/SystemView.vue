@@ -71,12 +71,12 @@ const services = computed<SvcCard[]>(() => {
     // latencyMs `undefined` (→ -1 → ẩn) chứ KHÔNG phải 0: "0ms" là một con số
     // đo được, mà ở đây chưa hề đo gì. Detail lấy thẳng từ backend để hai bên
     // không tự dựng hai chuỗi khác nhau từ cùng dữ liệu.
-    card('gateway', '🔗', 'Gateway', h.gateway?.status, undefined, h.gateway?.detail, '8002', true),
+    card('gateway', '🔗', 'Gateway', h.gateway?.status, undefined, h.gateway?.detail, '--', true),
     // Lõi chạy IN-PROCESS, không nghe cổng nào riêng: cột "port" cũ (8100/8000)
     // là cổng của kiến trúc Node.js đã bỏ từ lâu.
     card('ai', '🧠', 'AI Engine', h.aiEngine?.status, h.aiEngine?.latencyMs, h.aiEngine?.detail, '--', true),
     card('orchestrator', '⚡', 'Orchestrator', h.orchestrator?.status, -1, h.orchestrator?.detail, '--', true),
-    card('voice', '🎤', 'Voice Engine', h.voiceEngine?.status, h.voiceEngine?.latencyMs, h.voiceEngine?.detail, '8002', false),
+    card('voice', '🎤', 'Voice Engine', h.voiceEngine?.status, h.voiceEngine?.latencyMs, h.voiceEngine?.detail, '--', false),
     card('memory', '💾', 'Memory DB', h.memory?.status, -1, h.memory?.detail, '--', true),
     card('vram', '🎮', 'VRAM Guard', h.vramGuard?.status || (h.vramGuard?.isYielded ? 'degraded' : 'online'), -1, h.vramGuard?.detail, '--', false),
     card('whisper', '🗣️', 'Whisper STT', h.whisper?.status, -1, h.whisper?.detail, '--', false),
@@ -96,10 +96,10 @@ function card(id: string, icon: string, name: string, status: string | undefined
 
 function defaultCards(s: SvcCard['status']): SvcCard[] {
   return [
-    card('gateway','🔗','Gateway',s,-1,s === 'loading' ? t('sys_checking') : 'Disconnected','8002',true),
-    card('ai','🧠','AI Engine',s,-1,'--','8100',true),
+    card('gateway','🔗','Gateway',s,-1,s === 'loading' ? t('sys_checking') : 'Disconnected','--',true),
+    card('ai','🧠','AI Engine',s,-1,'--','--',true),
     card('orchestrator','⚡','Orchestrator',s,-1,'--','--',true),
-    card('voice','🎤','Voice Engine',s,-1,'--','8002',false),
+    card('voice','🎤','Voice Engine',s,-1,'--','--',false),
     card('memory','💾','Memory DB',s,-1,'--','--',true),
     card('vram','🎮','VRAM Guard',s,-1,'--','--',false),
     card('whisper','🗣️','Whisper STT',s,-1,'--','--',false),
@@ -135,9 +135,9 @@ const rssMB = computed(() => {
   const v = (gateway.systemStatus.value as SystemStatusExt)?.rssMemory;
   return v ? `${Math.round(v / 1048576)} MB` : '--';
 });
-// Không có gRPC lẫn HTTP nào: lõi Rust chạy in-process trong vỏ Tauri, hoặc
-// sau WebSocket 8002 ở chế độ gateway. Nhãn "Native gRPC" cũ là di sản kiến
-// trúc Node.js đã bỏ.
+// Không có gRPC lẫn HTTP nào: lõi Rust chạy 100% in-process trong vỏ Tauri
+// qua Tauri IPC native channels. Nhãn "Native gRPC" cũ là di sản kiến
+// trúc Node.js đã bỏ từ lâu.
 const engineMode = computed(() => (gateway.systemStatus.value as SystemStatusExt)?.engineMode === 'native' ? 'Native (in-process)' : '--');
 const aiModel = computed<string>(() => String((gateway.systemStatus.value as SystemStatusExt)?.model || '--'));
 

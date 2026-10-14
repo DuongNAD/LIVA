@@ -1,0 +1,7 @@
+{
+  "name": "gh-pages-noop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Empty stand-in for gh-pages, wired in through the root package.json overrides. pixi-live2d-display@0.4.0 lists gh-pages (a GitHub Pages publishing CLI) under runtime dependencies by mistake and never imports it; the real package pulls in globby -> fast-glob -> micromatch -> braces, and the braces DoS advisory GHSA-vfj7-8cjw-p6xm has no patched release.",
+  "license": "MIT"
+}

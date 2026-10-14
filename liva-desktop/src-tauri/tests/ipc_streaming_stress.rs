@@ -494,3 +494,43 @@ async fn test_in_process_ipc_execution_performance_and_isolation() {
     .expect_err("Setup must not be allowed to invoke chat:completion");
     assert!(setup_err.contains("TauriSetup"));
 }
+
+#[tokio::test]
+async fn test_voice_ipc_sink_handles_dropped_receiver_cleanly_without_panic() {
+    use liva_native_core::VoiceIpcEvent;
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<VoiceIpcEvent>(16);
+
+    // Drop the receiver to simulate window navigation or webview termination
+    drop(rx);
+
+    // Event sink simulates voice_subscribe callback forwarding
+    let sink = Arc::new(move |evt: VoiceIpcEvent| {
+        if let Err(err) = tx.try_send(evt) {
+            tracing::debug!("Voice IPC channel send skipped as expected: {err}");
+        }
+    });
+
+    // Multiple events dispatched to dropped receiver must execute cleanly without panic
+    let events = vec![
+        VoiceIpcEvent::Flush { seq_id: 101 },
+        VoiceIpcEvent::Speaker {
+            turn_epoch: 1,
+            sample_rate: 24000,
+            samples: vec![0.0, 0.1, -0.1],
+        },
+        VoiceIpcEvent::Viseme {
+            turn_epoch: 1,
+            base_seq_id: 5,
+            visemes: serde_json::json!([{"time": 0.05, "viseme": "aa"}]),
+        },
+        VoiceIpcEvent::TextEvent {
+            event: "test_event".to_string(),
+            payload: serde_json::json!({"key": "val"}),
+        },
+    ];
+
+    for evt in events {
+        sink(evt);
+    }
+}

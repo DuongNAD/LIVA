@@ -979,13 +979,24 @@ pub async fn select_tool(
         }
     };
     let raw = {
-        let state = std::sync::Arc::clone(state);
-        match state
-            .llm
-            .generate_text(prompt, liva_llm::Priority::Normal)
-            .await
-        {
-            Ok(text) => text,
+        let router = match state.llm.require_router() {
+            Ok(router) => router,
+            Err(e) => {
+                tracing::warn!("chọn tool: LLM lỗi ({e}); rơi về route_intent");
+                return None;
+            }
+        };
+        let completion_res = tokio::task::spawn_blocking(move || {
+            let mut llm = router.blocking_lock();
+            // temperature 0 + top_p 1: đây là quyết định phân loại, không phải sáng
+            // tác. Sampling ngẫu nhiên ở đây chỉ tạo ra kết quả không lặp lại được.
+            llm.generate_completion(&prompt, 0.0, 1.0, |_| true)
+        })
+        .await
+        .ok()?;
+
+        match completion_res {
+            Ok(out) => out.text,
             Err(e) => {
                 tracing::warn!("chọn tool: LLM lỗi ({e}); rơi về route_intent");
                 return None;

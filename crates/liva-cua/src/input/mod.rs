@@ -4,6 +4,8 @@
 //! - DeliveryMode::Background (Default, non-intrusive, zero focus/cursor disturbance)
 //! - DeliveryMode::Foreground (Explicit escalation using AttachThreadInput + SendInput)
 
+pub mod keyboard;
+pub mod mouse;
 pub mod pointer;
 pub mod uipi;
 pub mod win32_msg;
@@ -29,9 +31,42 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::kill_switch::CancellationToken;
 
+pub use keyboard::*;
+pub use mouse::*;
 pub use pointer::*;
 pub use uipi::*;
 pub use win32_msg::*;
+
+/// Validates window presence, non-iconic state, and UIPI access.
+pub fn validate_window_and_uipi(target_hwnd: u64) -> Result<(), CuaError> {
+    #[cfg(windows)]
+    {
+        let win_hwnd = target_hwnd as usize as HWND;
+        unsafe {
+            if IsWindow(win_hwnd) == 0 {
+                return Err(CuaError::WindowNotFound(target_hwnd));
+            }
+            if IsIconic(win_hwnd) != 0 {
+                return Err(CuaError::WindowMinimized(target_hwnd));
+            }
+        }
+
+        let uipi = check_uipi_restriction(target_hwnd)?;
+        if uipi.is_blocked {
+            return Err(CuaError::UipiBlocked(
+                uipi.refusal_message
+                    .unwrap_or_else(|| "UIPI restricted".into()),
+            ));
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = target_hwnd;
+    }
+
+    Ok(())
+}
 
 /// Classification of input events for silent-drop detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,5 +495,58 @@ impl InputActuator {
                 duration_ms: start.elapsed().as_millis() as u64,
             })
         }
+    }
+
+    /// Dispatches cursor motion to target coordinates.
+    pub fn dispatch_move_cursor(
+        target_hwnd: u64,
+        x: i32,
+        y: i32,
+        delivery_mode: CuaDeliveryMode,
+    ) -> Result<ActuationResult, CuaError> {
+        MouseController.move_cursor(target_hwnd, x, y, delivery_mode)
+    }
+
+    /// Dispatches mouse drag from start coordinates to end coordinates.
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_drag(
+        target_hwnd: u64,
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+        button: MouseButton,
+        steps: u32,
+        delivery_mode: CuaDeliveryMode,
+    ) -> Result<ActuationResult, CuaError> {
+        MouseController.drag(
+            target_hwnd,
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            button,
+            steps,
+            delivery_mode,
+        )
+    }
+
+    /// Dispatches single virtual key press or release.
+    pub fn dispatch_press_key(
+        target_hwnd: u64,
+        key: &str,
+        down: bool,
+        delivery_mode: CuaDeliveryMode,
+    ) -> Result<ActuationResult, CuaError> {
+        KeyboardController.press_key(target_hwnd, key, down, delivery_mode)
+    }
+
+    /// Dispatches hotkey chord sequence.
+    pub fn dispatch_hotkey(
+        target_hwnd: u64,
+        keys: &[String],
+        delivery_mode: CuaDeliveryMode,
+    ) -> Result<ActuationResult, CuaError> {
+        KeyboardController.hotkey(target_hwnd, keys, delivery_mode)
     }
 }

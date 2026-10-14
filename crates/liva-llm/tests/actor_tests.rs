@@ -138,7 +138,7 @@ async fn test_llm_actor_token_streaming_default() {
 #[tokio::test]
 async fn test_llm_actor_with_custom_streaming_backend() {
     let (tx, rx) = mpsc::channel(16);
-    let backend: LlmStreamingBackendFn = Box::new(|prompt, token_tx| {
+    let backend: LlmStreamingBackendFn = Box::new(|prompt, token_tx, _cancel| {
         if let Some(ref tx) = token_tx {
             let _ = tx.try_send("Chunk 1: ".to_string());
             let _ = tx.try_send("Chunk 2: ".to_string());
@@ -224,4 +224,60 @@ async fn test_llm_actor_in_flight_preemption() {
     // Low task either completed or was preempted safely
     let low_val = low_res.unwrap();
     assert!(low_val.is_ok() || low_val.unwrap_err().to_string().contains("cancelled"));
+}
+
+#[tokio::test]
+async fn test_streaming_backend_cooperative_preemption_cancellation() {
+    let (tx, rx) = mpsc::channel(16);
+    let cancelled_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag_clone = cancelled_flag.clone();
+
+    let backend: LlmStreamingBackendFn = Box::new(move |prompt, token_tx, cancel_token| {
+        if prompt == "slow_cancellable_low" {
+            for i in 0..100 {
+                if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
+                    flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                    return Err(anyhow::anyhow!("Operation cooperatively cancelled"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                if let Some(ref tx) = token_tx {
+                    let _ = tx.try_send(format!("tok_{i}"));
+                }
+            }
+        }
+        Ok(format!("completed:{prompt}"))
+    });
+
+    let actor = LlmActor::new(rx).with_streaming_backend(backend);
+    tokio::spawn(actor.run());
+    let handle = LlmActorHandle::new(tx);
+
+    let (token_tx, mut token_rx) = mpsc::channel(16);
+    let h1 = handle.clone();
+    let low_fut = tokio::spawn(async move {
+        h1.generate_text_stream("slow_cancellable_low", Priority::Low, Some(token_tx))
+            .await
+    });
+
+    // Wait until at least 1 token is emitted to ensure low task is actively running
+    let _ = token_rx.recv().await;
+
+    // Dispatch high priority task to trigger preemption
+    let h2 = handle.clone();
+    let high_fut =
+        tokio::spawn(async move { h2.generate_text("urgent_high_task", Priority::High).await });
+
+    let (low_res, high_res) = tokio::join!(low_fut, high_fut);
+    let high_val = high_res.expect("high task joined");
+    assert!(high_val.is_ok(), "High priority task must succeed");
+
+    let low_val = low_res.expect("low task joined");
+    assert!(
+        low_val.is_err(),
+        "Low priority task must be cooperatively cancelled"
+    );
+    assert!(
+        cancelled_flag.load(std::sync::atomic::Ordering::SeqCst),
+        "Backend cancel_token must have observed preemption cancel flag"
+    );
 }

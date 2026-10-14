@@ -1,7 +1,6 @@
 import { ref, type Ref, shallowRef, onUnmounted } from 'vue';
 import { logger } from '../utils/logger';
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { unpack } from 'msgpackr';
 import {
   OP_SPEAKER_OUT,
   OP_FLUSH,
@@ -10,7 +9,7 @@ import {
   parseSpeakerPayload,
 } from '../utils/speakerFrame';
 import type { IPlatformAdapter } from '../platform/IPlatformAdapter';
-import type { GatewayMessage, MessageDraft } from '../types/gateway';
+import type { GatewayMessage, GatewayPayload, MessageDraft } from '../types/gateway';
 
 // Re-export MessageDraft for downstream compatibility
 export type { MessageDraft } from '../types/gateway';
@@ -210,7 +209,6 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
         };
 
         ws.value = transportWrapper;
-        wsReconnectAttempt = 0;
         options.engineStatus.value = 'ready';
         logger.info('[WidgetTransport]', 'Subscribed to VoiceCoordinator IPC channel successfully');
         options.onConnected(transportWrapper);
@@ -221,10 +219,10 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
       }
     }
 
-    // Web / Test environment with WebSocket mock fallback
+    // Web / Test environment with WebSocket mock fallback (e.g. Vitest MockWebSocket)
     if (typeof WebSocket !== 'undefined') {
       try {
-        const wsUrl = `ws://127.0.0.1:8002/ws`;
+        const wsUrl = `ws://127.0.0.1:0/ws`;
         const socket = new WebSocket(wsUrl);
         ws.value = socket;
         socket.binaryType = 'arraybuffer';
@@ -233,7 +231,7 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
         socket.onopen = () => {
           if (ws.value !== socket) return;
           wsReconnectAttempt = 0;
-          logger.info('[WidgetTransport]', 'Connected via WebSocket fallback');
+          logger.info('[WidgetTransport]', 'Connected via WebSocket mock fallback');
           options.engineStatus.value = 'websocket-open';
           options.onConnected(socket);
         };
@@ -259,12 +257,6 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
                       options.onSpeakerBinary(payload, chunk.turnEpoch);
                       return;
                     }
-                  }
-                  try {
-                    data = unpack(new Uint8Array(arrayBuffer, 1)) as GatewayMessage;
-                  } catch (unpackErr) {
-                    logger.error('[WidgetTransport]', 'Lỗi unpack MsgPack:', unpackErr);
-                    return;
                   }
                 } else if (type === OP_FLUSH) {
                   if (arrayBuffer.byteLength >= VOICE_FRAME_HEADER_SIZE) {

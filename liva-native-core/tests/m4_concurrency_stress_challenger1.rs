@@ -97,9 +97,11 @@ fn build_stress_app_state() -> Arc<AppState> {
         liva_native_core::vision::capture::PixelFormat::Rgba,
     ));
 
-    let mut cua_config = CuaConfig::default();
-    cua_config.permission_mode = PermissionMode::Bounded;
-    cua_config.process_allowlist = vec!["notepad.exe".to_string(), "explorer.exe".to_string()];
+    let cua_config = CuaConfig {
+        permission_mode: PermissionMode::Bounded,
+        process_allowlist: vec!["notepad.exe".to_string(), "explorer.exe".to_string()],
+        ..CuaConfig::default()
+    };
 
     let mock_driver = Arc::new(liva_cua::mock::MockCuaDriver::new());
     let cua_engine = liva_cua::CuaEngine::new_with_driver(cua_config, mock_driver);
@@ -195,7 +197,7 @@ async fn test_adversarial_sqlite_wal_pool_25_concurrent_hammering() {
 
                         for row_res in rows {
                             let (_id, tid, iter, payload, checksum) = row_res?;
-                            let expected_checksum = (tid * 1000 + iter) as i64;
+                            let expected_checksum = tid * 1000 + iter;
                             if checksum != expected_checksum || !payload.contains("wal_stress_payload_") {
                                 return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
                                     std::io::Error::other(format!(
@@ -428,10 +430,12 @@ async fn test_adversarial_reader_pool_saturation_and_3s_timeout_sla() {
 
 #[test]
 fn test_adversarial_cua_parking_lot_rwlock_poison_immunity() {
-    let mut config = CuaConfig::default();
-    config.permission_mode = PermissionMode::Bounded;
-    config.process_allowlist = vec!["notepad.exe".to_string()];
-    config.protected_denylist = vec!["taskmgr.exe".to_string()];
+    let config = CuaConfig {
+        permission_mode: PermissionMode::Bounded,
+        process_allowlist: vec!["notepad.exe".to_string()],
+        protected_denylist: vec!["taskmgr.exe".to_string()],
+        ..CuaConfig::default()
+    };
 
     let governor = Arc::new(SecurityGovernor::new(&config));
 

@@ -578,6 +578,8 @@ fn test_challenger2_noactivate_guard_preexisting_bit_preservation() {
 }
 
 #[test]
+#[ignore = "changes the extended style of a real window owned by another process on the \
+            desktop running the tests; run on purpose with --ignored"]
 fn test_challenger2_noactivate_guard_cross_process_limitation() {
     #[cfg(windows)]
     unsafe {
@@ -609,14 +611,18 @@ fn test_challenger2_noactivate_guard_cross_process_limitation() {
                 w.title, w.pid, hwnd, initial_style, style_during_guard, was_applied
             );
 
-            // In Win32, SetWindowLongPtrW cannot modify window styles across process boundaries.
-            // If it didn't have it initially, Win32 security prevents setting it cross-process.
-            if (initial_style & (WS_EX_NOACTIVATE as isize)) == 0 {
-                assert_eq!(
-                    style_during_guard, initial_style,
-                    "Win32 security prevents SetWindowLongPtrW from modifying styles of cross-process windows!"
-                );
-            }
+            // This used to assert that Win32 refuses SetWindowLongPtrW(GWL_EXSTYLE) on a
+            // window of another process. Measured 2026-10-10 on Windows 11 it does not:
+            // at the same integrity level the guard set WS_EX_NOACTIVATE on the Claude
+            // desktop window (0x280100 -> 0x8280100). Whether it applies depends on the
+            // target's integrity level, so the invariant worth holding is that the
+            // guard always hands the foreign window back exactly as it found it.
+            drop(guard);
+            let style_after_guard = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            assert_eq!(
+                style_after_guard, initial_style,
+                "NoActivateGuard must restore the original style of a cross-process window"
+            );
         } else {
             println!("No external window found to test cross-process NoActivateGuard");
         }

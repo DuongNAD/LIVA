@@ -85,6 +85,7 @@ windows-sys = { version = "0.52.0", features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_Security",
+    "Win32_System_JobObjects",
 ] }
 
 # Desktop Shell
@@ -130,6 +131,18 @@ opt-level = 3
 [profile.dev.package.rust-argon2]
 opt-level = 3
 
+[profile.dev.package.chacha20]
+opt-level = 3
+
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+
+[profile.dev.package.stronghold-runtime]
+opt-level = 3
+
+[profile.dev.package.tauri-plugin-stronghold]
+opt-level = 3
+
 # `rust-argon2` delegates its compression primitive to this crate. Optimizing
 # only the wrapper leaves the password KDF effectively at debug speed.
 [profile.dev.package.blake2b_simd]
@@ -166,6 +179,15 @@ opt-level = 3
 [profile.dev.package.stronghold_engine]
 opt-level = 3
 
+[profile.dev.package.scrypt]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.pbkdf2]
+opt-level = 3
+
 [profile.test.package.llama-cpp-2]
 opt-level = 3
 
@@ -173,6 +195,18 @@ opt-level = 3
 opt-level = 3
 
 [profile.test.package.rust-argon2]
+opt-level = 3
+
+[profile.test.package.chacha20]
+opt-level = 3
+
+[profile.test.package.chacha20poly1305]
+opt-level = 3
+
+[profile.test.package.stronghold-runtime]
+opt-level = 3
+
+[profile.test.package.tauri-plugin-stronghold]
 opt-level = 3
 
 [profile.test.package.regex]
@@ -202,8 +236,18 @@ opt-level = 3
 [profile.test.package.stronghold_engine]
 opt-level = 3
 
+[profile.test.package.scrypt]
+opt-level = 3
+
+[profile.test.package.salsa20]
+opt-level = 3
+
+[profile.test.package.pbkdf2]
+opt-level = 3
+
 [profile.test.package.liva-storage]
 opt-level = 2
+
 
 
 [patch.crates-io]

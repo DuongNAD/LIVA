@@ -12,7 +12,10 @@
 
 pub mod dataset;
 pub mod metrics;
+pub mod normalizer;
 pub mod runner;
+pub mod trace;
+pub mod vietnamese_suite;
 
 pub use dataset::{BenchmarkSuite, TestCase, inject_anti_cache_nonce, inject_vietnamese_nonce};
 pub use metrics::{
@@ -20,9 +23,23 @@ pub use metrics::{
     calculate_latency_percentiles, calculate_percentile, calculate_tps, calculate_visible_tps,
     evaluate_cot_soundness, validate_arguments_schema,
 };
+pub use normalizer::{
+    DualWerScore, VietnameseNormalizer, WerMode, WerResult, align_words, calculate_dual_wer,
+    calculate_n_wer, calculate_o_wer, calculate_wer, integer_to_vietnamese_words, tokenize_words,
+};
 pub use runner::{
     BenchmarkReport, BenchmarkRunner, CloudApiProvider, ComparativeMatrix, EvaluationConfig,
     EvaluationProvider, EvaluationRun, MockProvider, ProviderResponse, TestCaseSummary,
+};
+pub use trace::{
+    ExecutionTraceRecord, JsonlTracer, PerTokenBreakdown, TraceChannel, TraceIntegrity,
+    TraceMetrics, TracePrincipal, TraceSessionMode, TraceTelemetry, TraceTrajectoryStep,
+    TraceVerificationReport, compute_audit_hash, verify_trace_chain,
+};
+pub use vietnamese_suite::{
+    BitemporalCase, BitemporalOp, CanaryCase, CanaryPillar, PromptInjectionCase,
+    ToolCallingCase, VietnameseEvalReport, generate_bitemporal_suite, generate_canary_suite,
+    generate_prompt_injection_suite, generate_tool_calling_suite, run_vietnamese_evaluation_suite,
 };
 
 use serde::{Deserialize, Serialize};

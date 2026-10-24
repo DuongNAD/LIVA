@@ -171,7 +171,8 @@ impl NativeMcpServer {
 
     /// Danh sách kỹ năng định dạng chuẩn JSON cho UI (`get_skills_list` và `system_status`).
     ///
-    /// Mỗi phần tử chứa đủ 5 khoá: `name`, `category`, `short_desc`, `description`, `parameters`.
+    /// Mỗi phần tử chứa đủ 5 khoá bắt buộc (`name`, `category`, `short_desc`, `description`, `parameters`)
+    /// kèm metadata phân quyền (`action_kind`, `default_policy`, `server`).
     pub fn list_skills(&self) -> Vec<Value> {
         self.list_tools()
             .tools
@@ -184,12 +185,24 @@ impl NativeMcpServer {
                     "get_weather" => "web",
                     _ => "extension",
                 };
+                let action_kind = match tool.name.as_str() {
+                    "read_markdown" | "search_vault" | "get_weather" => "read",
+                    _ => "write",
+                };
+                let default_policy = crate::llm::ExecPolicy::default_for_tool(
+                    crate::llm::tool_calling::NATIVE_SERVER,
+                    &tool.name,
+                )
+                .as_str();
                 serde_json::json!({
                     "name": tool.name,
                     "category": category,
                     "short_desc": tool.description,
                     "description": tool.description,
                     "parameters": tool.input_schema,
+                    "action_kind": action_kind,
+                    "default_policy": default_policy,
+                    "server": crate::llm::tool_calling::NATIVE_SERVER,
                 })
             })
             .collect()
@@ -352,30 +365,129 @@ impl NativeMcpServer {
                 let query = args.query.clone();
 
                 let text_res = tokio::task::spawn_blocking(move || -> Result<String, String> {
-                    let mut files_to_check = Vec::new();
+                    if query.trim().is_empty() {
+                        return Ok(format!("No matching files found for query '{}'", query));
+                    }
 
-                    fn walk_dir(
+                    let query_lower = query.to_lowercase();
+
+                    struct VaultMatch {
+                        path: String,
+                        size: u64,
+                        snippet: Option<String>,
+                    }
+
+                    fn search_dir(
                         dir: &Path,
-                        files: &mut Vec<PathBuf>,
-                        limit: usize,
+                        vault_path: &Path,
+                        query_lower: &str,
+                        matches: &mut Vec<VaultMatch>,
+                        scanned_count: &mut usize,
+                        max_results: usize,
+                        max_scan: usize,
                     ) -> std::io::Result<()> {
-                        if files.len() >= limit {
+                        if matches.len() >= max_results || *scanned_count >= max_scan {
                             return Ok(());
                         }
+
+                        const EXCLUDED_DIRS: &[&str] = &[
+                            ".git",
+                            ".obsidian",
+                            ".trash",
+                            "target",
+                            "node_modules",
+                            "archive",
+                        ];
+                        const MAX_FILE_SIZE: u64 = 2 * 1024 * 1024; // 2MB cap
+
                         if dir.is_dir() {
                             for entry in std::fs::read_dir(dir)? {
+                                if matches.len() >= max_results || *scanned_count >= max_scan {
+                                    break;
+                                }
+
                                 let entry = entry?;
                                 let loai = entry.file_type()?;
                                 if loai.is_symlink() {
                                     continue;
                                 }
+
                                 let path = entry.path();
                                 if loai.is_dir() {
-                                    walk_dir(&path, files, limit)?;
-                                } else {
-                                    files.push(path);
-                                    if files.len() >= limit {
-                                        break;
+                                    let dir_name = entry.file_name();
+                                    let dir_str = dir_name.to_string_lossy();
+                                    if dir_str.starts_with('.')
+                                        || EXCLUDED_DIRS
+                                            .iter()
+                                            .any(|&ex| dir_str.eq_ignore_ascii_case(ex))
+                                    {
+                                        continue;
+                                    }
+                                    search_dir(
+                                        &path,
+                                        vault_path,
+                                        query_lower,
+                                        matches,
+                                        scanned_count,
+                                        max_results,
+                                        max_scan,
+                                    )?;
+                                } else if loai.is_file() {
+                                    let ext = path
+                                        .extension()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("")
+                                        .to_lowercase();
+                                    if ext != "md" && ext != "txt" {
+                                        continue;
+                                    }
+
+                                    *scanned_count += 1;
+
+                                    let file_size = match std::fs::metadata(&path) {
+                                        Ok(meta) => {
+                                            if meta.len() > MAX_FILE_SIZE {
+                                                continue;
+                                            }
+                                            meta.len()
+                                        }
+                                        Err(_) => continue,
+                                    };
+
+                                    let Ok(rel_path) = path.strip_prefix(vault_path) else {
+                                        continue;
+                                    };
+                                    let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+                                    let rel_lower = rel_str.to_lowercase();
+
+                                    let Ok(content) = std::fs::read_to_string(&path) else {
+                                        continue;
+                                    };
+
+                                    let name_matched = rel_lower.contains(query_lower);
+                                    let content_match = content
+                                        .lines()
+                                        .find(|line| line.to_lowercase().contains(query_lower));
+
+                                    if name_matched || content_match.is_some() {
+                                        let snippet = content_match.map(|line| {
+                                            let trimmed = line.trim();
+                                            if trimmed.len() > 120 {
+                                                let mut end = 120;
+                                                while !trimmed.is_char_boundary(end) && end > 0 {
+                                                    end -= 1;
+                                                }
+                                                format!("{}...", &trimmed[..end])
+                                            } else {
+                                                trimmed.to_string()
+                                            }
+                                        });
+
+                                        matches.push(VaultMatch {
+                                            path: rel_str,
+                                            size: file_size,
+                                            snippet,
+                                        });
                                     }
                                 }
                             }
@@ -383,40 +495,38 @@ impl NativeMcpServer {
                         Ok(())
                     }
 
-                    if let Err(e) = walk_dir(&vault_path, &mut files_to_check, 5000) {
+                    let mut matches = Vec::new();
+                    let mut scanned_count = 0;
+                    const MAX_RESULTS: usize = 20;
+                    const MAX_SCAN_FILES: usize = 1000;
+
+                    if let Err(e) = search_dir(
+                        &vault_path,
+                        &vault_path,
+                        &query_lower,
+                        &mut matches,
+                        &mut scanned_count,
+                        MAX_RESULTS,
+                        MAX_SCAN_FILES,
+                    ) {
                         return Err(format!("Error reading vault directory: {}", e));
                     }
 
-                    let mut matched_files = Vec::new();
-                    const MAX_FILE_SIZE: u64 = 2 * 1024 * 1024; // 2MB cap
-
-                    for path in files_to_check {
-                        let ext = path
-                            .extension()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("")
-                            .to_lowercase();
-                        if (ext == "md" || ext == "txt")
-                            && (if let Ok(meta) = std::fs::metadata(&path) {
-                                meta.len() <= MAX_FILE_SIZE
-                            } else {
-                                false
-                            })
-                            && let Ok(content) = std::fs::read_to_string(&path)
-                            && content.contains(&query)
-                            && let Ok(rel_path) = path.strip_prefix(&vault_path)
-                        {
-                            let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-                            matched_files.push(rel_str);
-                        }
-                    }
-
-                    if matched_files.is_empty() {
+                    if matches.is_empty() {
                         Ok(format!("No matching files found for query '{}'", query))
                     } else {
-                        let mut res = format!("Search results for '{}':\n", query);
-                        for file in matched_files {
-                            res.push_str(&format!("- {}\n", file));
+                        let mut res = format!(
+                            "Search results for '{}' ({} found):\n",
+                            query,
+                            matches.len()
+                        );
+                        for item in matches {
+                            res.push_str(&format!("- {} ({} bytes)\n", item.path, item.size));
+                            if let Some(snippet) = &item.snippet {
+                                if !snippet.is_empty() {
+                                    res.push_str(&format!("  Preview: {}\n", snippet));
+                                }
+                            }
                         }
                         Ok(res)
                     }
@@ -635,5 +745,128 @@ mod sandbox_tests {
         // Ket qua phai nam DUOI vault
         let p = s.resolve_path("a/b.md").unwrap();
         assert!(p.starts_with("vault_test_goc"));
+    }
+
+    #[tokio::test]
+    async fn search_vault_prunes_excluded_directories() {
+        use crate::mcp::protocol::ToolContent;
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join(format!("liva_vault_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp vault");
+
+        // Create valid file
+        fs::write(
+            temp_dir.join("valid_note.md"),
+            "This is a valid note with PRUNE_TEST_KEYWORD",
+        )
+        .expect("write valid note");
+
+        // Create excluded directories and notes
+        for dir_name in &[".git", ".obsidian", ".trash", "target", "node_modules", "Archive", "archive"] {
+            let sub = temp_dir.join(dir_name);
+            fs::create_dir_all(&sub).expect("create excluded dir");
+            fs::write(
+                sub.join("ignored.md"),
+                "This file is inside an excluded directory with PRUNE_TEST_KEYWORD",
+            )
+            .expect("write ignored file");
+        }
+
+        let server = NativeMcpServer::new(temp_dir.to_str().unwrap());
+        let res = server
+            .call_tool(CallToolRequest {
+                name: "search_vault".to_string(),
+                arguments: serde_json::json!({ "query": "PRUNE_TEST_KEYWORD" }),
+            })
+            .await
+            .expect("search_vault call succeeded");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        assert!(!res.is_error);
+        if let ToolContent::Text { text } = &res.content[0] {
+            assert!(
+                text.contains("valid_note.md"),
+                "Should find valid_note.md, got: {text}"
+            );
+            assert!(
+                !text.contains(".git"),
+                "Should prune .git directory, got: {text}"
+            );
+            assert!(
+                !text.contains(".obsidian"),
+                "Should prune .obsidian directory, got: {text}"
+            );
+            assert!(
+                !text.contains("target"),
+                "Should prune target directory, got: {text}"
+            );
+            assert!(
+                !text.contains("node_modules"),
+                "Should prune node_modules directory, got: {text}"
+            );
+            assert!(
+                !text.contains("Archive/ignored.md") && !text.contains("archive/ignored.md"),
+                "Should prune Archive directory, got: {text}"
+            );
+        } else {
+            panic!("Expected Text content");
+        }
+    }
+
+    #[tokio::test]
+    async fn search_vault_caps_at_20_results_and_case_insensitive() {
+        use crate::mcp::protocol::ToolContent;
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join(format!("liva_vault_cap_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp vault");
+
+        // Create 25 matching files
+        for i in 1..=25 {
+            fs::write(
+                temp_dir.join(format!("note_{:02}.md", i)),
+                format!("Note content line {} containing CaseInsensitiveQUERY and preview text.", i),
+            )
+            .expect("write note");
+        }
+
+        let server = NativeMcpServer::new(temp_dir.to_str().unwrap());
+        // Query using lowercase
+        let res = server
+            .call_tool(CallToolRequest {
+                name: "search_vault".to_string(),
+                arguments: serde_json::json!({ "query": "caseinsensitivequery" }),
+            })
+            .await
+            .expect("search_vault call succeeded");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        assert!(!res.is_error);
+        if let ToolContent::Text { text } = &res.content[0] {
+            assert!(
+                text.contains("20 found"),
+                "Expected header to report 20 found, got: {text}"
+            );
+            let item_count = text.lines().filter(|l| l.starts_with("- ")).count();
+            assert_eq!(
+                item_count, 20,
+                "Expected exactly 20 items capped, got: {item_count}"
+            );
+            assert!(
+                text.contains("bytes)"),
+                "Expected file size metadata in bytes, got: {text}"
+            );
+            assert!(
+                text.contains("Preview:"),
+                "Expected snippet preview, got: {text}"
+            );
+        } else {
+            panic!("Expected Text content");
+        }
     }
 }

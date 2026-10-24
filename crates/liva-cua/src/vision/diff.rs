@@ -46,8 +46,16 @@ pub fn apply_roi_padding(rect: &CuaRect, padding: u32, max_w: u32, max_h: u32) -
 
 /// Crops a subregion from a RawFrame directly into a new RawFrame.
 pub fn crop_raw_frame(frame: &RawFrame, rect: &CuaRect) -> Result<RawFrame, CuaError> {
-    let fw = frame.width as i32;
-    let fh = frame.height as i32;
+    if frame.width == 0 || frame.height == 0 {
+        return Ok(RawFrame {
+            width: 0,
+            height: 0,
+            format: frame.format,
+            data: Vec::new(),
+        });
+    }
+    let fw = frame.width.saturating_sub(1) as i32;
+    let fh = frame.height.saturating_sub(1) as i32;
     if rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0 {
         return Err(CuaError::CoordinateOutOfBounds {
             x: rect.x,
@@ -55,11 +63,13 @@ pub fn crop_raw_frame(frame: &RawFrame, rect: &CuaRect) -> Result<RawFrame, CuaE
         });
     }
 
-    let x0 = rect.x.min(fw.saturating_sub(1)) as usize;
-    let y0 = rect.y.min(fh.saturating_sub(1)) as usize;
-    let crop_w = (rect.width as usize).min(frame.width as usize - x0).max(1);
+    let x0 = rect.x.min(fw) as usize;
+    let y0 = rect.y.min(fh) as usize;
+    let crop_w = (rect.width as usize)
+        .min((frame.width as usize).saturating_sub(x0))
+        .max(1);
     let crop_h = (rect.height as usize)
-        .min(frame.height as usize - y0)
+        .min((frame.height as usize).saturating_sub(y0))
         .max(1);
 
     let bpp = frame.format.bytes_per_pixel();
@@ -96,6 +106,102 @@ fn pixel_exceeds_tolerance(p1: &[u8], p2: &[u8], bpp: usize, tolerance: u8) -> b
         }
     }
     false
+}
+
+#[inline]
+pub fn count_row_changed_pixels(
+    prev_slice: &[u8],
+    curr_slice: &[u8],
+    roi_w: usize,
+    bpp: usize,
+    color_tolerance: u8,
+) -> usize {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") && bpp == 4 {
+            return unsafe {
+                count_row_changed_pixels_avx2_bpp4(prev_slice, curr_slice, roi_w, color_tolerance)
+            };
+        }
+    }
+
+    count_row_changed_pixels_scalar(prev_slice, curr_slice, roi_w, bpp, color_tolerance)
+}
+
+#[inline(always)]
+fn count_row_changed_pixels_scalar(
+    prev_slice: &[u8],
+    curr_slice: &[u8],
+    roi_w: usize,
+    bpp: usize,
+    color_tolerance: u8,
+) -> usize {
+    let mut changed = 0;
+    for c in 0..roi_w {
+        let px_off = c * bpp;
+        let p1 = &prev_slice[px_off..px_off + bpp];
+        let p2 = &curr_slice[px_off..px_off + bpp];
+        if pixel_exceeds_tolerance(p1, p2, bpp, color_tolerance) {
+            changed += 1;
+        }
+    }
+    changed
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn count_row_changed_pixels_avx2_bpp4(
+    prev_slice: &[u8],
+    curr_slice: &[u8],
+    roi_w: usize,
+    color_tolerance: u8,
+) -> usize {
+    use std::arch::x86_64::*;
+
+    let mut changed = 0;
+    let chunks = roi_w / 8; // 8 pixels of 4 bytes = 32 bytes per chunk
+    let tol_vec = _mm256_set1_epi8(color_tolerance as i8);
+    let zero = _mm256_setzero_si256();
+
+    let p1_ptr = prev_slice.as_ptr();
+    let p2_ptr = curr_slice.as_ptr();
+
+    for i in 0..chunks {
+        let offset = i * 32;
+        let zero_mask = unsafe {
+            let a = _mm256_loadu_si256(p1_ptr.add(offset) as *const __m256i);
+            let b = _mm256_loadu_si256(p2_ptr.add(offset) as *const __m256i);
+
+            let diff_ab = _mm256_subs_epu8(a, b);
+            let diff_ba = _mm256_subs_epu8(b, a);
+            let abs_diff = _mm256_or_si256(diff_ab, diff_ba);
+
+            let excess = _mm256_subs_epu8(abs_diff, tol_vec);
+            let eq_zero = _mm256_cmpeq_epi8(excess, zero);
+            _mm256_movemask_epi8(eq_zero) as u32
+        };
+
+        if zero_mask != 0xFFFF_FFFF {
+            let changed_byte_mask = !zero_mask;
+            for p in 0..8 {
+                if ((changed_byte_mask >> (p * 4)) & 0x0F) != 0 {
+                    changed += 1;
+                }
+            }
+        }
+    }
+
+    let rem_start = chunks * 8;
+    for c in rem_start..roi_w {
+        let px_off = c * 4;
+        let p1 = &prev_slice[px_off..px_off + 4];
+        let p2 = &curr_slice[px_off..px_off + 4];
+        if pixel_exceeds_tolerance(p1, p2, 4, color_tolerance) {
+            changed += 1;
+        }
+    }
+
+    changed
 }
 
 /// High-performance ROI diffing engine.
@@ -153,13 +259,17 @@ impl RoiDiffEngine {
             )));
         }
 
-        let fw = frame_before.width as i32;
-        let fh = frame_before.height as i32;
+        if frame_before.width == 0 || frame_before.height == 0 {
+            return Ok((0, 0, 0.0));
+        }
 
-        let roi_x = roi.x.clamp(0, fw.saturating_sub(1)) as usize;
-        let roi_y = roi.y.clamp(0, fh.saturating_sub(1)) as usize;
-        let roi_w = (roi.width as usize).min(frame_before.width as usize - roi_x);
-        let roi_h = (roi.height as usize).min(frame_before.height as usize - roi_y);
+        let max_w_idx = frame_before.width.saturating_sub(1) as i32;
+        let max_h_idx = frame_before.height.saturating_sub(1) as i32;
+
+        let roi_x = roi.x.clamp(0, max_w_idx) as usize;
+        let roi_y = roi.y.clamp(0, max_h_idx) as usize;
+        let roi_w = (roi.width as usize).min((frame_before.width as usize).saturating_sub(roi_x));
+        let roi_h = (roi.height as usize).min((frame_before.height as usize).saturating_sub(roi_y));
 
         let total_roi_pixels = roi_w * roi_h;
         if total_roi_pixels == 0 {
@@ -181,15 +291,8 @@ impl RoiDiffEngine {
                 continue;
             }
 
-            for c in 0..roi_w {
-                let px_off = c * bpp;
-                let p1 = &prev_slice[px_off..px_off + bpp];
-                let p2 = &curr_slice[px_off..px_off + bpp];
-
-                if pixel_exceeds_tolerance(p1, p2, bpp, color_tolerance) {
-                    changed_pixels += 1;
-                }
-            }
+            changed_pixels +=
+                count_row_changed_pixels(prev_slice, curr_slice, roi_w, bpp, color_tolerance);
         }
 
         let changed_ratio = changed_pixels as f32 / total_roi_pixels as f32;
@@ -388,5 +491,60 @@ impl VisualVerifierTrait for DefaultVisualVerifier {
 
     fn config(&self) -> RoiDiffConfig {
         self.config.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CuaPixelFormat, CuaRect, RawFrame};
+
+    #[test]
+    fn test_diff_padded_roi_zero_dimensions_defensive_clamp() {
+        let zero_frame_1 = RawFrame {
+            width: 0,
+            height: 0,
+            format: CuaPixelFormat::Rgba,
+            data: vec![],
+        };
+        let zero_frame_2 = RawFrame {
+            width: 0,
+            height: 0,
+            format: CuaPixelFormat::Rgba,
+            data: vec![],
+        };
+        let roi = CuaRect::new(10, 10, 50, 50);
+
+        // Synthetic 0x0 frames must return (0, 0, 0.0) without panic
+        let res = RoiDiffEngine::diff_padded_roi(&zero_frame_1, &zero_frame_2, &roi, 5);
+        assert!(res.is_ok());
+        let (changed, total, ratio) = res.unwrap();
+        assert_eq!(changed, 0);
+        assert_eq!(total, 0);
+        assert_eq!(ratio, 0.0);
+    }
+
+    #[test]
+    fn test_crop_raw_frame_zero_dimensions() {
+        let zero_frame = RawFrame {
+            width: 0,
+            height: 0,
+            format: CuaPixelFormat::Rgba,
+            data: vec![],
+        };
+        let roi = CuaRect::new(0, 0, 10, 10);
+        let cropped = crop_raw_frame(&zero_frame, &roi);
+        assert!(cropped.is_ok());
+        let f = cropped.unwrap();
+        assert_eq!(f.width, 0);
+        assert_eq!(f.height, 0);
+    }
+
+    #[test]
+    fn test_apply_roi_padding_zero_screen() {
+        let roi = CuaRect::new(5, 5, 20, 20);
+        let padded = apply_roi_padding(&roi, 10, 0, 0);
+        assert_eq!(padded.width, 0);
+        assert_eq!(padded.height, 0);
     }
 }

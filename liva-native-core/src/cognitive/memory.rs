@@ -337,6 +337,7 @@ impl CognitiveMemoryCoordinator {
                     ],
                 )?;
 
+                crate::active_recall::mark_facts_mutated();
                 Ok(FactUpsertOutcome::Superseded { history_id })
             } else {
                 // Stage to memory_conflict_queue
@@ -396,6 +397,7 @@ impl CognitiveMemoryCoordinator {
                 ],
             )?;
 
+            crate::active_recall::mark_facts_mutated();
             Ok(FactUpsertOutcome::Created)
         }
     }
@@ -536,6 +538,7 @@ impl CognitiveMemoryCoordinator {
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt",
                     params![fact_key, new_cipher, now_ms.to_string()],
                 )?;
+                crate::active_recall::mark_facts_mutated();
 
                 // Mark conflict as resolved_superseded
                 conn.execute(
@@ -570,6 +573,7 @@ impl CognitiveMemoryCoordinator {
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt",
                     params![fact_key, new_cipher, now_ms.to_string()],
                 )?;
+                crate::active_recall::mark_facts_mutated();
 
                 // Mark conflict as resolved_merged
                 conn.execute(
@@ -725,6 +729,7 @@ impl MemoryDeleteCoordinator {
             params![audit_id, scope_hash, counts_json, now_ms],
         )?;
 
+        crate::active_recall::mark_facts_mutated();
         Ok(counts)
     }
 

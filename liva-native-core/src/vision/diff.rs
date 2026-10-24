@@ -262,6 +262,113 @@ fn has_pixel_changed(
     false
 }
 
+#[inline]
+pub fn count_row_changed_pixels(
+    prev_slice: &[u8],
+    curr_slice: &[u8],
+    width_pixels: usize,
+    bytes_per_pixel: usize,
+    color_tolerance: u8,
+) -> usize {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") && bytes_per_pixel == 4 {
+            return unsafe {
+                count_row_changed_pixels_avx2_bpp4(
+                    prev_slice,
+                    curr_slice,
+                    width_pixels,
+                    color_tolerance,
+                )
+            };
+        }
+    }
+
+    count_row_changed_pixels_scalar(
+        prev_slice,
+        curr_slice,
+        width_pixels,
+        bytes_per_pixel,
+        color_tolerance,
+    )
+}
+
+#[inline(always)]
+fn count_row_changed_pixels_scalar(
+    prev_slice: &[u8],
+    curr_slice: &[u8],
+    width_pixels: usize,
+    bytes_per_pixel: usize,
+    color_tolerance: u8,
+) -> usize {
+    let mut changed = 0;
+    for c in 0..width_pixels {
+        let px_off = c * bytes_per_pixel;
+        let p1 = &prev_slice[px_off..px_off + bytes_per_pixel];
+        let p2 = &curr_slice[px_off..px_off + bytes_per_pixel];
+        if has_pixel_changed(p1, p2, bytes_per_pixel, color_tolerance) {
+            changed += 1;
+        }
+    }
+    changed
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn count_row_changed_pixels_avx2_bpp4(
+    prev_slice: &[u8],
+    curr_slice: &[u8],
+    width_pixels: usize,
+    color_tolerance: u8,
+) -> usize {
+    use std::arch::x86_64::*;
+
+    let mut changed = 0;
+    let chunks = width_pixels / 8; // 8 pixels of 4 bytes = 32 bytes per chunk
+    let tol_vec = _mm256_set1_epi8(color_tolerance as i8);
+    let zero = _mm256_setzero_si256();
+
+    let p1_ptr = prev_slice.as_ptr();
+    let p2_ptr = curr_slice.as_ptr();
+
+    for i in 0..chunks {
+        let offset = i * 32;
+        let zero_mask = unsafe {
+            let a = _mm256_loadu_si256(p1_ptr.add(offset) as *const __m256i);
+            let b = _mm256_loadu_si256(p2_ptr.add(offset) as *const __m256i);
+
+            let diff_ab = _mm256_subs_epu8(a, b);
+            let diff_ba = _mm256_subs_epu8(b, a);
+            let abs_diff = _mm256_or_si256(diff_ab, diff_ba);
+
+            let excess = _mm256_subs_epu8(abs_diff, tol_vec);
+            let eq_zero = _mm256_cmpeq_epi8(excess, zero);
+            _mm256_movemask_epi8(eq_zero) as u32
+        };
+
+        if zero_mask != 0xFFFF_FFFF {
+            let changed_byte_mask = !zero_mask;
+            for p in 0..8 {
+                if ((changed_byte_mask >> (p * 4)) & 0x0F) != 0 {
+                    changed += 1;
+                }
+            }
+        }
+    }
+
+    let rem_start = chunks * 8;
+    for c in rem_start..width_pixels {
+        let px_off = c * 4;
+        let p1 = &prev_slice[px_off..px_off + 4];
+        let p2 = &curr_slice[px_off..px_off + 4];
+        if has_pixel_changed(p1, p2, 4, color_tolerance) {
+            changed += 1;
+        }
+    }
+
+    changed
+}
+
 impl DiffEngine {
     /// Compares two frames within a specific ScreenRegion bounds.
     /// Employs pixel delta tolerance thresholding.
@@ -271,6 +378,15 @@ impl DiffEngine {
         region: &ScreenRegion,
         color_tolerance: u8,
     ) -> Result<RegionDiffResult, String> {
+        if prev.width == 0 || prev.height == 0 || curr.width == 0 || curr.height == 0 {
+            return Ok(RegionDiffResult {
+                region_id: region.id.clone(),
+                name: region.name.clone(),
+                difference: 0.0,
+                is_changed: false,
+            });
+        }
+
         // Bounds checking against frame dimensions with checked arithmetic
         let x_end = (region.x as usize)
             .checked_add(region.width as usize)
@@ -355,23 +471,19 @@ impl DiffEngine {
 
             // Fast path: if the row segments are identical, skip checking individual pixels
             let row_len = region.width as usize * bytes_per_pixel;
-            if prev.data[prev_row_offset..prev_row_offset + row_len]
-                == curr.data[curr_row_offset..curr_row_offset + row_len]
-            {
+            let prev_slice = &prev.data[prev_row_offset..prev_row_offset + row_len];
+            let curr_slice = &curr.data[curr_row_offset..curr_row_offset + row_len];
+            if prev_slice == curr_slice {
                 continue;
             }
 
-            for col in 0..region.width {
-                let p_off = prev_row_offset + (col as usize * bytes_per_pixel);
-                let c_off = curr_row_offset + (col as usize * bytes_per_pixel);
-
-                let prev_pixel = &prev.data[p_off..p_off + bytes_per_pixel];
-                let curr_pixel = &curr.data[c_off..c_off + bytes_per_pixel];
-
-                if has_pixel_changed(prev_pixel, curr_pixel, bytes_per_pixel, color_tolerance) {
-                    changed_pixels += 1;
-                }
-            }
+            changed_pixels += count_row_changed_pixels(
+                prev_slice,
+                curr_slice,
+                region.width as usize,
+                bytes_per_pixel,
+                color_tolerance,
+            );
         }
 
         let difference = changed_pixels as f32 / total_pixels as f32;
@@ -394,6 +506,9 @@ impl DiffEngine {
     ) -> Result<Option<VisualRoiPatch>, String> {
         if prev.width != curr.width || prev.height != curr.height {
             return Err("Frame dimension mismatch".to_string());
+        }
+        if curr.width == 0 || curr.height == 0 {
+            return Ok(None);
         }
         let w = curr.width as usize;
         let h = curr.height as usize;
@@ -453,8 +568,18 @@ pub fn apply_roi_padding(
     screen_h: usize,
     padding: usize,
 ) -> BoundingBox {
-    let x = bbox.x.saturating_sub(padding);
-    let y = bbox.y.saturating_sub(padding);
+    if screen_w == 0 || screen_h == 0 {
+        return BoundingBox {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
+    }
+    let max_x = screen_w.saturating_sub(1);
+    let max_y = screen_h.saturating_sub(1);
+    let x = bbox.x.saturating_sub(padding).min(max_x);
+    let y = bbox.y.saturating_sub(padding).min(max_y);
     let right = (bbox.x + bbox.width + padding).min(screen_w);
     let bottom = (bbox.y + bbox.height + padding).min(screen_h);
     BoundingBox {
@@ -1238,5 +1363,43 @@ mod tests {
         assert!(dst_h <= 720, "Height {} should be <= 720", dst_h);
         assert_eq!(dst_data.len(), dst_w * dst_h * 3);
         assert_eq!(dst_data[0], 128);
+    }
+
+    #[test]
+    fn test_zero_dimensions_defensive_clamp() {
+        let bbox = BoundingBox {
+            x: 10,
+            y: 10,
+            width: 50,
+            height: 50,
+        };
+        let padded = apply_roi_padding(&bbox, 0, 0, 16);
+        assert_eq!(padded.width, 0);
+        assert_eq!(padded.height, 0);
+
+        let zero_frame = Frame {
+            width: 0,
+            height: 0,
+            format: crate::vision::capture::PixelFormat::Rgba,
+            data: vec![],
+        };
+        let roi = DiffEngine::compute_roi_patch(&zero_frame, &zero_frame, 16);
+        assert!(roi.is_ok());
+        assert!(roi.unwrap().is_none());
+
+        let region = ScreenRegion {
+            id: "test".into(),
+            name: "test".into(),
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            threshold: 0.1,
+        };
+        let res = DiffEngine::diff_region(&zero_frame, &zero_frame, &region, 5);
+        assert!(res.is_ok());
+        let r = res.unwrap();
+        assert_eq!(r.difference, 0.0);
+        assert!(!r.is_changed);
     }
 }

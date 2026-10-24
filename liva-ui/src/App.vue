@@ -13,6 +13,18 @@ import { useSpeakerPlayback } from "./composables/useSpeakerPlayback";
 import { pack, unpack } from "msgpackr";
 import type { Application } from "pixi.js";
 import type { Live2DModel } from "pixi-live2d-display/cubism2";
+import CoTAccordion from "./components/CoTAccordion.vue";
+import { renderSafeRichText } from "./utils/richText";
+
+export interface AppMessage {
+  id?: string;
+  role: "user" | "assistant";
+  text: string;
+  thinking?: string;
+  thinkingStartTime?: number;
+  thinkingEndTime?: number;
+  isThinkingActive?: boolean;
+}
 
 // Khung thông điệp WS từ core; các trường trong payload tùy theo `event`
 interface WsMessage {
@@ -47,7 +59,7 @@ const inputText = ref("");
 import { useI18n } from "./composables/useI18n";
 const { t } = useI18n();
 
-const messages = shallowRef<{ role: "user" | "assistant"; text: string }[]>([
+const messages = shallowRef<AppMessage[]>([
   {
     role: "assistant",
     text: t('welcome_liva_turbo'),
@@ -250,28 +262,60 @@ onMounted(() => {
             triggerRef(messages);
             scrollToBottom();
           } else if (data.event === "ai_stream_chunk") {
-            if (data.payload.isThought) return;
-            if (messages.value.length > 0) {
-              messages.value[messages.value.length - 1].text +=
-                data.payload.textChunk;
-              triggerRef(messages);
-              scrollToBottom();
+            let lastMsg = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
+            if (!lastMsg || lastMsg.role !== "assistant") {
+              const newAssistantMsg: AppMessage = {
+                role: "assistant",
+                text: "",
+                thinking: "",
+                thinkingStartTime: performance.now(),
+                isThinkingActive: true,
+              };
+              messages.value.push(newAssistantMsg);
+              lastMsg = newAssistantMsg;
+            }
+            let chunk = data.payload.textChunk as string;
+            const isThoughtChunk = !!data.payload.isThought;
 
-              if (avatarModel && Math.random() > 0.9) {
-                avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
+            if (isThoughtChunk) {
+              chunk = chunk
+                .replace(/<\/?thought>/gi, "")
+                .replace(/<\|channel>thought/gi, "")
+                .replace(/<\/channel_thought>/gi, "")
+                .replace(/<\/?scratchpad>/gi, "");
+              if (lastMsg.thinking === undefined) {
+                lastMsg.thinking = "";
               }
+              if (!lastMsg.thinkingStartTime) {
+                lastMsg.thinkingStartTime = performance.now();
+              }
+              lastMsg.isThinkingActive = true;
+              lastMsg.thinking += chunk;
+            } else {
+              if (lastMsg.isThinkingActive) {
+                lastMsg.isThinkingActive = false;
+                lastMsg.thinkingEndTime = performance.now();
+              }
+              lastMsg.text += chunk;
+            }
+            triggerRef(messages);
+            scrollToBottom();
+
+            if (avatarModel && Math.random() > 0.9) {
+              avatarModel.internalModel.motionManager.startRandomMotion("tap_body");
             }
           } else if (data.event === "ai_spoken_response") {
             speaker.unblock();
             isThinking.value = false;
             const lastMsg = messages.value[messages.value.length - 1];
-            if (
-              lastMsg &&
-              lastMsg.role === "assistant" &&
-              lastMsg.text.length > 0 &&
-              data.payload.text.includes(lastMsg.text.trim())
-            ) {
-              lastMsg.text = data.payload.text;
+            if (lastMsg && lastMsg.role === "assistant") {
+              if (lastMsg.isThinkingActive) {
+                lastMsg.isThinkingActive = false;
+                lastMsg.thinkingEndTime = performance.now();
+              }
+              if (lastMsg.text.length > 0 && data.payload.text.includes(lastMsg.text.trim())) {
+                lastMsg.text = data.payload.text;
+              }
             } else if (!lastMsg || lastMsg.role === "user") {
               messages.value.push({ role: "assistant", text: data.payload.text });
             }
@@ -438,8 +482,39 @@ onUnmounted(() => {
     <div
       @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
-      class="glass w-full max-w-[400px] rounded-[24px] p-2 flex flex-col relative z-10 animate-fade-in-up mb-[60px] shadow-2xl"
+      class="glass w-full max-w-[400px] rounded-[24px] p-3 flex flex-col relative z-10 animate-fade-in-up mb-[60px] shadow-2xl"
     >
+      <!-- Message Stream & CoT Accordion Container -->
+      <div
+        ref="chatContainer"
+        v-if="messages.length > 1 || isThinking"
+        class="w-full max-h-[300px] overflow-y-auto flex flex-col gap-2 mb-2 scrollbar-hide px-1"
+      >
+        <template v-for="(msg, idx) in messages.slice(-15)" :key="idx">
+          <div
+            v-if="msg.text?.trim() || msg.thinking?.trim()"
+            :class="[
+              'px-3.5 py-2 rounded-[18px] text-xs max-w-[90%] leading-relaxed flex flex-col gap-1',
+              msg.role === 'user'
+                ? 'self-end bg-gradient-to-r from-purple-600 to-blue-500 text-white rounded-br-[4px]'
+                : 'self-start bg-white/10 text-white rounded-bl-[4px] backdrop-blur-md border border-white/10',
+            ]"
+          >
+            <CoTAccordion
+              v-if="msg.thinking"
+              :thinking="msg.thinking"
+              :is-streaming="!!msg.isThinkingActive"
+              :start-time="msg.thinkingStartTime"
+              :end-time="msg.thinkingEndTime"
+            />
+            <div v-if="msg.text" v-html="renderSafeRichText(msg.text)" class="w-full"></div>
+          </div>
+        </template>
+        <div v-if="isThinking" class="self-start text-xs text-purple-300 px-3 py-1 animate-pulse">
+          LIVA đang suy nghĩ...
+        </div>
+      </div>
+
       <div class="relative w-full">
         <input
           v-model="inputText"

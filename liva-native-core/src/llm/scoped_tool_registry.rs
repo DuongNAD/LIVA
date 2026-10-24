@@ -4,14 +4,22 @@
 //! hierarchical scope inheritance, fail-closed CommandPrincipal channel authorization,
 //! RiskTier policy gating, and secret-scrubbed action audit ledger persistence.
 
-use crate::authorization::{CommandPrincipal, authorize_command};
-use crate::cognitive::{ActionAuditRecord, PolicyEngine, RedactedAuditLedger, RiskTier};
+use crate::authorization::{authorize_command, ExecutorPolicy, SessionMode};
+use crate::cognitive::{
+    ActionAuditRecord, Blake3AuditChain, PolicyEngine, RedactedAuditLedger, RiskTier,
+};
 use crate::llm::tool_calling::{CatalogTool, rank_tools, validate_arguments};
+pub use liva_core_types::{
+    CallToolResult, CommandPrincipal, ScopedTool, Tool, ToolContent, ToolExecPolicy,
+    ToolExecutionContext, ToolScope as ToolScopeKind, async_trait,
+};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
+
+pub type NativeScopedToolRegistry = ScopedToolRegistry;
 
 /// Error types for tool registration and scope management.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +85,34 @@ impl ToolScope {
             parent_scope: None,
             principal,
             allowed_tools: HashSet::new(),
+        }
+    }
+
+    pub fn global(principal: CommandPrincipal) -> Self {
+        Self::new("scope:global", principal)
+    }
+
+    pub fn session(session_id: impl Into<String>, principal: CommandPrincipal) -> Self {
+        let sid = session_id.into();
+        Self::new(format!("scope:session:{sid}"), principal).with_parent("scope:global")
+    }
+
+    pub fn task(
+        task_id: impl Into<String>,
+        parent_session: impl Into<String>,
+        principal: CommandPrincipal,
+    ) -> Self {
+        let tid = task_id.into();
+        let pid = parent_session.into();
+        Self::new(format!("scope:task:{tid}"), principal)
+            .with_parent(format!("scope:session:{pid}"))
+    }
+
+    pub fn from_kind(kind: ToolScopeKind, principal: CommandPrincipal) -> Self {
+        match kind {
+            ToolScopeKind::Global => Self::global(principal),
+            ToolScopeKind::Session(sid) => Self::session(sid, principal),
+            ToolScopeKind::Task(tid) => Self::task(tid, "global", principal),
         }
     }
 
@@ -161,13 +197,31 @@ impl Drop for ScopeGuard {
         if let Some(scope_map) = tools.get_mut(&self.scope_id) {
             scope_map.remove(&self.tool_name);
         }
+        let mut dyn_tools = self
+            .registry
+            .dynamic_tools
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(dyn_map) = dyn_tools.get_mut(&self.scope_id) {
+            dyn_map.remove(&self.tool_name);
+        }
     }
 }
 
-#[derive(Debug)]
 pub struct ScopedToolRegistryInner {
     pub(crate) scoped_tools: RwLock<HashMap<String, HashMap<String, CatalogTool>>>,
+    pub(crate) dynamic_tools:
+        RwLock<HashMap<String, HashMap<String, (Arc<dyn ScopedTool>, ToolExecPolicy)>>>,
     pub(crate) scopes: RwLock<HashMap<String, ToolScope>>,
+}
+
+impl std::fmt::Debug for ScopedToolRegistryInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScopedToolRegistryInner")
+            .field("scoped_tools", &self.scoped_tools)
+            .field("scopes", &self.scopes)
+            .finish()
+    }
 }
 
 /// Thread-safe hierarchical Scoped Tool Registry.
@@ -184,12 +238,15 @@ impl Default for ScopedToolRegistry {
 
 impl ScopedToolRegistry {
     pub fn new() -> Self {
-        Self {
+        let registry = Self {
             inner: Arc::new(ScopedToolRegistryInner {
                 scoped_tools: RwLock::new(HashMap::new()),
+                dynamic_tools: RwLock::new(HashMap::new()),
                 scopes: RwLock::new(HashMap::new()),
             }),
-        }
+        };
+        registry.register_scope(ToolScope::global(CommandPrincipal::LocalCli));
+        registry
     }
 
     /// Registers or updates a scope in the registry.
@@ -208,6 +265,41 @@ impl ScopedToolRegistry {
             .write()
             .unwrap_or_else(|e| e.into_inner());
         tools.remove(scope_id);
+        let mut dyn_tools = self
+            .inner
+            .dynamic_tools
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        dyn_tools.remove(scope_id);
+    }
+
+    /// Registers an async ScopedTool implementation under a specific scope, returning an RAII ScopeGuard.
+    pub fn register_scoped_tool(
+        &self,
+        scope_id: &str,
+        tool: Arc<dyn ScopedTool>,
+    ) -> Result<ScopeGuard, ToolError> {
+        let def = tool.definition();
+        let name = def.name.clone();
+        let input_schema = serde_json::to_value(&def.input_schema).unwrap_or_else(|_| json!({}));
+        let catalog_tool = CatalogTool {
+            server: "dynamic".into(),
+            name: name.clone(),
+            description: def.description.clone(),
+            input_schema,
+            embed_extra: "".into(),
+        };
+        let guard = self.register_scoped(scope_id, catalog_tool)?;
+        let mut dyn_tools = self
+            .inner
+            .dynamic_tools
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        dyn_tools
+            .entry(scope_id.to_string())
+            .or_default()
+            .insert(name, (tool.clone(), tool.default_policy()));
+        Ok(guard)
     }
 
     /// Retrieves a scope definition if present.
@@ -354,7 +446,24 @@ impl ScopedToolRegistry {
             )));
         }
 
-        // 3. RiskTier policy check
+        // 3. ExecutorPolicy check (Rule-of-Two, Taint, R4 rejection)
+        let session_mode = if scope.principal == CommandPrincipal::Telegram {
+            SessionMode::Reader
+        } else {
+            SessionMode::Actor
+        };
+        if let Err(e) = ExecutorPolicy::enforce_sink_call(
+            session_mode,
+            tool_name,
+            args,
+            scope.principal == CommandPrincipal::Telegram,
+            None,
+            None,
+        ) {
+            return Err(ToolExecError::PolicyViolation(e.to_string()));
+        }
+
+        // 4. RiskTier policy check
         let risk_tier = PolicyEngine::classify_tool(&tool.qualified());
         if risk_tier == RiskTier::PhysicalOrIrreversible
             && scope.principal != CommandPrincipal::LocalCli
@@ -400,7 +509,7 @@ impl ScopedToolRegistry {
                 risk_tier: risk_tier.to_string(),
                 policy_decision: "allow".to_string(),
                 principal: format!("{:?}", scope.principal),
-                redacted_params: scrubbed_args_str,
+                redacted_params: scrubbed_args_str.clone(),
                 redacted_observation: Some(serde_json::to_string(&res).unwrap_or_default()),
                 status: "success".to_string(),
                 duration_ms: Some(1),
@@ -408,9 +517,191 @@ impl ScopedToolRegistry {
             };
 
             let _ = RedactedAuditLedger::record_action(db_conn, &record);
+            let _ = Blake3AuditChain::append_entry(
+                db_conn,
+                &format!("{:?}", scope.principal),
+                tool_name,
+                &tool.qualified(),
+                &scrubbed_args_str,
+                risk_tier,
+                "allow",
+                "success",
+                Some(1),
+            );
         }
 
         Ok(res)
+    }
+
+    /// Dispatches a tool call with fail-closed policy enforcement, context injection, and optional audit recording.
+    pub async fn dispatch(
+        &self,
+        scope: &ToolScope,
+        name: &str,
+        arguments: Value,
+        context: ToolExecutionContext,
+    ) -> Result<CallToolResult, ToolExecError> {
+        self.dispatch_with_audit(None, scope, name, arguments, context)
+            .await
+    }
+
+    /// Dispatches a tool call with full audit ledger persistence if a db connection is provided.
+    pub async fn dispatch_with_audit(
+        &self,
+        conn: Option<&Connection>,
+        scope: &ToolScope,
+        name: &str,
+        arguments: Value,
+        context: ToolExecutionContext,
+    ) -> Result<CallToolResult, ToolExecError> {
+        let available = self.resolve_tools_for_scope(&scope.scope_id);
+        let tool = available
+            .iter()
+            .find(|t| t.name == name)
+            .ok_or_else(|| ToolExecError::ToolNotFound(name.to_string()))?;
+
+        // 1. Check scope allowed_tools
+        if !scope.allowed_tools.is_empty() && !scope.allowed_tools.contains(name) {
+            return Err(ToolExecError::UnauthorizedPrincipal(format!(
+                "Principal {:?} not authorized for tool '{}' in scope '{}'",
+                context.caller_principal, name, scope.scope_id
+            )));
+        }
+
+        // 2. Resolve dynamic tool if registered
+        let dyn_entry = {
+            let dyn_tools = self
+                .inner
+                .dynamic_tools
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            let mut curr = Some(scope.scope_id.clone());
+            let mut found = None;
+            let scopes = self.inner.scopes.read().unwrap_or_else(|e| e.into_inner());
+            while let Some(sid) = curr {
+                if let Some(map) = dyn_tools.get(&sid) {
+                    if let Some(entry) = map.get(name) {
+                        found = Some(entry.clone());
+                        break;
+                    }
+                }
+                curr = scopes.get(&sid).and_then(|s| s.parent_scope.clone());
+            }
+            found
+        };
+
+        if let Some((dyn_tool, policy)) = dyn_entry {
+            // Check required principal
+            if context.caller_principal.privilege_level()
+                < dyn_tool.required_principal().privilege_level()
+            {
+                return Err(ToolExecError::UnauthorizedPrincipal(format!(
+                    "Principal {:?} does not meet required level {:?}",
+                    context.caller_principal,
+                    dyn_tool.required_principal()
+                )));
+            }
+
+            // Check policy
+            match policy {
+                ToolExecPolicy::Forbidden => {
+                    return Err(ToolExecError::PolicyViolation(format!(
+                        "Tool '{}' is forbidden by policy",
+                        name
+                    )));
+                }
+                ToolExecPolicy::ProposeOnly => {
+                    if context.caller_principal != CommandPrincipal::LocalCli
+                        && context.caller_principal != CommandPrincipal::Test
+                    {
+                        return Err(ToolExecError::ConfirmationRequired {
+                            token: format!("confirm:{}:{}", scope.scope_id, name),
+                            risk: "ProposeOnly".to_string(),
+                        });
+                    }
+                }
+                ToolExecPolicy::Auto => {}
+            }
+
+            // Validate arguments
+            if let Err(e) = validate_arguments(&tool.input_schema, &arguments) {
+                return Err(ToolExecError::InvalidArguments(e));
+            }
+
+            // ExecutorPolicy check (Rule-of-Two, Taint, R4 rejection)
+            let session_mode = if context.caller_principal == CommandPrincipal::Telegram {
+                SessionMode::Reader
+            } else {
+                SessionMode::Actor
+            };
+            if let Err(e) = ExecutorPolicy::enforce_sink_call(
+                session_mode,
+                name,
+                &arguments,
+                context.caller_principal == CommandPrincipal::Telegram,
+                None,
+                None,
+            ) {
+                return Err(ToolExecError::PolicyViolation(e.to_string()));
+            }
+
+            let start_time = std::time::Instant::now();
+            let result = dyn_tool.execute(arguments.clone(), context).await;
+            let elapsed_ms = start_time.elapsed().as_millis() as u64;
+
+            if let Some(db_conn) = conn {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                let scrubbed_args_str = serde_json::to_string(&arguments).unwrap_or_default();
+                let action_id = uuid::Uuid::new_v4().to_string();
+                let idempotency_key = hex::encode(md5_hash(
+                    format!("{}:{}:{}", scope.scope_id, name, scrubbed_args_str).as_bytes(),
+                ));
+
+                let (status, obs) = match &result {
+                    Ok(r) => (
+                        if r.is_error { "error" } else { "success" },
+                        Some(serde_json::to_string(&r.content).unwrap_or_default()),
+                    ),
+                    Err(e) => ("error", Some(e.clone())),
+                };
+
+                let record = ActionAuditRecord {
+                    id: None,
+                    action_id,
+                    idempotency_key,
+                    source_event_id: None,
+                    tool_id: tool.qualified(),
+                    risk_tier: "auto".to_string(),
+                    policy_decision: "allow".to_string(),
+                    principal: format!("{:?}", scope.principal),
+                    redacted_params: scrubbed_args_str.clone(),
+                    redacted_observation: obs,
+                    status: status.to_string(),
+                    duration_ms: Some(elapsed_ms as i64),
+                    created_at_ms: now_ms,
+                };
+                let _ = RedactedAuditLedger::record_action(db_conn, &record);
+                let _ = Blake3AuditChain::append_entry(
+                    db_conn,
+                    &format!("{:?}", scope.principal),
+                    name,
+                    &tool.qualified(),
+                    &scrubbed_args_str,
+                    RiskTier::R0,
+                    "allow",
+                    status,
+                    Some(elapsed_ms),
+                );
+            }
+
+            result.map_err(ToolExecError::ExecutionFailed)
+        } else {
+            let res = self.execute_guarded_with_audit(conn, scope, name, &arguments)?;
+            Ok(CallToolResult::success(res.to_string()))
+        }
     }
 }
 

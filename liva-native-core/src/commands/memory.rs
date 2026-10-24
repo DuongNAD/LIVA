@@ -338,6 +338,7 @@ pub async fn handle(state: Arc<AppState>, command: &str, payload: Value) -> Resu
                         Some(_) => {
                             conn.execute("DELETE FROM facts WHERE key = ?1", [&key])
                                 .map_err(|e| format!("Delete fact failed: {}", e))?;
+                            crate::active_recall::mark_facts_mutated();
                             Ok(serde_json::json!({ "success": true }))
                         }
                     }

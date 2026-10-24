@@ -4,6 +4,9 @@
 //! Expected input is a JSONL manifest produced by `scripts/prepare-fleurs-vi.py`:
 //! `{"audio":"audio/0000.wav","transcript":"..."}`.
 
+use liva_native_core::eval::normalizer::{calculate_dual_wer, WerResult};
+#[cfg(test)]
+use liva_native_core::eval::normalizer::{align_words, tokenize_words, VietnameseNormalizer};
 use liva_native_core::stt::SttManager;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -50,26 +53,7 @@ struct Sample {
     transcript: String,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
-struct WordErrors {
-    substitutions: usize,
-    deletions: usize,
-    insertions: usize,
-    reference_words: usize,
-}
-
-impl WordErrors {
-    fn add(&mut self, other: Self) {
-        self.substitutions += other.substitutions;
-        self.deletions += other.deletions;
-        self.insertions += other.insertions;
-        self.reference_words += other.reference_words;
-    }
-
-    fn total(self) -> usize {
-        self.substitutions + self.deletions + self.insertions
-    }
-}
+type WordErrors = WerResult;
 
 #[derive(Debug, Serialize)]
 struct EngineResult {
@@ -81,6 +65,9 @@ struct EngineResult {
     insertions: usize,
     reference_words: usize,
     wer_percent: f64,
+    o_wer_percent: f64,
+    n_wer_percent: f64,
+    normalization_gap_percent: f64,
     audio_seconds: f64,
     elapsed_seconds: f64,
     real_time_factor: f64,
@@ -98,73 +85,10 @@ struct BenchmarkReport {
     results: Vec<EngineResult>,
 }
 
+#[cfg(test)]
 fn normalize_words(text: &str) -> Vec<String> {
-    let normalized: String = text
-        .to_lowercase()
-        .chars()
-        .map(|ch| {
-            if ch.is_alphanumeric() || ch.is_whitespace() {
-                ch
-            } else {
-                ' '
-            }
-        })
-        .collect();
-    normalized
-        .split_whitespace()
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
-fn align_words(reference: &[String], hypothesis: &[String]) -> WordErrors {
-    let n = reference.len();
-    let m = hypothesis.len();
-    let mut cost = vec![vec![0usize; m + 1]; n + 1];
-    for (i, row) in cost.iter_mut().enumerate() {
-        row[0] = i;
-    }
-    // `cost[0]` dài đúng `m + 1`, nên `enumerate()` chạy j = 0..=m — tương
-    // đương vòng chỉ số cũ, và cùng dạng với vòng đặt cột 0 ngay trên.
-    for (j, cell) in cost[0].iter_mut().enumerate() {
-        *cell = j;
-    }
-
-    for i in 1..=n {
-        for j in 1..=m {
-            if reference[i - 1] == hypothesis[j - 1] {
-                cost[i][j] = cost[i - 1][j - 1];
-            } else {
-                cost[i][j] = 1 + cost[i - 1][j - 1].min(cost[i - 1][j]).min(cost[i][j - 1]);
-            }
-        }
-    }
-
-    let (mut i, mut j) = (n, m);
-    let mut errors = WordErrors {
-        reference_words: n,
-        ..WordErrors::default()
-    };
-    while i > 0 || j > 0 {
-        if i > 0
-            && j > 0
-            && reference[i - 1] == hypothesis[j - 1]
-            && cost[i][j] == cost[i - 1][j - 1]
-        {
-            i -= 1;
-            j -= 1;
-        } else if i > 0 && j > 0 && cost[i][j] == cost[i - 1][j - 1] + 1 {
-            errors.substitutions += 1;
-            i -= 1;
-            j -= 1;
-        } else if i > 0 && cost[i][j] == cost[i - 1][j] + 1 {
-            errors.deletions += 1;
-            i -= 1;
-        } else {
-            errors.insertions += 1;
-            j -= 1;
-        }
-    }
-    errors
+    let normalizer = VietnameseNormalizer::new();
+    tokenize_words(&normalizer.normalize(text))
 }
 
 fn read_manifest(path: &Path, limit: usize, min_samples: usize) -> Result<Vec<Sample>, String> {
@@ -393,7 +317,8 @@ fn run_engine(
     stt.set_language("vi-VN")?;
 
     let started = Instant::now();
-    let mut aggregate = WordErrors::default();
+    let mut agg_o_wer = WordErrors::default();
+    let mut agg_n_wer = WordErrors::default();
     let mut audio_seconds = 0.0f64;
     let mut end_of_turn_latencies = Vec::with_capacity(samples.len());
     for (index, sample) in samples.iter().enumerate() {
@@ -408,31 +333,32 @@ fn run_engine(
             validate_active_engine(engine, active, fallback_reason)?;
         }
         end_of_turn_latencies.push(vad_ended.elapsed());
-        aggregate.add(align_words(
-            &normalize_words(&sample.transcript),
-            &normalize_words(&hypothesis),
-        ));
+        let dual = calculate_dual_wer(&sample.transcript, &hypothesis);
+        agg_o_wer.add(&dual.o_wer);
+        agg_n_wer.add(&dual.n_wer);
         if (index + 1) % 10 == 0 || index + 1 == samples.len() {
             eprintln!("{}: {}/{} câu", engine.name(), index + 1, samples.len());
         }
     }
     let elapsed_seconds = started.elapsed().as_secs_f64();
-    let wer_percent = if aggregate.reference_words == 0 {
-        0.0
-    } else {
-        100.0 * aggregate.total() as f64 / aggregate.reference_words as f64
-    };
+    let o_wer_percent = agg_o_wer.wer_percent();
+    let n_wer_percent = agg_n_wer.wer_percent();
+    let normalization_gap_percent = o_wer_percent - n_wer_percent;
+    let wer_percent = n_wer_percent;
     let (active_engine, fallback_reason) = stt.active_vietnamese_engine();
     validate_active_engine(engine, active_engine, fallback_reason)?;
     Ok(EngineResult {
         engine: engine.name(),
         active_engine,
         samples: samples.len(),
-        substitutions: aggregate.substitutions,
-        deletions: aggregate.deletions,
-        insertions: aggregate.insertions,
-        reference_words: aggregate.reference_words,
+        substitutions: agg_n_wer.substitutions,
+        deletions: agg_n_wer.deletions,
+        insertions: agg_n_wer.insertions,
+        reference_words: agg_n_wer.reference_words,
         wer_percent,
+        o_wer_percent,
+        n_wer_percent,
+        normalization_gap_percent,
         audio_seconds,
         elapsed_seconds,
         real_time_factor: elapsed_seconds / audio_seconds,
@@ -578,6 +504,7 @@ mod tests {
                 deletions: 1,
                 insertions: 1,
                 reference_words: 5,
+                total_errors: 3,
             }
         );
     }
@@ -591,6 +518,7 @@ mod tests {
                 deletions: 2,
                 insertions: 0,
                 reference_words: 2,
+                total_errors: 2,
             }
         );
     }

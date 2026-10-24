@@ -28,6 +28,8 @@ pub mod liva_eval_tests;
 pub mod m2_redaction_adversarial_challenge;
 #[path = "../m3_ipc_sync_adversarial_challenge.rs"]
 pub mod m3_ipc_sync_adversarial_challenge;
+#[path = "../m3_adversarial_vault_search_challenge.rs"]
+pub mod m3_adversarial_vault_search_challenge;
 #[path = "../m4_cua_ipc_adversarial_challenge.rs"]
 pub mod m4_cua_ipc_adversarial_challenge;
 #[path = "../mcp_client_e2e.rs"]
@@ -36,6 +38,8 @@ pub mod mcp_client_e2e;
 pub mod mcp_vault_sandbox_escape;
 #[path = "../normalizer_adversarial_stress.rs"]
 pub mod normalizer_adversarial_stress;
+#[path = "../eval_normalizer_adversarial_challenge.rs"]
+pub mod eval_normalizer_adversarial_challenge;
 #[path = "../panic_cleanup.rs"]
 pub mod panic_cleanup;
 #[path = "../runtime_stability_tests.rs"]

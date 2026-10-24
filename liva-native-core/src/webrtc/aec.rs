@@ -196,23 +196,29 @@ impl SelfEchoCanceller {
         let mut out = Vec::with_capacity(samples.len());
 
         while self.capture_pending.len() >= FRAME_SIZE {
-            let mic_frame: Vec<f32> = self.capture_pending.drain(0..FRAME_SIZE).collect();
+            let mut mic_frame = [0.0f32; FRAME_SIZE];
+            for sample in &mut mic_frame {
+                *sample = self.capture_pending.pop_front().unwrap_or(0.0);
+            }
 
             // Register whatever far-end audio is queued for this tick before
             // cancelling — if nothing is playing, there's no echo to model,
             // so we simply skip the render call for this frame.
             if self.render_queue.len() >= FRAME_SIZE {
-                let render_frame: Vec<f32> = self.render_queue.drain(0..FRAME_SIZE).collect();
+                let mut render_frame = [0.0f32; FRAME_SIZE];
+                for sample in &mut render_frame {
+                    *sample = self.render_queue.pop_front().unwrap_or(0.0);
+                }
                 self.tts_queued = self.tts_queued.saturating_sub(FRAME_SIZE);
-                let mut render_out = vec![0.0f32; FRAME_SIZE];
+                let mut render_out = [0.0f32; FRAME_SIZE];
                 self.apm
-                    .process_render_f32(&[&render_frame], &mut [&mut render_out])
+                    .process_render_f32(&[&render_frame[..]], &mut [&mut render_out[..]])
                     .map_err(|e| format!("AEC3 process_render failed: {:?}", e))?;
             }
 
-            let mut capture_out = vec![0.0f32; FRAME_SIZE];
+            let mut capture_out = [0.0f32; FRAME_SIZE];
             self.apm
-                .process_capture_f32(&[&mic_frame], &mut [&mut capture_out])
+                .process_capture_f32(&[&mic_frame[..]], &mut [&mut capture_out[..]])
                 .map_err(|e| format!("AEC3 process_capture failed: {:?}", e))?;
 
             for sample in &mut capture_out {

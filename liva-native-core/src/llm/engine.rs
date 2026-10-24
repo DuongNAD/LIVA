@@ -37,11 +37,20 @@ pub enum VisionImage<'a> {
     Encoded(&'a [u8]),
 }
 
-static GLOBAL_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
+static GLOBAL_BACKEND: OnceLock<Result<LlamaBackend, String>> = OnceLock::new();
 
-pub fn get_backend() -> &'static LlamaBackend {
+pub fn try_get_backend() -> Result<&'static LlamaBackend, String> {
     GLOBAL_BACKEND
-        .get_or_init(|| LlamaBackend::init().expect("Failed to initialize llama.cpp backend"))
+        .get_or_init(|| {
+            LlamaBackend::init()
+                .map_err(|e| format!("Failed to initialize llama.cpp backend: {:?}", e))
+        })
+        .as_ref()
+        .map_err(|e| e.clone())
+}
+
+pub fn get_backend() -> Result<&'static LlamaBackend, String> {
+    try_get_backend()
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -356,7 +365,7 @@ pub fn prune_kv_cache(
 
 impl LlamaRouterManager {
     pub fn new(n_ctx: usize, n_gpu_layers: u32) -> Result<Self, String> {
-        let _ = get_backend();
+        let _ = get_backend()?;
         Ok(Self {
             engine: None,
             n_ctx,
@@ -414,7 +423,7 @@ impl LlamaRouterManager {
             model_params = model_params.with_use_mlock(false);
             model_params = model_params.with_vocab_only(target_vocab_only);
 
-            let backend = get_backend();
+            let backend = get_backend()?;
             let model = LlamaModel::load_from_file(backend, &new_model_path_buf, &model_params)
                 .map_err(|e| format!("Failed to load GGUF file: {:?}", e))?;
 
@@ -520,7 +529,7 @@ impl LlamaRouterManager {
         model_params = model_params.with_use_mlock(false);
         model_params = model_params.with_vocab_only(target_vocab_only);
 
-        let backend = get_backend();
+        let backend = get_backend()?;
         let model = LlamaModel::load_from_file(backend, &new_model_path_buf, &model_params)
             .map_err(|e| format!("Failed to load GGUF file: {:?}", e))?;
 
@@ -681,6 +690,127 @@ impl LlamaRouterManager {
         self.generate_completion(&compiled.prompt, temperature, top_p, token_callback)
     }
 
+    /// Compile, measure and evict history using dynamic token budgeting with dual-channel CoT streaming.
+    pub fn generate_budgeted_completion_dual_channel<F>(
+        &mut self,
+        messages: &[super::prompt::ChatMessage],
+        temperature: f32,
+        top_p: f32,
+        token_callback: F,
+    ) -> Result<CompletionOutput, String>
+    where
+        F: FnMut(&str, bool) -> bool,
+    {
+        use super::prompt::dynamic_prompt::{ContextTokenBudget, DynamicPromptAssembler};
+
+        if self.vocab_only {
+            return Err("Cannot generate completions on a vocab-only model".to_string());
+        }
+
+        let _guard = GeneratingGuard::enter();
+
+        let engine = self.engine.as_ref().ok_or(ERR_NO_MODEL)?;
+        let budget = ContextTokenBudget::new(self.n_ctx, RESERVE_FOR_COMPLETION)
+            .map_err(|error| error.to_string())?;
+        let (slices, selection) = DynamicPromptAssembler::select_chat_messages(messages)
+            .map_err(|error| error.to_string())?;
+        let compiled = DynamicPromptAssembler::compile_exact_budgeted_prompt(
+            &slices,
+            &selection,
+            &budget,
+            super::prompt::compile_prompt,
+            |prompt| {
+                engine
+                    .model
+                    .str_to_token(prompt, AddBos::Always)
+                    .map(|tokens| tokens.len())
+                    .map_err(|_| "Token measurement failed".to_string())
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        self.generate_completion_dual_channel(&compiled.prompt, temperature, top_p, token_callback)
+    }
+
+    /// Compile and generate from discrete P0-P4 prompt slices under strict token budget constraints.
+    pub fn generate_budgeted_completion_from_slices<F>(
+        &mut self,
+        slices: &[super::prompt::dynamic_prompt::PromptSlice],
+        selection: &super::prompt::dynamic_prompt::PromptSelection,
+        temperature: f32,
+        top_p: f32,
+        token_callback: F,
+    ) -> Result<CompletionOutput, String>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        use super::prompt::dynamic_prompt::{ContextTokenBudget, DynamicPromptAssembler};
+
+        if self.vocab_only {
+            return Err("Cannot generate completions on a vocab-only model".to_string());
+        }
+
+        let _guard = GeneratingGuard::enter();
+
+        let engine = self.engine.as_ref().ok_or(ERR_NO_MODEL)?;
+        let budget = ContextTokenBudget::new(self.n_ctx, RESERVE_FOR_COMPLETION)
+            .map_err(|error| error.to_string())?;
+        let compiled = DynamicPromptAssembler::compile_exact_budgeted_prompt(
+            slices,
+            selection,
+            &budget,
+            super::prompt::compile_prompt,
+            |prompt| {
+                engine
+                    .model
+                    .str_to_token(prompt, AddBos::Always)
+                    .map(|tokens| tokens.len())
+                    .map_err(|_| "Token measurement failed".to_string())
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        self.generate_completion(&compiled.prompt, temperature, top_p, token_callback)
+    }
+
+    /// Compile and generate from discrete P0-P4 prompt slices with real-time dual-channel CoT streaming.
+    pub fn generate_budgeted_completion_from_slices_dual_channel<F>(
+        &mut self,
+        slices: &[super::prompt::dynamic_prompt::PromptSlice],
+        selection: &super::prompt::dynamic_prompt::PromptSelection,
+        temperature: f32,
+        top_p: f32,
+        token_callback: F,
+    ) -> Result<CompletionOutput, String>
+    where
+        F: FnMut(&str, bool) -> bool,
+    {
+        use super::prompt::dynamic_prompt::{ContextTokenBudget, DynamicPromptAssembler};
+
+        if self.vocab_only {
+            return Err("Cannot generate completions on a vocab-only model".to_string());
+        }
+
+        let _guard = GeneratingGuard::enter();
+
+        let engine = self.engine.as_ref().ok_or(ERR_NO_MODEL)?;
+        let budget = ContextTokenBudget::new(self.n_ctx, RESERVE_FOR_COMPLETION)
+            .map_err(|error| error.to_string())?;
+        let compiled = DynamicPromptAssembler::compile_exact_budgeted_prompt(
+            slices,
+            selection,
+            &budget,
+            super::prompt::compile_prompt,
+            |prompt| {
+                engine
+                    .model
+                    .str_to_token(prompt, AddBos::Always)
+                    .map(|tokens| tokens.len())
+                    .map_err(|_| "Token measurement failed".to_string())
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        self.generate_completion_dual_channel(&compiled.prompt, temperature, top_p, token_callback)
+    }
+
     /// Prefill sẵn phần mở đầu chung của mọi lượt — `system_prompt` cộng phần
     /// khung trước câu của người dùng — vào KV cache, không sinh token nào.
     ///
@@ -735,6 +865,124 @@ impl LlamaRouterManager {
             .map_err(|e| format!("Decode failed: {:?}", e))?;
         self.last_tokens = tokens;
         Ok(self.last_tokens.len())
+    }
+
+    /// Thực hiện định tuyến quyết định 1-step (Single-Pass Logit Decision Routing)
+    /// theo kiến trúc IBM Granite Switch 4.1.
+    ///
+    /// Thay vì chạy vòng lặp sinh văn bản nhiều token, hàm này:
+    /// 1. Tái sử dụng tiền tố KV cache (`self.last_tokens`) chung với lượt trước.
+    /// 2. Chỉ chạy **1 lệnh `decode()` duy nhất** cho phần đuôi `tail_tokens`.
+    /// 3. Trích xuất trực tiếp logits của các nhãn lựa chọn (`option_labels`, ví dụ `["A", "B", "C"]`)
+    ///    tại vị trí token cuối cùng của prompt và trả về phân phối xác suất Softmax đã hiệu chuẩn.
+    pub fn decide_single_pass(
+        &mut self,
+        prompt: &str,
+        option_labels: &[&str],
+    ) -> Result<super::decision::DecisionDistribution, String> {
+        if self.vocab_only {
+            return Err("Cannot run single-pass decision on a vocab-only model".to_string());
+        }
+
+        let _guard = GeneratingGuard::enter();
+        let engine = self.engine.as_mut().ok_or(ERR_NO_MODEL)?;
+
+        let resolved_options =
+            super::decision::resolve_model_option_tokens(&engine.model, option_labels)?;
+
+        let prompt_tokens = engine
+            .model
+            .str_to_token(prompt, AddBos::Always)
+            .map_err(|e| format!("StringToTokenError: {:?}", e))?;
+        let prompt_tokens_len = prompt_tokens.len();
+        if prompt_tokens_len == 0 {
+            return Err("Decision prompt tokenized into 0 tokens".to_string());
+        }
+
+        check_prompt_fits(prompt_tokens_len, self.n_ctx)?;
+
+        // 1. Tìm tiền tố chung với `self.last_tokens` để tái sử dụng KV cache
+        //    (đặc biệt hiệu quả khi nhiều quyết định cùng chia sẻ lượt `State:`).
+        let mut common_len = 0;
+        for (i, (&t1, &t2)) in self
+            .last_tokens
+            .iter()
+            .zip(prompt_tokens.iter())
+            .enumerate()
+        {
+            if t1 == t2 {
+                common_len = i + 1;
+            } else {
+                break;
+            }
+        }
+        // Luôn decode ít nhất token cuối cùng để hàng logits cuối luôn được tính mới.
+        common_len = common_len.min(prompt_tokens_len.saturating_sub(1));
+
+        // 2. Xoá phần đuôi KV cache lệch khỏi tiền tố chung
+        if common_len > 0 {
+            if common_len < self.last_tokens.len() {
+                let _ = engine
+                    .context
+                    .clear_kv_cache_seq(Some(0), Some(common_len as u32), None);
+                self.last_tokens.truncate(common_len);
+            }
+        } else {
+            engine.context.clear_kv_cache();
+            self.last_tokens.clear();
+        }
+
+        let n_past = common_len as i32;
+        let tail_tokens = &prompt_tokens[common_len..];
+
+        // 3. Prefill phần đuôi trong 1 batch duy nhất, chỉ bật tính logits ở token cuối cùng.
+        let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(tail_tokens.len(), 1);
+        for (i, token) in tail_tokens.iter().enumerate() {
+            let pos = n_past + i as i32;
+            let is_last = i == tail_tokens.len() - 1;
+            batch
+                .add(*token, pos, &[0], is_last)
+                .map_err(|e| format!("Failed to add token to decision batch: {:?}", e))?;
+        }
+        engine
+            .context
+            .decode(&mut batch)
+            .map_err(|e| format!("Decision prefill decode failed: {:?}", e))?;
+
+        let last_batch_idx = (tail_tokens.len() - 1) as i32;
+        self.last_tokens = prompt_tokens;
+
+        // 4. Đọc trực tiếp hàng logits của token cuối cùng trong batch và gom theo các nhãn lựa chọn.
+        let logits = engine.context.get_logits_ith(last_batch_idx);
+
+        let mut raw_options = Vec::with_capacity(resolved_options.len());
+        for (label, token) in resolved_options {
+            let vocab_idx = usize::try_from(token.0).map_err(|_| {
+                format!("Invalid negative token ID {} for label '{label}'", token.0)
+            })?;
+            let &logit = logits.get(vocab_idx).ok_or_else(|| {
+                format!(
+                    "Token ID {} for label '{label}' out of vocabulary bounds ({})",
+                    vocab_idx,
+                    logits.len()
+                )
+            })?;
+            raw_options.push((label, token.0, logit));
+        }
+
+        super::decision::compute_decision_distribution(raw_options, prompt_tokens_len, common_len)
+    }
+
+    /// Định tuyến quyết định 2 lượt (`State:` + `### DECISION`) tận dụng Prefix KV Cache.
+    pub fn decide_options(
+        &mut self,
+        state_text: &str,
+        question: &str,
+        options: &[super::decision::DecisionOption],
+    ) -> Result<super::decision::DecisionDistribution, String> {
+        let prompt = super::decision::compile_decision_prompt(state_text, question, options)?;
+        let label_refs: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+        self.decide_single_pass(&prompt, &label_refs)
     }
 
     /// Generate one assistant response.
@@ -926,6 +1174,210 @@ impl LlamaRouterManager {
         response_text.push_str(&tail);
         if callback_active && !tail.is_empty() {
             let _ = token_callback(&tail);
+        }
+
+        Ok(CompletionOutput {
+            text: response_text,
+            prompt_tokens: prompt_tokens_len,
+            completion_tokens: completion_tokens_count,
+        })
+    }
+
+    /// Generate one assistant response using real-time Dual-Channel Chain-of-Thought (CoT) streaming.
+    ///
+    /// Tokens are demuxed via `ReasoningStreamSplitter` into visible text chunks (`is_thought: false`)
+    /// and thought reasoning chunks (`is_thought: true`), dispatched directly to `token_callback(chunk, is_thought)`.
+    /// The returned `CompletionOutput.text` contains exclusively the user-visible response text.
+    pub fn generate_completion_dual_channel<F>(
+        &mut self,
+        prompt: &str,
+        temperature: f32,
+        top_p: f32,
+        mut token_callback: F,
+    ) -> Result<CompletionOutput, String>
+    where
+        F: FnMut(&str, bool) -> bool,
+    {
+        if self.vocab_only {
+            return Err("Cannot generate completions on a vocab-only model".to_string());
+        }
+
+        let _guard = GeneratingGuard::enter();
+
+        let engine = self.engine.as_mut().ok_or(ERR_NO_MODEL)?;
+
+        // Tokenize prompt
+        let prompt_tokens = engine
+            .model
+            .str_to_token(prompt, AddBos::Always)
+            .map_err(|e| format!("StringToTokenError: {:?}", e))?;
+        let prompt_tokens_len = prompt_tokens.len();
+
+        tracing::debug!(
+            "prompt = {} token (n_ctx = {}, chừa {} cho câu trả lời)",
+            prompt_tokens_len,
+            self.n_ctx,
+            RESERVE_FOR_COMPLETION
+        );
+
+        check_prompt_fits(prompt_tokens_len, self.n_ctx)?;
+
+        // 1. Find common prefix with last processed tokens
+        let mut common_len = 0;
+        for (i, (&t1, &t2)) in self
+            .last_tokens
+            .iter()
+            .zip(prompt_tokens.iter())
+            .enumerate()
+        {
+            if t1 == t2 {
+                common_len = i + 1;
+            } else {
+                break;
+            }
+        }
+        common_len = common_len.min(prompt_tokens.len().saturating_sub(1));
+
+        // 2. Clear KV cache after common prefix
+        if common_len > 0 {
+            if common_len < self.last_tokens.len() {
+                let _ = engine
+                    .context
+                    .clear_kv_cache_seq(Some(0), Some(common_len as u32), None);
+                self.last_tokens.truncate(common_len);
+            }
+        } else {
+            engine.context.clear_kv_cache();
+            self.last_tokens.clear();
+        }
+
+        let mut n_past = common_len as i32;
+        let tail_tokens = &prompt_tokens[common_len..];
+
+        // 3. Prefill tail tokens
+        if !tail_tokens.is_empty() {
+            let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(tail_tokens.len(), 1);
+            for (i, token) in tail_tokens.iter().enumerate() {
+                let pos = n_past + i as i32;
+                let is_last = i == tail_tokens.len() - 1;
+                batch
+                    .add(*token, pos, &[0], is_last)
+                    .map_err(|e| format!("Failed to add token: {:?}", e))?;
+            }
+            engine
+                .context
+                .decode(&mut batch)
+                .map_err(|e| format!("Decode failed: {:?}", e))?;
+            n_past += tail_tokens.len() as i32;
+        }
+
+        self.last_tokens = prompt_tokens;
+
+        let mut sampler = super::sampler::create_sampler(temperature, top_p);
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
+        let mut response_text = String::with_capacity(1024);
+        let mut raw_response_bytes = 0usize;
+        let mut splitter = super::output_filter::ReasoningStreamSplitter::from_prompt_tail(prompt);
+        let mut callback_active = true;
+        let mut completion_tokens_count = 0;
+
+        // 4. Token generation loop
+        loop {
+            if is_cancel_requested() {
+                tracing::info!("Generation cancelled via atomic cancellation token");
+                callback_active = false;
+                break;
+            }
+
+            prune_kv_cache(
+                &mut engine.context,
+                &mut n_past,
+                self.n_ctx as i32,
+                &mut self.last_tokens,
+            );
+
+            let token = sampler.sample(&engine.context, -1);
+            sampler.accept(token);
+            completion_tokens_count += 1;
+
+            if engine.model.is_eog_token(token) {
+                break;
+            }
+
+            if let Ok(piece) = engine
+                .model
+                .token_to_piece(token, &mut decoder, false, None)
+                && !piece.is_empty()
+            {
+                raw_response_bytes = raw_response_bytes.saturating_add(piece.len());
+                let chunks = splitter.process_token(&piece);
+                for chunk in chunks {
+                    match chunk {
+                        super::output_filter::StreamChunk::Reasoning(thought) => {
+                            if !token_callback(&thought, true) {
+                                callback_active = false;
+                                break;
+                            }
+                        }
+                        super::output_filter::StreamChunk::VisibleText(visible) => {
+                            response_text.push_str(&visible);
+                            if !token_callback(&visible, false) {
+                                callback_active = false;
+                                break;
+                            }
+                        }
+                        super::output_filter::StreamChunk::Heartbeat => {
+                            if !token_callback("", false) {
+                                callback_active = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !callback_active {
+                    break;
+                }
+            }
+
+            self.last_tokens.push(token);
+
+            let mut batch = llama_cpp_2::llama_batch::LlamaBatch::new(1, 1);
+            batch
+                .add(token, n_past, &[0], true)
+                .map_err(|e| format!("Failed to add next token: {:?}", e))?;
+
+            engine
+                .context
+                .decode(&mut batch)
+                .map_err(|e| format!("Decode failed on next token: {:?}", e))?;
+
+            n_past += 1;
+
+            if raw_response_bytes > 100_000 || self.last_tokens.len() > self.n_ctx * 2 {
+                break;
+            }
+        }
+
+        if is_cancel_requested() {
+            return Err("LLM generation cancelled: requested by user".to_string());
+        }
+
+        let tail_chunks = splitter.flush();
+        for chunk in tail_chunks {
+            match chunk {
+                super::output_filter::StreamChunk::Reasoning(thought) => {
+                    if callback_active && !thought.is_empty() {
+                        let _ = token_callback(&thought, true);
+                    }
+                }
+                super::output_filter::StreamChunk::VisibleText(visible) => {
+                    response_text.push_str(&visible);
+                    if callback_active && !visible.is_empty() {
+                        let _ = token_callback(&visible, false);
+                    }
+                }
+                super::output_filter::StreamChunk::Heartbeat => {}
+            }
         }
 
         Ok(CompletionOutput {

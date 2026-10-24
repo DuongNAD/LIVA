@@ -32,9 +32,14 @@ Enables LIVA to query external search engines to find up-to-date documentation, 
 3. Filter and parse the results, selecting the top 3-5 pages for deep inspection.
 
 ## Usage Examples
-```javascript
-// Call search_web tool
-const results = await mcp.callTool('search_web', { query: 'Model Context Protocol spec' });
+```json
+// Tool call payload
+{
+  "name": "search_web",
+  "arguments": {
+    "query": "Model Context Protocol spec"
+  }
+}
 ```
 
 ## Error Handling
@@ -42,6 +47,7 @@ const results = await mcp.callTool('search_web', { query: 'Model Context Protoco
   - **Resolution**: Wait and retry with exponential backoff.
 
 ## Verification Method
-Run a test query via the CLI:
-`node scripts/test-search.js "test query"`
-Verify that a list of results is returned without errors.
+Run tool verification and benchmark via the CLI:
+`cargo run -p liva-tools -- bench`
+Verify that the tool executes and results are returned without errors.
+

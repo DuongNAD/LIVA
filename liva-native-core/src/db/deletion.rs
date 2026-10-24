@@ -275,6 +275,9 @@ pub fn delete_conversation(
         }
     }
     tx.commit()?;
+    if !dry_run && facts > 0 {
+        crate::active_recall::mark_facts_mutated();
+    }
 
     let wal_truncated = if dry_run {
         false
@@ -599,6 +602,9 @@ pub fn delete_subject(
         }
     }
     tx.commit()?;
+    if !dry_run && counts.facts > 0 {
+        crate::active_recall::mark_facts_mutated();
+    }
 
     let wal_truncated = if dry_run {
         false

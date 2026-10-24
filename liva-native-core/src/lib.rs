@@ -1,7 +1,7 @@
 pub mod active_recall;
 pub mod agent;
 mod artifact_trust;
-mod authorization;
+pub mod authorization;
 pub mod boot;
 pub mod cognitive;
 pub mod commands;
@@ -44,7 +44,10 @@ pub use artifact_trust::{
     embedded_file_hash, embedded_model_hash, embedded_runtime_artifact_hash, verify_model_artifact,
     verify_trusted_file,
 };
-pub use authorization::{CommandPrincipal, authorize_command};
+pub use authorization::{
+    authorize_command, CapabilityGrant, CapabilityToken, CommandPrincipal, DelegationStep,
+    DynamicToolPruner, EmergencyKillSwitch, ExecutorPolicy, Principal, SessionModeGovernor,
+};
 pub use crypto::EncryptionEngine;
 pub use db::DatabasePool;
 pub use db_actor::{DbActorError, DbActorHandle};
@@ -156,7 +159,11 @@ impl AppState {
 #[derive(serde::Serialize)]
 struct IpcTokenChunkData<'a> {
     token: &'a str,
+    #[serde(rename = "textChunk")]
+    text_chunk: &'a str,
     done: bool,
+    #[serde(rename = "isThought")]
+    is_thought: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -572,56 +579,135 @@ pub async fn handle_chat_completion_scoped(
     req_id: Option<String>,
     memory_scope: agent::graph::ConversationMemoryScope,
 ) -> Result<serde_json::Value, String> {
-    let messages_val = payload["messages"]
+    let raw_messages_val = payload["messages"]
         .as_array()
         .ok_or_else(|| "Missing or invalid 'messages' array".to_string())?;
 
-    let mut messages = Vec::with_capacity(messages_val.len() + 1);
-    for value in messages_val {
+    let mut raw_messages = Vec::with_capacity(raw_messages_val.len());
+    for value in raw_messages_val {
         let message: llm::ChatMessage = serde_json::from_value(value.clone())
             .map_err(|e| format!("Invalid message object: {e}"))?;
-        messages.push(message);
+        raw_messages.push(message);
     }
 
-    if !messages.iter().any(|message| message.role == "system") {
-        messages.insert(
-            0,
+    let latest_user_idx = raw_messages
+        .iter()
+        .rposition(|m| m.role == "user")
+        .ok_or_else(|| "No user message in conversation".to_string())?;
+
+    let last_user_text = raw_messages[latest_user_idx].content.clone();
+
+    // 1. P0: System Core Persona & Invariants (Mandatory, never evicted)
+    let core_persona_content = raw_messages
+        .iter()
+        .find(|m| m.role == "system")
+        .map(|m| m.content.clone())
+        .unwrap_or_else(|| llm::persona::PERSONA_LIVA.to_string());
+
+    let mut prompt_slices = Vec::new();
+    let mut prompt_selection = llm::prompt::dynamic_prompt::PromptSelection::default();
+
+    prompt_slices.push(llm::PromptSlice::new(
+        "p0_core_persona",
+        llm::SlicePriority::P0_SystemCore,
+        0,
+        llm::ChatMessage {
+            role: "system".to_string(),
+            content: core_persona_content,
+        },
+    ));
+    prompt_selection
+        .mandatory_ids
+        .push("p0_core_persona".to_string());
+
+    // 2. P1: Active Tool Schemas from native MCP server (compact format)
+    let tools_list = state.mcp_server.list_tools().tools;
+    if !tools_list.is_empty() {
+        let mut tool_lines = Vec::new();
+        for t in &tools_list {
+            let cat_tool = crate::llm::tool_calling::CatalogTool {
+                server: "native".into(),
+                name: t.name.clone(),
+                description: t.description.clone(),
+                input_schema: serde_json::to_value(&t.input_schema).unwrap_or_default(),
+                embed_extra: "".into(),
+            };
+            tool_lines.push(llm::DynamicPromptAssembler::format_compact_tool_schema(
+                &cat_tool,
+            ));
+        }
+        let tools_schema_msg = format!(
+            "Available Tools (Compact Schema):\n{}",
+            tool_lines.join("\n")
+        );
+        prompt_slices.push(llm::PromptSlice::new(
+            "p1_active_tool_schemas",
+            llm::SlicePriority::P1_BaseCapabilities,
+            1,
             llm::ChatMessage {
                 role: "system".to_string(),
-                content: llm::persona::PERSONA_LIVA.to_string(),
+                content: tools_schema_msg,
             },
-        );
+        ));
     }
 
-    let last_user_text = messages
-        .iter()
-        .rev()
-        .find(|message| message.role == "user")
-        .map(|message| message.content.clone())
-        .unwrap_or_default();
+    // 3. P3: Recalled Long-term Semantic Facts (if available)
     if let Some(memories) =
         agent::graph::recall_context_scoped(&state, &last_user_text, &memory_scope).await
     {
-        messages.insert(
-            1,
+        prompt_slices.push(llm::PromptSlice::new(
+            "p3_recalled_facts",
+            llm::SlicePriority::P3_DomainSkills,
+            2,
             llm::ChatMessage {
                 role: "system".to_string(),
                 content: agent::graph::memory_system_message(&memories),
             },
-        );
+        ));
     }
 
-    let cap = crate::agent::state::max_history_messages();
-    let sys_count = if messages.len() >= 2 && messages[1].role == "system" {
-        2
-    } else {
-        1
-    };
-    if messages.len() > cap + sys_count {
-        let keep_from = messages.len() - cap;
-        let mut trimmed = messages[..sys_count].to_vec();
-        trimmed.extend_from_slice(&messages[keep_from..]);
-        messages = trimmed;
+    // 4. Conversation History (P4) and Latest User Turn (P2/Mandatory)
+    let mut current_turn_group = Vec::new();
+    let mut seq = 10;
+    for (idx, msg) in raw_messages.into_iter().enumerate() {
+        if msg.role == "system" {
+            // Already handled in P0
+            continue;
+        }
+        seq += 1;
+        let slice_id = format!("turn_{idx}");
+        if idx < latest_user_idx {
+            // P4: History turns (evicted LIFO by atomic groups)
+            if msg.role == "user" && !current_turn_group.is_empty() {
+                prompt_selection
+                    .atomic_groups
+                    .push(std::mem::take(&mut current_turn_group));
+            }
+            current_turn_group.push(slice_id.clone());
+            prompt_slices.push(llm::PromptSlice::new(
+                slice_id,
+                llm::SlicePriority::P4_DynamicContext,
+                seq,
+                msg,
+            ));
+        } else {
+            // Latest user turn (Mandatory)
+            if !current_turn_group.is_empty() {
+                prompt_selection
+                    .atomic_groups
+                    .push(std::mem::take(&mut current_turn_group));
+            }
+            prompt_selection.mandatory_ids.push(slice_id.clone());
+            prompt_slices.push(llm::PromptSlice::new(
+                slice_id,
+                llm::SlicePriority::P0_SystemCore,
+                seq,
+                msg,
+            ));
+        }
+    }
+    if !current_turn_group.is_empty() {
+        prompt_selection.atomic_groups.push(current_turn_group);
     }
 
     let temperature = payload["temperature"]
@@ -632,13 +718,6 @@ pub async fn handle_chat_completion_scoped(
         .unwrap_or(llm::persona::TOP_P_DEFAULT as f64) as f32;
     let stream = payload["stream"].as_bool().unwrap_or(false);
 
-    let last_user_text = messages
-        .iter()
-        .rev()
-        .find(|m| m.role == "user")
-        .map(|m| m.content.as_str())
-        .unwrap_or("");
-
     // U22: Active Recall (Spaced Retrieval) can thiệp trước khi gọi LLM (0 token cost).
     let session_id = format!(
         "{}:{}",
@@ -646,7 +725,7 @@ pub async fn handle_chat_completion_scoped(
         memory_scope.storage_category()
     );
     if let Some(recall_reply) = state.active_recall.try_intercept_turn(
-        last_user_text,
+        &last_user_text,
         &session_id,
         &state.db,
         &state.crypto,
@@ -657,7 +736,9 @@ pub async fn handle_chat_completion_scoped(
                 status: "ok",
                 data: IpcTokenChunkData {
                     token: &recall_reply,
+                    text_chunk: &recall_reply,
                     done: false,
+                    is_thought: false,
                 },
             };
             let _ = crate::llm::nen_sinh_tiep_async(&tx_chan, &chunk_response).await;
@@ -666,7 +747,9 @@ pub async fn handle_chat_completion_scoped(
                 status: "ok",
                 data: IpcTokenChunkData {
                     token: "",
+                    text_chunk: "",
                     done: true,
+                    is_thought: false,
                 },
             };
             let _ = crate::llm::nen_sinh_tiep_async(&tx_chan, &done_chunk).await;
@@ -675,20 +758,20 @@ pub async fn handle_chat_completion_scoped(
     }
 
     let router = state.llm.require_router()?;
-    let do_kho = crate::agent::graph::phan_loai_do_kho(last_user_text);
+    let do_kho = crate::agent::graph::phan_loai_do_kho(&last_user_text);
 
     let start_instant = std::time::Instant::now();
     let (model_tx, model_rx) = tokio::sync::oneshot::channel();
 
-    // Sinh trên luồng blocking, giữ khoá engine suốt lượt: `generate_budgeted_completion`
+    // Sinh trên luồng blocking, giữ khoá engine suốt lượt: `generate_budgeted_completion_from_slices_dual_channel`
     // cắt prompt theo ngân sách context (thay vì để llama.cpp từ chối prompt quá dài)
     // và trả số token thật cho telemetry. Callback stream chạy trên luồng này nên
     // `blocking_send` trong `CompletionStream` là hợp lệ.
     let done_tx = if stream { tx.clone() } else { None };
     let done_req_id = if stream { req_id.clone() } else { None };
-    let inference_messages = messages.clone();
+    let slices_for_inference = prompt_slices;
+    let selection_for_inference = prompt_selection;
     let completion_res = tokio::task::spawn_blocking(move || {
-        let messages = inference_messages;
         let mut llm_manager = router.blocking_lock();
         // U14: Tự động tráo đổi router <-> expert model theo do_kho và chính sách chống dao động
         // Thực hiện NGAY trong khi đang giữ lock, loại bỏ hoàn toàn race condition check-then-act.
@@ -700,23 +783,34 @@ pub async fn handle_chat_completion_scoped(
             let req_id_inner =
                 req_id.ok_or_else(|| "Request ID missing for streaming".to_string())?;
             let mut stream_state = llm::engine::CompletionStream::new(&tx_inner);
-            let completion =
-                llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |piece| {
+            let completion = llm_manager.generate_budgeted_completion_from_slices_dual_channel(
+                &slices_for_inference,
+                &selection_for_inference,
+                temperature,
+                top_p,
+                |piece, is_thought| {
                     let chunk_response = IpcTokenChunkRef {
                         id: &req_id_inner,
                         status: "ok",
                         data: IpcTokenChunkData {
                             token: piece,
+                            text_chunk: piece,
                             done: false,
+                            is_thought,
                         },
                     };
                     stream_state.forward(piece, &chunk_response)
-                });
+                },
+            );
             stream_state.finish(completion)
         } else {
-            llm_manager.generate_budgeted_completion(&messages, temperature, top_p, |_| {
-                !llm::engine::is_cancel_requested()
-            })
+            llm_manager.generate_budgeted_completion_from_slices_dual_channel(
+                &slices_for_inference,
+                &selection_for_inference,
+                temperature,
+                top_p,
+                |_, _| !llm::engine::is_cancel_requested(),
+            )
         }
     })
     .await;
@@ -728,7 +822,9 @@ pub async fn handle_chat_completion_scoped(
             status: "ok",
             data: IpcTokenChunkData {
                 token: "",
+                text_chunk: "",
                 done: true,
+                is_thought: false,
             },
         };
         let _ = crate::llm::nen_sinh_tiep_async(tx_chan, &done_chunk).await;
@@ -817,7 +913,7 @@ pub async fn handle_chat_completion_scoped(
 
     agent::graph::persist_turn_scoped(
         &state,
-        last_user_text,
+        &last_user_text,
         &completion_output.text,
         &memory_scope,
     )

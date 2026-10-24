@@ -84,24 +84,28 @@ pub fn parse_virtual_key(key: &str) -> Result<(u16, bool), CuaError> {
 
         other => {
             if other.len() == 1 {
-                let ch = other.chars().next().unwrap();
-                if ch.is_ascii_alphabetic() {
-                    Ok((ch.to_ascii_uppercase() as u16, false))
-                } else if ch.is_ascii_digit() {
-                    Ok((ch as u16, false))
-                } else {
-                    #[cfg(windows)]
-                    {
-                        unsafe {
-                            let scan = windows_sys::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW(
-                                ch as u16,
-                            );
-                            if scan != -1 {
-                                let vk = (scan & 0xFF) as u16;
-                                return Ok((vk, false));
+                if let Some(ch) = other.chars().next() {
+                    if ch.is_ascii_alphabetic() {
+                        Ok((ch.to_ascii_uppercase() as u16, false))
+                    } else if ch.is_ascii_digit() {
+                        Ok((ch as u16, false))
+                    } else {
+                        #[cfg(windows)]
+                        {
+                            unsafe {
+                                let scan =
+                                    windows_sys::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW(
+                                        ch as u16,
+                                    );
+                                if scan != -1 {
+                                    let vk = (scan & 0xFF) as u16;
+                                    return Ok((vk, false));
+                                }
                             }
                         }
+                        Err(CuaError::Win32Error(format!("Unrecognized key: '{key}'")))
                     }
+                } else {
                     Err(CuaError::Win32Error(format!("Unrecognized key: '{key}'")))
                 }
             } else {

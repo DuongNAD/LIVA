@@ -511,6 +511,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
+dependencies = [
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq 0.4.2",
+ "cpufeatures 0.3.0",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3575,8 +3588,11 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 name = "liva-core-types"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -3635,6 +3651,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "base64 0.22.1",
+ "blake3",
  "bytemuck",
  "bytes",
  "cpal",
@@ -3689,6 +3706,7 @@ dependencies = [
  "r2d2",
  "r2d2_sqlite",
  "rusqlite",
+ "serde",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

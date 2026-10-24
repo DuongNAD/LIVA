@@ -703,13 +703,18 @@ fn loai_json(v: &Value) -> &'static str {
 
 // ── Được phép chạy hay chỉ được đề xuất ─────────────────────────────────────
 
-/// Tool này được tự chạy, hay chỉ được đề xuất cho người dùng?
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Tool này được tự chạy (`Auto`), hỏi xác nhận (`ProposeOnly` / `Ask`), hay chặn cứng (`Block`)?
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ExecPolicy {
-    /// Chạy ngay.
+    /// Chạy ngay (`auto`).
     Auto,
-    /// Chỉ trả về đề xuất; người dùng (hoặc một cổng đồng ý) quyết định.
+    /// Chỉ trả về đề xuất; người dùng (hoặc một cổng đồng ý) quyết định (`ask`).
+    #[serde(alias = "ask", alias = "propose_only")]
     ProposeOnly,
+    /// Chặn hoàn toàn: không đưa vào catalog và từ chối thực thi (`block`).
+    #[serde(alias = "block", alias = "forbidden", alias = "disabled")]
+    Block,
 }
 
 /// Tool nội bộ được auto-exec theo mặc định.
@@ -735,6 +740,62 @@ const NATIVE_AUTOEXEC: &[&str] = &[
 ];
 
 impl ExecPolicy {
+    /// Chuỗi chuẩn hoá gửi xuống JSON config và UI (`"auto"` | `"ask"` | `"block"`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::ProposeOnly => "ask",
+            Self::Block => "block",
+        }
+    }
+
+    /// Đọc chính sách từ chuỗi cấu hình (`"auto"`, `"ask"`, `"block"`).
+    pub fn parse_policy(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "ask" | "propose" | "propose_only" | "proposeonly" => Some(Self::ProposeOnly),
+            "block" | "blocked" | "forbidden" | "disabled" => Some(Self::Block),
+            _ => None,
+        }
+    }
+
+    /// Chính sách mặc định an toàn (Fail-closed) cho một tool khi người dùng chưa tuỳ chỉnh.
+    pub fn default_for_tool(server: &str, name: &str) -> Self {
+        if server == NATIVE_SERVER && NATIVE_AUTOEXEC.contains(&name) {
+            Self::Auto
+        } else {
+            Self::ProposeOnly
+        }
+    }
+
+    /// Quyết định cho một tool cụ thể, kết hợp cấu hình người dùng tại `config_path`
+    /// và biến môi trường `LIVA_MCP_AUTOEXEC`.
+    pub fn for_tool_from_path(server: &str, name: &str, config_path: &std::path::Path) -> Self {
+        let policies = crate::commands::config::load_skill_policies_from(config_path);
+        let qualified = format!("{server}/{name}");
+        let explicit = policies.get(&qualified).or_else(|| policies.get(name)).copied();
+        let disabled = crate::commands::config::load_disabled_skills_from(config_path);
+        if explicit == Some(Self::Block)
+            || disabled.contains(&qualified)
+            || disabled.contains(name)
+        {
+            return Self::Block;
+        }
+        if let Some(policy) = explicit {
+            return policy;
+        }
+        if let Ok(raw) = std::env::var("LIVA_MCP_AUTOEXEC") {
+            let khop = raw
+                .split(',')
+                .map(str::trim)
+                .any(|muc| muc == qualified || muc == format!("{server}/*"));
+            if khop {
+                return Self::Auto;
+            }
+        }
+        Self::default_for_tool(server, name)
+    }
+
     /// Quyết định cho một tool cụ thể.
     ///
     /// Vì sao chọn/chạy là hai bước tách rời: §4 tài liệu 04 —
@@ -747,17 +808,7 @@ impl ExecPolicy {
     /// tool, hoặc `server/*` cho cả server. Mặc định rỗng ⇒ mọi tool ngoài chỉ
     /// được đề xuất.
     pub fn for_tool(server: &str, name: &str) -> Self {
-        if server == NATIVE_SERVER && NATIVE_AUTOEXEC.contains(&name) {
-            return Self::Auto;
-        }
-        let Ok(raw) = std::env::var("LIVA_MCP_AUTOEXEC") else {
-            return Self::ProposeOnly;
-        };
-        let khop = raw
-            .split(',')
-            .map(str::trim)
-            .any(|muc| muc == format!("{server}/{name}") || muc == format!("{server}/*"));
-        if khop { Self::Auto } else { Self::ProposeOnly }
+        Self::for_tool_from_path(server, name, &crate::config_file_path())
     }
 }
 
@@ -1020,12 +1071,20 @@ pub async fn select_tool(
                 return None;
             }
             let policy = ExecPolicy::for_tool(&chon.server, &chon.name);
+            if policy == ExecPolicy::Block {
+                tracing::warn!(
+                    "chọn tool: {} đang ở trạng thái Block; bỏ qua và rơi về route_intent",
+                    chon.qualified()
+                );
+                return None;
+            }
             tracing::info!(
                 "chọn tool: {} — {}",
                 chon.qualified(),
                 match policy {
                     ExecPolicy::Auto => "tự chạy",
                     ExecPolicy::ProposeOnly => "chỉ đề xuất",
+                    ExecPolicy::Block => "bị chặn",
                 }
             );
             Some(ResolvedCall {
@@ -1069,6 +1128,10 @@ pub fn guard_direct_call(server: &str, name: &str) -> Result<(), String> {
             "tool '{server}/{name}' không nằm trong allowlist tự chạy, nên lớp lệnh từ chối gọi \
              nó. Nếu đây là caller hợp pháp và bạn thật sự muốn cho phép, đặt \
              LIVA_MCP_AUTOEXEC={server}/{name} (hoặc {server}/* cho cả server)."
+        )),
+        ExecPolicy::Block => Err(format!(
+            "tool '{server}/{name}' đang ở trạng thái Block (bị chặn bởi cấu hình phân quyền), \
+             nên lớp lệnh từ chối gọi nó."
         )),
     }
 }
@@ -1972,6 +2035,51 @@ mod tests {
         assert_eq!(catalog.tools().len(), 7);
         assert!(catalog.find(NATIVE_SERVER, "control_volume").is_some());
         assert!(catalog.find(NATIVE_SERVER, "read_markdown").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "control_smarthome").is_some());
+    }
+
+    #[tokio::test]
+    async fn exec_policy_for_tool_from_path_ho_tro_3_muc_auto_ask_block() {
+        let state = test_state();
+        let (_guard, temp_dir) = tao_thu_muc_tam("policy_three_tier");
+        let config_file = temp_dir.join("liva-config.json");
+
+        let config_content = json!({
+            "skills": {
+                "policies": {
+                    "write_markdown": "auto",
+                    "control_smarthome": "ask",
+                    "control_volume": "block"
+                }
+            }
+        });
+        std::fs::write(
+            &config_file,
+            serde_json::to_string(&config_content).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            ExecPolicy::for_tool_from_path(NATIVE_SERVER, "write_markdown", &config_file),
+            ExecPolicy::Auto
+        );
+        assert_eq!(
+            ExecPolicy::for_tool_from_path(NATIVE_SERVER, "control_smarthome", &config_file),
+            ExecPolicy::ProposeOnly
+        );
+        assert_eq!(
+            ExecPolicy::for_tool_from_path(NATIVE_SERVER, "control_volume", &config_file),
+            ExecPolicy::Block
+        );
+        assert_eq!(
+            ExecPolicy::for_tool_from_path(NATIVE_SERVER, "read_markdown", &config_file),
+            ExecPolicy::Auto
+        );
+
+        let catalog = build_catalog_from_path(&state, &config_file).await;
+        // control_volume là Block nên bị loại khỏi catalog
+        assert!(catalog.find(NATIVE_SERVER, "control_volume").is_none());
+        // control_smarthome là Ask nên vẫn có mặt trong catalog để đề xuất HITL
         assert!(catalog.find(NATIVE_SERVER, "control_smarthome").is_some());
     }
 }

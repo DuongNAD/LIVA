@@ -25,3 +25,5 @@ pub mod m4_escalation_adversarial_challenge;
 pub mod self_correction_stress;
 #[path = "../swarm_stress_tests.rs"]
 pub mod swarm_stress_tests;
+#[path = "../m2_session_actor_tests.rs"]
+pub mod m2_session_actor_tests;

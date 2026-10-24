@@ -169,11 +169,12 @@ impl SmartTurnClassifier {
         // the trailing frame exactly like the reference's `[:, :-1]`.
         let mut mel_spec = vec![0.0f32; N_MELS * N_FRAMES];
         let mut power = vec![0.0f32; N_FFT / 2 + 1];
+        let mut buf = vec![Complex::new(0.0f32, 0.0f32); N_FFT];
         for frame_idx in 0..N_FRAMES {
             let start = frame_idx * HOP;
-            let mut buf: Vec<Complex<f32>> = (0..N_FFT)
-                .map(|i| Complex::new(padded[start + i] * self.window[i], 0.0))
-                .collect();
+            for i in 0..N_FFT {
+                buf[i] = Complex::new(padded[start + i] * self.window[i], 0.0);
+            }
             self.fft.process(&mut buf);
             for (k, p) in power.iter_mut().enumerate() {
                 *p = buf[k].re * buf[k].re + buf[k].im * buf[k].im;

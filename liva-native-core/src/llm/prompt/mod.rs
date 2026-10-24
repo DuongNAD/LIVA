@@ -1,6 +1,11 @@
+pub mod compact_assembler;
 pub mod dynamic_prompt;
 pub mod persona;
 
+pub use compact_assembler::{
+    AssembledCompactPrompt, CompactPromptAssembler, CompactPromptBudget, MemoryFactEntry,
+    SkillIndexEntry, estimate_tokens,
+};
 pub use dynamic_prompt::{
     DynamicPromptAssembler, PromptAssemblyError, PromptBudget, PromptSlice, SkillDefinition,
     SlicePriority,

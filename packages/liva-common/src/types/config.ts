@@ -173,14 +173,24 @@ export interface SystemStatus {
 }
 
 // ─── Skill Metadata (from SkillRegistry) ───
+export type SkillPolicy = 'auto' | 'ask' | 'block';
+export type SkillActionKind = 'read' | 'write';
+
 export interface SkillInfo {
     name: string;
+    category?: string;
+    short_desc?: string;
     description: string;
     parameters: Record<string, unknown>;
     search_keywords?: string[];
     isCoreSkill?: boolean;
     requiresApproval?: boolean;
     enabled?: boolean;
+    policy?: SkillPolicy;
+    default_policy?: SkillPolicy;
+    is_exception?: boolean;
+    action_kind?: SkillActionKind;
+    server?: string;
 }
 
 // ─── Task (from TaskManager) ───

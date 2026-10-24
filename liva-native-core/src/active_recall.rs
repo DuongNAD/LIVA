@@ -15,8 +15,20 @@ use liva_storage::FactTrie;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+pub static FACTS_VERSION: AtomicU64 = AtomicU64::new(1);
+
+/// Increments the global facts version epoch whenever a fact is inserted, updated, or removed.
+pub fn mark_facts_mutated() {
+    FACTS_VERSION.fetch_add(1, Ordering::Release);
+}
+
+/// Returns the current facts version epoch.
+pub fn get_facts_version() -> u64 {
+    FACTS_VERSION.load(Ordering::Acquire)
+}
 
 /// Maximum pending challenge time-to-live (10 minutes = 600 seconds).
 pub const CHALLENGE_TTL_SECS: i64 = 600;
@@ -68,6 +80,7 @@ pub struct ActiveRecallManager {
     facts: RwLock<HashMap<String, FactRecord>>,
     initialized: AtomicBool,
     cached_db_count: AtomicUsize,
+    cached_facts_version: AtomicU64,
 }
 
 impl Default for ActiveRecallManager {
@@ -123,6 +136,7 @@ impl ActiveRecallManager {
             facts: RwLock::new(HashMap::new()),
             initialized: AtomicBool::new(false),
             cached_db_count: AtomicUsize::new(0),
+            cached_facts_version: AtomicU64::new(0),
         }
     }
 
@@ -135,6 +149,7 @@ impl ActiveRecallManager {
             facts: RwLock::new(HashMap::new()),
             initialized: AtomicBool::new(false),
             cached_db_count: AtomicUsize::new(0),
+            cached_facts_version: AtomicU64::new(0),
         }
     }
 
@@ -178,6 +193,8 @@ impl ActiveRecallManager {
             facts.insert(key.to_string(), record);
             self.cached_db_count.store(facts.len(), Ordering::Release);
         }
+        let bumped = FACTS_VERSION.fetch_add(1, Ordering::AcqRel) + 1;
+        self.cached_facts_version.store(bumped, Ordering::Release);
     }
 
     /// Refresh the in-memory FactTrie and facts index from SQLite WAL.
@@ -232,6 +249,8 @@ impl ActiveRecallManager {
 
         self.cached_db_count
             .store(facts_map.len(), Ordering::Release);
+        self.cached_facts_version
+            .store(FACTS_VERSION.load(Ordering::Acquire), Ordering::Release);
         *self.trie.write().unwrap_or_else(|e| e.into_inner()) = trie;
         *self.facts.write().unwrap_or_else(|e| e.into_inner()) = facts_map;
         self.initialized.store(true, Ordering::Release);
@@ -447,15 +466,10 @@ impl ActiveRecallManager {
             keys
         };
 
-        // Nếu không khớp trong RAM, kiểm tra xem DB có fact mới bổ sung không
+        // Nếu không khớp trong RAM, chỉ làm mới từ SQLite nếu FACTS_VERSION đã thay đổi (loại bỏ reader contention)
         if candidate_keys.is_empty() {
-            let db_count = db_pool
-                .with_reader(|conn| {
-                    conn.query_row("SELECT count(*) FROM facts", [], |r| r.get::<_, usize>(0))
-                })
-                .unwrap_or(0);
-
-            if db_count != self.cached_db_count.load(Ordering::Relaxed) {
+            let current_ver = FACTS_VERSION.load(Ordering::Acquire);
+            if current_ver != self.cached_facts_version.load(Ordering::Acquire) {
                 let _ = self.refresh_from_db(db_pool);
                 let trie = self.trie.read().unwrap_or_else(|e| e.into_inner());
                 candidate_keys = trie.search(&user_clean);
@@ -686,6 +700,52 @@ mod tests {
         assert!(
             median < std::time::Duration::from_micros(50),
             "FactTrie prefix lookup must be sub-50µs SLA, median of {SAMPLES} took {median:?}"
+        );
+    }
+
+    #[test]
+    fn test_active_recall_facts_version_sync_and_mutation() {
+        let manager = ActiveRecallManager::new();
+        let initial_ver = get_facts_version();
+
+        // Inserting fact marks mutation and updates version
+        manager.insert_fact_in_memory(
+            "test_key",
+            FactRecord {
+                key: "test_key".to_string(),
+                enc_value: "enc".to_string(),
+                memory_strength: 1.0,
+                last_accessed_at: 0,
+                access_count: 0,
+            },
+        );
+
+        let cached_ver = manager.cached_facts_version.load(Ordering::Acquire);
+        assert!(
+            cached_ver > initial_ver,
+            "cached_facts_version must be strictly greater than initial_ver"
+        );
+        assert!(
+            cached_ver >= initial_ver + 1,
+            "cached_facts_version must be at least initial_ver + 1"
+        );
+        assert!(
+            get_facts_version() >= cached_ver,
+            "global facts version must be at least cached version"
+        );
+
+        // Subsequent call without mutation returns None
+        let db_pool = DatabasePool::new_in_memory().expect("in-memory db");
+        let crypto = EncryptionEngine::new("00000000000000000000000000000000");
+        let res = manager.try_intercept_turn(
+            "completely unrelated query with no match",
+            "session_test",
+            &db_pool,
+            &crypto,
+        );
+        assert!(
+            res.is_none(),
+            "Subsequent turn without matching fact or mutation must return None"
         );
     }
 }

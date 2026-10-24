@@ -35,3 +35,11 @@ pub mod router_expert_autoswap_tests;
 pub mod scoped_tool_registry_tests;
 #[path = "../skills_commands.rs"]
 pub mod skills_commands;
+#[path = "../m2_sidecar_tests.rs"]
+pub mod m2_sidecar_tests;
+#[path = "../m2_compact_assembler_tests.rs"]
+pub mod m2_compact_assembler_tests;
+#[path = "../m2_tool_insurance_tests.rs"]
+pub mod m2_tool_insurance_tests;
+#[path = "../m2_prompt_invariance_and_hmac_challenge.rs"]
+pub mod m2_prompt_invariance_and_hmac_challenge;

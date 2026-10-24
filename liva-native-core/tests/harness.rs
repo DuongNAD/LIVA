@@ -24,3 +24,6 @@ pub mod agent;
 
 #[path = "suites/security.rs"]
 pub mod security;
+
+#[path = "suites/adversarial.rs"]
+pub mod adversarial;

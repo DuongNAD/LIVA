@@ -75,6 +75,11 @@ const {
   updateLookAt,
   updateExpressions,
   setFaceTrackingActive,
+  syncClock,
+  scheduleChunk,
+  setVisemeTimeline,
+  flush,
+  resetVisemes,
   dispose: disposeVRM,
 } = useAvatarWorkerBridge();
 
@@ -103,45 +108,53 @@ function stopAudioLipSync() {
 // ═══════════════════════════════════════════════════════
 let mouseNormX = 0;
 let mouseNormY = 0;
+let pointerGazeRafId: number | null = null;
+let isThinkingActive = false;
+
+function updatePointerGaze() {
+  pointerGazeRafId = null;
+  if (isCameraOn.value) return; // Face tracking takes priority
+  if (inspectionPoint) return; // Screen inspection takes priority over mouse cursor
+  if (isThinkingActive) {
+    // Khi đang tập trung suy nghĩ, mắt nhìn thẳng về phía người dùng/camera
+    updateLookAt(0, 4);
+    return;
+  }
+  // Map normalized -1..1 → VRM yaw/pitch degrees
+  const yaw = mouseNormX * 25; // ±25° max
+  const pitch = -mouseNormY * 15; // ±15° max (invert Y: cursor up = look up)
+  updateLookAt(yaw, pitch);
+}
 
 function onPointerMove(e: PointerEvent) {
   // Normalize to -1..1 range across the full viewport
   mouseNormX = (e.clientX / window.innerWidth) * 2 - 1;
   mouseNormY = (e.clientY / window.innerHeight) * 2 - 1;
+  if (pointerGazeRafId === null && typeof requestAnimationFrame === 'function') {
+    pointerGazeRafId = requestAnimationFrame(updatePointerGaze);
+  }
 }
-
-let mouseLookAtInterval: ReturnType<typeof setInterval> | null = null;
-let isThinkingActive = false;
 
 function handleSetThinking(active: boolean) {
   isThinkingActive = active;
   setThinking(active);
+  if (pointerGazeRafId === null && typeof requestAnimationFrame === 'function') {
+    pointerGazeRafId = requestAnimationFrame(updatePointerGaze);
+  }
 }
 
 function startMouseLookAt() {
-  if (mouseLookAtInterval) return;
   window.addEventListener('pointermove', onPointerMove, { passive: true });
-  // Poll every 100ms (10fps is enough for smooth eye tracking)
-  mouseLookAtInterval = setInterval(() => {
-    if (isCameraOn.value) return; // Face tracking takes priority
-    if (inspectionPoint) return; // Screen inspection takes priority over mouse cursor
-    if (isThinkingActive) {
-      // Khi đang tập trung suy nghĩ, mắt nhìn thẳng về phía người dùng/camera
-      updateLookAt(0, 4);
-      return;
-    }
-    // Map normalized -1..1 → VRM yaw/pitch degrees
-    const yaw = mouseNormX * 25; // ±25° max
-    const pitch = -mouseNormY * 15; // ±15° max (invert Y: cursor up = look up)
-    updateLookAt(yaw, pitch);
-  }, 100);
+  updatePointerGaze();
 }
 
 function stopMouseLookAt() {
   window.removeEventListener('pointermove', onPointerMove);
-  if (mouseLookAtInterval) {
-    clearInterval(mouseLookAtInterval);
-    mouseLookAtInterval = null;
+  if (pointerGazeRafId !== null) {
+    if (typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(pointerGazeRafId);
+    }
+    pointerGazeRafId = null;
   }
 }
 
@@ -696,6 +709,11 @@ defineExpose({
   onBargeIn,
   inspectScreenPoint,
   clearInspection,
+  setVisemeTimeline,
+  scheduleChunk,
+  syncClock,
+  flush,
+  resetVisemes,
 });
 </script>
 

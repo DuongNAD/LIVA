@@ -426,11 +426,22 @@ impl SessionEvent {
 /// Maximum capacity for historical events retained in the ring buffer per stream.
 pub const MAX_HISTORY_EVENTS: usize = 500;
 
-/// Append-only deterministic session event stream with multi-subscriber broadcast.
-#[derive(Clone, Debug)]
+/// Append-only deterministic session event stream with multi-subscriber broadcast and SQLite WAL persistence.
+#[derive(Clone)]
 pub struct SessionEventStream {
     pub tx: broadcast::Sender<SessionEvent>,
     history: Arc<RwLock<VecDeque<SessionEvent>>>,
+    db_pool: Option<Arc<crate::db::DatabasePool>>,
+    seq_counter: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl std::fmt::Debug for SessionEventStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionEventStream")
+            .field("history", &self.history)
+            .field("has_db_pool", &self.db_pool.is_some())
+            .finish()
+    }
 }
 
 impl SessionEventStream {
@@ -439,7 +450,55 @@ impl SessionEventStream {
         Self {
             tx,
             history: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_HISTORY_EVENTS))),
+            db_pool: None,
+            seq_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
+    }
+
+    /// Helper to fetch the next monotonic event sequence number from SQLite WAL.
+    fn fetch_next_seq(db_pool: &crate::db::DatabasePool) -> u64 {
+        if let Ok(conn) = db_pool.readers.get() {
+            let max_seq: Result<Option<i64>, _> =
+                conn.query_row("SELECT MAX(event_seq) FROM session_events", [], |row| {
+                    row.get(0)
+                });
+            match max_seq {
+                Ok(Some(m)) if m > 0 => (m as u64) + 1,
+                _ => 1,
+            }
+        } else {
+            1
+        }
+    }
+
+    /// Constructs a SessionEventStream attached to SQLite WAL database pool for persistence and replay.
+    pub fn with_db_pool(capacity: usize, db_pool: Arc<crate::db::DatabasePool>) -> Self {
+        let (tx, _) = broadcast::channel(capacity);
+        let initial_seq = Self::fetch_next_seq(&db_pool);
+        Self {
+            tx,
+            history: Arc::new(RwLock::new(VecDeque::with_capacity(MAX_HISTORY_EVENTS))),
+            db_pool: Some(db_pool),
+            seq_counter: Arc::new(std::sync::atomic::AtomicU64::new(initial_seq)),
+        }
+    }
+
+    /// Attach a database pool for WAL persistence.
+    pub fn set_db_pool(&mut self, db_pool: Arc<crate::db::DatabasePool>) {
+        let next_seq = Self::fetch_next_seq(&db_pool);
+        let mut cur = self.seq_counter.load(std::sync::atomic::Ordering::Relaxed);
+        while next_seq > cur {
+            match self.seq_counter.compare_exchange_weak(
+                cur,
+                next_seq,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => cur = actual,
+            }
+        }
+        self.db_pool = Some(db_pool);
     }
 
     /// Subscribes to new session events as they are published.
@@ -448,6 +507,7 @@ impl SessionEventStream {
     }
 
     /// Publishes a session event, appending it to the history ledger and broadcasting to subscribers.
+    /// Also persists the event to SQLite WAL asynchronously if a database pool is configured.
     pub async fn publish(&self, event: SessionEvent) -> Result<usize, String> {
         {
             let mut h = self.history.write().await;
@@ -456,6 +516,26 @@ impl SessionEventStream {
             }
             h.push_back(event.clone());
         }
+
+        // Asynchronously persist to SQLite WAL if db_pool is attached
+        if let Some(ref pool) = self.db_pool {
+            let session_id = event.session_id().to_string();
+            let event_type = event.event_name().to_string();
+            let payload = serde_json::to_string(&event).unwrap_or_default();
+            let seq = self
+                .seq_counter
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let append_res = pool
+                .writer_actor
+                .append_session_event(session_id, seq, event_type, payload)
+                .await;
+            if let Err(e) = append_res {
+                tracing::error!(
+                    "[SessionEventStream] Failed to persist session event to SQLite WAL: {e}"
+                );
+            }
+        }
+
         let send_res = self.tx.send(event);
         match send_res {
             Ok(subscribers) => Ok(subscribers),
@@ -463,13 +543,125 @@ impl SessionEventStream {
         }
     }
 
-    /// Replays historical events for a given session ID in strict FIFO sequence.
+    /// Replays historical events for a given session ID in strict FIFO sequence from RAM buffer.
     pub async fn replay(&self, session_id: &str) -> Vec<SessionEvent> {
         let h = self.history.read().await;
         h.iter()
             .filter(|e| e.session_id() == session_id)
             .cloned()
             .collect()
+    }
+
+    /// Replays deterministic session trajectory directly from SQLite WAL disk persistence.
+    pub fn replay_from_db(&self, session_id: &str) -> Result<Vec<SessionEvent>, String> {
+        let pool = self
+            .db_pool
+            .as_ref()
+            .ok_or_else(|| "Database pool not configured on SessionEventStream".to_string())?;
+
+        let conn = pool
+            .readers
+            .get()
+            .map_err(|e| format!("DB reader pool error: {e}"))?;
+
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT payload FROM session_events WHERE session_id = ?1 ORDER BY id ASC, event_seq ASC",
+            )
+            .map_err(|e| format!("Prepare query failed: {e}"))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![session_id], |row| {
+                let payload: String = row.get(0)?;
+                Ok(payload)
+            })
+            .map_err(|e| format!("Query execution failed: {e}"))?;
+
+        let mut events = Vec::new();
+        for row in rows {
+            let payload_str = row.map_err(|e| format!("Row read error: {e}"))?;
+            if let Ok(evt) = serde_json::from_str::<SessionEvent>(&payload_str) {
+                events.push(evt);
+            }
+        }
+
+        Ok(events)
+    }
+
+    /// Saves a session trajectory checkpoint for time-travel branching and crash recovery.
+    pub async fn save_branched_checkpoint(
+        &self,
+        checkpoint_id: impl Into<String>,
+        session_id: impl Into<String>,
+        parent_checkpoint_id: Option<String>,
+        turn_index: u32,
+        state_digest: impl Into<String>,
+        state_json: impl Into<String>,
+    ) -> Result<(), String> {
+        let pool = self
+            .db_pool
+            .as_ref()
+            .ok_or_else(|| "Database pool not configured on SessionEventStream".to_string())?;
+
+        let cp_id = checkpoint_id.into();
+        let sid = session_id.into();
+        let digest = state_digest.into();
+        let json_data = state_json.into();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
+        pool.writer_actor
+            .execute(move |conn| {
+                conn.execute(
+                    "INSERT INTO session_checkpoints (checkpoint_id, session_id, parent_checkpoint_id, turn_index, state_digest, state_json, created_at_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                     ON CONFLICT(checkpoint_id) DO UPDATE SET state_digest = excluded.state_digest, state_json = excluded.state_json",
+                    rusqlite::params![cp_id, sid, parent_checkpoint_id, turn_index, digest, json_data, now_ms],
+                )
+                .map(|_| ())
+                .map_err(|e| format!("Failed to save branched checkpoint: {e}"))
+            })
+            .await
+    }
+
+    /// Replays historical checkpoints for a given session.
+    pub fn replay_checkpoints_from_db(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, Option<String>, u32, String)>, String> {
+        let pool = self
+            .db_pool
+            .as_ref()
+            .ok_or_else(|| "Database pool not configured on SessionEventStream".to_string())?;
+
+        let conn = pool
+            .readers
+            .get()
+            .map_err(|e| format!("DB reader pool error: {e}"))?;
+
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT checkpoint_id, parent_checkpoint_id, turn_index, state_json FROM session_checkpoints WHERE session_id = ?1 ORDER BY turn_index ASC",
+            )
+            .map_err(|e| format!("Prepare query failed: {e}"))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![session_id], |row| {
+                let cp_id: String = row.get(0)?;
+                let parent: Option<String> = row.get(1)?;
+                let turn: u32 = row.get(2)?;
+                let json: String = row.get(3)?;
+                Ok((cp_id, parent, turn, json))
+            })
+            .map_err(|e| format!("Query failed: {e}"))?;
+
+        let mut cps = Vec::new();
+        for r in rows {
+            cps.push(r.map_err(|e| e.to_string())?);
+        }
+        Ok(cps)
     }
 
     /// Returns current number of events in the history buffer.

@@ -210,6 +210,7 @@ pub fn build_pipeline_graph(
                                     }));
                                     "chat_completion".to_string()
                                 }
+                                crate::llm::ExecPolicy::Block => "chat_completion".to_string(),
                             },
                             None => "chat_completion".to_string(),
                         };

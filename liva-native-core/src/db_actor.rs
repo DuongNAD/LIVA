@@ -94,6 +94,13 @@ pub enum DbWriteCommand {
         result_tx: Option<oneshot::Sender<Result<(), String>>>,
         sync_tx: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
     },
+    AppendSessionEvent {
+        session_id: String,
+        event_seq: u64,
+        event_type: String,
+        payload: String,
+        result_tx: Option<oneshot::Sender<Result<i64, String>>>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -220,6 +227,12 @@ fn reject_command(cmd: DbWriteCommand, err: &str) {
             if let Some(tx) = sync_tx {
                 let _ = tx.send(Err(err.to_string()));
             }
+        }
+        DbWriteCommand::AppendSessionEvent {
+            result_tx: Some(tx),
+            ..
+        } => {
+            let _ = tx.send(Err(err.to_string()));
         }
         _ => {}
     }
@@ -390,6 +403,9 @@ fn execute_write_operation(
             let res = crate::db::update_fact_recall_stats(conn, &fact_key, memory_strength, now_ts)
                 .map(|_| ())
                 .map_err(|e| format!("update_fact_recall_stats error for '{fact_key}': {e}"));
+            if res.is_ok() {
+                crate::active_recall::mark_facts_mutated();
+            }
             if let Err(ref err) = res {
                 tracing::warn!("[DbActor] {err}");
             }
@@ -564,6 +580,42 @@ fn execute_write_operation(
             };
             (PendingNotification { result_tx, sync_tx }, res, mutation)
         }
+        DbWriteCommand::AppendSessionEvent {
+            session_id,
+            event_seq,
+            event_type,
+            payload,
+            result_tx,
+        } => {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            let res = conn.execute(
+                "INSERT INTO session_events (session_id, event_seq, event_type, payload, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![session_id, event_seq as i64, event_type, payload, now_ms],
+            );
+            match res {
+                Ok(_) => {
+                    let row_id = conn.last_insert_rowid();
+                    if let Some(tx) = result_tx {
+                        let _ = tx.send(Ok(row_id));
+                    }
+                    (PendingNotification::from_result_tx(None), Ok(()), None)
+                }
+                Err(err) => {
+                    let err_msg = format!("append_session_event error: {err}");
+                    if let Some(tx) = result_tx {
+                        let _ = tx.send(Err(err_msg.clone()));
+                    }
+                    (
+                        PendingNotification::from_result_tx(None),
+                        Err(err_msg),
+                        None,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -674,7 +726,7 @@ fn process_transactional_batch(
                     }
                 }
                 csr_builder.compile_csr();
-                let new_snapshot = Arc::new(csr_builder.clone());
+                let new_snapshot = Arc::new(csr_builder.to_read_snapshot());
                 *last_stored_arc = Some(new_snapshot.clone());
                 shared_csr_graph.store(new_snapshot);
             }
@@ -744,11 +796,13 @@ fn process_write_batch(
 }
 
 impl DbActorHandle {
-    pub fn new(
+    /// Attempts to spawn the dedicated SQLite writer actor thread.
+    /// Returns `Err(std::io::Error)` if the OS thread cannot be spawned.
+    pub fn try_new(
         writer_pool: Pool<CustomSqliteManager>,
         shared_csr_graph: Arc<ArcSwap<CsrGraph>>,
         mut csr_builder: CsrGraph,
-    ) -> Self {
+    ) -> Result<Self, std::io::Error> {
         let (tx, mut rx) = mpsc::channel::<DbWriteCommand>(1024);
 
         let join_handle = std::thread::Builder::new()
@@ -767,7 +821,7 @@ impl DbActorHandle {
                     }
                 };
 
-                let initial_snapshot = Arc::new(csr_builder.clone());
+                let initial_snapshot = Arc::new(csr_builder.to_read_snapshot());
                 let mut last_stored_arc: Option<Arc<CsrGraph>> = Some(initial_snapshot);
 
                 while let Some(first_cmd) = rx.blocking_recv() {
@@ -829,14 +883,37 @@ impl DbActorHandle {
                     );
                 }
                 tracing::info!("[DbActor] Dedicated SQLite writer thread terminated cleanly");
-            })
-            .expect("failed to spawn liva-db-writer-actor thread");
+            })?;
 
-        Self {
+        Ok(Self {
             tx,
             _guard: Arc::new(std::sync::Mutex::new(DbActorJoinGuard {
                 join_handle: Some(join_handle),
             })),
+        })
+    }
+
+    /// Creates a new DbActorHandle, gracefully logging and falling back if thread spawn fails.
+    pub fn new(
+        writer_pool: Pool<CustomSqliteManager>,
+        shared_csr_graph: Arc<ArcSwap<CsrGraph>>,
+        csr_builder: CsrGraph,
+    ) -> Self {
+        match Self::try_new(writer_pool, shared_csr_graph, csr_builder) {
+            Ok(handle) => handle,
+            Err(e) => {
+                tracing::error!(
+                    "[DbActor] Failed to spawn dedicated SQLite writer thread: {}. Initializing degraded handle.",
+                    e
+                );
+                let (tx, _rx) = mpsc::channel::<DbWriteCommand>(1);
+                Self {
+                    tx,
+                    _guard: Arc::new(std::sync::Mutex::new(DbActorJoinGuard {
+                        join_handle: None,
+                    })),
+                }
+            }
         }
     }
 
@@ -952,6 +1029,29 @@ impl DbActorHandle {
             .map_err(|_| "DbActor response dropped".to_string())?
     }
 
+    /// Asynchronously append a session event to the SQLite WAL session_events stream.
+    pub async fn append_session_event(
+        &self,
+        session_id: impl Into<String>,
+        event_seq: u64,
+        event_type: impl Into<String>,
+        payload: impl Into<String>,
+    ) -> Result<i64, String> {
+        let (result_tx, result_rx) = oneshot::channel();
+        self.send(DbWriteCommand::AppendSessionEvent {
+            session_id: session_id.into(),
+            event_seq,
+            event_type: event_type.into(),
+            payload: payload.into(),
+            result_tx: Some(result_tx),
+        })
+        .await?;
+
+        result_rx
+            .await
+            .map_err(|_| "DbActor response dropped".to_string())?
+    }
+
     /// Submit a WAL checkpoint to the dedicated SQLite writer thread without awaiting completion.
     pub fn try_checkpoint_wal(&self) -> Result<(), String> {
         self.tx
@@ -1034,6 +1134,21 @@ impl DbActorHandle {
                     liva_storage::DbWriteCommand::CheckpointWal { result_tx } => {
                         let res = actor.checkpoint_wal().await;
                         if let Some(tx) = result_tx {
+                            let _ = tx.send(res);
+                        }
+                    }
+                    liva_storage::DbWriteCommand::AppendSessionEvent {
+                        session_id,
+                        event_seq,
+                        event_type,
+                        payload,
+                        responder,
+                    } => {
+                        let res = actor
+                            .append_session_event(session_id, event_seq, event_type, payload)
+                            .await
+                            .map_err(liva_storage::StorageError::Actor);
+                        if let Some(tx) = responder {
                             let _ = tx.send(res);
                         }
                     }

@@ -27,6 +27,10 @@ pub struct CsrGraph {
     node_labels: Vec<String>,
     /// Entity properties JSON string.
     node_properties: Vec<String>,
+    /// Precomputed lowercase node IDs for zero-allocation seed searching.
+    node_ids_lower: Vec<String>,
+    /// Precomputed lowercase entity labels for zero-allocation seed searching.
+    node_labels_lower: Vec<String>,
 
     /// Dynamic adjacency list for low-overhead modifications: node_idx -> list of outgoing edges.
     adjacency: Vec<Vec<DynamicEdge>>,
@@ -58,6 +62,8 @@ impl CsrGraph {
             idx_to_node: Vec::new(),
             node_labels: Vec::new(),
             node_properties: Vec::new(),
+            node_ids_lower: Vec::new(),
+            node_labels_lower: Vec::new(),
             adjacency: Vec::new(),
             row_ptr: vec![0],
             col_indices: Vec::new(),
@@ -108,15 +114,22 @@ impl CsrGraph {
 
     /// Adds or updates a node in the graph cache.
     pub fn add_node(&mut self, id: String, label: String, properties: String) -> usize {
+        let label_lower = label.to_lowercase();
         if let Some(&idx) = self.node_to_idx.get(&id) {
             self.node_labels[idx] = label;
+            if idx < self.node_labels_lower.len() {
+                self.node_labels_lower[idx] = label_lower;
+            }
             self.node_properties[idx] = properties;
             idx
         } else {
             let idx = self.idx_to_node.len();
+            let id_lower = id.to_lowercase();
             self.node_to_idx.insert(id.clone(), idx);
             self.idx_to_node.push(id);
             self.node_labels.push(label);
+            self.node_ids_lower.push(id_lower);
+            self.node_labels_lower.push(label_lower);
             self.node_properties.push(properties);
             self.adjacency.push(Vec::new());
             self.dirty = true;
@@ -215,7 +228,34 @@ impl CsrGraph {
         self.col_indices = col_indices;
         self.weights = weights;
         self.edge_relations = edge_relations;
+        if self.node_ids_lower.len() != self.idx_to_node.len() {
+            self.node_ids_lower = self.idx_to_node.iter().map(|s| s.to_lowercase()).collect();
+        }
+        if self.node_labels_lower.len() != self.node_labels.len() {
+            self.node_labels_lower = self.node_labels.iter().map(|s| s.to_lowercase()).collect();
+        }
         self.dirty = false;
+    }
+
+    /// Creates a lightweight read-only snapshot for publishing to `ArcSwap`.
+    /// The snapshot retains all flat CSR arrays and node indices, but omits
+    /// the dynamic `adjacency` vector list, eliminating tens of thousands of
+    /// heap allocations during snapshot cloning.
+    pub fn to_read_snapshot(&self) -> Self {
+        Self {
+            node_to_idx: self.node_to_idx.clone(),
+            idx_to_node: self.idx_to_node.clone(),
+            node_labels: self.node_labels.clone(),
+            node_properties: self.node_properties.clone(),
+            node_ids_lower: self.node_ids_lower.clone(),
+            node_labels_lower: self.node_labels_lower.clone(),
+            adjacency: Vec::new(),
+            row_ptr: self.row_ptr.clone(),
+            col_indices: self.col_indices.clone(),
+            weights: self.weights.clone(),
+            edge_relations: self.edge_relations.clone(),
+            dirty: false,
+        }
     }
 
     /// Loads graph structure from SQLite `l3_nodes` and `l3_edges` tables.
@@ -327,10 +367,11 @@ impl CsrGraph {
                 let start = self.row_ptr[u];
                 let end = self.row_ptr[u + 1];
 
+                let factor = damping * p_u;
                 for e in start..end {
                     let v = self.col_indices[e];
                     let w = self.weights[e];
-                    next_p[v] += damping * p_u * w;
+                    next_p[v] += factor * w;
                 }
             }
 
@@ -338,20 +379,26 @@ impl CsrGraph {
         }
 
         // 3. Rank entities by activation score
-        let mut results: Vec<(String, f32)> = p
+        let mut scored_indices: Vec<(usize, f32)> = p
             .into_iter()
             .enumerate()
             .filter(|(_, score)| *score > 1e-6)
-            .map(|(idx, score)| (self.idx_to_node[idx].clone(), score))
             .collect();
 
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        if results.len() > top_k {
-            results.truncate(top_k);
+        if scored_indices.len() > top_k {
+            scored_indices.select_nth_unstable_by(top_k, |a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            scored_indices.truncate(top_k);
         }
 
-        results
+        scored_indices
+            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        scored_indices
+            .into_iter()
+            .map(|(idx, score)| (self.idx_to_node[idx].clone(), score))
+            .collect()
     }
 
     /// Read-only version of Personalized PageRank.
@@ -410,10 +457,11 @@ impl CsrGraph {
                     let start = self.row_ptr[u];
                     let end = self.row_ptr[u + 1];
 
+                    let factor = damping * p_u;
                     for e in start..end {
                         let v = self.col_indices[e];
                         let w = self.weights[e];
-                        next_p[v] += damping * p_u * w;
+                        next_p[v] += factor * w;
                     }
                 }
             } else {
@@ -430,6 +478,7 @@ impl CsrGraph {
 
                     let raw_sum: f32 = edges.iter().map(|e| e.weight.max(0.0)).sum();
                     let count = edges.len();
+                    let factor = damping * p_u;
 
                     for edge in edges {
                         let norm_weight = if raw_sum > 0.0 {
@@ -437,7 +486,7 @@ impl CsrGraph {
                         } else {
                             1.0 / count as f32
                         };
-                        next_p[edge.target] += damping * p_u * norm_weight;
+                        next_p[edge.target] += factor * norm_weight;
                     }
                 }
             }
@@ -446,20 +495,26 @@ impl CsrGraph {
         }
 
         // 3. Rank entities by activation score
-        let mut results: Vec<(String, f32)> = p
+        let mut scored_indices: Vec<(usize, f32)> = p
             .into_iter()
             .enumerate()
             .filter(|(_, score)| *score > 1e-6)
-            .map(|(idx, score)| (self.idx_to_node[idx].clone(), score))
             .collect();
 
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        if results.len() > top_k {
-            results.truncate(top_k);
+        if scored_indices.len() > top_k {
+            scored_indices.select_nth_unstable_by(top_k, |a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            scored_indices.truncate(top_k);
         }
 
-        results
+        scored_indices
+            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        scored_indices
+            .into_iter()
+            .map(|(idx, score)| (self.idx_to_node[idx].clone(), score))
+            .collect()
     }
 
     /// Finds seed nodes in the graph that match words or phrases from the query text.
@@ -468,22 +523,35 @@ impl CsrGraph {
         let mut matched = Vec::new();
 
         for (idx, id) in self.idx_to_node.iter().enumerate() {
-            let label = &self.node_labels[idx];
-            let id_lower = id.to_lowercase();
-            let label_lower = label.to_lowercase();
+            let id_lower = self
+                .node_ids_lower
+                .get(idx)
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            let label_lower = self
+                .node_labels_lower
+                .get(idx)
+                .map(|s| s.as_str())
+                .unwrap_or("");
 
             // Match if query contains node id or label (word boundary or substring for compound words)
-            if query_lower.contains(&id_lower) || query_lower.contains(&label_lower) {
+            let matches_id = !id_lower.is_empty() && query_lower.contains(id_lower);
+            let matches_label = !label_lower.is_empty() && query_lower.contains(label_lower);
+            if matches_id || matches_label {
                 // Heuristic score: length of match
-                let weight = 1.0f32 + (label.len() as f32 * 0.05);
+                let label_len = self.node_labels.get(idx).map(|l| l.len()).unwrap_or(0);
+                let weight = 1.0f32 + (label_len as f32 * 0.05);
                 matched.push((id.clone(), weight));
             }
         }
 
-        matched.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         if matched.len() > max_seeds {
+            matched.select_nth_unstable_by(max_seeds, |a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
             matched.truncate(max_seeds);
         }
+        matched.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         matched
     }
@@ -605,5 +673,54 @@ mod tests {
                 "Scores between dirty and clean must match"
             );
         }
+    }
+
+    #[test]
+    fn test_csr_graph_read_snapshot_omits_adjacency_and_preserves_ppr() {
+        let mut graph = CsrGraph::new();
+        graph.add_edge("Alice", "Bob", "collaborates_with", 1.0, true);
+        graph.add_edge("Bob", "Charlie", "manages", 1.0, true);
+        graph.compile_csr();
+
+        let snapshot = graph.to_read_snapshot();
+        assert!(
+            snapshot.adjacency.is_empty(),
+            "Read snapshot must have empty adjacency"
+        );
+        assert_eq!(snapshot.node_count(), 3);
+        assert_eq!(snapshot.edge_count(), 4);
+
+        let seeds = [("Alice", 1.0f32)];
+        let ppr_original = graph.personalized_pagerank_readonly(&seeds, 3, 0.85, 3);
+        let ppr_snapshot = snapshot.personalized_pagerank_readonly(&seeds, 3, 0.85, 3);
+        assert_eq!(
+            ppr_original, ppr_snapshot,
+            "Snapshot PPR must match original graph PPR exactly"
+        );
+        assert_eq!(ppr_snapshot.len(), 3);
+    }
+
+    #[test]
+    fn test_csr_graph_find_seed_nodes_empty_guard() {
+        let mut graph = CsrGraph::new();
+        graph.add_node("".to_string(), "".to_string(), "{}".to_string());
+        graph.add_node(
+            "Rust".to_string(),
+            "Programming Language".to_string(),
+            "{}".to_string(),
+        );
+        graph.compile_csr();
+
+        // Empty string query should not match empty node id or label
+        let seeds_empty = graph.find_seed_nodes("", 5);
+        assert!(
+            seeds_empty.is_empty(),
+            "Empty query must not match empty node id/label"
+        );
+
+        // Specific query should only match valid non-empty node
+        let seeds_rust = graph.find_seed_nodes("Learning Rust today", 5);
+        assert_eq!(seeds_rust.len(), 1);
+        assert_eq!(seeds_rust[0].0, "Rust");
     }
 }

@@ -123,6 +123,11 @@ const avatarEngineMock = {
   onBargeIn: vi.fn(),
   triggerMotion: vi.fn(),
   getScreenBounds: vi.fn(() => null),
+  setVisemeTimeline: vi.fn(),
+  scheduleChunk: vi.fn(),
+  syncClock: vi.fn(),
+  flush: vi.fn(),
+  resetVisemes: vi.fn(),
 };
 
 const AvatarEngineStub = defineComponent({
@@ -206,6 +211,8 @@ describe('WidgetApp.vue', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    delete (window as any).LIVA_ECO_MODE;
+    delete (window as any).LIVA_AVATAR_DEMOTE_LEVEL;
   });
 
   it('should mount and render widget layout', () => {
@@ -1221,6 +1228,9 @@ describe('WidgetApp.vue', () => {
               invokeBackend: vi.fn(() => Promise.resolve()),
             },
           },
+          stubs: {
+            VRMEngine: AvatarEngineStub,
+          },
         },
       });
       await nextTick();
@@ -1242,6 +1252,7 @@ describe('WidgetApp.vue', () => {
       socket.onmessage?.(new MessageEvent('message', { data: frameBuffer.buffer }));
       await nextTick();
       expect(pendingVisemeCues()).toHaveLength(1);
+      expect(avatarEngineMock.setVisemeTimeline).toHaveBeenCalledWith(0, [{ v: 'aa', tMs: 0 }]);
 
       // Giả lập flush binary frame (opcode 0x03 [OP_FLUSH] + header)
       const flushBuffer = new Uint8Array(9 + 4);
@@ -1256,6 +1267,7 @@ describe('WidgetApp.vue', () => {
       // Timeline phải bị reset sạch sẽ
       expect(pendingVisemeCues()).toHaveLength(0);
       expect(currentViseme(1.0)).toBeNull();
+      expect(avatarEngineMock.flush).toHaveBeenCalled();
 
       wrapper.unmount();
     });

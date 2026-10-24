@@ -242,7 +242,10 @@ fn enumerate_via_enum_windows() -> Vec<CuaWindowInfo> {
         let (bounds, is_cloaked) = get_window_dwm_bounds(hwnd);
         let is_on_screen = !is_minimized && !is_cloaked && bounds.width > 0 && bounds.height > 0;
 
-        let mut guard = collector.lock().unwrap();
+        let mut guard = match collector.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let z_index = guard.current_z;
         guard.current_z += 1;
 
@@ -268,7 +271,10 @@ fn enumerate_via_enum_windows() -> Vec<CuaWindowInfo> {
         EnumWindows(Some(enum_proc), state_ptr);
     }
 
-    collector.into_inner().unwrap().windows
+    collector
+        .into_inner()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .windows
 }
 
 #[cfg(windows)]

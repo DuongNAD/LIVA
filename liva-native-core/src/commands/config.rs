@@ -375,7 +375,49 @@ async fn update_config(state: Arc<AppState>, payload: Value) -> Result<Value, St
     Ok(json!({ "success": true }))
 }
 
-/// Đọc danh sách kỹ năng bị vô hiệu hoá từ file cấu hình.
+/// Đọc bản đồ phân quyền kỹ năng (`"auto"` | `"ask"` | `"block"`) từ file cấu hình.
+pub fn load_skill_policies() -> std::collections::HashMap<String, crate::llm::ExecPolicy> {
+    load_skill_policies_from(&config_file_path())
+}
+
+pub fn load_skill_policies_from(
+    path: &std::path::Path,
+) -> std::collections::HashMap<String, crate::llm::ExecPolicy> {
+    if !path.exists() {
+        return std::collections::HashMap::new();
+    }
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Failed to read config file for skill policies: {e}");
+            return std::collections::HashMap::new();
+        }
+    };
+    let val: Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("Failed to parse config file for skill policies: {e}");
+            return std::collections::HashMap::new();
+        }
+    };
+    let mut map = std::collections::HashMap::new();
+    if let Some(obj) = val
+        .get("skills")
+        .and_then(|s| s.get("policies"))
+        .and_then(Value::as_object)
+    {
+        for (k, v) in obj {
+            if let Some(raw) = v.as_str()
+                && let Some(policy) = crate::llm::ExecPolicy::parse_policy(raw)
+            {
+                map.insert(k.clone(), policy);
+            }
+        }
+    }
+    map
+}
+
+/// Đọc danh sách kỹ năng bị vô hiệu hoá (`Block`) từ file cấu hình.
 /// Nếu không đọc được file hoặc JSON sai cú pháp, rơi về tập rỗng (không tắt kỹ năng nào)
 /// và ghi log `tracing::warn!`.
 pub fn load_disabled_skills() -> std::collections::HashSet<String> {
@@ -400,18 +442,57 @@ pub fn load_disabled_skills_from(path: &std::path::Path) -> std::collections::Ha
             return std::collections::HashSet::new();
         }
     };
-    if let Some(arr) = val
+    let mut disabled: std::collections::HashSet<String> = val
         .get("skills")
         .and_then(|s| s.get("disabled"))
         .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if let Some(obj) = val
+        .get("skills")
+        .and_then(|s| s.get("policies"))
+        .and_then(Value::as_object)
     {
-        arr.iter()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect()
-    } else {
-        std::collections::HashSet::new()
+        for (k, v) in obj {
+            if let Some(raw) = v.as_str()
+                && let Some(policy) = crate::llm::ExecPolicy::parse_policy(raw)
+            {
+                if policy == crate::llm::ExecPolicy::Block {
+                    disabled.insert(k.clone());
+                } else {
+                    disabled.remove(k);
+                }
+            }
+        }
     }
+
+    disabled
+}
+
+fn effective_tool_policy(
+    server: &str,
+    name: &str,
+    policies: &std::collections::HashMap<String, crate::llm::ExecPolicy>,
+    disabled: &std::collections::HashSet<String>,
+) -> crate::llm::ExecPolicy {
+    let qualified = format!("{server}/{name}");
+    if let Some(policy) = policies
+        .get(&qualified)
+        .or_else(|| policies.get(name))
+        .copied()
+    {
+        return policy;
+    }
+    if disabled.contains(&qualified) || disabled.contains(name) {
+        return crate::llm::ExecPolicy::Block;
+    }
+    crate::llm::ExecPolicy::default_for_tool(server, name)
 }
 
 pub fn get_skills_list(state: &AppState) -> Result<Value, String> {
@@ -423,16 +504,45 @@ pub fn get_skills_list_from(
     config_path: &std::path::Path,
 ) -> Result<Value, String> {
     let mut skills = state.mcp_server.list_skills();
+    let policies = load_skill_policies_from(config_path);
     let disabled = load_disabled_skills_from(config_path);
     for skill in &mut skills {
-        if let Some(name) = skill.get("name").and_then(Value::as_str) {
-            let is_enabled = !disabled.contains(name);
-            if let Some(obj) = skill.as_object_mut() {
-                obj.insert("enabled".to_string(), json!(is_enabled));
-            }
+        let name = skill
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let server = skill
+            .get("server")
+            .and_then(Value::as_str)
+            .unwrap_or(crate::llm::tool_calling::NATIVE_SERVER)
+            .to_string();
+        let default_policy = crate::llm::ExecPolicy::default_for_tool(&server, &name);
+        let policy = effective_tool_policy(&server, &name, &policies, &disabled);
+        let is_enabled = policy != crate::llm::ExecPolicy::Block;
+        let is_exception = policy != default_policy;
+        if let Some(obj) = skill.as_object_mut() {
+            obj.insert("enabled".to_string(), json!(is_enabled));
+            obj.insert("policy".to_string(), json!(policy.as_str()));
+            obj.insert("default_policy".to_string(), json!(default_policy.as_str()));
+            obj.insert("is_exception".to_string(), json!(is_exception));
         }
     }
     Ok(json!(skills))
+}
+
+fn parse_requested_policy(raw: &str, server: &str, name: &str) -> Result<crate::llm::ExecPolicy, String> {
+    if raw.trim().eq_ignore_ascii_case("default") {
+        return Ok(crate::llm::ExecPolicy::default_for_tool(server, name));
+    }
+    crate::llm::ExecPolicy::parse_policy(raw).ok_or_else(|| {
+        format!(
+            "Invalid 'policy' in payload: '{raw}' (expected 'auto', 'ask', 'block', or 'default')"
+        )
+    })
 }
 
 pub fn toggle_skill_at(
@@ -444,21 +554,42 @@ pub fn toggle_skill_at(
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| "Missing or invalid 'name' in payload".to_string())?;
-    let enabled = payload
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| "Missing or invalid 'enabled' in payload".to_string())?;
 
     let tools = state.mcp_server.list_tools();
     if !tools.tools.iter().any(|t| t.name == name) {
         return Err(format!("Unknown skill or tool: {name}"));
     }
 
-    let mut disabled = load_disabled_skills_from(config_path);
-    if enabled {
-        disabled.remove(name);
+    let server = crate::llm::tool_calling::NATIVE_SERVER;
+    let target_policy = if let Some(raw_policy) = payload.get("policy").and_then(Value::as_str) {
+        parse_requested_policy(raw_policy, server, name)?
+    } else if let Some(enabled) = payload.get("enabled").and_then(Value::as_bool) {
+        if enabled {
+            crate::llm::ExecPolicy::default_for_tool(server, name)
+        } else {
+            crate::llm::ExecPolicy::Block
+        }
     } else {
+        return Err("Missing or invalid 'policy' or 'enabled' in payload".to_string());
+    };
+
+    let mut policies = load_skill_policies_from(config_path);
+    let mut disabled = load_disabled_skills_from(config_path);
+
+    policies.insert(name.to_string(), target_policy);
+    if target_policy == crate::llm::ExecPolicy::Block {
         disabled.insert(name.to_string());
+    } else {
+        disabled.remove(name);
+    }
+
+    let mut policies_map = serde_json::Map::new();
+    let mut policy_keys: Vec<_> = policies.keys().cloned().collect();
+    policy_keys.sort();
+    for k in policy_keys {
+        if let Some(p) = policies.get(&k) {
+            policies_map.insert(k, json!(p.as_str()));
+        }
     }
 
     let mut disabled_vec: Vec<String> = disabled.into_iter().collect();
@@ -466,13 +597,19 @@ pub fn toggle_skill_at(
 
     let patch = json!({
         "skills": {
-            "disabled": disabled_vec
+            "disabled": disabled_vec,
+            "policies": Value::Object(policies_map)
         }
     });
 
     update_config_file_at(config_path, &patch)?;
 
-    Ok(json!({ "success": true }))
+    Ok(json!({
+        "success": true,
+        "name": name,
+        "policy": target_policy.as_str(),
+        "enabled": target_policy != crate::llm::ExecPolicy::Block
+    }))
 }
 
 async fn toggle_skill(state: Arc<AppState>, payload: Value) -> Result<Value, String> {
@@ -487,29 +624,105 @@ pub fn toggle_all_skills_at(
     payload: &Value,
     config_path: &std::path::Path,
 ) -> Result<Value, String> {
-    let enabled = payload
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| "Missing or invalid 'enabled' in payload".to_string())?;
+    let skills = state.mcp_server.list_skills();
+    let server = crate::llm::tool_calling::NATIVE_SERVER;
+    let mut policies = load_skill_policies_from(config_path);
+    let mut disabled = load_disabled_skills_from(config_path);
 
-    let disabled_vec: Vec<String> = if enabled {
-        Vec::new()
+    let category_filter = payload.get("category").and_then(Value::as_str);
+
+    if let Some(batch_map) = payload.get("policies").and_then(Value::as_object) {
+        for (tool_name, raw_val) in batch_map {
+            let raw_str = raw_val
+                .as_str()
+                .ok_or_else(|| format!("Invalid policy value for tool '{tool_name}'"))?;
+            if !skills
+                .iter()
+                .any(|s| s.get("name").and_then(Value::as_str) == Some(tool_name.as_str()))
+            {
+                return Err(format!("Unknown skill or tool: {tool_name}"));
+            }
+            let p = parse_requested_policy(raw_str, server, tool_name)?;
+            policies.insert(tool_name.clone(), p);
+            if p == crate::llm::ExecPolicy::Block {
+                disabled.insert(tool_name.clone());
+            } else {
+                disabled.remove(tool_name);
+            }
+        }
+    } else if let Some(raw_policy) = payload.get("policy").and_then(Value::as_str) {
+        for skill in &skills {
+            let Some(name) = skill.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(cat) = category_filter {
+                let skill_cat = skill
+                    .get("category")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if skill_cat != cat {
+                    continue;
+                }
+            }
+            let p = parse_requested_policy(raw_policy, server, name)?;
+            policies.insert(name.to_string(), p);
+            if p == crate::llm::ExecPolicy::Block {
+                disabled.insert(name.to_string());
+            } else {
+                disabled.remove(name);
+            }
+        }
+    } else if let Some(enabled) = payload.get("enabled").and_then(Value::as_bool) {
+        for skill in &skills {
+            let Some(name) = skill.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(cat) = category_filter {
+                let skill_cat = skill
+                    .get("category")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if skill_cat != cat {
+                    continue;
+                }
+            }
+            let p = if enabled {
+                crate::llm::ExecPolicy::default_for_tool(server, name)
+            } else {
+                crate::llm::ExecPolicy::Block
+            };
+            policies.insert(name.to_string(), p);
+            if p == crate::llm::ExecPolicy::Block {
+                disabled.insert(name.to_string());
+            } else {
+                disabled.remove(name);
+            }
+        }
     } else {
-        let mut all: Vec<String> = state
-            .mcp_server
-            .list_tools()
-            .tools
-            .into_iter()
-            .map(|t| t.name)
-            .collect();
-        all.sort();
-        all
-    };
+        return Err("Missing or invalid 'enabled', 'policy', or 'policies' in payload".to_string());
+    }
+
+    let mut policies_map = serde_json::Map::new();
+    let mut policy_keys: Vec<_> = policies.keys().cloned().collect();
+    policy_keys.sort();
+    for k in policy_keys {
+        if let Some(p) = policies.get(&k) {
+            policies_map.insert(k, json!(p.as_str()));
+        }
+    }
+
+    let mut disabled_vec: Vec<String> = disabled.into_iter().collect();
+    disabled_vec.sort();
+
+    let mut skills_patch = serde_json::Map::new();
+    skills_patch.insert("disabled".to_string(), json!(disabled_vec));
+    skills_patch.insert("policies".to_string(), Value::Object(policies_map));
+    if let Some(profile) = payload.get("agentProfile").and_then(Value::as_str) {
+        skills_patch.insert("activeProfile".to_string(), json!(profile));
+    }
 
     let patch = json!({
-        "skills": {
-            "disabled": disabled_vec
-        }
+        "skills": Value::Object(skills_patch)
     });
 
     update_config_file_at(config_path, &patch)?;
@@ -1524,5 +1737,94 @@ mod tests {
         let err = delete_avatar_model_from_dirs(&json!({ "filename": "non_existent.vrm" }), &dirs)
             .unwrap_err();
         assert!(err.contains("not found in model directories"));
+    }
+
+    #[test]
+    fn toggle_skill_policy_auto_ask_block_va_exception_flag() {
+        let (_guard, temp_dir) = tao_thu_muc_tam("toggle_skill_policy");
+        let config_file = temp_dir.join("liva-config.json");
+        let state = test_state();
+
+        // Mặc định: write_markdown là "ask" (enabled = true, is_exception = false),
+        // read_markdown là "auto" (enabled = true, is_exception = false)
+        let list = get_skills_list_from(&state, &config_file).unwrap();
+        let arr = list.as_array().unwrap();
+        let write_md = arr.iter().find(|s| s["name"] == "write_markdown").unwrap();
+        assert_eq!(write_md["policy"], "ask");
+        assert_eq!(write_md["default_policy"], "ask");
+        assert_eq!(write_md["is_exception"], false);
+        assert_eq!(write_md["enabled"], true);
+        assert_eq!(write_md["action_kind"], "write");
+
+        let read_md = arr.iter().find(|s| s["name"] == "read_markdown").unwrap();
+        assert_eq!(read_md["policy"], "auto");
+        assert_eq!(read_md["default_policy"], "auto");
+        assert_eq!(read_md["is_exception"], false);
+        assert_eq!(read_md["enabled"], true);
+        assert_eq!(read_md["action_kind"], "read");
+
+        // Đặt control_smarthome sang "ask" → trở thành ngoại lệ (default = "auto")
+        let res_ask = toggle_skill_at(
+            &state,
+            &json!({ "name": "control_smarthome", "policy": "ask" }),
+            &config_file,
+        )
+        .unwrap();
+        assert_eq!(res_ask["policy"], "ask");
+        assert_eq!(res_ask["enabled"], true);
+
+        // Đặt control_volume sang "block" → enabled = false, is_exception = true
+        let res_block = toggle_skill_at(
+            &state,
+            &json!({ "name": "control_volume", "policy": "block" }),
+            &config_file,
+        )
+        .unwrap();
+        assert_eq!(res_block["policy"], "block");
+        assert_eq!(res_block["enabled"], false);
+
+        let list2 = get_skills_list_from(&state, &config_file).unwrap();
+        let arr2 = list2.as_array().unwrap();
+        let sh = arr2
+            .iter()
+            .find(|s| s["name"] == "control_smarthome")
+            .unwrap();
+        assert_eq!(sh["policy"], "ask");
+        assert_eq!(sh["default_policy"], "auto");
+        assert_eq!(sh["is_exception"], true);
+        assert_eq!(sh["enabled"], true);
+
+        let vol = arr2.iter().find(|s| s["name"] == "control_volume").unwrap();
+        assert_eq!(vol["policy"], "block");
+        assert_eq!(vol["is_exception"], true);
+        assert_eq!(vol["enabled"], false);
+
+        // Áp dụng Agent Profile qua toggle_all_skills_at với bản đồ policies
+        toggle_all_skills_at(
+            &state,
+            &json!({
+                "agentProfile": "pkm_vault",
+                "policies": {
+                    "read_markdown": "auto",
+                    "search_vault": "auto",
+                    "write_markdown": "ask",
+                    "control_smarthome": "block",
+                    "control_volume": "block",
+                    "control_media": "block",
+                    "get_weather": "auto"
+                }
+            }),
+            &config_file,
+        )
+        .unwrap();
+
+        let list3 = get_skills_list_from(&state, &config_file).unwrap();
+        let arr3 = list3.as_array().unwrap();
+        let sh3 = arr3
+            .iter()
+            .find(|s| s["name"] == "control_smarthome")
+            .unwrap();
+        assert_eq!(sh3["policy"], "block");
+        assert_eq!(sh3["enabled"], false);
     }
 }

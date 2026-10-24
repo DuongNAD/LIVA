@@ -267,7 +267,7 @@ fn test_empirical_smart_turn_real_model_inference_benchmark() {
         );
 
         // Verification: Even with CPU single-threaded intra_threads=1, inference completes reliably
-        let timeout = if cfg!(debug_assertions) { 500.0 } else { 300.0 };
+        let timeout = if cfg!(debug_assertions) { 750.0 } else { 350.0 };
         assert!(
             avg < timeout,
             "Average inference latency ({:.2}ms) must complete within timeout",

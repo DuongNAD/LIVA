@@ -2,6 +2,8 @@
 
 #[path = "../active_recall_tests.rs"]
 pub mod active_recall_tests;
+#[path = "../challenger_m2_storage_rag_adversarial.rs"]
+pub mod challenger_m2_storage_rag_adversarial;
 #[path = "../cognitive_memory_tests.rs"]
 pub mod cognitive_memory_tests;
 #[path = "../conversation_delete.rs"]
@@ -12,10 +14,18 @@ pub mod crypto_boot_e2e;
 pub mod duong_dan_ban_cai;
 #[path = "../hipporag_m1_adversarial_benchmark.rs"]
 pub mod hipporag_m1_adversarial_benchmark;
+#[path = "../m1_active_recall_concurrency_challenge.rs"]
+pub mod m1_active_recall_concurrency_challenge;
+#[path = "../m1_csr_graph_adversarial_challenge.rs"]
+pub mod m1_csr_graph_adversarial_challenge;
 #[path = "../m1_memory_bounds_storage_invariants_challenge.rs"]
 pub mod m1_memory_bounds_storage_invariants_challenge;
 #[path = "../m2_memory_idle_adversarial_challenge.rs"]
 pub mod m2_memory_idle_adversarial_challenge;
+#[path = "../m3_bitemporal_adversarial_challenge.rs"]
+pub mod m3_bitemporal_adversarial_challenge;
+#[path = "../m3_bitemporal_fts_markdown_integration_tests.rs"]
+pub mod m3_bitemporal_fts_markdown_integration_tests;
 #[path = "../m3_sqlite_pragmas_concurrency_challenge.rs"]
 pub mod m3_sqlite_pragmas_concurrency_challenge;
 #[path = "../m4_concurrency_stress_challenger1.rs"]

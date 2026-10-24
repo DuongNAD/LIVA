@@ -514,13 +514,59 @@ describe("Dashboard Views", () => {
     vi.useRealTimers();
   });
 
-  it("should mount and exercise SkillsView.vue", async () => {
+  it("should mount and exercise SkillsView.vue with 3-tier Auto/Ask/Block policies and Agent Profiles", async () => {
+    skillsListRef.value = [
+      {
+        name: "read_markdown",
+        category: "docs",
+        description: "Read markdown",
+        enabled: true,
+        policy: "auto",
+        default_policy: "auto",
+        is_exception: false,
+        action_kind: "read",
+      },
+      {
+        name: "write_markdown",
+        category: "docs",
+        description: "Write markdown",
+        enabled: false,
+        policy: "block",
+        default_policy: "ask",
+        is_exception: true,
+        action_kind: "write",
+      },
+    ] as any;
+
     const wrapper = mount(SkillsView);
     expect(wrapper.exists()).toBe(true);
-    const btn = wrapper.find("button.btn-primary");
-    if (btn.exists()) {
-      await btn.trigger("click");
-    }
+    expect(wrapper.find("[data-testid='agent-profiles-panel']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='exceptions-badge']").exists()).toBe(true);
+
+    // Click Ask policy button on read_markdown
+    const askBtn = wrapper.find("[data-testid='policy-ask-read_markdown']");
+    expect(askBtn.exists()).toBe(true);
+    await askBtn.trigger("click");
+    expect(gatewayMock.sendMsg).toHaveBeenCalledWith("toggle_skill", {
+      name: "read_markdown",
+      policy: "ask",
+      enabled: true,
+    });
+
+    // Click PKM Agent Profile preset
+    const pkmProfileBtn = wrapper.find("[data-testid='agent-profile-pkm_vault']");
+    expect(pkmProfileBtn.exists()).toBe(true);
+    await pkmProfileBtn.trigger("click");
+    expect(gatewayMock.sendMsg).toHaveBeenCalledWith(
+      "toggle_all_skills",
+      expect.objectContaining({
+        agentProfile: "pkm_vault",
+        policies: expect.objectContaining({
+          read_markdown: "auto",
+          control_smarthome: "block",
+        }),
+      }),
+    );
   });
 
   it("should mount and exercise SystemView.vue", async () => {

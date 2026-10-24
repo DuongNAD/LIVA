@@ -2,6 +2,8 @@ import { ref, watch, onUnmounted, onDeactivated, type Ref } from 'vue';
 import { AvatarControlTagStream, type AvatarAction } from '../utils/avatarControlTags';
 import { getAvatarAnimation } from '../utils/avatarAnimationRegistry';
 
+import type { VisemeCue } from '../utils/speakerFrame';
+
 /** Các API mà engine avatar (VRM/Live2D) expose qua defineExpose */
 export interface AvatarEngineApi {
   triggerMotion?: () => void;
@@ -23,6 +25,11 @@ export interface AvatarEngineApi {
   inspectScreenPoint?: (x: number, y: number) => void;
   clearInspection?: () => void;
   dockToCorner?: (corner?: 'left' | 'right' | 'auto') => void;
+  setVisemeTimeline?: (turnEpoch: number, cues: VisemeCue[]) => void;
+  scheduleChunk?: (startTimeSec: number, durationSec: number) => void;
+  syncClock?: (clockOffset: number) => void;
+  flush?: (seqId?: number) => void;
+  resetVisemes?: () => void;
 }
 
 export interface UseWidgetAvatarControlOptions {

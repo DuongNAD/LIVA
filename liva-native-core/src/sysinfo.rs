@@ -114,6 +114,40 @@ pub fn process_memory_bytes() -> Option<(u64, u64)> {
     None
 }
 
+/// Ảnh chụp chi tiết bộ nhớ tiến trình (RSS, Peak RSS, Commit charge, Peak Commit charge).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+pub struct ProcessMemorySnapshot {
+    pub working_set_bytes: u64,
+    pub peak_working_set_bytes: u64,
+    pub pagefile_bytes: u64,
+    pub peak_pagefile_bytes: u64,
+}
+
+#[cfg(windows)]
+pub fn process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let mut pmc: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+    pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    if unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) } == 0 {
+        return None;
+    }
+    Some(ProcessMemorySnapshot {
+        working_set_bytes: pmc.WorkingSetSize as u64,
+        peak_working_set_bytes: pmc.PeakWorkingSetSize as u64,
+        pagefile_bytes: pmc.PagefileUsage as u64,
+        peak_pagefile_bytes: pmc.PeakPagefileUsage as u64,
+    })
+}
+
+#[cfg(not(windows))]
+pub fn process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +186,11 @@ mod tests {
         let (rss, commit) = process_memory_bytes().expect("Windows phải lấy được RSS");
         assert!(rss > 0, "RSS phải > 0");
         assert!(commit > 0, "commit charge phải > 0");
+
+        let snap = process_memory_snapshot().expect("Windows phải lấy được snapshot bộ nhớ");
+        assert!(snap.working_set_bytes > 0, "Working set phải > 0");
+        assert!(snap.peak_working_set_bytes >= snap.working_set_bytes, "Peak RSS phải >= Working set");
+        assert!(snap.pagefile_bytes > 0, "Pagefile bytes phải > 0");
     }
 
     #[cfg(not(windows))]
@@ -160,5 +199,6 @@ mod tests {
         assert_eq!(process_uptime_secs(), None);
         assert_eq!(ram_bytes(), None);
         assert_eq!(process_memory_bytes(), None);
+        assert_eq!(process_memory_snapshot(), None);
     }
 }

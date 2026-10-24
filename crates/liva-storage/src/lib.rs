@@ -52,7 +52,25 @@ pub enum DbWriteCommand {
     CheckpointWal {
         result_tx: Option<oneshot::Sender<std::result::Result<(), String>>>,
     },
-    // Future commands for specific operations like PersistTurn, UpdateFact, etc.
+    /// Append an event to the append-only session_events stream
+    AppendSessionEvent {
+        session_id: String,
+        event_seq: u64,
+        event_type: String,
+        payload: String,
+        responder: Option<oneshot::Sender<std::result::Result<i64, StorageError>>>,
+    },
+}
+
+/// Persistent record representation of an item in the session_events table.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionEventRecord {
+    pub id: i64,
+    pub session_id: String,
+    pub event_seq: u64,
+    pub event_type: String,
+    pub payload: String,
+    pub created_at: i64,
 }
 
 /// A handle to interact with the micro-batched DbActor.
@@ -113,6 +131,27 @@ impl DbActorHandle {
         rx.await
             .map_err(|_| StorageError::Actor("Response dropped".to_string()))?
             .map_err(StorageError::Actor)
+    }
+
+    /// Appends a session event to the append-only SQLite WAL stream.
+    pub async fn append_session_event(
+        &self,
+        session_id: impl Into<String>,
+        event_seq: u64,
+        event_type: impl Into<String>,
+        payload: impl Into<String>,
+    ) -> Result<i64> {
+        let (tx, rx) = oneshot::channel();
+        self.send(DbWriteCommand::AppendSessionEvent {
+            session_id: session_id.into(),
+            event_seq,
+            event_type: event_type.into(),
+            payload: payload.into(),
+            responder: Some(tx),
+        })
+        .await?;
+        rx.await
+            .map_err(|_| StorageError::Actor("Response dropped".to_string()))?
     }
 }
 
@@ -203,6 +242,12 @@ fn reject_cmd(cmd: DbWriteCommand, err_msg: &str) {
         } => {
             let _ = tx.send(Err(err_msg.to_string()));
         }
+        DbWriteCommand::AppendSessionEvent {
+            responder: Some(tx),
+            ..
+        } => {
+            let _ = tx.send(Err(StorageError::Actor(err_msg.to_string())));
+        }
         _ => {}
     }
 }
@@ -248,6 +293,10 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
 
     let mut pending_notifications: Vec<oneshot::Sender<std::result::Result<(), String>>> =
         Vec::new();
+    let mut pending_session_event_responders: Vec<(
+        oneshot::Sender<std::result::Result<i64, StorageError>>,
+        i64,
+    )> = Vec::new();
 
     let mut iter = cmds.into_iter();
     while let Some(cmd) = iter.next() {
@@ -264,6 +313,9 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
                     for prev_tx in pending_notifications {
                         let _ = prev_tx.send(Err(rb_msg.clone()));
                     }
+                    for (prev_responder, _) in pending_session_event_responders {
+                        let _ = prev_responder.send(Err(StorageError::Actor(rb_msg.clone())));
+                    }
                     for remaining in iter {
                         reject_cmd(remaining, &rb_msg);
                     }
@@ -272,7 +324,49 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
                     pending_notifications.push(tx);
                 }
             }
-            // Collapsed pattern match (fixes clippy::collapsible_match)
+            DbWriteCommand::AppendSessionEvent {
+                session_id,
+                event_seq,
+                event_type,
+                payload,
+                responder,
+            } => {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+
+                let insert_res = conn.execute(
+                    "INSERT INTO session_events (session_id, event_seq, event_type, payload, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![session_id, event_seq as i64, event_type, payload, now_ms],
+                );
+
+                match insert_res {
+                    Ok(_) => {
+                        let row_id = conn.last_insert_rowid();
+                        if let Some(tx) = responder {
+                            pending_session_event_responders.push((tx, row_id));
+                        }
+                    }
+                    Err(err) => {
+                        let _ = conn.execute_batch("ROLLBACK;");
+                        let rb_msg = format!("Insert session_event failed: {err}");
+                        if let Some(tx) = responder {
+                            let _ = tx.send(Err(StorageError::Db(err)));
+                        }
+                        for prev_tx in pending_notifications {
+                            let _ = prev_tx.send(Err(rb_msg.clone()));
+                        }
+                        for (prev_responder, _) in pending_session_event_responders {
+                            let _ = prev_responder.send(Err(StorageError::Actor(rb_msg.clone())));
+                        }
+                        for remaining in iter {
+                            reject_cmd(remaining, &rb_msg);
+                        }
+                        return;
+                    }
+                }
+            }
             DbWriteCommand::Flush {
                 result_tx: Some(tx),
             } => {
@@ -287,6 +381,9 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
             for tx in pending_notifications {
                 let _ = tx.send(Ok(()));
             }
+            for (tx, row_id) in pending_session_event_responders {
+                let _ = tx.send(Ok(row_id));
+            }
         }
         Err(e) => {
             let _ = conn.execute_batch("ROLLBACK;");
@@ -294,6 +391,9 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
             tracing::error!("{err_msg}");
             for tx in pending_notifications {
                 let _ = tx.send(Err(err_msg.clone()));
+            }
+            for (tx, _) in pending_session_event_responders {
+                let _ = tx.send(Err(StorageError::Actor(err_msg.clone())));
             }
         }
     }
@@ -304,6 +404,7 @@ fn process_transactional_batch(conn: &Connection, cmds: Vec<DbWriteCommand>) {
 // -----------------------------------------------------------------------------
 
 /// Represents a pending recall challenge
+#[deprecated(note = "Use liva_native_core::active_recall instead")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingRecall {
     pub fact_key: String,
@@ -314,7 +415,7 @@ pub struct PendingRecall {
 /// A node in the Trie for fast prefix/substring matching of fact keys.
 #[derive(Default, Debug, Clone)]
 pub struct TrieNode {
-    pub children: HashMap<char, TrieNode>,
+    pub children: Vec<(char, TrieNode)>,
     pub is_end_of_word: bool,
     // Store associated fact keys at this node
     pub fact_keys: Vec<String>,
@@ -335,12 +436,10 @@ impl TrieNode {
         match self.children.len() {
             0 => {}
             1 => {
-                if let Some(child) = self.children.values().next() {
-                    child.collect_all_fact_key_refs(out);
-                }
+                self.children[0].1.collect_all_fact_key_refs(out);
             }
             _ => {
-                for child in self.children.values() {
+                for (_, child) in &self.children {
                     child.collect_all_fact_key_refs(out);
                 }
             }
@@ -417,7 +516,14 @@ impl FactTrie {
 
         let mut curr = &mut self.root;
         for ch in norm_key.chars() {
-            curr = curr.children.entry(ch).or_default();
+            let next_idx = match curr.children.binary_search_by_key(&ch, |(c, _)| *c) {
+                Ok(idx) => idx,
+                Err(insert_idx) => {
+                    curr.children.insert(insert_idx, (ch, TrieNode::default()));
+                    insert_idx
+                }
+            };
+            curr = &mut curr.children[next_idx].1;
         }
         curr.is_end_of_word = true;
         if !curr.fact_keys.iter().any(|k| k == fact_key) {
@@ -427,23 +533,31 @@ impl FactTrie {
 
     /// Search the Trie for any fact keys that match substrings or words in the user text.
     /// Traverses the user text using sliding-window prefix matching against Trie nodes.
+    /// Capped to a maximum search depth (64 characters) to prevent O(L^2) slowdown on large prompts.
     pub fn search(&self, text: &str) -> Vec<String> {
         let norm_text = text.trim().to_lowercase();
         if norm_text.is_empty() {
             return vec![];
         }
 
-        let chars: Vec<char> = norm_text.chars().collect();
         let mut matched = Vec::new();
+        let mut seen: Vec<&str> = Vec::with_capacity(8);
+        const MAX_MATCH_DEPTH: usize = 64;
 
-        for start_idx in 0..chars.len() {
+        for (start_byte, _) in norm_text.char_indices() {
             let mut curr = &self.root;
-            for &ch in &chars[start_idx..] {
-                if let Some(next_node) = curr.children.get(&ch) {
-                    curr = next_node;
+            for (depth, ch) in norm_text[start_byte..].chars().enumerate() {
+                if depth >= MAX_MATCH_DEPTH {
+                    break;
+                }
+
+                if let Ok(idx) = curr.children.binary_search_by_key(&ch, |(c, _)| *c) {
+                    curr = &curr.children[idx].1;
                     if curr.is_end_of_word {
                         for fk in &curr.fact_keys {
-                            if !matched.contains(fk) {
+                            let s = fk.as_str();
+                            if !seen.contains(&s) {
+                                seen.push(s);
                                 matched.push(fk.clone());
                             }
                         }
@@ -471,8 +585,8 @@ impl FactTrie {
             let mut curr = &self.root;
             for &b in trimmed.as_bytes() {
                 let lc = b.to_ascii_lowercase() as char;
-                if let Some(next_node) = curr.children.get(&lc) {
-                    curr = next_node;
+                if let Ok(idx) = curr.children.binary_search_by_key(&lc, |(c, _)| *c) {
+                    curr = &curr.children[idx].1;
                 } else {
                     return vec![];
                 }
@@ -486,14 +600,14 @@ impl FactTrie {
         for ch in trimmed.chars() {
             if ch.is_uppercase() {
                 for lc in ch.to_lowercase() {
-                    if let Some(next_node) = curr.children.get(&lc) {
-                        curr = next_node;
+                    if let Ok(idx) = curr.children.binary_search_by_key(&lc, |(c, _)| *c) {
+                        curr = &curr.children[idx].1;
                     } else {
                         return vec![];
                     }
                 }
-            } else if let Some(next_node) = curr.children.get(&ch) {
-                curr = next_node;
+            } else if let Ok(idx) = curr.children.binary_search_by_key(&ch, |(c, _)| *c) {
+                curr = &curr.children[idx].1;
             } else {
                 return vec![];
             }
@@ -506,6 +620,7 @@ impl FactTrie {
 }
 
 /// A registered challenge associated with a fact key.
+#[deprecated(note = "Use liva_native_core::active_recall instead")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactChallenge {
     pub fact_key: String,
@@ -514,6 +629,8 @@ pub struct FactChallenge {
 }
 
 /// Manages active recall sessions using the Trie for fast lookups.
+#[deprecated(note = "Use liva_native_core::active_recall::ActiveRecallManager instead")]
+#[allow(deprecated)]
 pub struct ActiveRecallManager {
     trie: FactTrie,
     challenges: HashMap<String, FactChallenge>,
@@ -521,12 +638,14 @@ pub struct ActiveRecallManager {
 }
 
 // Added Default implementation (fixes clippy::new_without_default)
+#[allow(deprecated)]
 impl Default for ActiveRecallManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[allow(deprecated)]
 impl ActiveRecallManager {
     pub fn new() -> Self {
         Self {
@@ -704,6 +823,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_active_recall_manager_trie_integration() {
         let mut arm = ActiveRecallManager::new();
         arm.insert_fact("món ăn yêu thích", "favorite_food");
@@ -718,6 +838,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_active_recall_manager_custom_challenge_and_answers() {
         let mut arm = ActiveRecallManager::new();
         arm.register_challenge(
@@ -757,6 +878,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_active_recall_manager_empty_answer_never_triggers_false_positive() {
         let arm = ActiveRecallManager::new();
         // Manually inject a malformed pending challenge with empty answer
@@ -852,5 +974,85 @@ mod tests {
 
         let err_from_str: StorageError = "channel failed".into();
         assert!(matches!(err_from_str, StorageError::Actor(ref s) if s == "channel failed"));
+    }
+
+    #[test]
+    fn test_process_transactional_batch_append_session_event_without_hotpath_ddl() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        // Pre-create schema as done during pool initialization
+        conn.execute_batch(
+            "CREATE TABLE session_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                event_seq INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX idx_session_events_lookup ON session_events(session_id, event_seq);",
+        )
+        .expect("create table");
+
+        let (tx1, rx1) = oneshot::channel();
+        let (tx2, rx2) = oneshot::channel();
+
+        let cmd1 = DbWriteCommand::AppendSessionEvent {
+            session_id: "test-sess-1".to_string(),
+            event_seq: 1,
+            event_type: "PromptInjected".to_string(),
+            payload: "{}".to_string(),
+            responder: Some(tx1),
+        };
+        let cmd2 = DbWriteCommand::AppendSessionEvent {
+            session_id: "test-sess-1".to_string(),
+            event_seq: 2,
+            event_type: "ContentChunk".to_string(),
+            payload: "{}".to_string(),
+            responder: Some(tx2),
+        };
+
+        process_transactional_batch(&conn, vec![cmd1, cmd2]);
+
+        let row_id_1 = rx1
+            .blocking_recv()
+            .expect("rx1 received")
+            .expect("cmd1 success");
+        let row_id_2 = rx2
+            .blocking_recv()
+            .expect("rx2 received")
+            .expect("cmd2 success");
+
+        assert_eq!(row_id_1, 1);
+        assert_eq!(row_id_2, 2);
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_process_transactional_batch_append_session_event_fails_gracefully_when_table_missing() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        // Do NOT create table
+        let (tx, rx) = oneshot::channel();
+        let cmd = DbWriteCommand::AppendSessionEvent {
+            session_id: "test-sess-missing".to_string(),
+            event_seq: 1,
+            event_type: "PromptInjected".to_string(),
+            payload: "{}".to_string(),
+            responder: Some(tx),
+        };
+
+        process_transactional_batch(&conn, vec![cmd]);
+
+        let res = rx.blocking_recv().expect("rx received");
+        assert!(res.is_err(), "Must return error when table does not exist");
+        match res.unwrap_err() {
+            StorageError::Db(err) => {
+                assert!(err.to_string().contains("no such table"));
+            }
+            other => panic!("Expected StorageError::Db, got {other:?}"),
+        }
     }
 }

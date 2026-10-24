@@ -53,6 +53,9 @@ import type {
 } from './types/gateway';
 import { useWidgetWindow } from './composables/useWidgetWindow';
 import type { ToolPanelView } from './types/ui';
+import CoTAccordion from './components/CoTAccordion.vue';
+import { StreamBatcher } from './utils/streamBatcher';
+import { calculateClockOffset } from './composables/useAvatarWorkerBridge';
 
 const platform = inject<IPlatformAdapter>('platform');
 
@@ -174,6 +177,9 @@ interface Message {
   role: 'user' | 'assistant';
   text: string;
   thinking?: string;
+  thinkingStartTime?: number;
+  thinkingEndTime?: number;
+  isThinkingActive?: boolean;
 }
 
 
@@ -358,6 +364,7 @@ const speaker = useSpeakerPlayback({
   // AudioContext — đúng thời điểm audio thật bắt đầu, không phải lúc nhận frame.
   onChunkScheduled: ({ startTimeSec, durationSec }) => {
     noteChunkScheduled(startTimeSec, durationSec);
+    engineRef.value?.scheduleChunk?.(startTimeSec, durationSec);
   },
   onPlaybackStarted: () => {
     // Mic đang mở nghe wake-word; giọng TTS vọng vào nó là nguồn dương-tính-giả
@@ -366,6 +373,11 @@ const speaker = useSpeakerPlayback({
     // VC-8: cắm đồng hồ AudioContext cho registry viseme (một lần đủ — context
     // sống suốt phiên).
     setVisemeClock(() => speaker.getContext()?.currentTime ?? null);
+    const ctx = speaker.getContext();
+    if (ctx && engineRef.value?.syncClock) {
+      const offset = calculateClockOffset(ctx);
+      engineRef.value.syncClock(offset);
+    }
     // Bám vào analyser MỘT lần cho cả lượt nói. Trước đây việc này nằm ở
     // onSourceStarted, tức chạy lại mỗi chunk — mà chunk được xếp lịch trước
     // khi kêu, nên analyser đọc nhầm nguồn còn im và miệng đóng giữa câu.
@@ -404,6 +416,47 @@ const {
 });
 
 let speakerEpochGate = new SpeakerEpochGate();
+
+const streamBatcher = new StreamBatcher<Message>({
+  messagesRef: messages,
+  createAssistantMessage: () => ({
+    id: typeof generateMsgId === 'function' ? generateMsgId() : `msg-${Date.now()}`,
+    role: 'assistant',
+    text: '',
+    thinking: '',
+    thinkingStartTime: performance.now(),
+    isThinkingActive: true,
+  }),
+  onFlush: () => {
+    scrollToBottom();
+    voice.keepAlive();
+  },
+  processThoughtChunk: (chunk: string) => {
+    return chunk
+      .replace(/<\/?thought>/gi, '')
+      .replace(/<\|channel>thought/gi, '')
+      .replace(/<\/channel_thought>/gi, '')
+      .replace(/<\/?scratchpad>/gi, '');
+  },
+  processTextChunk: (rawChunk: string) => {
+    let chunk = rawChunk
+      .replace(/\[\[SYS_THINKING\]\]/g, t('sys_thinking'))
+      .replace(/\[\[SYS_USING_SKILL\]\]/g, t('sys_using_skill'));
+
+    const parsed = avatarControlStream.push(chunk);
+    chunk = parsed.text;
+    for (const control of parsed.controls) {
+      if (control.type === 'emotion') {
+        engineRef.value?.setExpression?.(control.value);
+      } else if (control.type === 'action') {
+        executeAvatarAction(control.value);
+      } else {
+        executeRegisteredAvatarAnimation(control.value);
+      }
+    }
+    return chunk.replace(/\n/g, '<br/>');
+  },
+});
 
 const handleGatewayMessage = async (data: GatewayMessage) => {
     if (data.event === 'config_data' || data.event === 'config_updated') {
@@ -464,11 +517,13 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
       voice.setProcessing();
     } else if (data.event === 'ai_thinking_end') {
       isThinking.value = false;
+      streamBatcher.finishThinking();
     } else if (data.event === 'ai_stream_reset') {
       if (speaker.isPlaying()) {
         engineRef.value?.onBargeIn?.();
       }
       avatarControlStream.reset();
+      streamBatcher.reset();
       if (
         messages.value.length > 0 &&
         messages.value[messages.value.length - 1].role === 'assistant'
@@ -478,6 +533,7 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
       }
     } else if (data.event === 'ai_stream_start') {
       avatarControlStream.reset();
+      streamBatcher.reset();
       speaker.unblock();
       isThinking.value = false;
 
@@ -533,55 +589,13 @@ const handleGatewayMessage = async (data: GatewayMessage) => {
       triggerRef(messages);
       scrollToBottom();
     } else if (data.event === 'ai_stream_chunk') {
-      let lastMsg = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
-      // Stream Chunk Race Guard: only append if last message is assistant; otherwise push a new assistant bubble
-      if (!lastMsg || lastMsg.role !== 'assistant') {
-        const newAssistantMsg = {
-          id: generateMsgId(),
-          role: 'assistant' as const,
-          text: '',
-          thinking: '',
-        };
-        messages.value.push(newAssistantMsg);
-        lastMsg = newAssistantMsg;
-      }
-      let chunk = data.payload.textChunk as string;
+      const chunk = data.payload.textChunk as string;
       const isThoughtChunk = !!data.payload.isThought;
-
-        if (isThoughtChunk) {
-          // Strip raw XML thought tags if any leak
-          chunk = chunk
-            .replace(/<\/?thought>/gi, '')
-            .replace(/<\|channel>thought/gi, '')
-            .replace(/<\/channel_thought>/gi, '')
-            .replace(/<\/?scratchpad>/gi, '');
-
-          if (lastMsg.thinking === undefined) {
-            lastMsg.thinking = '';
-          }
-          lastMsg.thinking += chunk;
-        } else {
-          chunk = chunk.replace(/\[\[SYS_THINKING\]\]/g, t('sys_thinking'));
-          chunk = chunk.replace(/\[\[SYS_USING_SKILL\]\]/g, t('sys_using_skill'));
-
-          const parsed = avatarControlStream.push(chunk);
-          chunk = parsed.text;
-          for (const control of parsed.controls) {
-            if (control.type === 'emotion') {
-              engineRef.value?.setExpression?.(control.value);
-            } else if (control.type === 'action') {
-              executeAvatarAction(control.value);
-            } else {
-              executeRegisteredAvatarAnimation(control.value);
-            }
-          }
-          chunk = chunk.replace(/\n/g, '<br/>');
-          lastMsg.text += chunk;
-        }
-      triggerRef(messages);
-      scrollToBottom();
+      streamBatcher.pushChunk(chunk, isThoughtChunk);
       voice.keepAlive(); // [v26] Reset 15s timeout on AI stream activity
     } else if (data.event === 'ai_spoken_response') {
+      streamBatcher.flush();
+      streamBatcher.finishThinking();
       speaker.unblock();
       isThinking.value = false;
       // Only transition back to PASSIVE immediately if no audio is currently playing/queued.
@@ -777,11 +791,13 @@ const {
     const tl = parseVisemePayload(payload);
     if (tl && speakerEpochGate.accepts(tl.turnEpoch)) {
       setVisemeTimeline(tl.cues);
+      engineRef.value?.setVisemeTimeline?.(tl.turnEpoch, tl.cues);
     }
   },
   onFlushBinary: (turnEpoch) => {
     speakerEpochGate.observeFlush(turnEpoch);
     resetVisemes(); // VC-8: barge-in xoá cả timeline viseme đang treo
+    engineRef.value?.flush?.();
     speaker.flush();
   },
   onJsonMessage: (data) => {
@@ -1264,23 +1280,13 @@ onDeactivated(() => {
                 : 'self-start chat-bubble-ai rounded-bl-[6px]',
             ]"
           >
-            <details
+            <CoTAccordion
               v-if="msg.thinking"
-              :open="!msg.text || msg.text.length === 0"
-              class="thinking-details mb-2 select-none opacity-80 w-full"
-              style="outline: none"
-            >
-              <summary
-                class="text-xs text-purple-400 hover:text-purple-300 font-semibold focus:outline-none cursor-pointer flex items-center gap-1"
-              >
-                💭 {{ t('thinking_details') }}
-              </summary>
-              <div
-                class="mt-1 pl-2 border-l border-purple-500/30 text-xs text-gray-400/80 leading-relaxed whitespace-pre-line"
-              >
-                {{ msg.thinking }}
-              </div>
-            </details>
+              :thinking="msg.thinking"
+              :is-streaming="!!msg.isThinkingActive"
+              :start-time="msg.thinkingStartTime"
+              :end-time="msg.thinkingEndTime"
+            />
             <div
               v-if="msg.text"
               v-html="renderSafeRichText(msg.text)"

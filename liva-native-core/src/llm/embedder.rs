@@ -67,8 +67,39 @@ pub fn resolve_model_dir() -> PathBuf {
     PathBuf::from("models/embedding")
 }
 
+/// Thread-safe wrapper around `ort::Session` providing concurrent, non-blocking `&self` inference.
+///
+/// ONNX Runtime's underlying C API (`OrtApi::Run`) is natively multi-thread safe on a shared session pointer.
+/// The Rust `ort::Session::run` method requires `&mut self` strictly for lifetime tracking in its safe API.
+/// This wrapper encapsulates interior mutability so concurrent threads can run embeddings without Mutex contention.
+pub struct ThreadSafeSession(std::cell::UnsafeCell<Session>);
+
+unsafe impl Send for ThreadSafeSession {}
+unsafe impl Sync for ThreadSafeSession {}
+
+impl ThreadSafeSession {
+    pub fn new(session: Session) -> Self {
+        Self(std::cell::UnsafeCell::new(session))
+    }
+
+    pub fn run<'s, 'i, 'v: 'i, const N: usize>(
+        &'s self,
+        input_values: impl Into<ort::session::SessionInputs<'i, 'v, N>>,
+    ) -> ort::Result<ort::session::SessionOutputs<'s>> {
+        let session_mut = unsafe { &mut *self.0.get() };
+        session_mut.run(input_values)
+    }
+}
+
+impl std::ops::Deref for ThreadSafeSession {
+    type Target = Session;
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.0.get() }
+    }
+}
+
 pub struct EmbeddingEngine {
-    session: std::sync::Mutex<Session>,
+    session: ThreadSafeSession,
     tokenizer: Tokenizer,
     model_dir: PathBuf,
     /// Model có KHAI BÁO input `token_type_ids` hay không. Nhiều bản export ONNX
@@ -123,7 +154,7 @@ impl EmbeddingEngine {
             .any(|i| i.name() == "token_type_ids");
 
         Ok(Self {
-            session: std::sync::Mutex::new(session),
+            session: ThreadSafeSession::new(session),
             tokenizer,
             model_dir: model_dir.to_path_buf(),
             needs_token_type_ids,
@@ -207,11 +238,8 @@ impl EmbeddingEngine {
             inputs.push(("token_type_ids".into(), tti.into()));
         }
 
-        let mut session_guard = self
+        let outputs = self
             .session
-            .lock()
-            .map_err(|e| format!("Embedding session lock failed: {}", e))?;
-        let outputs = session_guard
             .run(inputs)
             .map_err(|e| format!("Embedding ONNX run failed: {}", e))?;
 

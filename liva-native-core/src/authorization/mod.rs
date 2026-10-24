@@ -1,18 +1,35 @@
-//! Principal-aware command authorization for every external command-plane entry.
-//!
-//! Trusted local diagnostics keep the legacy unrestricted dispatcher. Every
-//! WebView/WebSocket/Telegram principal is fail-closed and must appear in an
-//! explicit allow-list here before it can reach [`crate::handle_command`].
+#![allow(unused_imports, dead_code)]
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum CommandPrincipal {
-    LocalCli,
-    Test,
-    TauriWidget,
-    TauriDashboard,
-    TauriSetup,
-    Telegram,
-}
+//! Principal-aware command authorization and security governance for LIVA.
+//!
+//! Subsystems:
+//! - F19: `session_mode` (Rule-of-Two 3 Session Modes)
+//! - F20: `taint` (3-Lane Data Taint) & `executor_policy` (Sink Enforcement)
+//! - F21: `principal` (Turn-Level Principal Identification) & `tool_pruning` (Dynamic Tool Pruning)
+//! - F22: `capability` (Attenuation-Only Capabilities, 7 Monotonic Invariants, CVE-2026-32922 fix)
+//! - F25: `kill_switch` (Emergency Kill Switch with Atomic Epoch Escalation)
+
+pub mod capability;
+pub mod executor_policy;
+pub mod kill_switch;
+pub mod principal;
+pub mod session_mode;
+pub mod taint;
+pub mod tool_pruning;
+
+pub use capability::{CapabilityGrant, CapabilityToken, DelegationStep};
+pub use executor_policy::ExecutorPolicy;
+pub use kill_switch::EmergencyKillSwitch;
+pub use principal::{AuthorityTier, ContactTrustLevel, Principal, PrincipalProvenance};
+pub use session_mode::{RuleOfTwoVertices, SessionMode, SessionModeGovernor};
+pub use taint::{DataOrigin, DeclassificationReceipt, IntegrityLevel, Labeled, TaintFlags};
+pub use tool_pruning::DynamicToolPruner;
+
+pub use liva_core_types::{CommandPrincipal, SecurityError};
+
+// -----------------------------------------------------------------------------
+// Legacy Command Authorization Allow-Lists (Fail-Closed IPC Whitelist)
+// -----------------------------------------------------------------------------
 
 const SETUP_COMMANDS: &[&str] = &["setup:status", "setup:paths", "setup:fetch"];
 

@@ -1,12 +1,16 @@
 #![allow(non_snake_case)]
+pub mod bitemporal;
 pub mod csr_graph;
 mod deletion;
+pub mod fts_vietnamese;
 
 pub use deletion::{
     ConversationDeletionCounts, ConversationDeletionReport, RetentionSweepReport,
     SubjectDeletionCounts, SubjectDeletionReport, delete_conversation, delete_subject,
     sweep_conversation_retention,
 };
+pub use crate::cognitive::audit_chain::{AuditBlock, Blake3AuditChain};
+
 
 use crate::crypto::EncryptionEngine;
 use arc_swap::ArcSwap;
@@ -333,6 +337,29 @@ fn init_schemas(conn: &Connection) -> Result<(), rusqlite::Error> {
             state_json TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS session_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            event_seq INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_events_lookup ON session_events(session_id, event_seq);
+        CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id, id);
+        CREATE INDEX IF NOT EXISTS idx_session_events_created ON session_events(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS session_checkpoints (
+            checkpoint_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            parent_checkpoint_id TEXT,
+            turn_index INTEGER NOT NULL,
+            state_digest TEXT NOT NULL,
+            state_json TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_checkpoints_sess ON session_checkpoints(session_id, turn_index);
+
         -- Sao lưu bản ghi facts KHÔNG giải mã được (locked) TRƯỚC khi set_fact
         -- ghi đè. Chống mất vĩnh viễn khi đổi khoá: một fact đang locked (đọc ra
         -- rỗng) mà consolidation/LLM ghi đè thì bản gốc mã hoá sẽ mất; ở đây giữ
@@ -599,7 +626,7 @@ fn ensure_foreign_key_integrity(conn: &Connection) -> Result<(), rusqlite::Error
 /// Phiên bản schema hiện tại. Baseline (mọi bảng `CREATE ... IF NOT EXISTS` ở
 /// trên) là **1**. Mỗi lần đổi schema về sau: tăng số này lên và thêm một mục
 /// vào [`MIGRATIONS`].
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 12;
 
 /// Các bước migration tuyến tính. Mỗi mục là `(phiên_bản_đích, sql)` và được
 /// áp khi DB đang ở phiên bản < đích, theo thứ tự tăng dần, mỗi bước một
@@ -816,7 +843,205 @@ const MIGRATIONS: &[(i64, &str)] = &[
          CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON turn_telemetry(ts);
          CREATE INDEX IF NOT EXISTS idx_telemetry_model ON turn_telemetry(model_id);",
     ),
+    // Migration 11: Bitemporal Cognitive Storage, Immutable Evidence Log, Active Singleton Invariant,
+    // Vietnamese FTS5 3-Form Virtual Table & Markdown Sync State (Milestone 3, F13-F18).
+    (
+        11,
+        "DROP INDEX IF EXISTS idx_facts_last_accessed;
+         ALTER TABLE facts RENAME TO facts_legacy;
+
+         CREATE TABLE IF NOT EXISTS facts (
+             fact_id TEXT PRIMARY KEY DEFAULT ('fact_' || hex(randomblob(16))),
+             subject TEXT NOT NULL DEFAULT '',
+             predicate TEXT NOT NULL DEFAULT '',
+             value TEXT NOT NULL,
+             object_value TEXT NOT NULL DEFAULT '',
+             scope TEXT NOT NULL DEFAULT 'personal',
+             origin TEXT NOT NULL DEFAULT 'explicit',
+             confidence REAL NOT NULL DEFAULT 1.0,
+             importance REAL DEFAULT 0.5,
+             sensitivity TEXT NOT NULL DEFAULT 'private',
+             valid_from INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+             valid_to INTEGER,
+             recorded_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+             expired_at INTEGER,
+             superseded_by TEXT,
+             supersede_reason TEXT,
+             reason TEXT,
+             category TEXT,
+             key TEXT,
+             createdAt TEXT DEFAULT '',
+             updatedAt TEXT DEFAULT '',
+             ttlDays INTEGER,
+             source TEXT DEFAULT 'explicit',
+             confidenceScore REAL DEFAULT 1.0,
+             sourceTurnId TEXT,
+             memory_strength REAL DEFAULT 1.0,
+             last_accessed_at INTEGER DEFAULT 0,
+             access_count INTEGER DEFAULT 0,
+             created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+             updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+             FOREIGN KEY (superseded_by) REFERENCES facts(fact_id)
+         );
+
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_active_singleton_fact
+         ON facts (subject, predicate, scope)
+         WHERE valid_to IS NULL AND expired_at IS NULL AND subject != '';
+
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_facts_key_unique ON facts(key);
+         CREATE INDEX IF NOT EXISTS idx_facts_last_accessed ON facts(last_accessed_at DESC);
+         CREATE INDEX IF NOT EXISTS idx_facts_subject_predicate ON facts(subject, predicate);
+         CREATE INDEX IF NOT EXISTS idx_facts_scope ON facts(scope);
+         CREATE INDEX IF NOT EXISTS idx_facts_valid_window ON facts(valid_from, valid_to);
+         CREATE INDEX IF NOT EXISTS idx_facts_system_window ON facts(recorded_at, expired_at);
+         CREATE INDEX IF NOT EXISTS idx_facts_superseded_by ON facts(superseded_by) WHERE superseded_by IS NOT NULL;
+
+         INSERT INTO facts (
+             fact_id, subject, predicate, value, object_value, scope, origin, confidence,
+             importance, sensitivity, valid_from, valid_to, recorded_at, expired_at,
+             superseded_by, supersede_reason, reason, category, key, createdAt, updatedAt, ttlDays, source,
+             confidenceScore, sourceTurnId, memory_strength, last_accessed_at, access_count, created_at, updated_at
+         )
+         SELECT 
+             'fact_legacy_' || key,
+             key,
+             'is',
+             value,
+             value,
+             'personal',
+             source,
+             confidenceScore,
+             importance,
+             'private',
+             strftime('%s', 'now') * 1000,
+             NULL,
+             strftime('%s', 'now') * 1000,
+             NULL,
+             NULL,
+             'migrated_from_legacy_v10',
+             'migrated_from_legacy_v10',
+             category,
+             key,
+             createdAt,
+             updatedAt,
+             ttlDays,
+             source,
+             confidenceScore,
+             sourceTurnId,
+             memory_strength,
+             last_accessed_at,
+             access_count,
+             strftime('%s', 'now') * 1000,
+             strftime('%s', 'now') * 1000
+         FROM facts_legacy;
+
+         DROP TABLE IF EXISTS facts_legacy;
+
+         CREATE TABLE IF NOT EXISTS evidence_log (
+             evidence_id TEXT PRIMARY KEY,
+             raw_content_nfc TEXT NOT NULL DEFAULT '',
+             nfc_content TEXT NOT NULL DEFAULT '',
+             content TEXT NOT NULL DEFAULT '',
+             blake3_hash TEXT UNIQUE,
+             source_channel TEXT NOT NULL DEFAULT 'desktop',
+             source_type TEXT NOT NULL DEFAULT 'desktop',
+             session_id TEXT,
+             turn_id TEXT,
+             principal TEXT NOT NULL DEFAULT 'owner',
+             channel TEXT NOT NULL DEFAULT 'desktop',
+             integrity_label TEXT NOT NULL DEFAULT 'owner_trusted',
+             integrity TEXT NOT NULL DEFAULT 'Trusted',
+             metadata_json TEXT,
+             tombstoned_at INTEGER,
+             tombstone_reason TEXT,
+             recorded_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+             created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+         );
+
+         CREATE INDEX IF NOT EXISTS idx_evidence_session_turn ON evidence_log(session_id, turn_id);
+         CREATE INDEX IF NOT EXISTS idx_evidence_integrity ON evidence_log(integrity);
+         CREATE INDEX IF NOT EXISTS idx_evidence_created_at ON evidence_log(created_at DESC);
+         CREATE INDEX IF NOT EXISTS idx_evidence_recorded_at ON evidence_log(recorded_at DESC);
+         CREATE INDEX IF NOT EXISTS idx_evidence_blake3 ON evidence_log(blake3_hash);
+         CREATE INDEX IF NOT EXISTS idx_evidence_active ON evidence_log(evidence_id) WHERE tombstoned_at IS NULL;
+
+         CREATE TRIGGER IF NOT EXISTS trg_evidence_log_immutable_update
+         BEFORE UPDATE OF evidence_id, raw_content_nfc, nfc_content, content, blake3_hash, source_type, session_id, turn_id, principal, channel, integrity_label, integrity, metadata_json, recorded_at, created_at ON evidence_log
+         BEGIN
+             SELECT RAISE(FAIL, 'LIVA Storage Invariant Violation: evidence_log core fields cannot be modified. Only tombstoned_at and tombstone_reason are mutable.');
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS trg_evidence_log_immutable_delete
+         BEFORE DELETE ON evidence_log
+         BEGIN
+             SELECT RAISE(FAIL, 'LIVA Storage Invariant Violation: evidence_log is append-only immutable. DELETE is prohibited.');
+         END;
+
+         CREATE TABLE IF NOT EXISTS fact_evidence (
+             fact_id TEXT NOT NULL,
+             evidence_id TEXT NOT NULL,
+             confidence_weight REAL NOT NULL DEFAULT 1.0,
+             extracted_at INTEGER NOT NULL,
+             PRIMARY KEY (fact_id, evidence_id),
+             FOREIGN KEY (fact_id) REFERENCES facts(fact_id) ON DELETE CASCADE,
+             FOREIGN KEY (evidence_id) REFERENCES evidence_log(evidence_id)
+         );
+
+         CREATE INDEX IF NOT EXISTS idx_fact_evidence_evidence ON fact_evidence(evidence_id);
+
+         CREATE TABLE IF NOT EXISTS markdown_sync_state (
+             file_path TEXT PRIMARY KEY,
+             blake3_hash TEXT NOT NULL DEFAULT '',
+             last_hash TEXT NOT NULL DEFAULT '',
+             synced_at INTEGER NOT NULL DEFAULT 0,
+             last_synced_at INTEGER NOT NULL DEFAULT 0
+         );
+
+         CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
+             fact_id UNINDEXED,
+             subject,
+             predicate,
+             form_nfc,
+             form_folded,
+             form_bigram,
+             tokenize=\"unicode61 remove_diacritics 0\"
+         );",
+    ),
+    (
+        12,
+        "CREATE TABLE IF NOT EXISTS audit_hash_chain (
+             sequence_num INTEGER PRIMARY KEY AUTOINCREMENT,
+             block_hash TEXT NOT NULL UNIQUE,
+             prev_block_hash TEXT NOT NULL,
+             timestamp_ms INTEGER NOT NULL,
+             principal TEXT NOT NULL,
+             action TEXT NOT NULL,
+             target TEXT NOT NULL,
+             payload_hash TEXT NOT NULL,
+             redacted_payload TEXT NOT NULL,
+             risk_tier TEXT NOT NULL,
+             policy_decision TEXT NOT NULL,
+             status TEXT NOT NULL,
+             duration_ms INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS idx_audit_chain_block_hash ON audit_hash_chain(block_hash);
+         CREATE INDEX IF NOT EXISTS idx_audit_chain_prev_hash ON audit_hash_chain(prev_block_hash);
+         CREATE INDEX IF NOT EXISTS idx_audit_chain_timestamp ON audit_hash_chain(timestamp_ms);
+
+         CREATE TRIGGER IF NOT EXISTS trg_audit_chain_no_update
+         BEFORE UPDATE ON audit_hash_chain
+         BEGIN
+             SELECT RAISE(ABORT, 'Audit log is strictly append-only: UPDATE operations are prohibited');
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS trg_audit_chain_no_delete
+         BEFORE DELETE ON audit_hash_chain
+         BEGIN
+             SELECT RAISE(ABORT, 'Audit log is strictly append-only: DELETE operations are prohibited');
+         END;",
+    ),
 ];
+
 
 /// Đưa schema từ phiên bản hiện tại của DB lên [`SCHEMA_VERSION`].
 ///
@@ -1061,6 +1286,7 @@ fn set_fact_inner(
         ),
     )?;
 
+    crate::active_recall::mark_facts_mutated();
     Ok(())
 }
 
@@ -1858,6 +2084,7 @@ pub fn search_fts_vectors(
          FROM vectors_fts f \
          INNER JOIN vectors_meta m ON m.id = f.rowid \
          WHERE f.content MATCH ? AND m.type != 'conversation_turn' AND {} \
+         ORDER BY f.rank \
          LIMIT ?",
         meta_conditions
     );
@@ -1913,6 +2140,7 @@ pub fn search_fts_vectors(
                  FROM vectors_fts f \
                  INNER JOIN vectors_meta m ON m.id = f.rowid \
                  WHERE f.content MATCH ? AND m.type != 'conversation_turn' AND {} \
+                 ORDER BY f.rank \
                  LIMIT ?",
                 meta_conds
             );
@@ -1990,12 +2218,12 @@ pub fn search_hybrid_vectors(
         let rank = (index + 1) as f64;
         let score = sparse_weight * (1.0 / (K + rank));
 
-        if let Some(existing) = results.iter_mut().find(|r| r.vec_id == item.vec_id) {
+        if let Some(existing) = results.iter_mut().find(|r| r.id == item.id) {
             existing.score += score;
         } else {
             results.push(VectorSearchResult {
                 id: item.id,
-                vec_id: item.vec_id.clone(),
+                vec_id: item.vec_id,
                 content: item.content,
                 r#type: item.r#type,
                 domain: item.domain,

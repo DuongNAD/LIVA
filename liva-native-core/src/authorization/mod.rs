@@ -67,6 +67,10 @@ const WIDGET_COMMANDS: &[&str] = &[
     "cua:emergency_stop",
     "cua:set_mode",
     "cua:get_status",
+    "cua:inspect_ui_tree",
+    "cua:execute_som_action",
+    "cua:run_profile",
+    "cua:list_devices",
 ];
 
 const DASHBOARD_COMMANDS: &[&str] = &[
@@ -150,6 +154,10 @@ const DASHBOARD_COMMANDS: &[&str] = &[
     "cua:set_mode",
     "cua:get_status",
     "cua:query_audit_logs",
+    "cua:inspect_ui_tree",
+    "cua:execute_som_action",
+    "cua:run_profile",
+    "cua:list_devices",
 ];
 
 const TELEGRAM_COMMANDS: &[&str] = &["ping", "status", "chat:completion"];

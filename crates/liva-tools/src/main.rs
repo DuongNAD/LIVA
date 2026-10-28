@@ -623,7 +623,11 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                     .and_then(|v| v.parse::<u32>().ok())
                     .unwrap_or(0);
 
-                let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+                let profile = if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                };
                 let backend = "CPU (AVX2 / in-process llama.cpp)";
 
                 println!("╭─ Cấu hình máy đo Live Inference ────────────────────────────");
@@ -640,7 +644,8 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                         free_ram as f64 / 1024.0 / 1024.0 / 1024.0
                     );
                 }
-                if let Some((total_vram, used_vram)) = liva_native_core::governor::gpu_vram_bytes() {
+                if let Some((total_vram, used_vram)) = liva_native_core::governor::gpu_vram_bytes()
+                {
                     println!(
                         "│ VRAM             : {} MiB tổng · {} MiB đang dùng",
                         total_vram / 1024 / 1024,
@@ -656,7 +661,8 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                 println!("│ Lượt đo          : {}", iterations);
                 println!("╰─────────────────────────────────────────────────────────────\n");
 
-                let mem_before = liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
+                let mem_before =
+                    liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
                 let rss_idle_mb = mem_before.working_set_bytes as f64 / 1024.0 / 1024.0;
 
                 print!("Loading model weights... ");
@@ -668,7 +674,10 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                 llm.swap_model(path, Some(n_ctx), Some(n_gpu_layers), Some(false))
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
-                println!("done in {:.1} ms.\n", t_load.elapsed().as_secs_f64() * 1000.0);
+                println!(
+                    "done in {:.1} ms.\n",
+                    t_load.elapsed().as_secs_f64() * 1000.0
+                );
 
                 print!("Warmup inference turn (excluded from stats)... ");
                 let _ = std::io::stdout().flush();
@@ -692,7 +701,10 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                     }
                     false
                 });
-                println!("TTFT thô: {:.1} ms.\n", warmup_ttft.unwrap_or_default().as_secs_f64() * 1000.0);
+                println!(
+                    "TTFT thô: {:.1} ms.\n",
+                    warmup_ttft.unwrap_or_default().as_secs_f64() * 1000.0
+                );
 
                 let mut raw_ttft_list = Vec::with_capacity(iterations);
                 let mut visible_ttft_list = Vec::with_capacity(iterations);
@@ -700,7 +712,10 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                 let mut total_gen_duration = Duration::ZERO;
 
                 let mut tracer = if let Some(ref path) = out_jsonl {
-                    Some(liva_native_core::eval::trace::JsonlTracer::open_or_create(path).map_err(|e| anyhow::anyhow!("{e}"))?)
+                    Some(
+                        liva_native_core::eval::trace::JsonlTracer::open_or_create(path)
+                            .map_err(|e| anyhow::anyhow!("{e}"))?,
+                    )
                 } else {
                     None
                 };
@@ -709,7 +724,9 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                     let messages = vec![
                         liva_native_core::llm::ChatMessage {
                             role: "system".into(),
-                            content: format!("[turn #{i}] Bạn là LIVA, trợ lý AI cá nhân bảo mật cao."),
+                            content: format!(
+                                "[turn #{i}] Bạn là LIVA, trợ lý AI cá nhân bảo mật cao."
+                            ),
                         },
                         liva_native_core::llm::ChatMessage {
                             role: "user".into(),
@@ -738,9 +755,12 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                         }
                         token_count += 1;
                         token_count <= 32
-                    }).map_err(|e| anyhow::anyhow!("{e}"))?;
+                    })
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-                    let gen_duration = first_token_time.map(|t| t.elapsed()).unwrap_or(Duration::ZERO);
+                    let gen_duration = first_token_time
+                        .map(|t| t.elapsed())
+                        .unwrap_or(Duration::ZERO);
                     let raw = raw_ttft.unwrap_or_else(|| t_start.elapsed());
                     let visible = visible_ttft.unwrap_or(raw);
 
@@ -789,48 +809,79 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                                 status: "Success".into(),
                             }],
                             telemetry: liva_native_core::eval::trace::TraceTelemetry {
-                                model_id: path.file_name().and_then(|n| n.to_str()).unwrap_or("router-gguf").into(),
+                                model_id: path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("router-gguf")
+                                    .into(),
                                 backend: "llama-cpp".into(),
                                 slot_id: 0,
                                 prefix_cache_hit: false,
                                 n_ctx,
                                 sys_ram_free_gb: 24.0,
                                 vram_allocated_mb: None,
-                                per_token_breakdown: liva_native_core::eval::trace::PerTokenBreakdown {
-                                    avg_tauri_ipc_us: 140,
-                                    avg_cpu_sampling_us: 180,
-                                    avg_flash_attention_us: 4100,
-                                    avg_backend_offload_us: 0,
-                                    avg_grammar_masking_us: 48,
-                                },
+                                per_token_breakdown:
+                                    liva_native_core::eval::trace::PerTokenBreakdown {
+                                        avg_tauri_ipc_us: 140,
+                                        avg_cpu_sampling_us: 180,
+                                        avg_flash_attention_us: 4100,
+                                        avg_backend_offload_us: 0,
+                                        avg_grammar_masking_us: 48,
+                                    },
                             },
                             integrity: liva_native_core::eval::trace::TraceIntegrity::default(),
                         };
-                        tr.append_record(&mut rec).map_err(|e| anyhow::anyhow!("{e}"))?;
+                        tr.append_record(&mut rec)
+                            .map_err(|e| anyhow::anyhow!("{e}"))?;
                     }
                 }
 
-                let avg_raw_ms = raw_ttft_list.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / iterations as f64;
-                let avg_vis_ms = visible_ttft_list.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / iterations as f64;
+                let avg_raw_ms = raw_ttft_list
+                    .iter()
+                    .map(|d| d.as_secs_f64() * 1000.0)
+                    .sum::<f64>()
+                    / iterations as f64;
+                let avg_vis_ms = visible_ttft_list
+                    .iter()
+                    .map(|d| d.as_secs_f64() * 1000.0)
+                    .sum::<f64>()
+                    / iterations as f64;
                 let avg_tps = if total_gen_duration.as_secs_f64() > 0.0 {
                     total_tokens as f64 / total_gen_duration.as_secs_f64()
                 } else {
                     0.0
                 };
 
-                let mem_after = liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
-                let rss_peak_mb = (mem_after.peak_working_set_bytes.max(mem_after.working_set_bytes)) as f64 / 1024.0 / 1024.0;
+                let mem_after =
+                    liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
+                let rss_peak_mb = (mem_after
+                    .peak_working_set_bytes
+                    .max(mem_after.working_set_bytes)) as f64
+                    / 1024.0
+                    / 1024.0;
                 let commit_mb = mem_after.pagefile_bytes as f64 / 1024.0 / 1024.0;
 
-                println!("\n╭─ Kết quả Live Benchmark · {} lượt ─────────────────────────", iterations);
+                println!(
+                    "\n╭─ Kết quả Live Benchmark · {} lượt ─────────────────────────",
+                    iterations
+                );
                 println!("│ Raw TTFT avg     : {:>8.2} ms", avg_raw_ms);
                 println!("│ Visible TTFT avg : {:>8.2} ms", avg_vis_ms);
-                println!("│ Throughput       : {:>8.1} tok/s (total {} tokens)", avg_tps, total_tokens);
-                println!("│ Win32 RSS        : {:.1} MiB idle · {:.1} MiB peak (Commit: {:.1} MiB)", rss_idle_mb, rss_peak_mb, commit_mb);
+                println!(
+                    "│ Throughput       : {:>8.1} tok/s (total {} tokens)",
+                    avg_tps, total_tokens
+                );
+                println!(
+                    "│ Win32 RSS        : {:.1} MiB idle · {:.1} MiB peak (Commit: {:.1} MiB)",
+                    rss_idle_mb, rss_peak_mb, commit_mb
+                );
                 println!("╰─────────────────────────────────────────────────────────────");
 
                 if let Some(ref path) = out_jsonl {
-                    println!("  [OK] Hash-chained JSONL trace written to: {}", path.display());
+                    println!(
+                        "  [OK] Hash-chained JSONL trace written to: {}",
+                        path.display()
+                    );
                 }
                 println!("  [OK] Live GGUF TTFT benchmark completed successfully.");
                 return Ok(());
@@ -840,7 +891,8 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
             println!("Prompt: \"{}\"", prompt);
             println!("Iterations: {}", iterations);
 
-            let mem_before = liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
+            let mem_before =
+                liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
             let rss_idle_mb = mem_before.working_set_bytes as f64 / 1024.0 / 1024.0;
 
             // Phase 1: Actor Priority Queue Dispatch Overhead
@@ -853,7 +905,10 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
             let mut ttft_latencies = Vec::with_capacity(iterations);
 
             let mut tracer = if let Some(ref path) = out_jsonl {
-                Some(liva_native_core::eval::trace::JsonlTracer::open_or_create(path).map_err(|e| anyhow::anyhow!("{e}"))?)
+                Some(
+                    liva_native_core::eval::trace::JsonlTracer::open_or_create(path)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?,
+                )
             } else {
                 None
             };
@@ -942,7 +997,8 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                         },
                         integrity: liva_native_core::eval::trace::TraceIntegrity::default(),
                     };
-                    tr.append_record(&mut rec).map_err(|e| anyhow::anyhow!("{e}"))?;
+                    tr.append_record(&mut rec)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
                 }
             }
 
@@ -957,8 +1013,13 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                 .sum::<f64>()
                 / iterations as f64;
 
-            let mem_after = liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
-            let rss_peak_mb = (mem_after.peak_working_set_bytes.max(mem_after.working_set_bytes)) as f64 / 1024.0 / 1024.0;
+            let mem_after =
+                liva_native_core::sysinfo::process_memory_snapshot().unwrap_or_default();
+            let rss_peak_mb = (mem_after
+                .peak_working_set_bytes
+                .max(mem_after.working_set_bytes)) as f64
+                / 1024.0
+                / 1024.0;
             let commit_mb = mem_after.pagefile_bytes as f64 / 1024.0 / 1024.0;
 
             println!(
@@ -982,7 +1043,10 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                 "  [INFO] Note: Evaluated with in-memory streaming actor; full inference requires loaded GGUF weights."
             );
             if let Some(ref path) = out_jsonl {
-                println!("  [OK] Hash-chained JSONL trace written to: {}", path.display());
+                println!(
+                    "  [OK] Hash-chained JSONL trace written to: {}",
+                    path.display()
+                );
             }
             println!("  [OK] LLM Actor dispatch & streaming TTFT benchmark completed.");
             handle.shutdown().await?;
@@ -1032,8 +1096,16 @@ async fn execute_bench_target(target: BenchTarget) -> anyhow::Result<()> {
                     total_n_errs += dual.n_wer.total_errors;
                     total_words += dual.n_wer.reference_words;
                 }
-                let o_wer = if total_words > 0 { total_o_errs as f64 / total_words as f64 * 100.0 } else { 0.0 };
-                let n_wer = if total_words > 0 { total_n_errs as f64 / total_words as f64 * 100.0 } else { 0.0 };
+                let o_wer = if total_words > 0 {
+                    total_o_errs as f64 / total_words as f64 * 100.0
+                } else {
+                    0.0
+                };
+                let n_wer = if total_words > 0 {
+                    total_n_errs as f64 / total_words as f64 * 100.0
+                } else {
+                    0.0
+                };
                 println!(
                     "  Algorithmic Levenshtein verification: O-WER = {:.2}%, N-WER = {:.2}% (Normalization Gain: {:.2}%)",
                     o_wer, n_wer, o_wer - n_wer
@@ -1609,7 +1681,11 @@ async fn run_doctor(args: DoctorArgs) -> anyhow::Result<()> {
             println!("      + Found {item}");
         }
     } else if models_dir.exists() || fallback_dir.exists() {
-        let dir = if models_dir.exists() { models_dir } else { &fallback_dir };
+        let dir = if models_dir.exists() {
+            models_dir
+        } else {
+            &fallback_dir
+        };
         println!(
             "WARN (Models dir found at {} but router checkpoint not downloaded yet)",
             dir.display()
@@ -1924,7 +2000,8 @@ async fn execute_eval_target(target: EvalTarget) -> anyhow::Result<()> {
 
         EvalTarget::Vietnamese { out_markdown } => {
             println!("== [EVAL: Comprehensive Vietnamese Evaluation Suite & Canary Gate] ==");
-            let report = liva_native_core::eval::vietnamese_suite::run_vietnamese_evaluation_suite();
+            let report =
+                liva_native_core::eval::vietnamese_suite::run_vietnamese_evaluation_suite();
             let md = report.to_markdown();
             println!("{}", md);
             if let Some(ref path) = out_markdown {
@@ -1932,9 +2009,14 @@ async fn execute_eval_target(target: EvalTarget) -> anyhow::Result<()> {
                 println!("Report exported to: {}", path.display());
             }
             if !report.canary_gate_passed {
-                anyhow::bail!("Canary gate failed (pass rate: {:.1}%)", report.canary_pass_rate * 100.0);
+                anyhow::bail!(
+                    "Canary gate failed (pass rate: {:.1}%)",
+                    report.canary_pass_rate * 100.0
+                );
             }
-            println!("  [OK] Vietnamese evaluation suite and canary gate passed (100% Canary PASS).");
+            println!(
+                "  [OK] Vietnamese evaluation suite and canary gate passed (100% Canary PASS)."
+            );
         }
     }
     Ok(())
@@ -2047,7 +2129,10 @@ mod tests {
         let cli = Cli::try_parse_from(args).expect("parse bench ttft");
         match cli.command {
             Commands::Bench(BenchArgs {
-                target: Some(BenchTarget::Ttft { iterations, live, .. }),
+                target:
+                    Some(BenchTarget::Ttft {
+                        iterations, live, ..
+                    }),
             }) => {
                 assert_eq!(iterations, 5);
                 assert!(live);
@@ -2164,7 +2249,15 @@ mod tests {
         // Verify clap debug asserts pass across all commands and subcommands (prevents flag collision)
         Cli::command().debug_assert();
 
-        let args = ["liva-tools", "probe", "vision", "-w", "128", "--height", "96"];
+        let args = [
+            "liva-tools",
+            "probe",
+            "vision",
+            "-w",
+            "128",
+            "--height",
+            "96",
+        ];
         let cli = Cli::try_parse_from(args).expect("parse probe vision");
         match cli.command {
             Commands::Probe(ProbeArgs {
@@ -2187,4 +2280,3 @@ mod tests {
         assert!(res.is_ok(), "Doctor check must succeed: {:?}", res);
     }
 }
-

@@ -14,6 +14,8 @@ pub mod continuous_stress_1000_rounds;
 pub mod m1_challenger2_integration;
 #[path = "../m1_resilience_adversarial_challenge.rs"]
 pub mod m1_resilience_adversarial_challenge;
+#[path = "../m2_session_actor_tests.rs"]
+pub mod m2_session_actor_tests;
 #[path = "../m4_adversarial_stress_challenge.rs"]
 pub mod m4_adversarial_stress_challenge;
 #[path = "../m4_checkpoint_adversarial_challenge.rs"]
@@ -25,5 +27,3 @@ pub mod m4_escalation_adversarial_challenge;
 pub mod self_correction_stress;
 #[path = "../swarm_stress_tests.rs"]
 pub mod swarm_stress_tests;
-#[path = "../m2_session_actor_tests.rs"]
-pub mod m2_session_actor_tests;

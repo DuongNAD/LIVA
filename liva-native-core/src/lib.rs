@@ -45,8 +45,8 @@ pub use artifact_trust::{
     verify_trusted_file,
 };
 pub use authorization::{
-    authorize_command, CapabilityGrant, CapabilityToken, CommandPrincipal, DelegationStep,
-    DynamicToolPruner, EmergencyKillSwitch, ExecutorPolicy, Principal, SessionModeGovernor,
+    CapabilityGrant, CapabilityToken, CommandPrincipal, DelegationStep, DynamicToolPruner,
+    EmergencyKillSwitch, ExecutorPolicy, Principal, SessionModeGovernor, authorize_command,
 };
 pub use crypto::EncryptionEngine;
 pub use db::DatabasePool;

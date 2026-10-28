@@ -21,6 +21,14 @@ pub mod empirical_m2_challenger_tests;
 pub mod llm_code_agent_tests;
 #[path = "../m1_llm_priority_actor_challenge.rs"]
 pub mod m1_llm_priority_actor_challenge;
+#[path = "../m2_compact_assembler_tests.rs"]
+pub mod m2_compact_assembler_tests;
+#[path = "../m2_prompt_invariance_and_hmac_challenge.rs"]
+pub mod m2_prompt_invariance_and_hmac_challenge;
+#[path = "../m2_sidecar_tests.rs"]
+pub mod m2_sidecar_tests;
+#[path = "../m2_tool_insurance_tests.rs"]
+pub mod m2_tool_insurance_tests;
 #[path = "../prompt_budget_runtime.rs"]
 pub mod prompt_budget_runtime;
 #[path = "../reflex_lane_tests.rs"]
@@ -35,11 +43,3 @@ pub mod router_expert_autoswap_tests;
 pub mod scoped_tool_registry_tests;
 #[path = "../skills_commands.rs"]
 pub mod skills_commands;
-#[path = "../m2_sidecar_tests.rs"]
-pub mod m2_sidecar_tests;
-#[path = "../m2_compact_assembler_tests.rs"]
-pub mod m2_compact_assembler_tests;
-#[path = "../m2_tool_insurance_tests.rs"]
-pub mod m2_tool_insurance_tests;
-#[path = "../m2_prompt_invariance_and_hmac_challenge.rs"]
-pub mod m2_prompt_invariance_and_hmac_challenge;

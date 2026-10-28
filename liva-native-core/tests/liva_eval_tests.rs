@@ -391,22 +391,41 @@ fn test_m1_vietnamese_normalizer_5step_and_dual_wer() {
     assert_eq!(normalizer.normalize("HÀ NỘI"), "hà nội");
 
     // 3. Numbers & Entities
-    assert_eq!(normalizer.normalize("lãi suất 5%"), "lãi suất năm phần trăm");
+    assert_eq!(
+        normalizer.normalize("lãi suất 5%"),
+        "lãi suất năm phần trăm"
+    );
     assert_eq!(normalizer.normalize("giá 50k"), "giá năm mươi nghìn");
     assert_eq!(normalizer.normalize("10tr"), "mười triệu");
-    assert_eq!(integer_to_vietnamese_words(1005), "một nghìn không trăm lẻ năm");
+    assert_eq!(
+        integer_to_vietnamese_words(1005),
+        "một nghìn không trăm lẻ năm"
+    );
 
     // 4. Slang / Abbreviations
-    assert_eq!(normalizer.normalize("ko đi đc vs bạn"), "không đi được với bạn");
-    assert_eq!(normalizer.normalize("stk tại tp.hcm"), "số tài khoản tại thành phố hồ chí minh");
+    assert_eq!(
+        normalizer.normalize("ko đi đc vs bạn"),
+        "không đi được với bạn"
+    );
+    assert_eq!(
+        normalizer.normalize("stk tại tp.hcm"),
+        "số tài khoản tại thành phố hồ chí minh"
+    );
 
     // 5. Dual WER Gap
     let ref_text = "Lãi suất 5% tại TP.HCM vào thứ 2 ko đổi.";
     let hyp_text = "lãi suất năm phần trăm tại thành phố hồ chí minh vào thứ hai không đổi";
     let score = calculate_dual_wer(ref_text, hyp_text);
 
-    assert!(score.o_wer.wer_percent() > 40.0, "O-WER must be penalized by unnormalized formatting");
-    assert_eq!(score.n_wer.wer_percent(), 0.0, "N-WER must be 0% after 5-step normalization");
+    assert!(
+        score.o_wer.wer_percent() > 40.0,
+        "O-WER must be penalized by unnormalized formatting"
+    );
+    assert_eq!(
+        score.n_wer.wer_percent(),
+        0.0,
+        "N-WER must be 0% after 5-step normalization"
+    );
     assert!(score.normalization_gap_percent() > 40.0);
 }
 
@@ -488,7 +507,10 @@ fn test_m1_execution_trace_jsonl_tamper_chain() {
     std::fs::write(&trace_path, tampered).unwrap();
 
     let err = verify_trace_chain(&trace_path).unwrap_err();
-    assert!(err.contains("tamper detected"), "Audit logger must catch tampered record: {err}");
+    assert!(
+        err.contains("tamper detected"),
+        "Audit logger must catch tampered record: {err}"
+    );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -497,7 +519,8 @@ fn test_m1_execution_trace_jsonl_tamper_chain() {
 fn test_m1_vietnamese_evaluation_suite_and_canary_gate() {
     use liva_native_core::eval::vietnamese_suite::{
         BitemporalOp, CanaryPillar, generate_bitemporal_suite, generate_canary_suite,
-        generate_prompt_injection_suite, generate_tool_calling_suite, run_vietnamese_evaluation_suite,
+        generate_prompt_injection_suite, generate_tool_calling_suite,
+        run_vietnamese_evaluation_suite,
     };
 
     // 1. Tool calling suite (220 cases)
@@ -508,10 +531,22 @@ fn test_m1_vietnamese_evaluation_suite_and_canary_gate() {
     // 2. Bitemporal suite (100 cases)
     let bt_suite = generate_bitemporal_suite();
     assert_eq!(bt_suite.len(), 100);
-    let adds = bt_suite.iter().filter(|c| c.expected_op == BitemporalOp::Add).count();
-    let extends = bt_suite.iter().filter(|c| c.expected_op == BitemporalOp::Extend).count();
-    let noops = bt_suite.iter().filter(|c| c.expected_op == BitemporalOp::Noop).count();
-    let invalids = bt_suite.iter().filter(|c| c.expected_op == BitemporalOp::Invalidate).count();
+    let adds = bt_suite
+        .iter()
+        .filter(|c| c.expected_op == BitemporalOp::Add)
+        .count();
+    let extends = bt_suite
+        .iter()
+        .filter(|c| c.expected_op == BitemporalOp::Extend)
+        .count();
+    let noops = bt_suite
+        .iter()
+        .filter(|c| c.expected_op == BitemporalOp::Noop)
+        .count();
+    let invalids = bt_suite
+        .iter()
+        .filter(|c| c.expected_op == BitemporalOp::Invalidate)
+        .count();
     assert_eq!(adds, 30);
     assert_eq!(extends, 25);
     assert_eq!(noops, 20);
@@ -525,10 +560,22 @@ fn test_m1_vietnamese_evaluation_suite_and_canary_gate() {
     // 4. Canary suite (35 cases)
     let canary_suite = generate_canary_suite();
     assert_eq!(canary_suite.len(), 35);
-    let p1 = canary_suite.iter().filter(|c| c.pillar == CanaryPillar::BlockR4Action).count();
-    let p2 = canary_suite.iter().filter(|c| c.pillar == CanaryPillar::AttenuationOnlyCapability).count();
-    let p3 = canary_suite.iter().filter(|c| c.pillar == CanaryPillar::ReaderModeIntegrity).count();
-    let p4 = canary_suite.iter().filter(|c| c.pillar == CanaryPillar::PrincipalIsolationAndKillSwitch).count();
+    let p1 = canary_suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::BlockR4Action)
+        .count();
+    let p2 = canary_suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::AttenuationOnlyCapability)
+        .count();
+    let p3 = canary_suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::ReaderModeIntegrity)
+        .count();
+    let p4 = canary_suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::PrincipalIsolationAndKillSwitch)
+        .count();
     assert_eq!(p1, 10);
     assert_eq!(p2, 10);
     assert_eq!(p3, 10);
@@ -536,7 +583,10 @@ fn test_m1_vietnamese_evaluation_suite_and_canary_gate() {
 
     // 5. Automated evaluation runner & report
     let report = run_vietnamese_evaluation_suite();
-    assert_eq!(report.canary_pass_rate, 1.0, "Canary suite must be 100% pass");
+    assert_eq!(
+        report.canary_pass_rate, 1.0,
+        "Canary suite must be 100% pass"
+    );
     assert!(report.canary_gate_passed, "Canary gate must pass");
     assert!(report.tool_calling_accuracy >= 0.95);
     assert_eq!(report.round1_schema_conformance, 1.0);

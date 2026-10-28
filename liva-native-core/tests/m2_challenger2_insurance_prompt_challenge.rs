@@ -26,11 +26,11 @@ use liva_native_core::llm::prompt::compact_assembler::{
 };
 use liva_native_core::llm::tool_calling::CatalogTool;
 use liva_native_core::llm::tool_insurance::{
-    canonical_json_hash, compute_hmac_sha256, verify_hmac_constant_time, EscalationReason,
-    HmacReceiptVerifier, InsuranceAction, ToolCallReceipt, ToolInsuranceEngine,
-    MAX_SCHEMA_RETRIES, MAX_TOOL_CHAIN_DEPTH,
+    EscalationReason, HmacReceiptVerifier, InsuranceAction, MAX_SCHEMA_RETRIES,
+    MAX_TOOL_CHAIN_DEPTH, ToolCallReceipt, ToolInsuranceEngine, canonical_json_hash,
+    compute_hmac_sha256, verify_hmac_constant_time,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 fn create_sample_catalog_tools() -> Vec<CatalogTool> {
@@ -94,7 +94,8 @@ fn test_adversarial_tool_result_forgery_unauthenticated_hallucination() {
         call_id: "call_hallucinated_001".into(),
         session_id: "sess_victim".into(),
         tool_name: "write_markdown".into(),
-        canonical_args_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+        canonical_args_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            .into(),
         result_hash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
         read_after_write_verified: true,
         hmac_signature: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".into(),
@@ -102,8 +103,15 @@ fn test_adversarial_tool_result_forgery_unauthenticated_hallucination() {
     };
 
     let result = verifier.verify_receipt(&forged_receipt);
-    assert!(result.is_err(), "Forged HMAC signature must be strictly rejected");
-    assert!(result.unwrap_err().contains("HMAC signature verification failed"));
+    assert!(
+        result.is_err(),
+        "Forged HMAC signature must be strictly rejected"
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .contains("HMAC signature verification failed")
+    );
 }
 
 #[test]
@@ -119,7 +127,15 @@ fn test_adversarial_hmac_single_bit_payload_corruption() {
     let result_content = "Success: 32 bytes written";
 
     let genuine_receipt = engine
-        .issue_signed_receipt(session_id, call_id, tool_name, &args, result_content, true, true)
+        .issue_signed_receipt(
+            session_id,
+            call_id,
+            tool_name,
+            &args,
+            result_content,
+            true,
+            true,
+        )
         .expect("issue genuine receipt");
 
     // Baseline: genuine receipt must verify cleanly
@@ -197,7 +213,8 @@ fn test_adversarial_hmac_single_bit_payload_corruption() {
 
     // 7. Non-hex invalid characters
     let mut non_hex_sig = genuine_receipt.clone();
-    non_hex_sig.hmac_signature = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ".into();
+    non_hex_sig.hmac_signature =
+        "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ".into();
     assert!(
         verifier.verify_receipt(&non_hex_sig).is_err(),
         "Non-hex characters in HMAC signature must fail"
@@ -219,7 +236,15 @@ fn test_adversarial_cross_session_receipt_replay_attack() {
 
     // Session A generates a legitimate receipt
     let receipt_a = engine_a
-        .issue_signed_receipt("session_a", call_id, tool_name, &args, result_content, true, true)
+        .issue_signed_receipt(
+            "session_a",
+            call_id,
+            tool_name,
+            &args,
+            result_content,
+            true,
+            true,
+        )
         .expect("issue receipt in session A");
 
     assert!(engine_a.verifier().verify_receipt(&receipt_a).is_ok());
@@ -253,7 +278,10 @@ fn test_adversarial_read_after_write_unconfirmed_bypass_attempt() {
         true,  // is_mutating
         false, // raw_confirmed is FALSE
     );
-    assert!(unconfirmed_issue.is_err(), "Must reject issuance when RAW check fails");
+    assert!(
+        unconfirmed_issue.is_err(),
+        "Must reject issuance when RAW check fails"
+    );
     let err_msg = unconfirmed_issue.unwrap_err();
     assert!(err_msg.contains("Read-after-write verification failed"));
 
@@ -329,7 +357,11 @@ fn test_adversarial_system_prompt_overflow_strict_rejection() {
     // Construct an adversarial system rules string with > 1000 tokens (> 4000 characters)
     let overflow_system_rules = "You are an AI assistant. ".repeat(300); // 300 * 25 = 7500 chars ≈ 1875 tokens
     let est_tokens = estimate_tokens(&overflow_system_rules);
-    assert!(est_tokens > 1000, "Must exceed 1000 tokens: est = {}", est_tokens);
+    assert!(
+        est_tokens > 1000,
+        "Must exceed 1000 tokens: est = {}",
+        est_tokens
+    );
 
     let result = CompactPromptAssembler::assemble(
         &overflow_system_rules,
@@ -340,7 +372,10 @@ fn test_adversarial_system_prompt_overflow_strict_rejection() {
         &budget,
     );
 
-    assert!(result.is_err(), "Must return Err on system prompt token overflow");
+    assert!(
+        result.is_err(),
+        "Must return Err on system prompt token overflow"
+    );
     let err = result.unwrap_err();
     assert!(err.contains("Static system rules exceed budget"));
     assert!(err.contains("1000"));
@@ -364,7 +399,9 @@ fn test_adversarial_bitemporal_memory_overflow_budget_pruning() {
             fact_id: format!("fact_{i:03}"),
             subject: format!("user_profile_{i}"),
             predicate: "preference_detail_attribute".into(),
-            object_value: format!("detailed_preference_specification_value_string_for_testing_boundaries_{i}"),
+            object_value: format!(
+                "detailed_preference_specification_value_string_for_testing_boundaries_{i}"
+            ),
             scope: "global".into(),
             confidence: (i as f32) / 60.0, // Increasing confidence from 0.0 to ~0.98
             is_active: true,
@@ -388,7 +425,10 @@ fn test_adversarial_bitemporal_memory_overflow_budget_pruning() {
         assembled.estimated_memory_tokens,
         budget.max_memory_tokens
     );
-    assert!(assembled.estimated_memory_tokens > 1000, "Should pack memory close to 1500 token limit");
+    assert!(
+        assembled.estimated_memory_tokens > 1000,
+        "Should pack memory close to 1500 token limit"
+    );
 
     // Invariant: Higher confidence memories must be retained before lower confidence ones!
     // Since confidence 0.98 (i=59) is highest, it must be present in the assembled prompt
@@ -418,7 +458,9 @@ fn test_adversarial_skills_and_tools_catalog_overflow_pruning() {
     for i in 0..40 {
         many_skills.push(SkillIndexEntry {
             skill_id: format!("skill_module_{i:02}"),
-            description: format!("Automated specialist capability description for skill index stress test #{i}"),
+            description: format!(
+                "Automated specialist capability description for skill index stress test #{i}"
+            ),
         });
     }
 
@@ -428,7 +470,9 @@ fn test_adversarial_skills_and_tools_catalog_overflow_pruning() {
         many_tools.push(CatalogTool {
             server: "stress_server".into(),
             name: format!("stress_tool_operation_{i:02}"),
-            description: format!("Comprehensive tool description for stress testing parameter schemas #{i}"),
+            description: format!(
+                "Comprehensive tool description for stress testing parameter schemas #{i}"
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -480,22 +524,23 @@ fn test_adversarial_massive_conversation_history_overflow_pruning() {
     for i in 0..50 {
         let text = format!("Turn {i}: ") + &"Detailed conversation content message payload repeating multiple words for token consumption test. ".repeat(5);
         turns.push(ChatMessage {
-            role: if i % 2 == 0 { "user".into() } else { "assistant".into() },
+            role: if i % 2 == 0 {
+                "user".into()
+            } else {
+                "assistant".into()
+            },
             content: text,
         });
     }
 
-    let assembled = CompactPromptAssembler::assemble(
-        system_rules,
-        &skills,
-        &tools,
-        &memories,
-        &turns,
-        &budget,
-    )
-    .expect("assemble with massive history");
+    let assembled =
+        CompactPromptAssembler::assemble(system_rules, &skills, &tools, &memories, &turns, &budget)
+            .expect("assemble with massive history");
 
-    assert!(assembled.dropped_history_turns > 0, "Older turns must be dropped");
+    assert!(
+        assembled.dropped_history_turns > 0,
+        "Older turns must be dropped"
+    );
 
     // Invariant: The very latest user message MUST be preserved!
     let latest_user_msg = turns.iter().rev().find(|m| m.role == "user").unwrap();
@@ -503,7 +548,10 @@ fn test_adversarial_massive_conversation_history_overflow_pruning() {
         .full_messages
         .iter()
         .any(|m| m.content.contains(&latest_user_msg.content));
-    assert!(found_latest, "Mandatory latest user turn must NEVER be dropped");
+    assert!(
+        found_latest,
+        "Mandatory latest user turn must NEVER be dropped"
+    );
 }
 
 #[test]
@@ -594,7 +642,10 @@ fn test_adversarial_worker_escalation_two_consecutive_schema_failures() {
     let action_step1 = engine.inspect_and_insure(write_tool, &invalid_args_1, 0, 1);
 
     match action_step1 {
-        InsuranceAction::RetryWithFeedback { feedback_prompt, retry_count } => {
+        InsuranceAction::RetryWithFeedback {
+            feedback_prompt,
+            retry_count,
+        } => {
             assert_eq!(retry_count, 1, "Must increment retry_count to 1");
             assert!(feedback_prompt.contains("thiếu tham số bắt buộc: content"));
         }
@@ -630,7 +681,10 @@ fn test_adversarial_worker_escalation_recovery_on_valid_retry() {
     // Attempt 1: Failed (missing path)
     let invalid_args = json!({});
     let action_1 = engine.inspect_and_insure(read_tool, &invalid_args, 0, 1);
-    assert!(matches!(action_1, InsuranceAction::RetryWithFeedback { retry_count: 1, .. }));
+    assert!(matches!(
+        action_1,
+        InsuranceAction::RetryWithFeedback { retry_count: 1, .. }
+    ));
 
     // Attempt 2: Model provides valid args after feedback
     let valid_args = json!({ "path": "notes/read.md", "max_lines": 50 });

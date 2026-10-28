@@ -30,26 +30,21 @@ static RE_DATE_DMY: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex for date d/m/y")
 });
 
-static RE_WEEKDAY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bthứ\s*([2-7])\b").expect("valid regex for weekday")
-});
+static RE_WEEKDAY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bthứ\s*([2-7])\b").expect("valid regex for weekday"));
 
-static RE_PERCENT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(\d+(?:[.,]\d+)?)\s*%").expect("valid regex for percent")
-});
+static RE_PERCENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(\d+(?:[.,]\d+)?)\s*%").expect("valid regex for percent"));
 
 static RE_CURRENCY_VND: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(\d+(?:[.,]\d+)*)\s*(?:đ|₫|vnd|vnđ)\b")
-        .expect("valid regex for currency vnd")
+    Regex::new(r"(?i)(\d+(?:[.,]\d+)*)\s*(?:đ|₫|vnd|vnđ)\b").expect("valid regex for currency vnd")
 });
 
-static RE_CURRENCY_K: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(\d+)\s*k\b").expect("valid regex for k unit")
-});
+static RE_CURRENCY_K: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(\d+)\s*k\b").expect("valid regex for k unit"));
 
-static RE_CURRENCY_TR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(\d+)\s*tr(?:iệu)?\b").expect("valid regex for tr unit")
-});
+static RE_CURRENCY_TR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(\d+)\s*tr(?:iệu)?\b").expect("valid regex for tr unit"));
 
 static RE_CURRENCY_USD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:\$\s*(\d+(?:[.,]\d+)*)|(\d+(?:[.,]\d+)*)\s*\$)")
@@ -61,17 +56,14 @@ static RE_NUMBER_GROUPED: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex for grouped thousands")
 });
 
-static RE_DECIMAL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(\d+)[,.](\d+)\b").expect("valid regex for decimal numbers")
-});
+static RE_DECIMAL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(\d+)[,.](\d+)\b").expect("valid regex for decimal numbers"));
 
-static RE_INTEGER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b\d+\b").expect("valid regex for standalone integers")
-});
+static RE_INTEGER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d+\b").expect("valid regex for standalone integers"));
 
-static RE_MULTI_WHITESPACE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s+").expect("valid regex for whitespace collapsing")
-});
+static RE_MULTI_WHITESPACE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+").expect("valid regex for whitespace collapsing"));
 
 // ============================================================================
 // ABBREVIATIONS & PHONETIC SLANG DICTIONARY
@@ -172,11 +164,7 @@ fn format_sub_billion(n: u64, mut is_highest: bool) -> String {
     let thousands = (n % 1_000_000) / 1_000;
     let units = n % 1_000;
 
-    let groups = [
-        (millions, "triệu"),
-        (thousands, "nghìn"),
-        (units, ""),
-    ];
+    let groups = [(millions, "triệu"), (thousands, "nghìn"), (units, "")];
 
     for &(val, scale) in &groups {
         if val > 0 {
@@ -195,13 +183,7 @@ fn format_sub_billion(n: u64, mut is_highest: bool) -> String {
     words.join(" ")
 }
 
-fn append_triplet_words(
-    words: &mut Vec<&'static str>,
-    h: u32,
-    t: u32,
-    u: u32,
-    is_highest: bool,
-) {
+fn append_triplet_words(words: &mut Vec<&'static str>, h: u32, t: u32, u: u32, is_highest: bool) {
     if h > 0 {
         words.push(DIGIT_WORDS[h as usize]);
         words.push("trăm");
@@ -407,7 +389,10 @@ impl VietnameseNormalizer {
         // 3g. Currency USD: $50 / 50$ -> năm mươi đô la
         result = RE_CURRENCY_USD
             .replace_all(&result, |caps: &regex::Captures| {
-                let raw = caps.get(1).or_else(|| caps.get(2)).map_or("", |m| m.as_str());
+                let raw = caps
+                    .get(1)
+                    .or_else(|| caps.get(2))
+                    .map_or("", |m| m.as_str());
                 let clean = raw.replace(['.', ','], "");
                 let num: u64 = clean.parse().unwrap_or(0);
                 let words = integer_to_vietnamese_words(num);
@@ -562,11 +547,7 @@ impl WerResult {
     /// Calculates Word Error Rate as a percentage (0.0 to 100.0+).
     pub fn wer_percent(&self) -> f64 {
         if self.reference_words == 0 {
-            if self.total_errors == 0 {
-                0.0
-            } else {
-                100.0
-            }
+            if self.total_errors == 0 { 0.0 } else { 100.0 }
         } else {
             (self.total_errors as f64 / self.reference_words as f64) * 100.0
         }
@@ -801,7 +782,10 @@ mod tests {
         );
         // Numbers >= 10^9 and >= 10^12
         assert_eq!(integer_to_vietnamese_words(1_000_000_000), "một tỷ");
-        assert_eq!(integer_to_vietnamese_words(1_000_000_000_000), "một nghìn tỷ");
+        assert_eq!(
+            integer_to_vietnamese_words(1_000_000_000_000),
+            "một nghìn tỷ"
+        );
     }
 
     #[test]
@@ -809,7 +793,10 @@ mod tests {
         let normalizer = VietnameseNormalizer::new();
 
         // Percent
-        assert_eq!(normalizer.normalize("lãi suất 5%"), "lãi suất năm phần trăm");
+        assert_eq!(
+            normalizer.normalize("lãi suất 5%"),
+            "lãi suất năm phần trăm"
+        );
         assert_eq!(
             normalizer.normalize("tăng 2,5%"),
             "tăng hai phẩy năm phần trăm"
@@ -827,21 +814,18 @@ mod tests {
         assert_eq!(normalizer.normalize("chi phí 10tr"), "chi phí mười triệu");
 
         // Currency USD
-        assert_eq!(normalizer.normalize("học phí $50"), "học phí năm mươi đô la");
+        assert_eq!(
+            normalizer.normalize("học phí $50"),
+            "học phí năm mươi đô la"
+        );
 
         // Dates & Weekdays
         assert_eq!(
             normalizer.normalize("họp vào ngày 15/4"),
             "họp vào ngày mười lăm tháng tư"
         );
-        assert_eq!(
-            normalizer.normalize("gặp vào thứ 2"),
-            "gặp vào thứ hai"
-        );
-        assert_eq!(
-            normalizer.normalize("lịch hẹn t6"),
-            "lịch hẹn thứ sáu"
-        );
+        assert_eq!(normalizer.normalize("gặp vào thứ 2"), "gặp vào thứ hai");
+        assert_eq!(normalizer.normalize("lịch hẹn t6"), "lịch hẹn thứ sáu");
     }
 
     #[test]
@@ -866,30 +850,66 @@ mod tests {
         let normalizer = VietnameseNormalizer::new();
 
         // 1. Numbers >= 10^12 and long STK
-        assert_eq!(integer_to_vietnamese_words(1_000_000_000_000), "một nghìn tỷ");
-        assert_eq!(integer_to_vietnamese_words(1_500_000_000_000), "một nghìn năm trăm tỷ");
+        assert_eq!(
+            integer_to_vietnamese_words(1_000_000_000_000),
+            "một nghìn tỷ"
+        );
+        assert_eq!(
+            integer_to_vietnamese_words(1_500_000_000_000),
+            "một nghìn năm trăm tỷ"
+        );
         let norm_stk = normalizer.normalize("Số tài khoản 1234567890123456");
         assert!(!norm_stk.is_empty());
         assert!(!norm_stk.contains("1234567890123456"));
 
         // 2. Grouped thousands vs decimals
-        assert_eq!(normalizer.normalize("Doanh thu 1.000.000 đồng"), "doanh thu một triệu đồng");
-        assert_eq!(normalizer.normalize("Vé xem phim 50.000 đồng"), "vé xem phim năm mươi nghìn đồng");
-        assert_eq!(normalizer.normalize("Tỷ lệ 2.5 phần trăm"), "tỷ lệ hai phẩy năm phần trăm");
+        assert_eq!(
+            normalizer.normalize("Doanh thu 1.000.000 đồng"),
+            "doanh thu một triệu đồng"
+        );
+        assert_eq!(
+            normalizer.normalize("Vé xem phim 50.000 đồng"),
+            "vé xem phim năm mươi nghìn đồng"
+        );
+        assert_eq!(
+            normalizer.normalize("Tỷ lệ 2.5 phần trăm"),
+            "tỷ lệ hai phẩy năm phần trăm"
+        );
 
         // 3. Negative numbers
-        assert_eq!(normalizer.normalize("Nhiệt độ -5 độ C"), "nhiệt độ âm năm độ c");
-        assert_eq!(normalizer.normalize("Lỗ -100.000đ"), "lỗ âm một trăm nghìn đồng");
-        assert_eq!(normalizer.normalize("Tăng trưởng -2,5%"), "tăng trưởng âm hai phẩy năm phần trăm");
-        assert_eq!(normalizer.normalize("Số dư -$50"), "số dư âm năm mươi đô la");
+        assert_eq!(
+            normalizer.normalize("Nhiệt độ -5 độ C"),
+            "nhiệt độ âm năm độ c"
+        );
+        assert_eq!(
+            normalizer.normalize("Lỗ -100.000đ"),
+            "lỗ âm một trăm nghìn đồng"
+        );
+        assert_eq!(
+            normalizer.normalize("Tăng trưởng -2,5%"),
+            "tăng trưởng âm hai phẩy năm phần trăm"
+        );
+        assert_eq!(
+            normalizer.normalize("Số dư -$50"),
+            "số dư âm năm mươi đô la"
+        );
 
         // 4. Dot-terminated abbreviations
         assert_eq!(normalizer.normalize("Tôi ko."), "tôi không");
-        assert_eq!(normalizer.normalize("Vui lòng gửi stk."), "vui lòng gửi số tài khoản");
-        assert_eq!(normalizer.normalize("Chi nhánh tp.hcm."), "chi nhánh thành phố hồ chí minh");
+        assert_eq!(
+            normalizer.normalize("Vui lòng gửi stk."),
+            "vui lòng gửi số tài khoản"
+        );
+        assert_eq!(
+            normalizer.normalize("Chi nhánh tp.hcm."),
+            "chi nhánh thành phố hồ chí minh"
+        );
 
         // 5. Multi-word abbreviation
-        assert_eq!(normalizer.normalize("Tôi sống tại tp hcm"), "tôi sống tại thành phố hồ chí minh");
+        assert_eq!(
+            normalizer.normalize("Tôi sống tại tp hcm"),
+            "tôi sống tại thành phố hồ chí minh"
+        );
     }
 
     #[test]

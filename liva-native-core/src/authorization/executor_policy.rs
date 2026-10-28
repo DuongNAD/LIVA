@@ -86,7 +86,8 @@ impl ExecutorPolicy {
                                 rc.expires_at_ms, now
                             )));
                         }
-                        let computed_hash = crate::cognitive::policy::compute_canonical_args_hash(arguments_json);
+                        let computed_hash =
+                            crate::cognitive::policy::compute_canonical_args_hash(arguments_json);
                         if rc.payload_blake3_hash != computed_hash {
                             return Err(SecurityError::InvalidDeclassificationReceipt(format!(
                                 "Declassification receipt payload hash mismatch: expected {}, got {}",
@@ -223,15 +224,17 @@ mod tests {
             issued_at_ms: 1000,
             expires_at_ms: u64::MAX,
         };
-        assert!(ExecutorPolicy::enforce_sink_call(
-            SessionMode::Actor,
-            "write_file",
-            &empty_args,
-            true,
-            None,
-            Some(&valid_receipt)
-        )
-        .is_ok());
+        assert!(
+            ExecutorPolicy::enforce_sink_call(
+                SessionMode::Actor,
+                "write_file",
+                &empty_args,
+                true,
+                None,
+                Some(&valid_receipt)
+            )
+            .is_ok()
+        );
 
         // 5b. Tainted argument with hash mismatch fails
         let mismatched_receipt = DeclassificationReceipt {
@@ -274,14 +277,16 @@ mod tests {
         ));
 
         // 6. Safe read operation succeeds
-        assert!(ExecutorPolicy::enforce_sink_call(
-            SessionMode::Actor,
-            "get_time",
-            &empty_args,
-            false,
-            None,
-            None
-        )
-        .is_ok());
+        assert!(
+            ExecutorPolicy::enforce_sink_call(
+                SessionMode::Actor,
+                "get_time",
+                &empty_args,
+                false,
+                None,
+                None
+            )
+            .is_ok()
+        );
     }
 }

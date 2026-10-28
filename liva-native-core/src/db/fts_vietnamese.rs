@@ -120,40 +120,30 @@ impl VietnameseThreeFormNormalizer {
 pub fn fold_vietnamese_char(c: char) -> char {
     match c {
         // Vowel A (a, à, á, ả, ã, ạ, ă, ằ, ắ, ẳ, ẵ, ặ, â, ầ, ấ, ẩ, ẫ, ậ)
-        'a' | 'á' | 'à' | 'ả' | 'ã' | 'ạ'
-        | 'ă' | 'ắ' | 'ằ' | 'ẳ' | 'ẵ' | 'ặ'
-        | 'â' | 'ấ' | 'ầ' | 'ẩ' | 'ẫ' | 'ậ'
-        | 'A' | 'Á' | 'À' | 'Ả' | 'Ã' | 'Ạ'
-        | 'Ă' | 'Ắ' | 'Ằ' | 'Ẳ' | 'Ẵ' | 'Ặ'
-        | 'Â' | 'Ấ' | 'Ầ' | 'Ẩ' | 'Ẫ' | 'Ậ' => 'a',
+        'a' | 'á' | 'à' | 'ả' | 'ã' | 'ạ' | 'ă' | 'ắ' | 'ằ' | 'ẳ' | 'ẵ' | 'ặ' | 'â' | 'ấ' | 'ầ'
+        | 'ẩ' | 'ẫ' | 'ậ' | 'A' | 'Á' | 'À' | 'Ả' | 'Ã' | 'Ạ' | 'Ă' | 'Ắ' | 'Ằ' | 'Ẳ' | 'Ẵ'
+        | 'Ặ' | 'Â' | 'Ấ' | 'Ầ' | 'Ẩ' | 'Ẫ' | 'Ậ' => 'a',
 
         // Vowel E (e, è, é, ẻ, ẽ, ẹ, ê, ề, ế, ể, ễ, ệ)
-        'e' | 'é' | 'è' | 'ẻ' | 'ẽ' | 'ẹ'
-        | 'ê' | 'ế' | 'ề' | 'ể' | 'ễ' | 'ệ'
-        | 'E' | 'É' | 'È' | 'Ẻ' | 'Ẽ' | 'Ẹ'
-        | 'Ê' | 'Ế' | 'Ề' | 'Ể' | 'Ễ' | 'Ệ' => 'e',
+        'e' | 'é' | 'è' | 'ẻ' | 'ẽ' | 'ẹ' | 'ê' | 'ế' | 'ề' | 'ể' | 'ễ' | 'ệ' | 'E' | 'É' | 'È'
+        | 'Ẻ' | 'Ẽ' | 'Ẹ' | 'Ê' | 'Ế' | 'Ề' | 'Ể' | 'Ễ' | 'Ệ' => 'e',
 
         // Vowel I (i, ì, í, ỉ, ĩ, ị)
-        'i' | 'í' | 'ì' | 'ỉ' | 'ĩ' | 'ị'
-        | 'I' | 'Í' | 'Ì' | 'Ỉ' | 'Ĩ' | 'Ị' => 'i',
+        'i' | 'í' | 'ì' | 'ỉ' | 'ĩ' | 'ị' | 'I' | 'Í' | 'Ì' | 'Ỉ' | 'Ĩ' | 'Ị' => 'i',
 
         // Vowel O (o, ò, ó, ỏ, õ, ọ, ô, ồ, ố, ổ, ỗ, ộ, ơ, ờ, ớ, ở, ỡ, ợ)
-        'o' | 'ó' | 'ò' | 'ỏ' | 'õ' | 'ọ'
-        | 'ô' | 'ố' | 'ồ' | 'ổ' | 'ỗ' | 'ộ'
-        | 'ơ' | 'ớ' | 'ờ' | 'ở' | 'ỡ' | 'ợ'
-        | 'O' | 'Ó' | 'Ò' | 'Ỏ' | 'Õ' | 'Ọ'
-        | 'Ô' | 'Ố' | 'Ồ' | 'Ổ' | 'Ỗ' | 'Ộ'
-        | 'Ơ' | 'Ớ' | 'Ờ' | 'Ở' | 'Ỡ' | 'Ợ' => 'o',
+        'o' | 'ó' | 'ò' | 'ỏ' | 'õ' | 'ọ' | 'ô' | 'ố' | 'ồ' | 'ổ' | 'ỗ' | 'ộ' | 'ơ' | 'ớ' | 'ờ'
+        | 'ở' | 'ỡ' | 'ợ' | 'O' | 'Ó' | 'Ò' | 'Ỏ' | 'Õ' | 'Ọ' | 'Ô' | 'Ố' | 'Ồ' | 'Ổ' | 'Ỗ'
+        | 'Ộ' | 'Ơ' | 'Ớ' | 'Ờ' | 'Ở' | 'Ỡ' | 'Ợ' => 'o',
 
         // Vowel U (u, ù, ú, ủ, ũ, ụ, ư, ừ, ứ, ử, ữ, ự)
-        'u' | 'ú' | 'ù' | 'ủ' | 'ũ' | 'ụ'
-        | 'ư' | 'ứ' | 'ừ' | 'ử' | 'ữ' | 'ự'
-        | 'U' | 'Ú' | 'Ù' | 'Ủ' | 'Ũ' | 'Ụ'
-        | 'Ư' | 'Ứ' | 'Ừ' | 'Ử' | 'Ữ' | 'Ự' => 'u',
+        'u' | 'ú' | 'ù' | 'ủ' | 'ũ' | 'ụ' | 'ư' | 'ứ' | 'ừ' | 'ử' | 'ữ' | 'ự' | 'U' | 'Ú' | 'Ù'
+        | 'Ủ' | 'Ũ' | 'Ụ' | 'Ư' | 'Ứ' | 'Ừ' | 'Ử' | 'Ữ' | 'Ự' => 'u',
 
         // Vowel Y (y, ỳ, ý, ỷ, ỹ, ỵ)
-        'y' | 'ý' | 'ỳ' | 'ỷ' | 'ỹ' | 'ỵ'
-        | 'Y' | 'Ý' | 'Ỳ' | 'Ỷ' | 'Ỹ' | 'Ỵ' => 'y',
+        'y' | 'ý' | 'ỳ' | 'ỷ' | 'ỹ' | 'ỵ' | 'Y' | 'Ý' | 'Ỳ' | 'Ỷ' | 'Ỹ' | 'Ỵ' => {
+            'y'
+        }
 
         // Consonant Đ
         'đ' | 'Đ' => 'd',
@@ -185,9 +175,36 @@ fn clean_punctuation_and_spaces(text: &str) -> String {
 fn is_punctuation_or_symbol(c: char) -> bool {
     matches!(
         c,
-        '.' | ',' | ';' | ':' | '!' | '?' | '-' | '(' | ')' | '[' | ']' | '{' | '}'
-            | '"' | '\'' | '`' | '/' | '\\' | '|' | '@' | '#' | '$' | '%' | '^'
-            | '&' | '*' | '+' | '=' | '<' | '>' | '~'
+        '.' | ','
+            | ';'
+            | ':'
+            | '!'
+            | '?'
+            | '-'
+            | '('
+            | ')'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '"'
+            | '\''
+            | '`'
+            | '/'
+            | '\\'
+            | '|'
+            | '@'
+            | '#'
+            | '$'
+            | '%'
+            | '^'
+            | '&'
+            | '*'
+            | '+'
+            | '='
+            | '<'
+            | '>'
+            | '~'
     )
 }
 
@@ -233,10 +250,7 @@ pub fn upsert_fact_fts(
     let forms = VietnameseThreeFormNormalizer::normalize(content);
 
     // Delete existing entry if present
-    conn.execute(
-        "DELETE FROM facts_fts WHERE fact_id = ?1",
-        [fact_id],
-    )?;
+    conn.execute("DELETE FROM facts_fts WHERE fact_id = ?1", [fact_id])?;
 
     conn.execute(
         "INSERT INTO facts_fts (fact_id, subject, predicate, form_nfc, form_folded, form_bigram)
@@ -583,7 +597,11 @@ pub fn fuse_hybrid_candidates(
         .into_iter()
         .map(|(fid, base_rrf)| {
             let (decay, conf, imp) = if let Some(m) = meta_map.get(&fid) {
-                (compute_ebbinghaus_decay(m, now_ms), m.confidence, m.importance / 10.0)
+                (
+                    compute_ebbinghaus_decay(m, now_ms),
+                    m.confidence,
+                    m.importance / 10.0,
+                )
             } else {
                 (1.0, 1.0, 1.0)
             };
@@ -595,7 +613,11 @@ pub fn fuse_hybrid_candidates(
         })
         .collect();
 
-    res.sort_by(|a, b| b.final_score.partial_cmp(&a.final_score).unwrap_or(std::cmp::Ordering::Equal));
+    res.sort_by(|a, b| {
+        b.final_score
+            .partial_cmp(&a.final_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     res
 }
 
@@ -621,7 +643,10 @@ mod tests {
         let forms = VietnameseThreeFormNormalizer::normalize(text);
         for ch in forms.form_folded.chars() {
             if ch.is_alphabetic() {
-                assert!(ch.is_ascii_alphabetic(), "Character '{ch}' must be ASCII folded");
+                assert!(
+                    ch.is_ascii_alphabetic(),
+                    "Character '{ch}' must be ASCII folded"
+                );
             }
         }
     }
@@ -642,7 +667,14 @@ mod tests {
         )
         .unwrap();
 
-        upsert_fact_fts(&conn, "f1", "user", "passport", "Chủ sở hữu có hộ chiếu Việt Nam").unwrap();
+        upsert_fact_fts(
+            &conn,
+            "f1",
+            "user",
+            "passport",
+            "Chủ sở hữu có hộ chiếu Việt Nam",
+        )
+        .unwrap();
         upsert_fact_fts(&conn, "f2", "user", "residence", "Sống tại thủ đô Hà Nội").unwrap();
 
         // 1. Search unaccented "ho chieu"
@@ -696,38 +728,39 @@ mod tests {
         fact_episodic.scope = "episodic".into();
 
         let decay_epi = calculate_temporal_decay(&fact_episodic, now_ms);
-        assert!(decay_epi < 0.5, "100-day-old episodic fact must decay significantly");
+        assert!(
+            decay_epi < 0.5,
+            "100-day-old episodic fact must decay significantly"
+        );
         assert!(decay_epi >= 0.10, "Decay must be clamped at 0.10");
     }
 
     #[test]
     fn test_format_preference_reminder() {
         let now_ms = 1_000_000_000_000;
-        let facts = vec![
-            BitemporalFact {
-                fact_id: "f1".into(),
-                subject: "user".into(),
-                predicate: "preference_drink".into(),
-                value: "cà phê sữa đá ít đường".into(),
-                object_value: "cà phê sữa đá ít đường".into(),
-                scope: "personal".into(),
-                origin: FactOrigin::Explicit,
-                confidence: 1.0,
-                valid_from: now_ms,
-                valid_to: None,
-                recorded_at: now_ms,
-                expired_at: None,
-                superseded_by: None,
-                reason: None,
-                supersede_reason: None,
-                category: None,
-                key: None,
-                importance: 9,
-                sensitivity: FactSensitivity::Normal,
-                created_at: now_ms,
-                updated_at: now_ms,
-            },
-        ];
+        let facts = vec![BitemporalFact {
+            fact_id: "f1".into(),
+            subject: "user".into(),
+            predicate: "preference_drink".into(),
+            value: "cà phê sữa đá ít đường".into(),
+            object_value: "cà phê sữa đá ít đường".into(),
+            scope: "personal".into(),
+            origin: FactOrigin::Explicit,
+            confidence: 1.0,
+            valid_from: now_ms,
+            valid_to: None,
+            recorded_at: now_ms,
+            expired_at: None,
+            superseded_by: None,
+            reason: None,
+            supersede_reason: None,
+            category: None,
+            key: None,
+            importance: 9,
+            sensitivity: FactSensitivity::Normal,
+            created_at: now_ms,
+            updated_at: now_ms,
+        }];
 
         let reminder = format_preference_reminder(&facts).expect("reminder");
         assert!(reminder.contains("[Nhắc nhở sở thích người dùng liên quan]:"));
@@ -757,14 +790,23 @@ mod tests {
         // 1. With access_count = 0 -> tau_eff = 180 * 1.0 = 180d -> decay = exp(-1.0) ~ 0.3679
         let decay_0 = compute_ebbinghaus_decay(&meta, now_ms);
         let expected_0 = (-1.0f64).exp();
-        assert!((decay_0 - expected_0).abs() < 1e-4, "access_count=0 must yield base decay");
+        assert!(
+            (decay_0 - expected_0).abs() < 1e-4,
+            "access_count=0 must yield base decay"
+        );
 
         // 2. With access_count = 5 -> tau_eff = 180 * (1 + 0.2*5) = 360d -> decay = exp(-180/360) = exp(-0.5) ~ 0.6065
         meta.access_count = 5;
         let decay_5 = compute_ebbinghaus_decay(&meta, now_ms);
         let expected_5 = (-0.5f64).exp();
-        assert!((decay_5 - expected_5).abs() < 1e-4, "access_count=5 must double half-life");
-        assert!(decay_5 > decay_0, "Reinforcement must significantly improve retention");
+        assert!(
+            (decay_5 - expected_5).abs() < 1e-4,
+            "access_count=5 must double half-life"
+        );
+        assert!(
+            decay_5 > decay_0,
+            "Reinforcement must significantly improve retention"
+        );
 
         // 3. With access_count = 10 -> capped at min(access_count, 5) = 5 -> identical to access_count = 5
         meta.access_count = 10;
@@ -788,24 +830,36 @@ mod tests {
 
         // 1. Empty string query
         let q_empty = VietnameseThreeFormNormalizer::build_fts5_query("");
-        assert!(q_empty.is_empty(), "Empty query should produce empty string");
+        assert!(
+            q_empty.is_empty(),
+            "Empty query should produce empty string"
+        );
         let res_empty = search_facts_fts(&conn, "", 10).unwrap();
         assert!(res_empty.is_empty());
 
         // 2. Whitespace-only query
         let q_ws = VietnameseThreeFormNormalizer::build_fts5_query("   \t\n  ");
-        assert!(q_ws.is_empty(), "Whitespace query should produce empty string");
+        assert!(
+            q_ws.is_empty(),
+            "Whitespace query should produce empty string"
+        );
         let res_ws = search_facts_fts(&conn, "   \t\n  ", 10).unwrap();
         assert!(res_ws.is_empty());
 
         // 3. Punctuation-only query
         let q_punct = VietnameseThreeFormNormalizer::build_fts5_query("??? !@#$%^&*() - + = < >");
-        assert!(q_punct.is_empty(), "Punctuation query should produce empty string");
+        assert!(
+            q_punct.is_empty(),
+            "Punctuation query should produce empty string"
+        );
         let res_punct = search_facts_fts(&conn, "??? !@#$%^&*() - + = < >", 10).unwrap();
         assert!(res_punct.is_empty());
 
         // 4. Standalone wildcard query
         let res_star = search_facts_fts(&conn, "*", 10).unwrap();
-        assert!(res_star.is_empty(), "Standalone '*' query should not crash SQLite FTS5");
+        assert!(
+            res_star.is_empty(),
+            "Standalone '*' query should not crash SQLite FTS5"
+        );
     }
 }

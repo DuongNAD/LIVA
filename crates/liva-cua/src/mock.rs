@@ -11,6 +11,7 @@ use std::time::Duration;
 
 pub struct MockCuaDriver {
     pub windows: Mutex<HashMap<u64, CuaWindowInfo>>,
+    pub ui_trees: Mutex<HashMap<u64, crate::perception::UiTree>>,
     pub dispatched_actions: Mutex<Vec<CuaAction>>,
     pub simulated_uipi_rids: Mutex<HashMap<u64, u32>>,
     pub agent_rid: Mutex<u32>,
@@ -30,6 +31,7 @@ impl MockCuaDriver {
     pub fn new() -> Self {
         Self {
             windows: Mutex::new(HashMap::new()),
+            ui_trees: Mutex::new(HashMap::new()),
             dispatched_actions: Mutex::new(Vec::new()),
             simulated_uipi_rids: Mutex::new(HashMap::new()),
             agent_rid: Mutex::new(0x2000), // Medium integrity (0x2000)
@@ -42,6 +44,10 @@ impl MockCuaDriver {
 
     pub fn insert_window(&self, info: CuaWindowInfo) {
         self.windows.lock().unwrap().insert(info.hwnd, info);
+    }
+
+    pub fn insert_ui_tree(&self, hwnd: u64, tree: crate::perception::UiTree) {
+        self.ui_trees.lock().unwrap().insert(hwnd, tree);
     }
 
     pub fn get_dispatched_actions(&self) -> Vec<CuaAction> {
@@ -196,6 +202,15 @@ impl CuaDriverTrait for MockCuaDriver {
             Some((target_rid, agent_rid))
         } else {
             None
+        }
+    }
+
+    async fn inspect_ui_tree(&self, hwnd: u64) -> Result<crate::perception::UiTree, CuaError> {
+        let trees = self.ui_trees.lock().unwrap();
+        if let Some(tree) = trees.get(&hwnd) {
+            Ok(tree.clone())
+        } else {
+            Ok(crate::perception::UiTree::empty(hwnd))
         }
     }
 }

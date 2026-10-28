@@ -23,7 +23,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time", "rt"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "process"] }
 async-trait = { workspace = true }
 liva-storage = { path = "../liva-storage" }
 rusqlite = { workspace = true }
@@ -38,6 +38,22 @@ r2d2_sqlite = { workspace = true }
 [[test]]
 name = "cua_harness"
 path = "tests/harness.rs"
+
+[[test]]
+name = "perception_tests"
+path = "tests/perception_tests.rs"
+
+[[test]]
+name = "som_perception_challenge"
+path = "tests/suites/som_perception_challenge.rs"
+
+[[test]]
+name = "execution_profile_tests"
+path = "tests/execution_profile_tests.rs"
+
+[[test]]
+name = "adb_driver_tests"
+path = "tests/adb_driver_tests.rs"
 
 [lints]
 workspace = true

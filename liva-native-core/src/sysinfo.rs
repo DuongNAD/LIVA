@@ -189,7 +189,10 @@ mod tests {
 
         let snap = process_memory_snapshot().expect("Windows phải lấy được snapshot bộ nhớ");
         assert!(snap.working_set_bytes > 0, "Working set phải > 0");
-        assert!(snap.peak_working_set_bytes >= snap.working_set_bytes, "Peak RSS phải >= Working set");
+        assert!(
+            snap.peak_working_set_bytes >= snap.working_set_bytes,
+            "Peak RSS phải >= Working set"
+        );
         assert!(snap.pagefile_bytes > 0, "Pagefile bytes phải > 0");
     }
 

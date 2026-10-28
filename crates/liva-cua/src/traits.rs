@@ -29,4 +29,9 @@ pub trait CuaDriverTrait: Send + Sync {
 
     /// Optional hook to receive active Kill-Switch CancellationToken for loop cancellation.
     fn set_cancellation_token(&self, _token: CancellationToken) {}
+
+    /// Inspect and extract structured semantic UI element tree.
+    async fn inspect_ui_tree(&self, hwnd: u64) -> Result<crate::perception::UiTree, CuaError> {
+        Ok(crate::perception::UiTree::empty(hwnd))
+    }
 }

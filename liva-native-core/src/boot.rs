@@ -409,6 +409,7 @@ pub fn build_app_state() -> Result<Boot, BootError> {
 
     let cua_db_handle = db.writer_actor.to_storage_handle();
     let cua_engine = Arc::new(liva_cua::CuaEngine::new(cua_config, Some(cua_db_handle)));
+    mcp_server.set_cua(cua_engine.clone());
 
     let state = Arc::new(AppState {
         db,

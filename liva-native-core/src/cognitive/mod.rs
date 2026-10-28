@@ -37,10 +37,8 @@ pub use memory::{
 };
 pub use observation::{AuditTrace, ObservationStatus, SideEffectRecord, ToolObservation};
 pub use policy::{
-    canonicalize_json, compute_canonical_args_hash, visualize_invisible_chars, PolicyDecision,
-    PolicyEngine, RiskTier,
+    PolicyDecision, PolicyEngine, RiskTier, canonicalize_json, compute_canonical_args_hash,
+    visualize_invisible_chars,
 };
 pub use proposal::{ActionProposal, UndoHint};
 pub use redaction::{ActionAuditRecord, RedactedAuditLedger, SecretScrubber};
-
-

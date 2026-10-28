@@ -27,14 +27,14 @@
 //!    - Lineage chain integrity: superseded_by pointers form an acyclic audit trail.
 
 use liva_native_core::db::bitemporal::{
-    apply_reconciliation, get_active_fact, ingest_evidence, init_bitemporal_schema,
-    query_active_facts, query_fact_history, query_facts_as_of_system_time,
-    query_facts_as_of_world_time, tombstone_evidence, BitemporalFact, FactOrigin, FactSensitivity,
-    ReconciliationOutcome,
+    BitemporalFact, FactOrigin, FactSensitivity, ReconciliationOutcome, apply_reconciliation,
+    get_active_fact, ingest_evidence, init_bitemporal_schema, query_active_facts,
+    query_fact_history, query_facts_as_of_system_time, query_facts_as_of_world_time,
+    tombstone_evidence,
 };
-use rusqlite::{params, Connection};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use rusqlite::{Connection, params};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 fn setup_in_memory_bitemporal_db() -> Connection {
@@ -68,7 +68,10 @@ fn challenge_active_singleton_rejects_duplicate_active_facts() {
          ) VALUES ('fact_dup_1', 'user', 'preferred_editor', 'neovim', 'work', 'explicit', 1.0, 8, 'normal', 1000, NULL, 1000, NULL)",
         [],
     );
-    assert!(err_identical.is_err(), "Duplicate active fact with identical value must be rejected by idx_active_singleton_fact");
+    assert!(
+        err_identical.is_err(),
+        "Duplicate active fact with identical value must be rejected by idx_active_singleton_fact"
+    );
     let err_str = err_identical.unwrap_err().to_string();
     assert!(
         err_str.contains("UNIQUE constraint failed"),
@@ -84,15 +87,25 @@ fn challenge_active_singleton_rejects_duplicate_active_facts() {
          ) VALUES ('fact_dup_2', 'user', 'preferred_editor', 'vscode', 'work', 'explicit', 1.0, 8, 'normal', 2000, NULL, 2000, NULL)",
         [],
     );
-    assert!(err_conflict.is_err(), "Conflicting active fact for same key must be rejected");
     assert!(
-        err_conflict.unwrap_err().to_string().contains("UNIQUE constraint failed"),
+        err_conflict.is_err(),
+        "Conflicting active fact for same key must be rejected"
+    );
+    assert!(
+        err_conflict
+            .unwrap_err()
+            .to_string()
+            .contains("UNIQUE constraint failed"),
         "Must enforce active singleton regardless of value differences"
     );
 
     // Verify that the table still has exactly 1 fact
     let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM facts WHERE subject = 'user' AND predicate = 'preferred_editor'", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM facts WHERE subject = 'user' AND predicate = 'preferred_editor'",
+            [],
+            |r| r.get(0),
+        )
         .expect("count query");
     assert_eq!(count, 1, "Only the original fact must exist in facts table");
 }
@@ -131,7 +144,11 @@ fn challenge_active_singleton_scope_partition_allows_cross_scope_coexistence() {
 
     // Verify all 3 coexist as active facts
     let active_facts = query_active_facts(&conn, None).expect("query all active");
-    assert_eq!(active_facts.len(), 3, "Distinct scopes must isolate active facts without conflict");
+    assert_eq!(
+        active_facts.len(),
+        3,
+        "Distinct scopes must isolate active facts without conflict"
+    );
 
     // But inserting a second active fact in 'personal' must still fail
     let err_dup_personal = conn.execute(
@@ -141,7 +158,10 @@ fn challenge_active_singleton_scope_partition_allows_cross_scope_coexistence() {
          ) VALUES ('fact_dup_personal', 'user', 'email', 'other@gmail.com', 'personal', 'explicit', 1.0, 5, 'private', 2000, NULL, 2000, NULL)",
         [],
     );
-    assert!(err_dup_personal.is_err(), "Duplicate within same scope must fail");
+    assert!(
+        err_dup_personal.is_err(),
+        "Duplicate within same scope must fail"
+    );
 }
 
 #[test]
@@ -203,8 +223,26 @@ fn challenge_active_singleton_multi_step_reconciliation_stress() {
 
     // We simulate 20 successive mutations to the user's favorite programming language
     let languages = [
-        "Rust", "TypeScript", "Python", "Go", "C++", "Zig", "Haskell", "Elixir", "Julia", "OCaml",
-        "Rust", "Rust", "TypeScript", "Swift", "Kotlin", "Java", "C#", "Dart", "Scala", "Rust",
+        "Rust",
+        "TypeScript",
+        "Python",
+        "Go",
+        "C++",
+        "Zig",
+        "Haskell",
+        "Elixir",
+        "Julia",
+        "OCaml",
+        "Rust",
+        "Rust",
+        "TypeScript",
+        "Swift",
+        "Kotlin",
+        "Java",
+        "C#",
+        "Dart",
+        "Scala",
+        "Rust",
     ];
 
     for (i, &lang) in languages.iter().enumerate() {
@@ -263,15 +301,26 @@ fn challenge_active_singleton_multi_step_reconciliation_stress() {
 
     // Verify history length: 20 mutations, 19 transitions (some NOOPs didn't create new rows)
     let history = query_fact_history(&conn, "user", "primary_language", "work").expect("history");
-    assert!(history.len() >= 15, "History should retain all unique past states");
+    assert!(
+        history.len() >= 15,
+        "History should retain all unique past states"
+    );
 
     // Verify lineage integrity: every superseded fact points to a valid later fact
     for fact in &history {
         if let Some(ref next_id) = fact.superseded_by {
             let next_exists: bool = conn
-                .query_row("SELECT 1 FROM facts WHERE fact_id = ?1", params![next_id], |_| Ok(true))
+                .query_row(
+                    "SELECT 1 FROM facts WHERE fact_id = ?1",
+                    params![next_id],
+                    |_| Ok(true),
+                )
                 .unwrap_or(false);
-            assert!(next_exists, "Lineage pointer superseded_by='{}' points to non-existent fact", next_id);
+            assert!(
+                next_exists,
+                "Lineage pointer superseded_by='{}' points to non-existent fact",
+                next_id
+            );
         }
     }
 }
@@ -284,8 +333,18 @@ fn challenge_active_singleton_multi_step_reconciliation_stress() {
 fn challenge_evidence_log_immutable_update_trigger_blocks_all_content_columns() {
     let conn = setup_in_memory_bitemporal_db();
     let text = "Hải đã mua vé máy bay ngày 25/12";
-    let eid = ingest_evidence(&conn, text, "turn", Some("s1"), Some("t1"), "Owner", "tauri", "Trusted", 1000)
-        .expect("ingest");
+    let eid = ingest_evidence(
+        &conn,
+        text,
+        "turn",
+        Some("s1"),
+        Some("t1"),
+        "Owner",
+        "tauri",
+        "Trusted",
+        1000,
+    )
+    .expect("ingest");
 
     // Attack 1: Attempt to alter `nfc_content`
     let res_nfc = conn.execute(
@@ -294,7 +353,11 @@ fn challenge_evidence_log_immutable_update_trigger_blocks_all_content_columns() 
     );
     assert!(res_nfc.is_err(), "Must reject update to nfc_content");
     let err_msg = res_nfc.unwrap_err().to_string();
-    assert!(err_msg.contains("SECURITY VIOLATION"), "Must raise explicit SECURITY VIOLATION: {}", err_msg);
+    assert!(
+        err_msg.contains("SECURITY VIOLATION"),
+        "Must raise explicit SECURITY VIOLATION: {}",
+        err_msg
+    );
 
     // Attack 2: Attempt to alter `content`
     let res_content = conn.execute(
@@ -302,7 +365,12 @@ fn challenge_evidence_log_immutable_update_trigger_blocks_all_content_columns() 
         params![eid],
     );
     assert!(res_content.is_err(), "Must reject update to content column");
-    assert!(res_content.unwrap_err().to_string().contains("SECURITY VIOLATION"));
+    assert!(
+        res_content
+            .unwrap_err()
+            .to_string()
+            .contains("SECURITY VIOLATION")
+    );
 
     // Attack 3: Attempt to alter `evidence_id` (content-addressed hash)
     let res_id = conn.execute(
@@ -310,7 +378,12 @@ fn challenge_evidence_log_immutable_update_trigger_blocks_all_content_columns() 
         params![eid],
     );
     assert!(res_id.is_err(), "Must reject update to evidence_id");
-    assert!(res_id.unwrap_err().to_string().contains("SECURITY VIOLATION"));
+    assert!(
+        res_id
+            .unwrap_err()
+            .to_string()
+            .contains("SECURITY VIOLATION")
+    );
 
     // Attack 4: Attempt to forge `created_at` timestamp
     let res_ts = conn.execute(
@@ -318,24 +391,52 @@ fn challenge_evidence_log_immutable_update_trigger_blocks_all_content_columns() 
         params![eid],
     );
     assert!(res_ts.is_err(), "Must reject update to created_at");
-    assert!(res_ts.unwrap_err().to_string().contains("SECURITY VIOLATION"));
+    assert!(
+        res_ts
+            .unwrap_err()
+            .to_string()
+            .contains("SECURITY VIOLATION")
+    );
 
     // Verify the record remains completely uncorrupted
     let current_content: String = conn
-        .query_row("SELECT nfc_content FROM evidence_log WHERE evidence_id = ?1", params![eid], |r| r.get(0))
+        .query_row(
+            "SELECT nfc_content FROM evidence_log WHERE evidence_id = ?1",
+            params![eid],
+            |r| r.get(0),
+        )
         .expect("read record");
-    assert_eq!(current_content, text, "Content must remain intact after blocked attacks");
+    assert_eq!(
+        current_content, text,
+        "Content must remain intact after blocked attacks"
+    );
 }
 
 #[test]
 fn challenge_evidence_log_immutable_delete_trigger_blocks_physical_deletions() {
     let conn = setup_in_memory_bitemporal_db();
-    let eid = ingest_evidence(&conn, "Dữ liệu nhật ký quan trọng", "turn", None, None, "Owner", "cli", "Trusted", 1000)
-        .expect("ingest");
+    let eid = ingest_evidence(
+        &conn,
+        "Dữ liệu nhật ký quan trọng",
+        "turn",
+        None,
+        None,
+        "Owner",
+        "cli",
+        "Trusted",
+        1000,
+    )
+    .expect("ingest");
 
     // Attack 1: Specific row physical DELETE
-    let res_del = conn.execute("DELETE FROM evidence_log WHERE evidence_id = ?1", params![eid]);
-    assert!(res_del.is_err(), "Must block DELETE of single evidence record");
+    let res_del = conn.execute(
+        "DELETE FROM evidence_log WHERE evidence_id = ?1",
+        params![eid],
+    );
+    assert!(
+        res_del.is_err(),
+        "Must block DELETE of single evidence record"
+    );
     let err_msg = res_del.unwrap_err().to_string();
     assert!(
         err_msg.contains("SECURITY VIOLATION: evidence_log is append-only"),
@@ -345,27 +446,52 @@ fn challenge_evidence_log_immutable_delete_trigger_blocks_physical_deletions() {
 
     // Attack 2: Table-wide wipe attempt (DELETE FROM evidence_log)
     let res_wipe = conn.execute("DELETE FROM evidence_log", []);
-    assert!(res_wipe.is_err(), "Must block bulk DELETE FROM evidence_log");
-    assert!(res_wipe.unwrap_err().to_string().contains("SECURITY VIOLATION"));
+    assert!(
+        res_wipe.is_err(),
+        "Must block bulk DELETE FROM evidence_log"
+    );
+    assert!(
+        res_wipe
+            .unwrap_err()
+            .to_string()
+            .contains("SECURITY VIOLATION")
+    );
 
     // Verify row still exists
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM evidence_log", [], |r| r.get(0)).expect("count");
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM evidence_log", [], |r| r.get(0))
+        .expect("count");
     assert_eq!(count, 1, "Evidence row must survive DELETE attacks");
 }
 
 #[test]
 fn challenge_evidence_log_tombstoning_lifecycle_and_idempotence() {
     let conn = setup_in_memory_bitemporal_db();
-    let eid = ingest_evidence(&conn, "Thông tin cần quên", "turn", None, None, "Owner", "cli", "Trusted", 1000)
-        .expect("ingest");
+    let eid = ingest_evidence(
+        &conn,
+        "Thông tin cần quên",
+        "turn",
+        None,
+        None,
+        "Owner",
+        "cli",
+        "Trusted",
+        1000,
+    )
+    .expect("ingest");
 
     // Tombstone the record
-    let tombstone_res = tombstone_evidence(&conn, &eid, "right_to_be_forgotten", 1500).expect("tombstone");
+    let tombstone_res =
+        tombstone_evidence(&conn, &eid, "right_to_be_forgotten", 1500).expect("tombstone");
     assert!(tombstone_res, "First tombstone should succeed");
 
     // Second tombstone on already tombstoned record -> returns false (idempotent noop)
-    let tombstone_repeat = tombstone_evidence(&conn, &eid, "second_attempt", 1600).expect("tombstone repeat");
-    assert!(!tombstone_repeat, "Repeated tombstone should be a safe noop returning false");
+    let tombstone_repeat =
+        tombstone_evidence(&conn, &eid, "second_attempt", 1600).expect("tombstone repeat");
+    assert!(
+        !tombstone_repeat,
+        "Repeated tombstone should be a safe noop returning false"
+    );
 
     // Verify row is marked tombstoned
     let (tombstoned_at, reason): (Option<i64>, Option<String>) = conn
@@ -384,12 +510,27 @@ fn challenge_evidence_log_empty_and_whitespace_rejection() {
     let conn = setup_in_memory_bitemporal_db();
 
     // Empty string
-    let res_empty = ingest_evidence(&conn, "", "turn", None, None, "Owner", "cli", "Trusted", 1000);
+    let res_empty = ingest_evidence(
+        &conn, "", "turn", None, None, "Owner", "cli", "Trusted", 1000,
+    );
     assert!(res_empty.is_err(), "Must reject empty evidence string");
 
     // Pure whitespace
-    let res_ws = ingest_evidence(&conn, "   \t\n  ", "turn", None, None, "Owner", "cli", "Trusted", 1000);
-    assert!(res_ws.is_err(), "Must reject whitespace-only evidence string");
+    let res_ws = ingest_evidence(
+        &conn,
+        "   \t\n  ",
+        "turn",
+        None,
+        None,
+        "Owner",
+        "cli",
+        "Trusted",
+        1000,
+    );
+    assert!(
+        res_ws.is_err(),
+        "Must reject whitespace-only evidence string"
+    );
 }
 
 #[test]
@@ -403,16 +544,26 @@ fn challenge_evidence_log_vietnamese_nfc_canonicalization_stress() {
         // Đà Nẵng
         ("Đà Nẵng", "\u{0110}a\u{0300} N\u{0103}\u{0303}ng"),
         // Thành phố Hồ Chí Minh
-        ("Thành phố Hồ Chí Minh", "Tha\u{0300}nh ph\u{00f4}\u{0301} H\u{00f4}\u{0300} Chi\u{0301} Minh"),
+        (
+            "Thành phố Hồ Chí Minh",
+            "Tha\u{0300}nh ph\u{00f4}\u{0301} H\u{00f4}\u{0300} Chi\u{0301} Minh",
+        ),
         // Cà phê sữa đá
-        ("Cà phê sữa đá", "Ca\u{0300} ph\u{00ea} s\u{01b0}\u{0303}a \u{0111}a\u{0301}"),
+        (
+            "Cà phê sữa đá",
+            "Ca\u{0300} ph\u{00ea} s\u{01b0}\u{0303}a \u{0111}a\u{0301}",
+        ),
     ];
 
     for (nfc_str, nfd_str) in pairs {
-        let id_nfc = ingest_evidence(&conn, nfc_str, "turn", None, None, "Owner", "cli", "Trusted", 1000)
-            .expect("ingest nfc");
-        let id_nfd = ingest_evidence(&conn, nfd_str, "turn", None, None, "Owner", "cli", "Trusted", 1001)
-            .expect("ingest nfd");
+        let id_nfc = ingest_evidence(
+            &conn, nfc_str, "turn", None, None, "Owner", "cli", "Trusted", 1000,
+        )
+        .expect("ingest nfc");
+        let id_nfd = ingest_evidence(
+            &conn, nfd_str, "turn", None, None, "Owner", "cli", "Trusted", 1001,
+        )
+        .expect("ingest nfd");
 
         assert_eq!(
             id_nfc, id_nfd,
@@ -433,8 +584,8 @@ fn challenge_bitemporal_retroactive_fact_orthogonality() {
     // Scenario: User tells LIVA at t_sys = 2026-05-01 (1_777_593_600_000 ms)
     // that they lived in Paris from 2020-01-01 (1_577_836_800_000 ms) to 2022-01-01 (1_640_995_200_000 ms).
     let t_world_start = 1_577_836_800_000i64; // 2020-01-01
-    let t_world_end = 1_640_995_200_000i64;   // 2022-01-01
-    let t_sys_record = 1_777_593_600_000i64;  // 2026-05-01
+    let t_world_end = 1_640_995_200_000i64; // 2022-01-01
+    let t_sys_record = 1_777_593_600_000i64; // 2026-05-01
 
     conn.execute(
         "INSERT INTO facts (
@@ -452,18 +603,33 @@ fn challenge_bitemporal_retroactive_fact_orthogonality() {
 
     // 2. World Time Check after validity ended (t_world = 2023-01-01)
     let t_world_after = 1_672_531_200_000i64;
-    let world_after = query_facts_as_of_world_time(&conn, t_world_after).expect("query world time after");
-    assert_eq!(world_after.len(), 0, "Fact was no longer valid in the world in 2023");
+    let world_after =
+        query_facts_as_of_world_time(&conn, t_world_after).expect("query world time after");
+    assert_eq!(
+        world_after.len(),
+        0,
+        "Fact was no longer valid in the world in 2023"
+    );
 
     // 3. System Time Check before recording (t_sys = 2021-01-01):
     // What did LIVA know at transaction time in 2021? NOTHING!
-    let sys_facts_2021 = query_facts_as_of_system_time(&conn, t_world_mid).expect("query sys time 2021");
-    assert_eq!(sys_facts_2021.len(), 0, "LIVA system did NOT know about Paris in 2021 (recorded in 2026)");
+    let sys_facts_2021 =
+        query_facts_as_of_system_time(&conn, t_world_mid).expect("query sys time 2021");
+    assert_eq!(
+        sys_facts_2021.len(),
+        0,
+        "LIVA system did NOT know about Paris in 2021 (recorded in 2026)"
+    );
 
     // 4. System Time Check after recording (t_sys = 2026-06-01):
     // LIVA knows about it in 2026
-    let sys_facts_2026 = query_facts_as_of_system_time(&conn, t_sys_record + 1000).expect("query sys time 2026");
-    assert_eq!(sys_facts_2026.len(), 1, "LIVA knows about Paris after transaction recording in 2026");
+    let sys_facts_2026 =
+        query_facts_as_of_system_time(&conn, t_sys_record + 1000).expect("query sys time 2026");
+    assert_eq!(
+        sys_facts_2026.len(),
+        1,
+        "LIVA knows about Paris after transaction recording in 2026"
+    );
 }
 
 #[test]
@@ -485,15 +651,27 @@ fn challenge_bitemporal_prescheduled_future_fact_orthogonality() {
 
     // System knew this fact at t=1500 (since recorded_at=1000)
     let sys_facts = query_facts_as_of_system_time(&conn, 1500).expect("query sys");
-    assert_eq!(sys_facts.len(), 1, "System already knows about scheduled move");
+    assert_eq!(
+        sys_facts.len(),
+        1,
+        "System already knows about scheduled move"
+    );
 
     // But in the real world at t=2000, user does NOT yet live in Tokyo
     let world_facts_2000 = query_facts_as_of_world_time(&conn, 2000).expect("query world 2000");
-    assert_eq!(world_facts_2000.len(), 0, "Fact is not yet valid in world time at t=2000");
+    assert_eq!(
+        world_facts_2000.len(),
+        0,
+        "Fact is not yet valid in world time at t=2000"
+    );
 
     // In the real world at t=6000, user DOES live in Tokyo
     let world_facts_6000 = query_facts_as_of_world_time(&conn, 6000).expect("query world 6000");
-    assert_eq!(world_facts_6000.len(), 1, "Fact is valid in world time at t=6000");
+    assert_eq!(
+        world_facts_6000.len(),
+        1,
+        "Fact is valid in world time at t=6000"
+    );
     assert_eq!(world_facts_6000[0].value, "Tokyo");
 }
 

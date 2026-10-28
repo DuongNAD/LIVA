@@ -13,18 +13,17 @@ use liva_native_core::cognitive::deterministic_writer::{
 };
 use liva_native_core::cognitive::markdown_sync::{MarkdownSyncConfig, MarkdownSyncManager};
 use liva_native_core::db::bitemporal::{
-    apply_reconciliation, get_active_fact, ingest_evidence, ingest_evidence_log,
-    init_bitemporal_schema, query_active_facts, query_fact_history,
-    query_facts_as_of_system_time, query_facts_as_of_world_time, tombstone_evidence,
-    BitemporalFact, FactOrigin, FactScope, FactSensitivity, IntegrityLabel,
-    ReconciliationOutcome, SourceChannel,
+    BitemporalFact, FactOrigin, FactScope, FactSensitivity, IntegrityLabel, ReconciliationOutcome,
+    SourceChannel, apply_reconciliation, get_active_fact, ingest_evidence, ingest_evidence_log,
+    init_bitemporal_schema, query_active_facts, query_fact_history, query_facts_as_of_system_time,
+    query_facts_as_of_world_time, tombstone_evidence,
 };
 use liva_native_core::db::fts_vietnamese::{
-    compute_ebbinghaus_decay, fold_vietnamese_char, fuse_hybrid_candidates,
-    init_facts_fts_schema, search_facts_fts, upsert_fact_fts, FactScoringMeta,
-    RetrievalCandidate, VietnameseThreeFormNormalizer,
+    FactScoringMeta, RetrievalCandidate, VietnameseThreeFormNormalizer, compute_ebbinghaus_decay,
+    fold_vietnamese_char, fuse_hybrid_candidates, init_facts_fts_schema, search_facts_fts,
+    upsert_fact_fts,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,42 +66,92 @@ fn test_f13_evidence_log_nfc_content_addressed_deduplication() {
     let composed_nfc = "Tôi sống tại Hà Nội";
     let decomposed_nfd = "T\u{00f4}i s\u{00f4}\u{0301}ng ta\u{0323}i Ha\u{0300} N\u{00f4}\u{0323}i";
 
-    let id1 = ingest_evidence(&conn, composed_nfc, "turn", None, None, "Owner", "tauri", "Trusted", 1000)
-        .expect("ingest composed");
-    let id2 = ingest_evidence(&conn, decomposed_nfd, "turn", None, None, "Owner", "tauri", "Trusted", 1001)
-        .expect("ingest decomposed");
+    let id1 = ingest_evidence(
+        &conn,
+        composed_nfc,
+        "turn",
+        None,
+        None,
+        "Owner",
+        "tauri",
+        "Trusted",
+        1000,
+    )
+    .expect("ingest composed");
+    let id2 = ingest_evidence(
+        &conn,
+        decomposed_nfd,
+        "turn",
+        None,
+        None,
+        "Owner",
+        "tauri",
+        "Trusted",
+        1001,
+    )
+    .expect("ingest decomposed");
 
-    assert_eq!(id1, id2, "NFC normalization must yield identical BLAKE3 content-addressed ID");
+    assert_eq!(
+        id1, id2,
+        "NFC normalization must yield identical BLAKE3 content-addressed ID"
+    );
 
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM evidence_log", [], |r| r.get(0))
         .expect("count rows");
-    assert_eq!(count, 1, "Content-addressing must deduplicate identical NFC evidence");
+    assert_eq!(
+        count, 1,
+        "Content-addressing must deduplicate identical NFC evidence"
+    );
 }
 
 #[test]
 fn test_f13_evidence_log_immutability_triggers_and_tombstoning() {
     let conn = setup_m3_test_db();
-    let id = ingest_evidence(&conn, "Thông tin bí mật", "turn", None, None, "Owner", "tauri", "Trusted", 1000)
-        .expect("ingest evidence");
+    let id = ingest_evidence(
+        &conn,
+        "Thông tin bí mật",
+        "turn",
+        None,
+        None,
+        "Owner",
+        "tauri",
+        "Trusted",
+        1000,
+    )
+    .expect("ingest evidence");
 
     // Physical UPDATE must be aborted by trigger
     let update_res = conn.execute(
         "UPDATE evidence_log SET nfc_content = 'Sửa lén' WHERE evidence_id = ?1",
         params![id],
     );
-    assert!(update_res.is_err(), "Trigger must reject physical modification of evidence_log");
+    assert!(
+        update_res.is_err(),
+        "Trigger must reject physical modification of evidence_log"
+    );
 
     // Physical DELETE must be aborted by trigger
-    let delete_res = conn.execute("DELETE FROM evidence_log WHERE evidence_id = ?1", params![id]);
-    assert!(delete_res.is_err(), "Trigger must reject physical deletion of evidence_log");
+    let delete_res = conn.execute(
+        "DELETE FROM evidence_log WHERE evidence_id = ?1",
+        params![id],
+    );
+    assert!(
+        delete_res.is_err(),
+        "Trigger must reject physical deletion of evidence_log"
+    );
 
     // Tombstoning must be accepted
-    let tombstone_res = tombstone_evidence(&conn, &id, "user_explicit_forget", 1050).expect("tombstone");
+    let tombstone_res =
+        tombstone_evidence(&conn, &id, "user_explicit_forget", 1050).expect("tombstone");
     assert!(tombstone_res, "Tombstone update should succeed");
 
     let is_tombstoned: Option<i64> = conn
-        .query_row("SELECT tombstoned_at FROM evidence_log WHERE evidence_id = ?1", params![id], |r| r.get(0))
+        .query_row(
+            "SELECT tombstoned_at FROM evidence_log WHERE evidence_id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
         .expect("query tombstoned");
     assert_eq!(is_tombstoned, Some(1050));
 }
@@ -130,14 +179,27 @@ fn test_f15_active_fact_singleton_invariant_enforcement() {
         [],
     );
 
-    assert!(err.is_err(), "idx_active_singleton_fact must prevent simultaneous active singleton facts");
+    assert!(
+        err.is_err(),
+        "idx_active_singleton_fact must prevent simultaneous active singleton facts"
+    );
 }
 
 #[test]
 fn test_f14_f15_four_action_reconciliation_and_time_travel() {
     let mut conn = setup_m3_test_db();
-    let eid = ingest_evidence(&conn, "Tôi ở Hà Nội từ 2026", "turn", None, None, "Owner", "cli", "Trusted", 1000)
-        .expect("ingest");
+    let eid = ingest_evidence(
+        &conn,
+        "Tôi ở Hà Nội từ 2026",
+        "turn",
+        None,
+        None,
+        "Owner",
+        "cli",
+        "Trusted",
+        1000,
+    )
+    .expect("ingest");
 
     // 1. ADD
     let f1 = BitemporalFact {
@@ -167,7 +229,12 @@ fn test_f14_f15_four_action_reconciliation_and_time_travel() {
     let tx = conn.transaction().expect("tx1");
     let out1 = apply_reconciliation(&tx, f1.clone(), Some(&eid), 1000).expect("add");
     tx.commit().expect("commit tx1");
-    assert_eq!(out1, ReconciliationOutcome::Added { fact_id: "fact_hanoi".into() });
+    assert_eq!(
+        out1,
+        ReconciliationOutcome::Added {
+            fact_id: "fact_hanoi".into()
+        }
+    );
 
     // 2. NOOP: Same fact asserted
     let tx = conn.transaction().expect("tx2");
@@ -184,7 +251,12 @@ fn test_f14_f15_four_action_reconciliation_and_time_travel() {
     let tx = conn.transaction().expect("tx3");
     let out3 = apply_reconciliation(&tx, f1_extended, Some(&eid), 1200).expect("extend");
     tx.commit().expect("commit tx3");
-    assert_eq!(out3, ReconciliationOutcome::Extended { fact_id: "fact_hanoi".into() });
+    assert_eq!(
+        out3,
+        ReconciliationOutcome::Extended {
+            fact_id: "fact_hanoi".into()
+        }
+    );
 
     // 4. INVALIDATE: User moved to Đà Nẵng
     let f2 = BitemporalFact {
@@ -241,7 +313,8 @@ fn test_f14_f15_four_action_reconciliation_and_time_travel() {
     assert_eq!(as_of_2500[0].value, "Đà Nẵng");
 
     // Full Lineage History
-    let history = query_fact_history(&conn, "user", "residence", "personal").expect("query history");
+    let history =
+        query_fact_history(&conn, "user", "residence", "personal").expect("query history");
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].fact_id, "fact_hanoi");
     assert_eq!(history[0].superseded_by, Some("fact_danang".into()));
@@ -275,7 +348,10 @@ fn test_f16_deterministic_writer_sub_5ms_rule_extraction() {
         "Rule extraction must be ultra-fast (took {}ms)",
         elapsed.as_millis()
     );
-    assert!(!outcomes.is_empty(), "Should have extracted and reconciled facts");
+    assert!(
+        !outcomes.is_empty(),
+        "Should have extracted and reconciled facts"
+    );
 
     let active_facts = query_active_facts(&conn, None).expect("query active");
     assert!(!active_facts.is_empty(), "Fact must be recorded in DB");
@@ -297,13 +373,19 @@ fn test_f16_memghost_defense_blocks_assistant_and_untrusted_channels() {
 
     // Assistant prose trying to mutate protected personal preference -> BLOCKED
     let filter_res1 = MemGhostFilter::evaluate(&candidate, CommandPrincipal::LocalCli, false);
-    assert!(matches!(filter_res1, MemGhostFilterResult::RejectedBlocked { .. }));
+    assert!(matches!(
+        filter_res1,
+        MemGhostFilterResult::RejectedBlocked { .. }
+    ));
 
     // Untrusted channel (e.g. web/telegram stranger) -> BLOCKED
     let mut candidate2 = candidate.clone();
     candidate2.source_role = "user".into();
     let filter_res2 = MemGhostFilter::evaluate(&candidate2, CommandPrincipal::Telegram, true);
-    assert!(matches!(filter_res2, MemGhostFilterResult::RejectedBlocked { .. }));
+    assert!(matches!(
+        filter_res2,
+        MemGhostFilterResult::RejectedBlocked { .. }
+    ));
 }
 
 #[test]
@@ -322,7 +404,10 @@ fn test_f16_anti_hallucination_grounding_verification() {
         source_role: "user".into(),
     };
     let res1 = AntiHallucinationVerifier::verify(&grounded_candidate, raw_evidence);
-    assert_eq!(res1, liva_native_core::cognitive::deterministic_writer::AntiHallucinationResult::Grounded);
+    assert_eq!(
+        res1,
+        liva_native_core::cognitive::deterministic_writer::AntiHallucinationResult::Grounded
+    );
 
     // Fact with fabricated number NOT in evidence -> REJECTED
     let fabricated_candidate = CandidateFact {
@@ -336,7 +421,10 @@ fn test_f16_anti_hallucination_grounding_verification() {
         source_role: "user".into(),
     };
     let res2 = AntiHallucinationVerifier::verify(&fabricated_candidate, raw_evidence);
-    assert!(matches!(res2, liva_native_core::cognitive::deterministic_writer::AntiHallucinationResult::Rejected { .. }));
+    assert!(matches!(
+        res2,
+        liva_native_core::cognitive::deterministic_writer::AntiHallucinationResult::Rejected { .. }
+    ));
 }
 
 // ============================================================================
@@ -358,15 +446,30 @@ fn test_f17_vietnamese_normalizer_and_unaccented_matching() {
     let text = "Căn cước công dân và hộ chiếu tại Đà Nẵng";
     let forms = VietnameseThreeFormNormalizer::normalize(text);
     assert_eq!(forms.form_nfc, "căn cước công dân và hộ chiếu tại đà nẵng");
-    assert_eq!(forms.form_folded, "can cuoc cong dan va ho chieu tai da nang");
+    assert_eq!(
+        forms.form_folded,
+        "can cuoc cong dan va ho chieu tai da nang"
+    );
     assert!(forms.form_bigram.contains("ho_chieu"));
     assert!(forms.form_bigram.contains("da_nang"));
 
     // Upsert into SQLite FTS5 table
-    upsert_fact_fts(&conn, "fact_passport", "user", "giấy_tờ", "Hộ chiếu Việt Nam cấp tại Đà Nẵng")
-        .expect("upsert fts");
-    upsert_fact_fts(&conn, "fact_bike", "user", "sở_thích", "Bảo hộ lao động và đèn chiếu sáng")
-        .expect("upsert fts");
+    upsert_fact_fts(
+        &conn,
+        "fact_passport",
+        "user",
+        "giấy_tờ",
+        "Hộ chiếu Việt Nam cấp tại Đà Nẵng",
+    )
+    .expect("upsert fts");
+    upsert_fact_fts(
+        &conn,
+        "fact_bike",
+        "user",
+        "sở_thích",
+        "Bảo hộ lao động và đèn chiếu sáng",
+    )
+    .expect("upsert fts");
 
     // 1. Search with exact unaccented query "ho chieu"
     let hits1 = search_facts_fts(&conn, "ho chieu", 5).expect("search");
@@ -426,19 +529,37 @@ fn test_f17_hybrid_rrf_with_dynamic_ebbinghaus_decay() {
     );
 
     let dense_ranks = vec![
-        RetrievalCandidate { fact_id: "fact_a".into(), raw_rank: 1 },
-        RetrievalCandidate { fact_id: "fact_b".into(), raw_rank: 2 },
+        RetrievalCandidate {
+            fact_id: "fact_a".into(),
+            raw_rank: 1,
+        },
+        RetrievalCandidate {
+            fact_id: "fact_b".into(),
+            raw_rank: 2,
+        },
     ];
     let sparse_ranks = vec![
-        RetrievalCandidate { fact_id: "fact_a".into(), raw_rank: 1 },
-        RetrievalCandidate { fact_id: "fact_b".into(), raw_rank: 2 },
+        RetrievalCandidate {
+            fact_id: "fact_a".into(),
+            raw_rank: 1,
+        },
+        RetrievalCandidate {
+            fact_id: "fact_b".into(),
+            raw_rank: 2,
+        },
     ];
 
     let fused = fuse_hybrid_candidates(&dense_ranks, &sparse_ranks, &meta_map, 0.6, 0.4, 5, now);
     assert_eq!(fused.len(), 2);
     assert_eq!(fused[0].fact_id, "fact_a");
-    assert_eq!(fused[0].decay_factor, 1.0, "User-edited fact must never decay");
-    assert!(fused[1].decay_factor <= 0.20, "Episodic fact after 120d must have decayed significantly");
+    assert_eq!(
+        fused[0].decay_factor, 1.0,
+        "User-edited fact must never decay"
+    );
+    assert!(
+        fused[1].decay_factor <= 0.20,
+        "Episodic fact after 120d must have decayed significantly"
+    );
 }
 
 // ============================================================================
@@ -480,7 +601,9 @@ fn test_f18_bidirectional_markdown_sync_workflow() {
     tx.commit().expect("commit");
 
     // 2. Forward Sync: DB -> Markdown files
-    let export_rep = sync_mgr.export_all_active_facts(&conn).expect("export markdown");
+    let export_rep = sync_mgr
+        .export_all_active_facts(&conn)
+        .expect("export markdown");
     assert!(export_rep.files_scanned >= 1);
 
     let user_md_path = temp_dir.path().join("USER.md");

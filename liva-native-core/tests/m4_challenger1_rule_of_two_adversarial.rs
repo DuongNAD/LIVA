@@ -13,12 +13,12 @@ use liva_core_types::{
     Labeled, Principal, RuleOfTwoVertices, SecurityError, SessionMode, SessionQueueMode,
     SessionTurnRequest, TaintFlags,
 };
+use liva_native_core::authorization::SessionModeGovernor;
 use liva_native_core::cognitive::audit_chain::Blake3AuditChain;
 use liva_native_core::cognitive::policy::{
     PolicyEngine, RiskTier, canonicalize_json, compute_canonical_args_hash,
     visualize_invisible_chars,
 };
-use liva_native_core::authorization::SessionModeGovernor;
 use liva_native_core::db::DatabasePool;
 use liva_native_core::llm::prompt::compact_assembler::{
     CompactPromptAssembler, CompactPromptBudget,
@@ -488,7 +488,10 @@ fn challenge_canonical_json_hashing_and_unicode_normalization() {
     // "Tiếng Việt": Composed NFC vs Decomposed NFD
     let composed_str = "Tiếng Việt";
     let decomposed_str = "Ti\u{00EA}\u{0301}ng Vi\u{00EA}\u{0323}t";
-    assert_ne!(composed_str, decomposed_str, "String bytes must differ before normalization");
+    assert_ne!(
+        composed_str, decomposed_str,
+        "String bytes must differ before normalization"
+    );
 
     let json_composed = json!({"text": composed_str});
     let json_decomposed = json!({"text": decomposed_str});
@@ -562,7 +565,10 @@ fn challenge_blake3_audit_chain_tamper_detection_and_immutability() {
 
     // Verify chain integrity passes on pristine database (verifies 2 blocks)
     let verified_count = Blake3AuditChain::verify_chain_integrity(&conn).expect("verify pristine");
-    assert_eq!(verified_count, 2, "Pristine audit chain must verify 2 blocks");
+    assert_eq!(
+        verified_count, 2,
+        "Pristine audit chain must verify 2 blocks"
+    );
 
     // 2. SQLite Engine-Level Trigger Immutability Protection
     // Direct UPDATE must fail at SQLite engine level via trigger

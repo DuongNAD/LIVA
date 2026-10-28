@@ -17,7 +17,10 @@ fn create_temp_vault(prefix: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let p = std::env::temp_dir().join(format!("liva_challenger_m3_{prefix}_{}_{nano}", std::process::id()));
+    let p = std::env::temp_dir().join(format!(
+        "liva_challenger_m3_{prefix}_{}_{nano}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&p);
     fs::create_dir_all(&p).expect("failed to create temp test vault");
     p
@@ -58,7 +61,10 @@ async fn test_adversarial_directory_pruning_nested_mixed_case() {
         fs::create_dir_all(&full_dir).expect("create excluded dir");
         fs::write(
             full_dir.join("leak_check.md"),
-            format!("EXCLUDED LEAK CONTENT: file in {} containing ADVERSARIAL_KEYWORD_PRUNE", rel_path),
+            format!(
+                "EXCLUDED LEAK CONTENT: file in {} containing ADVERSARIAL_KEYWORD_PRUNE",
+                rel_path
+            ),
         )
         .expect("write excluded file");
     }
@@ -78,19 +84,37 @@ async fn test_adversarial_directory_pruning_nested_mixed_case() {
     if let ToolContent::Text { text } = &res.content[0] {
         // Must contain allowed files
         assert!(text.contains("root_valid.md"), "Must contain root_valid.md");
-        assert!(text.contains("allowed_dir/sub_allowed/deep_valid.md"), "Must contain deep_valid.md");
+        assert!(
+            text.contains("allowed_dir/sub_allowed/deep_valid.md"),
+            "Must contain deep_valid.md"
+        );
 
         // Must NOT contain any pruned directories or files inside them
         assert!(!text.to_lowercase().contains(".git"), "Must prune .Git");
-        assert!(!text.to_lowercase().contains(".obsidian"), "Must prune .OBSIDIAN");
+        assert!(
+            !text.to_lowercase().contains(".obsidian"),
+            "Must prune .OBSIDIAN"
+        );
         assert!(!text.to_lowercase().contains("target"), "Must prune Target");
-        assert!(!text.to_lowercase().contains("node_modules"), "Must prune Node_Modules");
-        assert!(!text.to_lowercase().contains("archive"), "Must prune archive/Archive/ARCHIVE");
+        assert!(
+            !text.to_lowercase().contains("node_modules"),
+            "Must prune Node_Modules"
+        );
+        assert!(
+            !text.to_lowercase().contains("archive"),
+            "Must prune archive/Archive/ARCHIVE"
+        );
         assert!(!text.to_lowercase().contains(".trash"), "Must prune .trash");
-        assert!(!text.contains("EXCLUDED LEAK CONTENT"), "Must not leak excluded content");
+        assert!(
+            !text.contains("EXCLUDED LEAK CONTENT"),
+            "Must not leak excluded content"
+        );
 
         // Exactly 2 valid files found
-        assert!(text.contains("(2 found)"), "Expected exactly 2 found, got: {text}");
+        assert!(
+            text.contains("(2 found)"),
+            "Expected exactly 2 found, got: {text}"
+        );
     } else {
         panic!("Expected Text content from search_vault");
     }
@@ -104,7 +128,10 @@ async fn test_adversarial_result_capping_with_35_files() {
     for i in 1..=35 {
         fs::write(
             vault_dir.join(format!("document_{:02}.md", i)),
-            format!("Line content for document {:02} with TARGET_CAPPING_TOKEN in body.", i),
+            format!(
+                "Line content for document {:02} with TARGET_CAPPING_TOKEN in body.",
+                i
+            ),
         )
         .expect("write doc");
     }
@@ -143,9 +170,15 @@ async fn test_adversarial_utf8_vietnamese_boundary_and_accents() {
     // Case A: 119 ASCII bytes + 3-byte Vietnamese 'ế' (indices 119, 120, 121)
     // Slicing at 120 without boundary check would crash inside 'ế'.
     let prefix_119 = "A".repeat(119);
-    let line_split_at_120 = format!("{}ế_VIỆT_NAM_HÀ_NỘI_ĐÀ_NẴNG_SÀI_GÒN_KIẾN_TRÚC_HỆ_THỐNG", prefix_119);
+    let line_split_at_120 = format!(
+        "{}ế_VIỆT_NAM_HÀ_NỘI_ĐÀ_NẴNG_SÀI_GÒN_KIẾN_TRÚC_HỆ_THỐNG",
+        prefix_119
+    );
     assert_eq!(prefix_119.len(), 119);
-    assert!(!line_split_at_120.is_char_boundary(120), "Byte 120 must be mid-character");
+    assert!(
+        !line_split_at_120.is_char_boundary(120),
+        "Byte 120 must be mid-character"
+    );
 
     fs::write(
         vault_dir.join("vietnamese_boundary_split.md"),
@@ -157,7 +190,10 @@ async fn test_adversarial_utf8_vietnamese_boundary_and_accents() {
     let prefix_118 = "B".repeat(118);
     let line_split_at_120_b = format!("{}ộ_TIẾNG_VIỆT_CÓ_DẤU_ĐẶC_BIỆT_KHÔNG_PANIC", prefix_118);
     assert_eq!(prefix_118.len(), 118);
-    assert!(!line_split_at_120_b.is_char_boundary(120), "Byte 120 must be mid-character");
+    assert!(
+        !line_split_at_120_b.is_char_boundary(120),
+        "Byte 120 must be mid-character"
+    );
 
     fs::write(
         vault_dir.join("vietnamese_boundary_split_b.md"),
@@ -216,7 +252,10 @@ async fn test_adversarial_utf8_vietnamese_boundary_and_accents() {
 
     assert!(!res3.is_error);
     if let ToolContent::Text { text } = &res3.content[0] {
-        assert!(text.contains("vietnamese_case_folding.md"), "Should match Tiếng Việt via case folding");
+        assert!(
+            text.contains("vietnamese_case_folding.md"),
+            "Should match Tiếng Việt via case folding"
+        );
     }
 
     let _ = fs::remove_dir_all(&vault_dir);
@@ -273,7 +312,10 @@ async fn test_adversarial_file_size_and_extension_filter() {
         assert!(!text.contains("script.py"), "Must skip .py files");
         assert!(!text.contains("data.json"), "Must skip .json files");
         assert!(!text.contains("oversized.md"), "Must skip files > 2MB");
-        assert!(text.contains("(2 found)"), "Expected exactly 2 valid matches");
+        assert!(
+            text.contains("(2 found)"),
+            "Expected exactly 2 valid matches"
+        );
     } else {
         panic!("Expected Text content");
     }

@@ -29,7 +29,8 @@ fn test_adversarial_pathological_vietnamese_and_nfd_nfc() {
     // "và" in NFD: 'v' + 'a' + U+0300
     // "Sài" in NFC: 'S' + U+00E0 + 'i'
     // "Gòn" in NFD: 'G' + 'o' + U+0300 + 'n'
-    let mixed_nfd_nfc = "H\u{0061}\u{0300} N\u{1ED9}i v\u{0061}\u{0300} S\u{00E0}i G\u{006F}\u{0300}n";
+    let mixed_nfd_nfc =
+        "H\u{0061}\u{0300} N\u{1ED9}i v\u{0061}\u{0300} S\u{00E0}i G\u{006F}\u{0300}n";
     let pure_nfc = "Hà Nội và Sài Gòn";
 
     let norm_mixed = normalizer.normalize(mixed_nfd_nfc);

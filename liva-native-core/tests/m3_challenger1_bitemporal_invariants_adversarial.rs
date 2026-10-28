@@ -7,18 +7,19 @@
 //! - F15: Active Fact Singleton Invariant (`idx_active_singleton_fact`, 4-action reconciliation state machine).
 
 use liva_native_core::db::bitemporal::{
-    apply_reconciliation, atomic_supersede_fact, get_active_fact, ingest_evidence,
-    init_bitemporal_schema, query_active_facts, query_fact_history,
-    query_facts_as_of_system_time, query_facts_as_of_world_time, tombstone_evidence,
-    BitemporalFact, FactOrigin, FactSensitivity, ReconciliationOutcome,
+    BitemporalFact, FactOrigin, FactSensitivity, ReconciliationOutcome, apply_reconciliation,
+    atomic_supersede_fact, get_active_fact, ingest_evidence, init_bitemporal_schema,
+    query_active_facts, query_fact_history, query_facts_as_of_system_time,
+    query_facts_as_of_world_time, tombstone_evidence,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::sync::Arc;
 use std::thread;
 
 fn setup_adversarial_db() -> Connection {
     let conn = Connection::open_in_memory().expect("open memory db");
-    conn.execute_batch("PRAGMA foreign_keys = ON;").expect("enable fk");
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .expect("enable fk");
     init_bitemporal_schema(&conn).expect("init bitemporal schema");
     conn
 }
@@ -44,7 +45,10 @@ fn challenge_evidence_log_immutability_triggers_and_tampering() {
     .expect("ingest");
 
     // 1. Direct Physical DELETE -> Must be rejected by trg_evidence_log_immutable_delete
-    let delete_res = conn.execute("DELETE FROM evidence_log WHERE evidence_id = ?1", params![id]);
+    let delete_res = conn.execute(
+        "DELETE FROM evidence_log WHERE evidence_id = ?1",
+        params![id],
+    );
     assert!(
         delete_res.is_err(),
         "CRITICAL: Direct DELETE on evidence_log must be blocked by SQLite trigger"
@@ -98,14 +102,17 @@ fn challenge_evidence_log_immutability_triggers_and_tampering() {
     let integrity_tampered = update_integrity.is_ok();
 
     // 6. Legitimate Tombstoning
-    let tombstone_res = tombstone_evidence(&conn, &id, "compliance_gdpr_forget", 1_000_100)
-        .expect("tombstone");
+    let tombstone_res =
+        tombstone_evidence(&conn, &id, "compliance_gdpr_forget", 1_000_100).expect("tombstone");
     assert!(tombstone_res, "Legitimate tombstoning must succeed");
 
     // Idempotent tombstoning: already tombstoned record should return false
-    let double_tombstone = tombstone_evidence(&conn, &id, "duplicate_request", 1_000_200)
-        .expect("second tombstone");
-    assert!(!double_tombstone, "Second tombstone must return false since already tombstoned");
+    let double_tombstone =
+        tombstone_evidence(&conn, &id, "duplicate_request", 1_000_200).expect("second tombstone");
+    assert!(
+        !double_tombstone,
+        "Second tombstone must return false since already tombstoned"
+    );
 }
 
 // ============================================================================
@@ -245,7 +252,12 @@ fn challenge_four_action_reconciliation_lifecycle_and_foreign_keys() {
     let tx = conn.transaction().expect("tx1");
     let out_add = apply_reconciliation(&tx, fact.clone(), Some(&eid), 1000).expect("apply add");
     tx.commit().expect("commit tx1");
-    assert_eq!(out_add, ReconciliationOutcome::Added { fact_id: "fact_drink_01".into() });
+    assert_eq!(
+        out_add,
+        ReconciliationOutcome::Added {
+            fact_id: "fact_drink_01".into()
+        }
+    );
 
     // 2. NOOP Corroboration Stress: Re-assert identical fact 50 times
     // Verify confidence increases monotonically and strictly caps <= 1.0 (no overflow)
@@ -277,7 +289,12 @@ fn challenge_four_action_reconciliation_lifecycle_and_foreign_keys() {
     let tx = conn.transaction().expect("tx extend");
     let out_extend = apply_reconciliation(&tx, fact.clone(), Some(&eid), 2000).expect("extend");
     tx.commit().expect("commit extend");
-    assert_eq!(out_extend, ReconciliationOutcome::Extended { fact_id: "fact_drink_01".into() });
+    assert_eq!(
+        out_extend,
+        ReconciliationOutcome::Extended {
+            fact_id: "fact_drink_01".into()
+        }
+    );
 
     // 4. INVALIDATE: Contradictory value asserted ("Cà phê sữa đá")
     let mut new_fact = fact.clone();
@@ -325,7 +342,8 @@ fn challenge_four_action_reconciliation_lifecycle_and_foreign_keys() {
     )
     .expect("atomic supersede");
 
-    let history2 = query_fact_history(&conn, "user", "morning_drink", "personal").expect("history 2");
+    let history2 =
+        query_fact_history(&conn, "user", "morning_drink", "personal").expect("history 2");
     assert_eq!(history2.len(), 3);
     assert_eq!(history2[1].superseded_by, Some(sup_id.clone()));
     assert_eq!(history2[2].fact_id, sup_id);
@@ -373,14 +391,21 @@ fn challenge_bitemporal_time_travel_world_vs_system_divergence() {
     // 1. System Time Travel: "What did LIVA know at T_sys = 150?"
     // Expected: Only Hà Nội (f_hn) was recorded and active in system state at T=150.
     let sys_150 = query_facts_as_of_system_time(&conn, 150).expect("sys 150");
-    assert_eq!(sys_150.len(), 1, "At T_sys=150, system only knew 1 residence fact");
+    assert_eq!(
+        sys_150.len(),
+        1,
+        "At T_sys=150, system only knew 1 residence fact"
+    );
     assert_eq!(sys_150[0].fact_id, "f_hn");
     assert_eq!(sys_150[0].value, "Hà Nội");
 
     // 2. System Time Travel: "What did LIVA know at T_sys = 50 (before any record was created)?"
     // Expected: Nothing (empty vec). No future leakage!
     let sys_50 = query_facts_as_of_system_time(&conn, 50).expect("sys 50");
-    assert!(sys_50.is_empty(), "At T_sys=50, no facts existed in system memory");
+    assert!(
+        sys_50.is_empty(),
+        "At T_sys=50, no facts existed in system memory"
+    );
 
     // 3. System Time Travel: "What did LIVA know at T_sys = 250?"
     // Expected: Đà Nẵng (f_dn). f_hn expired at 200.
@@ -426,16 +451,29 @@ fn challenge_evidence_nfc_normalization_stress() {
 
     // 5 diverse Unicode variants of Vietnamese words with tone marks in composed and decomposed forms
     let variants = vec![
-        ("Cà phê sữa đá", "Ca\u{0300} ph\u{00ea} s\u{01b0}\u{0303}a \u{0111}a\u{0301}"),
-        ("Hà Nội mùa thu", "Ha\u{0300} N\u{00f4}\u{0323}i mu\u{0300}a thu"),
-        ("Trí tuệ nhân tạo", "Tri\u{0301} tu\u{00ea}\u{0323} nh\u{00e2}n ta\u{0323}o"),
+        (
+            "Cà phê sữa đá",
+            "Ca\u{0300} ph\u{00ea} s\u{01b0}\u{0303}a \u{0111}a\u{0301}",
+        ),
+        (
+            "Hà Nội mùa thu",
+            "Ha\u{0300} N\u{00f4}\u{0323}i mu\u{0300}a thu",
+        ),
+        (
+            "Trí tuệ nhân tạo",
+            "Tri\u{0301} tu\u{00ea}\u{0323} nh\u{00e2}n ta\u{0323}o",
+        ),
     ];
 
     for (composed, decomposed) in variants {
-        let hash_comp = ingest_evidence(&conn, composed, "turn", None, None, "Owner", "cli", "Trusted", 1000)
-            .expect("ingest composed");
-        let hash_decomp = ingest_evidence(&conn, decomposed, "turn", None, None, "Owner", "cli", "Trusted", 1001)
-            .expect("ingest decomposed");
+        let hash_comp = ingest_evidence(
+            &conn, composed, "turn", None, None, "Owner", "cli", "Trusted", 1000,
+        )
+        .expect("ingest composed");
+        let hash_decomp = ingest_evidence(
+            &conn, decomposed, "turn", None, None, "Owner", "cli", "Trusted", 1001,
+        )
+        .expect("ingest decomposed");
 
         assert_eq!(
             hash_comp, hash_decomp,
@@ -447,7 +485,10 @@ fn challenge_evidence_nfc_normalization_stress() {
     let total: i64 = conn
         .query_row("SELECT COUNT(*) FROM evidence_log", [], |r| r.get(0))
         .expect("count");
-    assert_eq!(total, 3, "All decomposed variants must have been deduplicated");
+    assert_eq!(
+        total, 3,
+        "All decomposed variants must have been deduplicated"
+    );
 }
 
 // ============================================================================
@@ -529,9 +570,11 @@ fn challenge_concurrent_active_singleton_insertion_race() {
             |r| r.get(0),
         )
         .expect("query total");
-    assert_eq!(total_active, 1, "Invariant: exactly 1 active fact exists in database");
+    assert_eq!(
+        total_active, 1,
+        "Invariant: exactly 1 active fact exists in database"
+    );
 
     // Clean up temporary database files
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
-

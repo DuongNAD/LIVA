@@ -6,7 +6,7 @@
 //! 3. Active Fact Singleton Invariant enforced via SQLite conditional unique index `idx_active_singleton_fact`.
 //! 4. 4-Action Reconciliation Engine (`ADD`, `EXTEND`, `NOOP`, `INVALIDATE`) preserving complete soft-delete audit lineage.
 
-use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult, Transaction};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult, Transaction, params};
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
@@ -445,7 +445,11 @@ pub fn ingest_evidence_log(
         "conversation_turn",
         session_id,
         None,
-        if integrity == IntegrityLabel::OwnerTrusted { "Owner" } else { "Untrusted" },
+        if integrity == IntegrityLabel::OwnerTrusted {
+            "Owner"
+        } else {
+            "Untrusted"
+        },
         source_channel.as_str(),
         integrity.as_str(),
         now_ms,
@@ -603,7 +607,12 @@ pub fn apply_reconciliation(
                      SET valid_to = ?1, expired_at = ?1, reason = ?2 
                      WHERE fact_id = ?3",
                     params![now_ms, reason, active_id],
-                ).map_err(|e| rusqlite::Error::ToSqlConversionFailure(format!("step 1 (close old fact) failed: {e}").into()))?;
+                )
+                .map_err(|e| {
+                    rusqlite::Error::ToSqlConversionFailure(
+                        format!("step 1 (close old fact) failed: {e}").into(),
+                    )
+                })?;
 
                 // 2. Insert new fact
                 tx.execute(
@@ -633,7 +642,12 @@ pub fn apply_reconciliation(
                 tx.execute(
                     "UPDATE facts SET superseded_by = ?1 WHERE fact_id = ?2",
                     params![&fact_id, &active_id],
-                ).map_err(|e| rusqlite::Error::ToSqlConversionFailure(format!("step 3 (update superseded_by) failed: {e}").into()))?;
+                )
+                .map_err(|e| {
+                    rusqlite::Error::ToSqlConversionFailure(
+                        format!("step 3 (update superseded_by) failed: {e}").into(),
+                    )
+                })?;
 
                 if let Some(eid) = evidence_id {
                     tx.execute(
@@ -674,7 +688,11 @@ fn map_fact_row(r: &rusqlite::Row) -> SqlResult<BitemporalFact> {
         importance: match r.get_ref(7)? {
             rusqlite::types::ValueRef::Integer(i) => i as u8,
             rusqlite::types::ValueRef::Real(f) => {
-                if f > 1.0 { f.round() as u8 } else { (f * 10.0).round() as u8 }
+                if f > 1.0 {
+                    f.round() as u8
+                } else {
+                    (f * 10.0).round() as u8
+                }
             }
             _ => 5,
         },
@@ -755,10 +773,7 @@ pub fn query_active_facts(
 }
 
 /// Alias for query_active_facts.
-pub fn list_active_facts(
-    conn: &Connection,
-    scope: Option<&str>,
-) -> SqlResult<Vec<BitemporalFact>> {
+pub fn list_active_facts(conn: &Connection, scope: Option<&str>) -> SqlResult<Vec<BitemporalFact>> {
     query_active_facts(conn, scope)
 }
 
@@ -771,7 +786,11 @@ pub fn insert_active_fact(
     let fact_id = if !fact.fact_id.is_empty() {
         fact.fact_id.clone()
     } else {
-        format!("fact_{}_{}", fact.recorded_at, &uuid::Uuid::new_v4().to_string()[..8])
+        format!(
+            "fact_{}_{}",
+            fact.recorded_at,
+            &uuid::Uuid::new_v4().to_string()[..8]
+        )
     };
 
     let now_ms = if fact.recorded_at > 0 {
@@ -921,7 +940,9 @@ pub fn atomic_supersede_fact(
             Ok(id)
         }
         Err(err) => {
-            let _ = conn.execute_batch(&format!("ROLLBACK TO SAVEPOINT {sp_name}; RELEASE SAVEPOINT {sp_name};"));
+            let _ = conn.execute_batch(&format!(
+                "ROLLBACK TO SAVEPOINT {sp_name}; RELEASE SAVEPOINT {sp_name};"
+            ));
             Err(err)
         }
     }
@@ -1012,35 +1033,65 @@ mod tests {
         let text1 = "Hà Nội";
         let text2 = "Ha\u{0300} N\u{00f4}\u{0323}i"; // Decomposed NFD
 
-        let id1 = ingest_evidence(&conn, text1, "turn", None, None, "Owner", "cli", "Trusted", 1000)
-            .expect("ingest 1");
-        let id2 = ingest_evidence(&conn, text2, "turn", None, None, "Owner", "cli", "Trusted", 1001)
-            .expect("ingest 2");
+        let id1 = ingest_evidence(
+            &conn, text1, "turn", None, None, "Owner", "cli", "Trusted", 1000,
+        )
+        .expect("ingest 1");
+        let id2 = ingest_evidence(
+            &conn, text2, "turn", None, None, "Owner", "cli", "Trusted", 1001,
+        )
+        .expect("ingest 2");
 
-        assert_eq!(id1, id2, "NFC normalization must yield identical BLAKE3 hashes");
+        assert_eq!(
+            id1, id2,
+            "NFC normalization must yield identical BLAKE3 hashes"
+        );
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM evidence_log", [], |r| r.get(0))
             .expect("count");
-        assert_eq!(count, 1, "Idempotent insert must store exactly one evidence record");
+        assert_eq!(
+            count, 1,
+            "Idempotent insert must store exactly one evidence record"
+        );
     }
 
     #[test]
     fn test_evidence_immutability_triggers() {
         let conn = setup_memory_db();
-        let id = ingest_evidence(&conn, "Hải thích trà xanh", "turn", None, None, "Owner", "cli", "Trusted", 1000)
-            .expect("ingest");
+        let id = ingest_evidence(
+            &conn,
+            "Hải thích trà xanh",
+            "turn",
+            None,
+            None,
+            "Owner",
+            "cli",
+            "Trusted",
+            1000,
+        )
+        .expect("ingest");
 
         let res_update = conn.execute(
             "UPDATE evidence_log SET nfc_content = 'fake' WHERE evidence_id = ?1",
             params![id],
         );
-        assert!(res_update.is_err(), "Trigger must reject physical update of evidence_log");
+        assert!(
+            res_update.is_err(),
+            "Trigger must reject physical update of evidence_log"
+        );
 
-        let res_delete = conn.execute("DELETE FROM evidence_log WHERE evidence_id = ?1", params![id]);
-        assert!(res_delete.is_err(), "Trigger must reject physical deletion of evidence_log");
+        let res_delete = conn.execute(
+            "DELETE FROM evidence_log WHERE evidence_id = ?1",
+            params![id],
+        );
+        assert!(
+            res_delete.is_err(),
+            "Trigger must reject physical deletion of evidence_log"
+        );
 
-        let tombstoned = tombstone_evidence(&conn, &id, "user_requested_forget", 1050).expect("tombstone");
+        let tombstoned =
+            tombstone_evidence(&conn, &id, "user_requested_forget", 1050).expect("tombstone");
         assert!(tombstoned, "Tombstoning must succeed");
     }
 
@@ -1074,8 +1125,18 @@ mod tests {
     #[test]
     fn test_four_action_reconciliation_workflow() {
         let mut conn = setup_memory_db();
-        let eid = ingest_evidence(&mut conn, "Tôi sống ở Hà Nội", "turn", None, None, "Owner", "cli", "Trusted", 1000)
-            .expect("ingest evidence");
+        let eid = ingest_evidence(
+            &mut conn,
+            "Tôi sống ở Hà Nội",
+            "turn",
+            None,
+            None,
+            "Owner",
+            "cli",
+            "Trusted",
+            1000,
+        )
+        .expect("ingest evidence");
 
         // 1. ADD
         let f1 = BitemporalFact {
@@ -1105,7 +1166,12 @@ mod tests {
         let tx = conn.transaction().expect("tx");
         let outcome1 = apply_reconciliation(&tx, f1.clone(), Some(&eid), 1000).expect("add");
         tx.commit().expect("commit");
-        assert_eq!(outcome1, ReconciliationOutcome::Added { fact_id: "fact_001".into() });
+        assert_eq!(
+            outcome1,
+            ReconciliationOutcome::Added {
+                fact_id: "fact_001".into()
+            }
+        );
 
         // 2. NOOP (re-affirming identical fact)
         let tx = conn.transaction().expect("tx");
@@ -1122,7 +1188,12 @@ mod tests {
         let tx = conn.transaction().expect("tx");
         let outcome3 = apply_reconciliation(&tx, f1_extend, Some(&eid), 1200).expect("extend");
         tx.commit().expect("commit");
-        assert_eq!(outcome3, ReconciliationOutcome::Extended { fact_id: "fact_001".into() });
+        assert_eq!(
+            outcome3,
+            ReconciliationOutcome::Extended {
+                fact_id: "fact_001".into()
+            }
+        );
 
         // 4. INVALIDATE & SUPERSEDE (moved to Đà Nẵng)
         let f2 = BitemporalFact {
@@ -1175,7 +1246,8 @@ mod tests {
         assert_eq!(as_of_2500.len(), 1);
         assert_eq!(as_of_2500[0].value, "Đà Nẵng");
 
-        let history = query_fact_history(&conn, "user", "living_city", "personal").expect("history");
+        let history =
+            query_fact_history(&conn, "user", "living_city", "personal").expect("history");
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].fact_id, "fact_001");
         assert_eq!(history[0].superseded_by, Some("fact_002".into()));
@@ -1232,7 +1304,10 @@ mod tests {
 
         // 4. Legitimate tombstoning must succeed
         let tombstoned = tombstone_evidence(&conn, &id, "gdpr_request", 2000).unwrap();
-        assert!(tombstoned, "Legitimate tombstoning of metadata must succeed");
+        assert!(
+            tombstoned,
+            "Legitimate tombstoning of metadata must succeed"
+        );
     }
 
     #[test]

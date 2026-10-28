@@ -44,14 +44,15 @@ static RE_USER_PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Biểu thức người dùng không còn thích
 static RE_USER_DISLIKE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\btôi\s+(?:không\s+còn\s+thích|bỏ\s+thích|chán|không\s+thích\s+nữa)\s+([^.,;!?\n]+)")
-        .expect("valid dislike regex")
+    Regex::new(
+        r"(?i)\btôi\s+(?:không\s+còn\s+thích|bỏ\s+thích|chán|không\s+thích\s+nữa)\s+([^.,;!?\n]+)",
+    )
+    .expect("valid dislike regex")
 });
 
 /// Số điện thoại di động Việt Nam (10 chữ số, đầu mạng 03, 05, 07, 08, 09)
-static RE_VIETNAMESE_PHONE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(0[35789]\d{8})\b").expect("valid phone regex")
-});
+static RE_VIETNAMESE_PHONE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(0[35789]\d{8})\b").expect("valid phone regex"));
 
 /// Số tài khoản ngân hàng Việt Nam (8 đến 16 số đi liền sau từ khoá STK, tài khoản)
 static RE_BANK_ACCOUNT: LazyLock<Regex> = LazyLock::new(|| {
@@ -73,14 +74,15 @@ static RE_CURRENCY_METRIC: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Từ ngữ thời gian tương đối tiếng Việt
 static RE_RELATIVE_TIME: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(hôm\s+nay|ngày\s+mai|hôm\s+qua|tuần\s+sau|tháng\s+sau|thứ\s+[2-7]|chủ\s+nhật)\b")
-        .expect("valid relative time regex")
+    Regex::new(
+        r"(?i)\b(hôm\s+nay|ngày\s+mai|hôm\s+qua|tuần\s+sau|tháng\s+sau|thứ\s+[2-7]|chủ\s+nhật)\b",
+    )
+    .expect("valid relative time regex")
 });
 
 /// Chuỗi chữ số từ 2 ký tự trở lên (kiểm chứng số liệu chống ảo giác)
-static RE_DIGITS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b\d{2,}\b").expect("valid digits regex")
-});
+static RE_DIGITS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{2,}\b").expect("valid digits regex"));
 
 // ============================================================================
 // DATA STRUCTURES
@@ -327,7 +329,11 @@ impl AntiHallucinationVerifier {
     }
 
     /// Verify candidate with ExtractedFactCandidate contract.
-    pub fn verify_candidate(&self, candidate: &ExtractedFactCandidate, evidence_text_nfc: &str) -> bool {
+    pub fn verify_candidate(
+        &self,
+        candidate: &ExtractedFactCandidate,
+        evidence_text_nfc: &str,
+    ) -> bool {
         let fake = CandidateFact {
             subject: candidate.subject.clone(),
             predicate: candidate.predicate.clone(),
@@ -338,7 +344,10 @@ impl AntiHallucinationVerifier {
             source_evidence_hash: String::new(),
             source_role: "user".into(),
         };
-        matches!(Self::verify(&fake, evidence_text_nfc), AntiHallucinationResult::Grounded)
+        matches!(
+            Self::verify(&fake, evidence_text_nfc),
+            AntiHallucinationResult::Grounded
+        )
     }
 
     /// Verify that candidate numbers, metrics, and entities actually exist in evidence text.
@@ -398,7 +407,9 @@ impl MemGhostFilter {
     pub fn channel_security(channel: SourceChannel) -> (CommandPrincipal, bool) {
         match channel {
             SourceChannel::Telegram | SourceChannel::Zalo => (CommandPrincipal::Telegram, true),
-            SourceChannel::ExternalWeb | SourceChannel::WebRss => (CommandPrincipal::Telegram, true),
+            SourceChannel::ExternalWeb | SourceChannel::WebRss => {
+                (CommandPrincipal::Telegram, true)
+            }
             SourceChannel::Tauri => (CommandPrincipal::TauriDashboard, false),
             SourceChannel::LocalCli | SourceChannel::Cli => (CommandPrincipal::LocalCli, false),
         }
@@ -417,7 +428,10 @@ impl MemGhostFilter {
             source_evidence_hash: String::new(),
             source_role: "user".into(),
         };
-        matches!(Self::evaluate(&fake, principal, is_untrusted), MemGhostFilterResult::Permitted)
+        matches!(
+            Self::evaluate(&fake, principal, is_untrusted),
+            MemGhostFilterResult::Permitted
+        )
     }
 
     /// Evaluate security clearance and data taint against memory injection.
@@ -494,7 +508,12 @@ impl DeterministicReconciliationEngine {
         evidence_id: &str,
         now_epoch_ms: i64,
     ) -> Result<ReconciliationOutcome, rusqlite::Error> {
-        let existing = get_active_fact(conn, &candidate.subject, &candidate.predicate, &candidate.scope)?;
+        let existing = get_active_fact(
+            conn,
+            &candidate.subject,
+            &candidate.predicate,
+            &candidate.scope,
+        )?;
 
         match existing {
             Some(existing_fact) => {
@@ -541,7 +560,9 @@ impl DeterministicReconciliationEngine {
                         action: ReconciliationAction::Invalidate,
                         fact_id: new_fact_id,
                         superseded_fact_id: Some(existing_fact.fact_id),
-                        message: "Invalidated old conflicting fact and established new active singleton".into(),
+                        message:
+                            "Invalidated old conflicting fact and established new active singleton"
+                                .into(),
                     })
                 }
             }
@@ -700,7 +721,8 @@ impl DeterministicPostTurnWriter {
         integrity: crate::db::bitemporal::IntegrityLabel,
         turn_id: &str,
     ) -> Result<PostTurnProcessingResult, rusqlite::Error> {
-        let (channel_principal, channel_untrusted) = MemGhostFilter::channel_security(source_channel);
+        let (channel_principal, channel_untrusted) =
+            MemGhostFilter::channel_security(source_channel);
         let is_untrusted = channel_untrusted
             || integrity == crate::db::bitemporal::IntegrityLabel::ExternalUntrusted
             || integrity == crate::db::bitemporal::IntegrityLabel::Untrusted;
@@ -717,14 +739,8 @@ impl DeterministicPostTurnWriter {
             integrity,
             Some(turn_id),
         )?;
-        let outcomes = Self::process_turn_sync(
-            conn,
-            user_msg,
-            "",
-            principal,
-            source_channel,
-            is_untrusted,
-        )?;
+        let outcomes =
+            Self::process_turn_sync(conn, user_msg, "", principal, source_channel, is_untrusted)?;
         Ok(PostTurnProcessingResult {
             evidence_id: Some(evi_id),
             outcomes,
@@ -740,7 +756,8 @@ impl DeterministicPostTurnWriter {
         source_channel: SourceChannel,
         is_untrusted_channel: bool,
     ) -> Result<Vec<ReconciliationOutcome>, rusqlite::Error> {
-        let (channel_principal, channel_untrusted) = MemGhostFilter::channel_security(source_channel);
+        let (channel_principal, channel_untrusted) =
+            MemGhostFilter::channel_security(source_channel);
         let is_untrusted_channel = is_untrusted_channel || channel_untrusted;
         let principal = if is_untrusted_channel {
             channel_principal
@@ -760,13 +777,8 @@ impl DeterministicPostTurnWriter {
         };
 
         // 1. Ingest immutable evidence
-        let (evidence_id, _) = ingest_evidence_log(
-            conn,
-            source_channel,
-            user_input,
-            integrity_label,
-            None,
-        )?;
+        let (evidence_id, _) =
+            ingest_evidence_log(conn, source_channel, user_input, integrity_label, None)?;
 
         // 2. Rule-based extraction (<5ms)
         let slots = extract_rule_based_signals(user_input);
@@ -782,7 +794,9 @@ impl DeterministicPostTurnWriter {
                 ),
                 SlotType::ExplicitForget => {
                     // Close active fact matching value
-                    if let Ok(Some(f)) = get_active_fact(conn, "user", &slot.normalized_value, "personal") {
+                    if let Ok(Some(f)) =
+                        get_active_fact(conn, "user", &slot.normalized_value, "personal")
+                    {
                         let _ = atomic_supersede_fact(
                             conn,
                             &f.fact_id,
@@ -907,20 +921,34 @@ mod tests {
     #[test]
     fn test_extract_rule_based_signals_speed_and_accuracy() {
         let text = "Hôm nay ngày 24/10/2026, hãy ghi nhớ rằng số tài khoản ngân hàng của tôi là STK: 0912345678 và tôi thích uống cà phê sữa đá. Số điện thoại của tôi là 0987654321, tôi chuyển 500k.";
-        
+
         // Warmup regex DFA and memory
         let _ = extract_rule_based_signals(text);
         let start = std::time::Instant::now();
         let slots = extract_rule_based_signals(text);
         let elapsed = start.elapsed();
 
-        assert!(elapsed.as_millis() < 50, "Extraction must complete with low latency (took {:?})", elapsed);
+        assert!(
+            elapsed.as_millis() < 50,
+            "Extraction must complete with low latency (took {:?})",
+            elapsed
+        );
 
-        let has_remember = slots.iter().any(|s| s.slot_type == SlotType::ExplicitRemember);
-        let has_bank = slots.iter().any(|s| s.slot_type == SlotType::BankAccount && s.normalized_value == "0912345678");
-        let has_pref = slots.iter().any(|s| s.slot_type == SlotType::UserPreference);
-        let has_phone = slots.iter().any(|s| s.slot_type == SlotType::PhoneNumber && s.normalized_value == "0987654321");
-        let has_curr = slots.iter().any(|s| s.slot_type == SlotType::CurrencyAmount);
+        let has_remember = slots
+            .iter()
+            .any(|s| s.slot_type == SlotType::ExplicitRemember);
+        let has_bank = slots
+            .iter()
+            .any(|s| s.slot_type == SlotType::BankAccount && s.normalized_value == "0912345678");
+        let has_pref = slots
+            .iter()
+            .any(|s| s.slot_type == SlotType::UserPreference);
+        let has_phone = slots
+            .iter()
+            .any(|s| s.slot_type == SlotType::PhoneNumber && s.normalized_value == "0987654321");
+        let has_curr = slots
+            .iter()
+            .any(|s| s.slot_type == SlotType::CurrencyAmount);
         let has_date = slots.iter().any(|s| s.slot_type == SlotType::DateTime);
 
         assert!(has_remember, "Must extract remember command");
@@ -962,7 +990,10 @@ mod tests {
             source_role: "user".into(),
         };
         match AntiHallucinationVerifier::verify(&hallucinated_fact, evidence) {
-            AntiHallucinationResult::Rejected { missing_entity_or_metric, .. } => {
+            AntiHallucinationResult::Rejected {
+                missing_entity_or_metric,
+                ..
+            } => {
                 assert_eq!(missing_entity_or_metric, "500");
             }
             _ => panic!("Must reject hallucinated metric"),
@@ -989,7 +1020,8 @@ mod tests {
         // 2. Assistant prose trying to create personal preference -> RejectedBlocked
         let mut candidate_as_assistant = candidate_personal.clone();
         candidate_as_assistant.source_role = "assistant".into();
-        let res2 = MemGhostFilter::evaluate(&candidate_as_assistant, CommandPrincipal::LocalCli, false);
+        let res2 =
+            MemGhostFilter::evaluate(&candidate_as_assistant, CommandPrincipal::LocalCli, false);
         assert!(matches!(res2, MemGhostFilterResult::RejectedBlocked { .. }));
 
         // 3. Trusted owner writing personal preference -> Permitted
@@ -1014,17 +1046,26 @@ mod tests {
         };
 
         // 1. ADD
-        let out1 = DeterministicReconciliationEngine::reconcile(&conn, &candidate_a, "ev1", now_ms).unwrap();
+        let out1 = DeterministicReconciliationEngine::reconcile(&conn, &candidate_a, "ev1", now_ms)
+            .unwrap();
         assert_eq!(out1.action, ReconciliationAction::Add);
 
         // 2. NOOP (same value, lower or equal confidence)
-        let out2 = DeterministicReconciliationEngine::reconcile(&conn, &candidate_a, "ev1", now_ms + 100).unwrap();
+        let out2 =
+            DeterministicReconciliationEngine::reconcile(&conn, &candidate_a, "ev1", now_ms + 100)
+                .unwrap();
         assert_eq!(out2.action, ReconciliationAction::Noop);
 
         // 3. EXTEND (same value, higher confidence)
         let mut candidate_boosted = candidate_a.clone();
         candidate_boosted.confidence = 1.0;
-        let out3 = DeterministicReconciliationEngine::reconcile(&conn, &candidate_boosted, "ev2", now_ms + 200).unwrap();
+        let out3 = DeterministicReconciliationEngine::reconcile(
+            &conn,
+            &candidate_boosted,
+            "ev2",
+            now_ms + 200,
+        )
+        .unwrap();
         assert_eq!(out3.action, ReconciliationAction::Extend);
 
         // 4. INVALIDATE (user changed mind to "trà xanh")
@@ -1038,12 +1079,16 @@ mod tests {
             source_evidence_hash: "ev3".into(),
             source_role: "user".into(),
         };
-        let out4 = DeterministicReconciliationEngine::reconcile(&conn, &candidate_b, "ev3", now_ms + 300).unwrap();
+        let out4 =
+            DeterministicReconciliationEngine::reconcile(&conn, &candidate_b, "ev3", now_ms + 300)
+                .unwrap();
         assert_eq!(out4.action, ReconciliationAction::Invalidate);
         assert_eq!(out4.superseded_fact_id, Some(out1.fact_id));
 
         // Active singleton invariant verified: exactly 1 active fact
-        let active = get_active_fact(&conn, "user", "favorite_drink", "personal").unwrap().unwrap();
+        let active = get_active_fact(&conn, "user", "favorite_drink", "personal")
+            .unwrap()
+            .unwrap();
         assert_eq!(active.object_value, "trà xanh");
     }
 
@@ -1135,27 +1180,39 @@ mod tests {
             updated_at: now_ms,
         };
         let id_inf = insert_active_fact(&conn, &f_inf, Some("ev_1")).unwrap();
-        assert!(!FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(), "1 session must NOT promote");
+        assert!(
+            !FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(),
+            "1 session must NOT promote"
+        );
 
         // Link second evidence in the SAME session ('ev_same_sess' -> 'sess_1') -> distinct session count is still 1 (< 3)
         conn.execute(
             "INSERT INTO fact_evidence (fact_id, evidence_id, confidence_weight, extracted_at) VALUES (?1, 'ev_same_sess', 1.0, ?2)",
             rusqlite::params![&id_inf, now_ms + 500],
         ).unwrap();
-        assert!(!FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(), "2 evidences in SAME session must NOT promote (Challenge C2)");
+        assert!(
+            !FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(),
+            "2 evidences in SAME session must NOT promote (Challenge C2)"
+        );
 
         // Link evidence from second session ('ev_2' -> 'sess_2') -> distinct session count is 2 (< 3)
         conn.execute(
             "INSERT INTO fact_evidence (fact_id, evidence_id, confidence_weight, extracted_at) VALUES (?1, 'ev_2', 1.0, ?2)",
             rusqlite::params![&id_inf, now_ms + 1000],
         ).unwrap();
-        assert!(!FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(), "2 distinct sessions must NOT promote (< 3)");
+        assert!(
+            !FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(),
+            "2 distinct sessions must NOT promote (< 3)"
+        );
 
         // Link evidence from third session ('ev_3' -> 'sess_3') -> distinct session count is 3 (>= 3) -> PROMOTED!
         conn.execute(
             "INSERT INTO fact_evidence (fact_id, evidence_id, confidence_weight, extracted_at) VALUES (?1, 'ev_3', 1.0, ?2)",
             rusqlite::params![&id_inf, now_ms + 2000],
         ).unwrap();
-        assert!(FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(), "3 distinct sessions MUST promote");
+        assert!(
+            FactPromotionEvaluator::is_eligible_for_core_profile(&conn, &id_inf).unwrap(),
+            "3 distinct sessions MUST promote"
+        );
     }
 }

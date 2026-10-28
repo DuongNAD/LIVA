@@ -534,7 +534,11 @@ pub fn get_skills_list_from(
     Ok(json!(skills))
 }
 
-fn parse_requested_policy(raw: &str, server: &str, name: &str) -> Result<crate::llm::ExecPolicy, String> {
+fn parse_requested_policy(
+    raw: &str,
+    server: &str,
+    name: &str,
+) -> Result<crate::llm::ExecPolicy, String> {
     if raw.trim().eq_ignore_ascii_case("default") {
         return Ok(crate::llm::ExecPolicy::default_for_tool(server, name));
     }

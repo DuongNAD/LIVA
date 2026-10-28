@@ -90,7 +90,11 @@ mod tests {
     #[test]
     fn test_session_mode_governor_rule_of_two_and_enforcement() {
         // Invariant: No session mode ever activates all three vertices
-        for mode in [SessionMode::Reader, SessionMode::Actor, SessionMode::Browser] {
+        for mode in [
+            SessionMode::Reader,
+            SessionMode::Actor,
+            SessionMode::Browser,
+        ] {
             let v = SessionModeGovernor::get_vertices(mode);
             assert!(v.is_valid());
             assert!(v.validate().is_ok());
@@ -106,13 +110,15 @@ mod tests {
             ),
             Err(SecurityError::MutationForbiddenInReaderMode(_))
         ));
-        assert!(SessionModeGovernor::check_tool_call(
-            SessionMode::Reader,
-            "read_file",
-            RiskTier::R0,
-            false
-        )
-        .is_ok());
+        assert!(
+            SessionModeGovernor::check_tool_call(
+                SessionMode::Reader,
+                "read_file",
+                RiskTier::R0,
+                false
+            )
+            .is_ok()
+        );
 
         // Browser Mode: blocks vault / memory / keyring / sensitive personal tools
         assert!(matches!(
@@ -160,21 +166,25 @@ mod tests {
             ),
             Err(SecurityError::VaultAccessForbiddenInBrowserMode(_))
         ));
-        assert!(SessionModeGovernor::check_tool_call(
-            SessionMode::Browser,
-            "web_fetch",
-            RiskTier::R1,
-            false
-        )
-        .is_ok());
+        assert!(
+            SessionModeGovernor::check_tool_call(
+                SessionMode::Browser,
+                "web_fetch",
+                RiskTier::R1,
+                false
+            )
+            .is_ok()
+        );
 
         // Actor Mode: permits authorized calls
-        assert!(SessionModeGovernor::check_tool_call(
-            SessionMode::Actor,
-            "send_message",
-            RiskTier::R3,
-            false
-        )
-        .is_ok());
+        assert!(
+            SessionModeGovernor::check_tool_call(
+                SessionMode::Actor,
+                "send_message",
+                RiskTier::R3,
+                false
+            )
+            .is_ok()
+        );
     }
 }

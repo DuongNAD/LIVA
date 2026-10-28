@@ -60,3 +60,18 @@ pub mod cua_m3_pointer_safety_challenge;
 
 #[path = "suites/cua_m3_challenger_empirical.rs"]
 pub mod cua_m3_challenger_empirical;
+
+#[path = "perception_tests.rs"]
+pub mod perception_tests;
+
+#[path = "suites/cua_m1_perception_adversarial.rs"]
+pub mod cua_m1_perception_adversarial;
+
+#[path = "execution_profile_tests.rs"]
+pub mod execution_profile_tests;
+
+#[path = "suites/cua_m2_execution_adversarial.rs"]
+pub mod cua_m2_execution_adversarial;
+
+#[path = "adb_driver_tests.rs"]
+pub mod adb_driver_tests;

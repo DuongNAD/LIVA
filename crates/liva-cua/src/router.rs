@@ -69,6 +69,8 @@ pub enum TargetCoordinate {
     /// Center point of target window client area.
     #[default]
     WindowClientCenter,
+    /// Target UI element by its Set-of-Mark semantic index ([1..N]).
+    SomIndex(usize),
 
     // Aliases for System-2 / test compatibility
     #[serde(rename = "normalized")]
@@ -112,6 +114,10 @@ impl TargetCoordinate {
 
     pub fn window_client_center() -> Self {
         Self::WindowClientCenter
+    }
+
+    pub fn som_index(index: usize) -> Self {
+        Self::SomIndex(index)
     }
 }
 
@@ -641,12 +647,43 @@ impl TargetResolver {
         let client_bounds =
             Self::get_client_bounds_in_screen(window_info.hwnd, &window_info.bounds);
 
+        // If SomIndex and expected_roi is None, resolve via UI tree
+        let (expected_roi, som_label) = match descriptor.coordinate {
+            TargetCoordinate::SomIndex(idx) => {
+                if let Some(roi) = descriptor.expected_roi {
+                    (Some(roi), descriptor.semantic_label.clone())
+                } else {
+                    let mut tree = driver
+                        .inspect_ui_tree(window_info.hwnd)
+                        .await
+                        .map_err(|e| PreCheckError::Win32Error(e.to_string()))?;
+                    crate::perception::SoMIndexer::index_tree(&mut tree);
+                    if let Some(elem) = tree.find_by_som(idx) {
+                        let label = descriptor
+                            .semantic_label
+                            .clone()
+                            .or_else(|| Some(format!("{:?}:{}", elem.role, elem.name)));
+                        (Some(elem.bounds), label)
+                    } else {
+                        return Err(PreCheckError::WindowNotFound {
+                            target_hwnd: window_info.hwnd,
+                            detail: format!(
+                                "Element with SoM index [{}] not found in UI tree",
+                                idx
+                            ),
+                        });
+                    }
+                }
+            }
+            _ => (descriptor.expected_roi, descriptor.semantic_label.clone()),
+        };
+
         // 3. Translate TargetCoordinate across 7 spaces
         let (screen_point, client_point) = Self::translate_coordinates(
             &descriptor.coordinate,
             &window_info.bounds,
             &client_bounds,
-            descriptor.expected_roi.as_ref(),
+            expected_roi.as_ref(),
         )?;
 
         // 4. Hit-test child control
@@ -663,8 +700,8 @@ impl TargetResolver {
             screen_point,
             client_point,
             hit_control_hwnd,
-            expected_roi: descriptor.expected_roi,
-            semantic_label: descriptor.semantic_label.clone(),
+            expected_roi,
+            semantic_label: som_label,
             window_info,
         })
     }
@@ -934,6 +971,20 @@ impl TargetResolver {
                 (sx, sy, cx, cy)
             }
             TargetCoordinate::WindowClientCenter | TargetCoordinate::RoiCenter => {
+                if let Some(roi) = expected_roi {
+                    let (rcx, rcy) = roi.center();
+                    let cx = rcx - client_bounds.x;
+                    let cy = rcy - client_bounds.y;
+                    (rcx, rcy, cx, cy)
+                } else {
+                    let cx = client_bounds.width / 2;
+                    let cy = client_bounds.height / 2;
+                    let sx = client_bounds.x + cx;
+                    let sy = client_bounds.y + cy;
+                    (sx, sy, cx, cy)
+                }
+            }
+            TargetCoordinate::SomIndex(_) => {
                 if let Some(roi) = expected_roi {
                     let (rcx, rcy) = roi.center();
                     let cx = rcx - client_bounds.x;

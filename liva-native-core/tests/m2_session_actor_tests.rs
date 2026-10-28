@@ -1,8 +1,5 @@
 //! Milestone 2 Integration Tests: Session Actor & Queue Modes (Features F07 & F08).
 
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::mpsc;
 use liva_core_types::{
     CommandPrincipal, Principal, SessionError, SessionMode, SessionQueueMode, SessionTurnRequest,
 };
@@ -10,6 +7,9 @@ use liva_native_core::agent::session_actor::{
     DEFAULT_MAILBOX_CAPACITY, MAX_FOLLOWUP_QUEUE_DEPTH, SessionActor, SessionActorHandle,
     SessionManager,
 };
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn test_f07_session_actor_bounded_mailbox_backpressure() {
@@ -140,9 +140,7 @@ async fn test_f08_queue_mode_interrupt_preemption() {
     };
 
     let handle_clone = handle.clone();
-    let turn1_task = tokio::spawn(async move {
-        handle_clone.execute_turn(req_long, None).await
-    });
+    let turn1_task = tokio::spawn(async move { handle_clone.execute_turn(req_long, None).await });
 
     // Allow turn 1 to start
     tokio::time::sleep(Duration::from_millis(20)).await;
@@ -249,9 +247,7 @@ async fn test_f08_queue_mode_steer_injection() {
     };
 
     let handle_clone = handle.clone();
-    let turn_task = tokio::spawn(async move {
-        handle_clone.execute_turn(req_normal, None).await
-    });
+    let turn_task = tokio::spawn(async move { handle_clone.execute_turn(req_normal, None).await });
 
     tokio::time::sleep(Duration::from_millis(20)).await;
 

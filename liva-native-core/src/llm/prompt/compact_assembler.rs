@@ -124,7 +124,11 @@ impl CompactPromptAssembler {
     /// Formats a catalog tool into a dense 1-line schema.
     pub fn format_dense_tool_line(tool: &CatalogTool) -> String {
         let mut params = Vec::new();
-        if let Some(props) = tool.input_schema.get("properties").and_then(|p| p.as_object()) {
+        if let Some(props) = tool
+            .input_schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+        {
             let required_list: Vec<&str> = tool
                 .input_schema
                 .get("required")
@@ -142,7 +146,12 @@ impl CompactPromptAssembler {
         if params.is_empty() {
             format!("- {}: {}\n", tool.name, tool.description)
         } else {
-            format!("- {}: {} ({})\n", tool.name, tool.description, params.join(", "))
+            format!(
+                "- {}: {} ({})\n",
+                tool.name,
+                tool.description,
+                params.join(", ")
+            )
         }
     }
 
@@ -226,9 +235,14 @@ impl CompactPromptAssembler {
         // --- 4. SECTION 4: BITEMPORAL MEMORY CONTEXT (<= 1500 tokens) ---
         let mut memory_text = String::new();
         let mut memory_tokens = 0;
-        let mut active_memories: Vec<&MemoryFactEntry> = memories.iter().filter(|m| m.is_active).collect();
+        let mut active_memories: Vec<&MemoryFactEntry> =
+            memories.iter().filter(|m| m.is_active).collect();
         // Sort memories by confidence descending
-        active_memories.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        active_memories.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         if !active_memories.is_empty() {
             memory_text.push_str("\n## BITEMPORAL MEMORY CONTEXT\n");
@@ -246,7 +260,9 @@ impl CompactPromptAssembler {
         }
 
         // Combine Sections 1-4 into unified leading system message
-        let mut combined_system = String::with_capacity(sys_text.len() + skill_text.len() + tools_text.len() + memory_text.len());
+        let mut combined_system = String::with_capacity(
+            sys_text.len() + skill_text.len() + tools_text.len() + memory_text.len(),
+        );
         combined_system.push_str(&sys_text);
         combined_system.push_str(&skill_text);
         combined_system.push_str(&tools_text);

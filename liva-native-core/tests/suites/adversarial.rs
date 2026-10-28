@@ -27,11 +27,13 @@ pub mod m2_session_sidecar_adversarial_challenge;
 #[path = "../m3_challenger1_bitemporal_invariants_adversarial.rs"]
 pub mod m3_challenger1_bitemporal_invariants_adversarial;
 
+#[path = "../cua_adversarial_stress.rs"]
+pub mod cua_adversarial_stress;
 #[path = "../m3_challenger2_memghost_fts_markdown_adversarial.rs"]
 pub mod m3_challenger2_memghost_fts_markdown_adversarial;
+#[path = "../m4_artemis_cua_mcp_adversarial_challenge.rs"]
+pub mod m4_artemis_cua_mcp_adversarial_challenge;
 #[path = "../m4_challenger1_rule_of_two_adversarial.rs"]
 pub mod m4_challenger1_rule_of_two_adversarial;
 #[path = "../m4_challenger2_security_adversarial_challenge.rs"]
 pub mod m4_challenger2_security_adversarial_challenge;
-
-

@@ -9,7 +9,7 @@
 use crate::llm::scoped_tool_registry::CommandPrincipal;
 use crate::llm::tool_calling::{CatalogTool, validate_arguments};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 /// Maximum allowed tool chain depth before automatically escalating to worker model.
@@ -42,13 +42,9 @@ pub enum InsuranceAction {
         retry_count: usize,
     },
     /// Escalation required to heavy worker model.
-    EscalateToWorker {
-        reason: EscalationReason,
-    },
+    EscalateToWorker { reason: EscalationReason },
     /// Tool call rejected due to privilege or policy denial.
-    Reject {
-        reason: String,
-    },
+    Reject { reason: String },
 }
 
 /// Reason for escalating from lightweight router to worker model.
@@ -220,7 +216,11 @@ impl ToolInsuranceEngine {
         tools
             .iter()
             .filter(|t| {
-                if !is_owner && (t.name.contains("dpapi") || t.name.contains("policy") || t.name.contains("write_markdown")) {
+                if !is_owner
+                    && (t.name.contains("dpapi")
+                        || t.name.contains("policy")
+                        || t.name.contains("write_markdown"))
+                {
                     false
                 } else {
                     true

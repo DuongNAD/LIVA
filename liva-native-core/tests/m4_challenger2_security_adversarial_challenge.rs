@@ -20,18 +20,18 @@
 //!    - Validates architectural defects: private `mod authorization;` in `lib.rs` and missing `escalate_epoch` method on `EmergencyKillSwitch`.
 
 use liva_core_types::{
-    CallToolResult, CommandPrincipal, DataOrigin, DeclassificationReceipt, IntegrityLevel,
-    Labeled, Principal, SecurityError, SessionMode, TaintFlags, Tool, ToolContent, ToolExecutionContext,
+    CallToolResult, CommandPrincipal, DataOrigin, DeclassificationReceipt, IntegrityLevel, Labeled,
+    Principal, SecurityError, SessionMode, TaintFlags, Tool, ToolContent, ToolExecutionContext,
 };
 use liva_native_core::cognitive::audit_chain::{AuditBlock, Blake3AuditChain, GENESIS_PREV_HASH};
 use liva_native_core::cognitive::policy::{
-    canonicalize_json, compute_canonical_args_hash, visualize_invisible_chars, RiskTier,
+    RiskTier, canonicalize_json, compute_canonical_args_hash, visualize_invisible_chars,
 };
 use liva_native_core::llm::{CatalogTool, ScopedToolRegistry, ToolScope};
 use rusqlite::Connection;
 use serde_json::json;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 // ============================================================================
@@ -109,10 +109,7 @@ fn test_m4_c2_audit_chain_immutability_triggers_reject_raw_update_and_delete() {
     );
 
     // Attack 4: Direct SQL raw DELETE single row
-    let delete_single_res = conn.execute(
-        "DELETE FROM audit_hash_chain WHERE sequence_num = 3",
-        [],
-    );
+    let delete_single_res = conn.execute("DELETE FROM audit_hash_chain WHERE sequence_num = 3", []);
     assert!(
         delete_single_res.is_err(),
         "CRITICAL BUG: SQLite trigger failed to abort raw DELETE on single row"
@@ -160,10 +157,7 @@ fn test_m4_c2_audit_chain_cryptographic_tamper_detection_1byte_hash_corruption()
         .expect("append block");
     }
 
-    assert_eq!(
-        Blake3AuditChain::verify_chain_integrity(&conn).unwrap(),
-        5
-    );
+    assert_eq!(Blake3AuditChain::verify_chain_integrity(&conn).unwrap(), 5);
 
     // Simulate an offline attack or dropped trigger: drop triggers to allow direct row mutation
     conn.execute("DROP TRIGGER IF EXISTS trg_audit_chain_no_update", [])
@@ -209,10 +203,7 @@ fn test_m4_c2_audit_chain_cryptographic_tamper_detection_1byte_hash_corruption()
         [&original_hash],
     )
     .expect("restore block 3 hash");
-    assert_eq!(
-        Blake3AuditChain::verify_chain_integrity(&conn).unwrap(),
-        5
-    );
+    assert_eq!(Blake3AuditChain::verify_chain_integrity(&conn).unwrap(), 5);
 
     // Sub-attack 2: Tamper prev_block_hash of block 4
     conn.execute(
@@ -232,10 +223,7 @@ fn test_m4_c2_audit_chain_cryptographic_tamper_detection_1byte_hash_corruption()
         [&original_hash],
     )
     .expect("restore prev_block_hash");
-    assert_eq!(
-        Blake3AuditChain::verify_chain_integrity(&conn).unwrap(),
-        5
-    );
+    assert_eq!(Blake3AuditChain::verify_chain_integrity(&conn).unwrap(), 5);
 
     // Sub-attack 3: Tamper payload text in block 2
     conn.execute(
@@ -258,10 +246,7 @@ fn test_m4_c2_audit_chain_cryptographic_tamper_detection_1byte_hash_corruption()
     )
     .expect("restore payload 2");
     // Verify restored
-    assert_eq!(
-        Blake3AuditChain::verify_chain_integrity(&conn).unwrap(),
-        5
-    );
+    assert_eq!(Blake3AuditChain::verify_chain_integrity(&conn).unwrap(), 5);
 
     // Now delete middle block 3
     conn.execute("DELETE FROM audit_hash_chain WHERE sequence_num = 3", [])
@@ -315,9 +300,9 @@ fn test_m4_c2_untrusted_taint_labeled_invariants_and_receipt_declassification() 
     let trusted_owner_data = Labeled::new_owner("config_header".to_string(), "desktop");
     assert!(!trusted_owner_data.is_tainted());
 
-    let combined = untrusted_data.clone().combine(trusted_owner_data, |u, t| {
-        format!("{t}\n{u}")
-    });
+    let combined = untrusted_data
+        .clone()
+        .combine(trusted_owner_data, |u, t| format!("{t}\n{u}"));
     assert!(
         combined.is_tainted(),
         "Combined data with any untrusted input must be tainted"
@@ -438,11 +423,8 @@ fn test_m4_c2_scoped_tool_registry_tainted_sink_enforcement_and_mode_violations(
     registry.register_scope(cli_scope.clone());
 
     // Calling an unregistered handler without mock will reach execution phase or succeed
-    let cli_read_res = registry.execute_guarded(
-        &cli_scope,
-        "read_file",
-        &json!({"path": "safe.txt"}),
-    );
+    let cli_read_res =
+        registry.execute_guarded(&cli_scope, "read_file", &json!({"path": "safe.txt"}));
     // Since no execution backend is attached, it will return an execution error or success, but NOT PolicyViolation!
     if let Err(e) = cli_read_res {
         let err_msg = e.to_string();
@@ -452,7 +434,6 @@ fn test_m4_c2_scoped_tool_registry_tainted_sink_enforcement_and_mode_violations(
         );
     }
 }
-
 
 // ============================================================================
 // 3. CANONICAL HASH & INVISIBLE CHARACTER DETECTION (FEATURE F23)
@@ -681,14 +662,20 @@ fn test_m4_c2_architectural_defects_and_contract_verification() {
     // -----------------------------------------------------------------------
     let ks = EmergencyKillSwitch::new();
     assert_eq!(ks.current_epoch(), 1);
-    assert!(!ks.is_active(), "Kill switch must not be in safe mode initially");
+    assert!(
+        !ks.is_active(),
+        "Kill switch must not be in safe mode initially"
+    );
     assert!(ks.validate_grant(1).is_ok());
 
     // Escalate epoch without safe mode lockdown
     let new_epoch = ks.escalate_epoch("Immediate token rotation");
     assert_eq!(new_epoch, 2);
     assert_eq!(ks.current_epoch(), 2);
-    assert!(!ks.is_active(), "Kill switch must NOT be active (no safe mode lockdown)");
+    assert!(
+        !ks.is_active(),
+        "Kill switch must NOT be active (no safe mode lockdown)"
+    );
 
     // validate_grant(1) must immediately return TokenEpochRevoked (< 5ns)
     let revoke_err = ks.validate_grant(1).unwrap_err();
@@ -719,7 +706,10 @@ fn test_m4_c2_architectural_defects_and_contract_verification() {
             None,
         );
         assert!(
-            matches!(err, Err(SecurityError::VaultAccessForbiddenInBrowserMode(_))),
+            matches!(
+                err,
+                Err(SecurityError::VaultAccessForbiddenInBrowserMode(_))
+            ),
             "Tool '{sensitive_tool}' MUST be blocked in Browser mode, got: {err:?}"
         );
     }

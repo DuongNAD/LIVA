@@ -51,7 +51,10 @@ impl CapabilityGrant {
 
         // 2. Resource pattern containment: Child paths strictly contained within Parent paths
         for child_res in &self.resource_patterns {
-            if child_res.contains("..") || child_res.contains("/../") || child_res.contains("\\..\\") {
+            if child_res.contains("..")
+                || child_res.contains("/../")
+                || child_res.contains("\\..\\")
+            {
                 return Err(SecurityError::PrivilegeEscalationDetected(
                     "Path traversal attempt in resource pattern detected".into(),
                 ));
@@ -176,7 +179,10 @@ impl CapabilityToken {
             }
         } else {
             // 1. Root step: verify delegation_chain[0].grant with master_key
-            let root_mac = blake3::keyed_hash(master_key, &self.delegation_chain[0].grant.canonical_bytes());
+            let root_mac = blake3::keyed_hash(
+                master_key,
+                &self.delegation_chain[0].grant.canonical_bytes(),
+            );
             if root_mac.as_bytes() != &self.delegation_chain[0].mac {
                 return Err(SecurityError::InvalidSignature);
             }
@@ -211,7 +217,10 @@ impl CapabilityToken {
     /// Validates validity at the current timestamp and epoch.
     pub fn validate_usable(&self, current_epoch: u64, now_ms: u64) -> Result<(), SecurityError> {
         if self.grant.epoch != current_epoch {
-            return Err(SecurityError::TokenEpochRevoked(self.grant.epoch, current_epoch));
+            return Err(SecurityError::TokenEpochRevoked(
+                self.grant.epoch,
+                current_epoch,
+            ));
         }
         if let Some(exp) = self.grant.expires_at {
             if now_ms > exp {
@@ -357,7 +366,9 @@ mod tests {
             expires_at: Some(8000),
             plan_hash: None,
         };
-        let child_token = root_token.attenuate(child_grant.clone()).expect("attenuate child");
+        let child_token = root_token
+            .attenuate(child_grant.clone())
+            .expect("attenuate child");
         assert!(child_token.verify_chain(&master_key).is_ok());
 
         // Step 2: Leaf grandchild
@@ -397,7 +408,9 @@ mod tests {
 
         // Forgery 3: Tampering intermediate step grant fails verification
         let mut tampered_intermediate_grant = grandchild_token.clone();
-        tampered_intermediate_grant.delegation_chain[0].grant.max_risk_tier = RiskTier::R4;
+        tampered_intermediate_grant.delegation_chain[0]
+            .grant
+            .max_risk_tier = RiskTier::R4;
         assert!(matches!(
             tampered_intermediate_grant.verify_chain(&master_key),
             Err(SecurityError::InvalidSignature)
@@ -407,7 +420,9 @@ mod tests {
         let fake_secret = [0x55u8; 32];
         let fake_root = CapabilityToken::new_root(root_grant, &fake_secret);
         let fake_child = fake_root.attenuate(child_grant).expect("attenuate fake");
-        let fake_grandchild = fake_child.attenuate(grandchild_grant).expect("attenuate fake leaf");
+        let fake_grandchild = fake_child
+            .attenuate(grandchild_grant)
+            .expect("attenuate fake leaf");
         assert!(matches!(
             fake_grandchild.verify_chain(&master_key),
             Err(SecurityError::InvalidSignature)

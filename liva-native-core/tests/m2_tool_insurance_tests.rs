@@ -3,9 +3,9 @@
 use liva_core_types::CommandPrincipal;
 use liva_native_core::llm::tool_calling::CatalogTool;
 use liva_native_core::llm::tool_insurance::{
-    canonical_json_hash, compute_hmac_sha256, verify_hmac_constant_time, EscalationReason,
-    HmacReceiptVerifier, InsuranceAction, ToolCallReceipt, ToolInsuranceEngine,
-    MAX_SCHEMA_RETRIES, MAX_TOOL_CHAIN_DEPTH,
+    EscalationReason, HmacReceiptVerifier, InsuranceAction, MAX_SCHEMA_RETRIES,
+    MAX_TOOL_CHAIN_DEPTH, ToolCallReceipt, ToolInsuranceEngine, canonical_json_hash,
+    compute_hmac_sha256, verify_hmac_constant_time,
 };
 use serde_json::json;
 
@@ -100,7 +100,10 @@ fn test_f12_tier3_schema_retry_and_worker_escalation() {
     let invalid_args = json!({});
     let action_attempt1 = engine.inspect_and_insure(read_tool, &invalid_args, 0, 1);
     match action_attempt1 {
-        InsuranceAction::RetryWithFeedback { feedback_prompt, retry_count } => {
+        InsuranceAction::RetryWithFeedback {
+            feedback_prompt,
+            retry_count,
+        } => {
             assert_eq!(retry_count, 1);
             assert!(feedback_prompt.contains("argument validation failed"));
             assert!(feedback_prompt.contains("thiếu tham số bắt buộc: path"));
@@ -123,7 +126,10 @@ fn test_f12_tier3_schema_retry_and_worker_escalation() {
     // Case 3: Empty string parameter in required field -> Rejected as hallucination guessing
     let empty_str_args = json!({ "path": "" });
     let action_empty = engine.inspect_and_insure(read_tool, &empty_str_args, 0, 1);
-    assert!(matches!(action_empty, InsuranceAction::RetryWithFeedback { .. }));
+    assert!(matches!(
+        action_empty,
+        InsuranceAction::RetryWithFeedback { .. }
+    ));
 
     // Case 4: Tool chain limit exceeded (chain_step > 2) -> Escalate to Worker
     let valid_args = json!({ "path": "docs/readme.md" });
@@ -154,25 +160,18 @@ fn test_f12_tier4_hmac_receipt_issuance_and_verification() {
     // 1. Read-After-Write Verification check for mutating tool:
     // If raw_confirmed is false, issuance MUST be refused.
     let fail_issue = engine.issue_signed_receipt(
-        session_id,
-        call_id,
-        tool_name,
-        &args,
-        result,
-        true,  // is_mutating
+        session_id, call_id, tool_name, &args, result, true,  // is_mutating
         false, // raw_confirmed = false!
     );
-    assert!(fail_issue.is_err(), "Must refuse receipt if RAW check failed");
+    assert!(
+        fail_issue.is_err(),
+        "Must refuse receipt if RAW check failed"
+    );
 
     // 2. Issuance with raw_confirmed = true succeeds
     let receipt = engine
         .issue_signed_receipt(
-            session_id,
-            call_id,
-            tool_name,
-            &args,
-            result,
-            true, // is_mutating
+            session_id, call_id, tool_name, &args, result, true, // is_mutating
             true, // raw_confirmed
         )
         .expect("issue signed receipt");
@@ -184,16 +183,26 @@ fn test_f12_tier4_hmac_receipt_issuance_and_verification() {
 
     // 3. Verification of legitimate receipt
     let verifier = engine.verifier();
-    assert!(verifier.verify_receipt(&receipt).is_ok(), "Legitimate receipt must verify cleanly");
+    assert!(
+        verifier.verify_receipt(&receipt).is_ok(),
+        "Legitimate receipt must verify cleanly"
+    );
 
     // 4. Rejection of tampered receipt (e.g. forged result_hash or arguments)
     let mut tampered = receipt.clone();
-    tampered.result_hash = "0000000000000000000000000000000000000000000000000000000000000000".into();
-    assert!(verifier.verify_receipt(&tampered).is_err(), "Tampered receipt must be rejected");
+    tampered.result_hash =
+        "0000000000000000000000000000000000000000000000000000000000000000".into();
+    assert!(
+        verifier.verify_receipt(&tampered).is_err(),
+        "Tampered receipt must be rejected"
+    );
 
     let mut tampered_tool = receipt.clone();
     tampered_tool.tool_name = "delete_file".into();
-    assert!(verifier.verify_receipt(&tampered_tool).is_err(), "Tampered tool name must be rejected");
+    assert!(
+        verifier.verify_receipt(&tampered_tool).is_err(),
+        "Tampered tool name must be rejected"
+    );
 }
 
 #[test]
@@ -204,7 +213,10 @@ fn test_f12_canonical_json_hash_key_sorting() {
 
     let hash_a = canonical_json_hash(&json_a);
     let hash_b = canonical_json_hash(&json_b);
-    assert_eq!(hash_a, hash_b, "Canonical JSON hash must be key-order invariant");
+    assert_eq!(
+        hash_a, hash_b,
+        "Canonical JSON hash must be key-order invariant"
+    );
 }
 
 #[test]

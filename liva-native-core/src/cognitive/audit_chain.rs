@@ -2,10 +2,11 @@
 
 use crate::cognitive::policy::RiskTier;
 use crate::cognitive::redaction::SecretScrubber;
-use rusqlite::{params, Connection, Result as SqlResult};
+use rusqlite::{Connection, Result as SqlResult, params};
 use serde::{Deserialize, Serialize};
 
-pub const GENESIS_PREV_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+pub const GENESIS_PREV_HASH: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Single cryptographically-chained block in the audit ledger.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,8 +102,8 @@ impl Blake3AuditChain {
         status: &str,
         duration_ms: Option<u64>,
     ) -> SqlResult<AuditBlock> {
-        let (latest_seq, latest_hash) = Self::get_latest_tip(conn)?
-            .unwrap_or_else(|| (0, GENESIS_PREV_HASH.to_string()));
+        let (latest_seq, latest_hash) =
+            Self::get_latest_tip(conn)?.unwrap_or_else(|| (0, GENESIS_PREV_HASH.to_string()));
 
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -110,7 +111,9 @@ impl Blake3AuditChain {
             .as_millis() as i64;
 
         let redacted_payload = SecretScrubber::scrub(raw_payload);
-        let payload_hash = blake3::hash(redacted_payload.as_bytes()).to_hex().to_string();
+        let payload_hash = blake3::hash(redacted_payload.as_bytes())
+            .to_hex()
+            .to_string();
 
         let block_hash = AuditBlock::compute_hash(
             &latest_hash,
@@ -212,8 +215,9 @@ impl Blake3AuditChain {
             }
 
             // Invariant 2: Payload integrity
-            let computed_payload_hash =
-                blake3::hash(block.redacted_payload.as_bytes()).to_hex().to_string();
+            let computed_payload_hash = blake3::hash(block.redacted_payload.as_bytes())
+                .to_hex()
+                .to_string();
             if computed_payload_hash != block.payload_hash {
                 return Err(format!(
                     "Audit payload tampered at block {}: payload hash mismatch",

@@ -5,12 +5,15 @@
 //! state guards, multi-tier security governance, multi-trigger emergency kill-switch,
 //! and structured audit ledger.
 
+pub mod adb;
 pub mod audit;
+pub mod execution;
 pub mod geometry;
 pub mod guards;
 pub mod input;
 pub mod kill_switch;
 pub mod mock;
+pub mod perception;
 pub mod router;
 pub mod security;
 pub mod traits;
@@ -24,12 +27,15 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
+pub use adb::*;
 pub use audit::*;
+pub use execution::*;
 pub use geometry::*;
 pub use guards::*;
 pub use input::*;
 pub use kill_switch::*;
 pub use mock::MockCuaDriver;
+pub use perception::*;
 pub use router::*;
 pub use security::*;
 pub use traits::CuaDriverTrait;
@@ -64,6 +70,20 @@ impl CuaEngine {
     /// Initialize with a custom driver (used for mocking, tests, or platform injection).
     pub fn new_with_driver(config: CuaConfig, driver: Arc<dyn CuaDriverTrait>) -> Self {
         Self::new_with_deps(config, driver, None)
+    }
+
+    /// Initialize with an Android ADB driver.
+    pub fn new_with_adb(config: CuaConfig, adb_driver: Arc<adb::AdbCuaDriver>) -> Self {
+        Self::new_with_deps(config, adb_driver, None)
+    }
+
+    /// Full constructor for ADB driver with optional SQLite DbActor handle.
+    pub fn new_with_adb_and_db(
+        config: CuaConfig,
+        adb_driver: Arc<adb::AdbCuaDriver>,
+        db_handle: Option<liva_storage::DbActorHandle>,
+    ) -> Self {
+        Self::new_with_deps(config, adb_driver, db_handle)
     }
 
     /// Full constructor accepting custom driver and optional SQLite DbActor handle.
@@ -131,6 +151,80 @@ impl CuaEngine {
     /// Validates the state of a target window.
     pub async fn validate_window_state(&self, hwnd: u64) -> Result<WindowStateVerdict, CuaError> {
         self.driver.inspect_window(hwnd).await
+    }
+
+    /// Inspects and extracts the semantic UI element tree for a target window,
+    /// indexed with Set-of-Mark (SoM) numbers [1..N].
+    pub async fn inspect_ui_tree(&self, hwnd: u64) -> Result<UiTree, CuaError> {
+        let mut tree = self.driver.inspect_ui_tree(hwnd).await?;
+        SoMIndexer::index_tree(&mut tree);
+        Ok(tree)
+    }
+
+    /// Perceives a target window using dual-targeting perception:
+    /// semantic UI element hierarchy inspection with automatic visual ROI fallback.
+    pub async fn perceive_target(
+        &self,
+        hwnd: u64,
+        capturer: Option<&dyn ScreenCapturerTrait>,
+    ) -> Result<PerceptionResult, CuaError> {
+        PerceptionEngine::new()
+            .perceive(hwnd, self.driver.as_ref(), capturer)
+            .await
+    }
+
+    /// Resolves an action template targeting a specific Set-of-Mark element index
+    /// into a verified concrete CuaAction with element center coordinates.
+    pub fn resolve_som_action(
+        &self,
+        tree: &UiTree,
+        som_index: usize,
+        action_template: CuaAction,
+    ) -> Result<CuaAction, CuaError> {
+        PerceptionResolver::resolve_action(tree, som_index, action_template)
+    }
+
+    /// Execute a multi-step plan under Flash or Pro profile.
+    pub async fn run_profile_plan(
+        self: &Arc<Self>,
+        plan: ProfilePlan,
+        visual_verifier: Option<Arc<dyn VisualVerifierTrait>>,
+    ) -> Result<ProfileExecutionResult, CuaError> {
+        let orchestrator =
+            CuaExecutionOrchestrator::new(self.clone(), visual_verifier, plan.config.clone());
+        orchestrator.execute_plan(plan).await
+    }
+
+    /// Execute a single step under Flash profile.
+    pub async fn execute_flash_step(
+        self: &Arc<Self>,
+        step_index: usize,
+        action: &ProfileAction,
+        target_hwnd: u64,
+        session_id: &str,
+    ) -> Result<ProfileStepResult, CuaError> {
+        let orchestrator =
+            CuaExecutionOrchestrator::new(self.clone(), None, ProfileConfig::flash());
+        orchestrator
+            .execute_flash_step(step_index, action, target_hwnd, session_id)
+            .await
+    }
+
+    /// Execute a single step under Pro profile with pre/post verification and self-healing.
+    pub async fn execute_pro_step(
+        self: &Arc<Self>,
+        step_index: usize,
+        action: &ProfileAction,
+        target_hwnd: u64,
+        session_id: &str,
+        retries_left: u32,
+        visual_verifier: Option<Arc<dyn VisualVerifierTrait>>,
+    ) -> Result<ProfileStepResult, ProDefectReport> {
+        let orchestrator =
+            CuaExecutionOrchestrator::new(self.clone(), visual_verifier, ProfileConfig::pro());
+        orchestrator
+            .execute_pro_step(step_index, action, target_hwnd, session_id, retries_left)
+            .await
     }
 
     /// Execute a discrete action with full security, kill-switch, state verification,
@@ -867,6 +961,18 @@ impl CuaDriverTrait for Win32CuaDriver {
         #[cfg(not(windows))]
         let _ = (hwnd, delta_y);
         Ok(())
+    }
+
+    async fn inspect_ui_tree(&self, hwnd: u64) -> Result<crate::perception::UiTree, CuaError> {
+        #[cfg(windows)]
+        {
+            crate::perception::win32::extract_win32_ui_tree(hwnd)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = hwnd;
+            Ok(crate::perception::UiTree::empty(hwnd))
+        }
     }
 }
 

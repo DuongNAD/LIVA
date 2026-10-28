@@ -104,15 +104,9 @@ fn test_f11_compact_prompt_budget_boundaries() {
         content: "Hôm nay thời tiết thế nào?".into(),
     }];
 
-    let assembled = CompactPromptAssembler::assemble(
-        system_rules,
-        &skills,
-        &tools,
-        &memories,
-        &turns,
-        &budget,
-    )
-    .expect("assemble prompt");
+    let assembled =
+        CompactPromptAssembler::assemble(system_rules, &skills, &tools, &memories, &turns, &budget)
+            .expect("assemble prompt");
 
     assert!(assembled.estimated_system_tokens <= budget.max_system_tokens);
     assert!(assembled.estimated_skill_index_tokens <= budget.max_skill_index_tokens);
@@ -198,15 +192,9 @@ fn test_f11_bitemporal_memory_sorting_and_filtering() {
         content: "Test".into(),
     }];
 
-    let assembled = CompactPromptAssembler::assemble(
-        system_rules,
-        &skills,
-        &tools,
-        &memories,
-        &turns,
-        &budget,
-    )
-    .unwrap();
+    let assembled =
+        CompactPromptAssembler::assemble(system_rules, &skills, &tools, &memories, &turns, &budget)
+            .unwrap();
 
     let sys = &assembled.system_turn_content;
     assert!(sys.contains("[language_preference] user -> Vietnamese"));
@@ -219,7 +207,10 @@ fn test_f11_bitemporal_memory_sorting_and_filtering() {
     // Higher confidence fact (0.98) must appear before lower confidence fact (0.85)
     let pos_lang = sys.find("language_preference").unwrap();
     let pos_laptop = sys.find("work_laptop").unwrap();
-    assert!(pos_lang < pos_laptop, "Memories must be ordered by confidence descending");
+    assert!(
+        pos_lang < pos_laptop,
+        "Memories must be ordered by confidence descending"
+    );
 }
 
 #[test]
@@ -241,6 +232,12 @@ fn test_f11_dense_tool_line_formatting() {
 
     let line = CompactPromptAssembler::format_dense_tool_line(&tool);
     assert!(line.contains("- test_tool: A test tool description"));
-    assert!(line.contains("file_path*:string"), "Required parameters must be marked with *");
-    assert!(line.contains("verbose:boolean"), "Optional parameters must NOT have *");
+    assert!(
+        line.contains("file_path*:string"),
+        "Required parameters must be marked with *"
+    );
+    assert!(
+        line.contains("verbose:boolean"),
+        "Optional parameters must NOT have *"
+    );
 }

@@ -3,9 +3,11 @@ use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub struct NativeMcpServer {
     vault_path: PathBuf,
+    cua: std::sync::RwLock<Option<Arc<liva_cua::CuaEngine>>>,
 }
 
 /// Canonical của **tổ tiên tồn tại gần nhất** của `p` (kể cả chính `p`).
@@ -43,6 +45,47 @@ struct SearchVaultArgs {
     query: String,
 }
 
+#[derive(JsonSchema, Deserialize)]
+struct CuaInspectUiArgs {
+    #[serde(default)]
+    target_hwnd: Option<u64>,
+    #[serde(default)]
+    fallback_roi: Option<bool>,
+}
+
+#[derive(JsonSchema, Deserialize)]
+struct CuaExecuteSomArgs {
+    #[serde(default)]
+    target_hwnd: Option<u64>,
+    som_index: usize,
+    action: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    button: Option<String>,
+    #[serde(default)]
+    delta_x: Option<i32>,
+    #[serde(default)]
+    delta_y: Option<i32>,
+}
+
+#[derive(JsonSchema, Deserialize)]
+struct CuaRunProfileArgs {
+    profile: String,
+    #[serde(default)]
+    target_hwnd: Option<u64>,
+    #[serde(default)]
+    plan_id: Option<String>,
+    #[serde(default)]
+    steps: Option<Vec<Value>>,
+}
+
+#[derive(JsonSchema, Deserialize)]
+struct CuaEmergencyHaltArgs {
+    #[serde(default)]
+    reset: Option<bool>,
+}
+
 // Tham số của tool `control_smarthome`.
 //
 // Dùng lại ĐÚNG enum của `integrations::smart_home` thay vì `String` trơn. Bản
@@ -71,7 +114,25 @@ impl NativeMcpServer {
     pub fn new(vault_path: &str) -> Self {
         Self {
             vault_path: PathBuf::from(vault_path),
+            cua: std::sync::RwLock::new(None),
         }
+    }
+
+    pub fn new_with_cua(vault_path: &str, cua: Arc<liva_cua::CuaEngine>) -> Self {
+        Self {
+            vault_path: PathBuf::from(vault_path),
+            cua: std::sync::RwLock::new(Some(cua)),
+        }
+    }
+
+    pub fn set_cua(&self, cua: Arc<liva_cua::CuaEngine>) {
+        if let Ok(mut lock) = self.cua.write() {
+            *lock = Some(cua);
+        }
+    }
+
+    pub fn cua(&self) -> Option<Arc<liva_cua::CuaEngine>> {
+        self.cua.read().ok().and_then(|g| g.clone())
     }
 
     /// Bốn tool nội bộ. Mô tả **song ngữ + kèm ví dụ cách nói** từ 26/07/2026.
@@ -165,6 +226,30 @@ impl NativeMcpServer {
                         .to_string(),
                     input_schema: schema_for!(crate::integrations::weather::WeatherArgs),
                 },
+                Tool {
+                    name: "cua_inspect_ui".to_string(),
+                    description: "Kiểm tra cấu trúc giao diện ứng dụng hoặc màn hình điện thoại, trích xuất cây phần tử UI có gắn chỉ số Set-of-Mark [1..N] để nhắm mục tiêu chính xác. Inspect active window or Android UI tree and extract Set-of-Mark indexed elements."
+                        .to_string(),
+                    input_schema: schema_for!(CuaInspectUiArgs),
+                },
+                Tool {
+                    name: "cua_execute_som".to_string(),
+                    description: "Thực thi thao tác tương tác (click, nhập liệu, cuộn) lên một phần tử giao diện theo chỉ số Set-of-Mark [1..N] đã trích xuất. Execute UI action targeting a specific Set-of-Mark element index."
+                        .to_string(),
+                    input_schema: schema_for!(CuaExecuteSomArgs),
+                },
+                Tool {
+                    name: "cua_run_profile".to_string(),
+                    description: "Thực thi chuỗi thao tác tự động hóa đa bước theo profile Flash (tốc độ cao) hoặc Pro (tự xác minh trước/sau thao tác, phát hiện modal bất thường và tự phục hồi). Execute multi-step automation workflow under Flash or Pro execution profile."
+                        .to_string(),
+                    input_schema: schema_for!(CuaRunProfileArgs),
+                },
+                Tool {
+                    name: "cua_emergency_halt".to_string(),
+                    description: "Kích hoạt ngắt khẩn cấp ngay lập tức (<15ms) toàn bộ hoạt động điều khiển chuột/phím của tác nhân tự động hóa CUA. Emergency halt all running CUA desktop automation actions instantly."
+                        .to_string(),
+                    input_schema: schema_for!(CuaEmergencyHaltArgs),
+                },
             ],
         }
     }
@@ -183,10 +268,12 @@ impl NativeMcpServer {
                     "control_smarthome" => "core",
                     "control_volume" | "control_media" => "system",
                     "get_weather" => "web",
+                    "cua_inspect_ui" | "cua_execute_som" | "cua_run_profile"
+                    | "cua_emergency_halt" => "automation",
                     _ => "extension",
                 };
                 let action_kind = match tool.name.as_str() {
-                    "read_markdown" | "search_vault" | "get_weather" => "read",
+                    "read_markdown" | "search_vault" | "get_weather" | "cua_inspect_ui" => "read",
                     _ => "write",
                 };
                 let default_policy = crate::llm::ExecPolicy::default_for_tool(
@@ -261,6 +348,26 @@ impl NativeMcpServer {
                  mưa không · có nên mang ô không · nhiệt độ bây giờ bao nhiêu · \
                  trời hôm nay ra sao · mai có mưa không · what's the weather · \
                  is it raining outside · how hot is it today",
+            ),
+            (
+                "cua_inspect_ui",
+                "xem màn hình · kiểm tra giao diện · quét các nút trên cửa sổ · đọc cây UI · \
+                 tìm nút bấm · inspect window · read UI tree · scan interactive elements · Set-of-Mark",
+            ),
+            (
+                "cua_execute_som",
+                "bấm nút số 1 · click vào ô số 2 · nhấn nút số · gõ chữ vào ô · cuộn trang · \
+                 click element 1 · type text into input 3 · click Set-of-Mark · tap button",
+            ),
+            (
+                "cua_run_profile",
+                "chạy quy trình tự động · thực hiện kịch bản · chạy profile flash · chạy profile pro · \
+                 tự động hóa màn hình · run automation workflow · execute plan · flash profile · pro profile",
+            ),
+            (
+                "cua_emergency_halt",
+                "dừng lại ngay · dừng khẩn cấp · dừng điều khiển chuột · ngắt tự động hóa · hủy thao tác · \
+                 emergency stop · halt automation · kill switch · stop immediately · cancel actions",
             ),
         ]
     }
@@ -617,6 +724,291 @@ impl NativeMcpServer {
                     },
                 },
             ),
+            "cua_inspect_ui" => {
+                let args: CuaInspectUiArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
+                let cua = match self.cua() {
+                    Some(c) => c,
+                    None => {
+                        return Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: "CUA engine is not configured on NativeMcpServer".to_string(),
+                            }],
+                            is_error: true,
+                        });
+                    }
+                };
+
+                let hwnd = args.target_hwnd.unwrap_or(0);
+                if args.fallback_roi.unwrap_or(false) {
+                    match cua.perceive_target(hwnd, None).await {
+                        Ok(perception) => Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: serde_json::to_string_pretty(&perception).unwrap_or_default(),
+                            }],
+                            is_error: false,
+                        }),
+                        Err(e) => Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: format!("Perception error: {}", e),
+                            }],
+                            is_error: true,
+                        }),
+                    }
+                } else {
+                    match cua.inspect_ui_tree(hwnd).await {
+                        Ok(tree) => {
+                            let prompt = tree.format_som_prompt();
+                            Ok(CallToolResult {
+                                content: vec![ToolContent::Text {
+                                    text: format!(
+                                        "UI Tree for HWND {hwnd} (Total nodes: {}, Interactive: {}):\n{}",
+                                        tree.total_nodes, tree.interactive_count, prompt
+                                    ),
+                                }],
+                                is_error: false,
+                            })
+                        }
+                        Err(e) => Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: format!("UI inspection error: {}", e),
+                            }],
+                            is_error: true,
+                        }),
+                    }
+                }
+            }
+            "cua_execute_som" => {
+                let args: CuaExecuteSomArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
+                let cua = match self.cua() {
+                    Some(c) => c,
+                    None => {
+                        return Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: "CUA engine is not configured on NativeMcpServer".to_string(),
+                            }],
+                            is_error: true,
+                        });
+                    }
+                };
+
+                let hwnd = args.target_hwnd.unwrap_or(0);
+                let tree = match cua.inspect_ui_tree(hwnd).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        return Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: format!("Failed to inspect UI tree: {}", e),
+                            }],
+                            is_error: true,
+                        });
+                    }
+                };
+
+                let button = match args
+                    .button
+                    .as_deref()
+                    .unwrap_or("left")
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "right" => liva_cua::types::MouseButton::Right,
+                    "middle" => liva_cua::types::MouseButton::Middle,
+                    _ => liva_cua::types::MouseButton::Left,
+                };
+
+                let action_template = match args.action.to_ascii_lowercase().as_str() {
+                    "click" => liva_cua::types::CuaAction::Click {
+                        target_hwnd: hwnd,
+                        x: None,
+                        y: None,
+                        button,
+                        click_count: 1,
+                        delivery_mode: liva_cua::types::CuaDeliveryMode::Background,
+                    },
+                    "double_click" => liva_cua::types::CuaAction::Click {
+                        target_hwnd: hwnd,
+                        x: None,
+                        y: None,
+                        button: liva_cua::types::MouseButton::Left,
+                        click_count: 2,
+                        delivery_mode: liva_cua::types::CuaDeliveryMode::Background,
+                    },
+                    "hover" | "move" => liva_cua::types::CuaAction::MoveCursor {
+                        target_hwnd: hwnd,
+                        x: 0,
+                        y: 0,
+                        delivery_mode: liva_cua::types::CuaDeliveryMode::Background,
+                    },
+                    "type" | "type_text" => liva_cua::types::CuaAction::TypeText {
+                        target_hwnd: hwnd,
+                        text: args.text.unwrap_or_default(),
+                        delivery_mode: liva_cua::types::CuaDeliveryMode::Background,
+                    },
+                    "scroll" => liva_cua::types::CuaAction::Scroll {
+                        target_hwnd: hwnd,
+                        delta_x: args.delta_x.unwrap_or(0),
+                        delta_y: args.delta_y.unwrap_or(-120),
+                        x: None,
+                        y: None,
+                    },
+                    other => {
+                        return Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: format!("Unsupported action: '{other}'"),
+                            }],
+                            is_error: true,
+                        });
+                    }
+                };
+
+                let resolved_action =
+                    match cua.resolve_som_action(&tree, args.som_index, action_template) {
+                        Ok(act) => act,
+                        Err(e) => {
+                            return Ok(CallToolResult {
+                                content: vec![ToolContent::Text {
+                                    text: format!(
+                                        "Failed to resolve SoM index {}: {}",
+                                        args.som_index, e
+                                    ),
+                                }],
+                                is_error: true,
+                            });
+                        }
+                    };
+
+                match cua.execute_action(resolved_action).await {
+                    Ok(result) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text {
+                            text: format!(
+                                "Action executed successfully on SoM [{}]: type={}, effect={:?}, duration={}ms",
+                                args.som_index,
+                                result.action_type,
+                                result.effect,
+                                result.duration_ms
+                            ),
+                        }],
+                        is_error: false,
+                    }),
+                    Err(e) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text {
+                            text: format!(
+                                "Action execution failed on SoM [{}]: {}",
+                                args.som_index, e
+                            ),
+                        }],
+                        is_error: true,
+                    }),
+                }
+            }
+            "cua_run_profile" => {
+                let args: CuaRunProfileArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
+                let cua = match self.cua() {
+                    Some(c) => c,
+                    None => {
+                        return Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: "CUA engine is not configured on NativeMcpServer".to_string(),
+                            }],
+                            is_error: true,
+                        });
+                    }
+                };
+
+                let profile = match args.profile.to_ascii_lowercase().as_str() {
+                    "pro" => liva_cua::execution::ExecutionProfile::Pro,
+                    _ => liva_cua::execution::ExecutionProfile::Flash,
+                };
+                let plan_id = args
+                    .plan_id
+                    .unwrap_or_else(|| "mcp_profile_plan".to_string());
+                let mut plan =
+                    liva_cua::execution::ProfilePlan::new(plan_id, "mcp_session", profile);
+                if let Some(hwnd) = args.target_hwnd {
+                    plan = plan.with_target_hwnd(hwnd);
+                }
+                if let Some(steps_val) = args.steps {
+                    let parsed_steps: Vec<liva_cua::execution::ProfileAction> = steps_val
+                        .into_iter()
+                        .filter_map(|v| serde_json::from_value(v).ok())
+                        .collect();
+                    plan = plan.with_steps(parsed_steps);
+                }
+
+                match cua.run_profile_plan(plan, None).await {
+                    Ok(result) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text {
+                            text: format!(
+                                "Profile '{:?}' plan executed: success={}, completed={}/{} steps, duration={}ms\nSummary:\n{}",
+                                result.profile,
+                                result.success,
+                                result.completed_steps,
+                                result.total_steps,
+                                result.duration_ms,
+                                result.history_summary
+                            ),
+                        }],
+                        is_error: !result.success,
+                    }),
+                    Err(e) => Ok(CallToolResult {
+                        content: vec![ToolContent::Text {
+                            text: format!("Profile plan execution failed: {}", e),
+                        }],
+                        is_error: true,
+                    }),
+                }
+            }
+            "cua_emergency_halt" => {
+                let args: CuaEmergencyHaltArgs =
+                    serde_json::from_value(req.arguments).map_err(|e| e.to_string())?;
+                let cua = match self.cua() {
+                    Some(c) => c,
+                    None => {
+                        return Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: "CUA engine is not configured on NativeMcpServer".to_string(),
+                            }],
+                            is_error: true,
+                        });
+                    }
+                };
+
+                if args.reset.unwrap_or(false) {
+                    match cua.reset_emergency_halt() {
+                        Ok(_) => Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: "CUA emergency halt successfully reset".to_string(),
+                            }],
+                            is_error: false,
+                        }),
+                        Err(e) => Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: format!("Failed to reset emergency halt: {}", e),
+                            }],
+                            is_error: true,
+                        }),
+                    }
+                } else {
+                    match cua.trigger_emergency_halt() {
+                        Ok(_) => Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: "CUA emergency halt triggered successfully (<15ms SLA)"
+                                    .to_string(),
+                            }],
+                            is_error: false,
+                        }),
+                        Err(e) => Ok(CallToolResult {
+                            content: vec![ToolContent::Text {
+                                text: format!("Failed to trigger emergency halt: {}", e),
+                            }],
+                            is_error: true,
+                        }),
+                    }
+                }
+            }
             _ => Err(format!("Tool '{}' not found", req.name)),
         }
     }
@@ -764,7 +1156,15 @@ mod sandbox_tests {
         .expect("write valid note");
 
         // Create excluded directories and notes
-        for dir_name in &[".git", ".obsidian", ".trash", "target", "node_modules", "Archive", "archive"] {
+        for dir_name in &[
+            ".git",
+            ".obsidian",
+            ".trash",
+            "target",
+            "node_modules",
+            "Archive",
+            "archive",
+        ] {
             let sub = temp_dir.join(dir_name);
             fs::create_dir_all(&sub).expect("create excluded dir");
             fs::write(
@@ -821,7 +1221,8 @@ mod sandbox_tests {
         use crate::mcp::protocol::ToolContent;
         use std::fs;
 
-        let temp_dir = std::env::temp_dir().join(format!("liva_vault_cap_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("liva_vault_cap_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).expect("create temp vault");
 
@@ -829,7 +1230,10 @@ mod sandbox_tests {
         for i in 1..=25 {
             fs::write(
                 temp_dir.join(format!("note_{:02}.md", i)),
-                format!("Note content line {} containing CaseInsensitiveQUERY and preview text.", i),
+                format!(
+                    "Note content line {} containing CaseInsensitiveQUERY and preview text.",
+                    i
+                ),
             )
             .expect("write note");
         }

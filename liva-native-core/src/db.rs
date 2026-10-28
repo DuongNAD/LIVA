@@ -4,13 +4,12 @@ pub mod csr_graph;
 mod deletion;
 pub mod fts_vietnamese;
 
+pub use crate::cognitive::audit_chain::{AuditBlock, Blake3AuditChain};
 pub use deletion::{
     ConversationDeletionCounts, ConversationDeletionReport, RetentionSweepReport,
     SubjectDeletionCounts, SubjectDeletionReport, delete_conversation, delete_subject,
     sweep_conversation_retention,
 };
-pub use crate::cognitive::audit_chain::{AuditBlock, Blake3AuditChain};
-
 
 use crate::crypto::EncryptionEngine;
 use arc_swap::ArcSwap;
@@ -1041,7 +1040,6 @@ const MIGRATIONS: &[(i64, &str)] = &[
          END;",
     ),
 ];
-
 
 /// Đưa schema từ phiên bản hiện tại của DB lên [`SCHEMA_VERSION`].
 ///

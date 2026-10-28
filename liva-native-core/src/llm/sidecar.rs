@@ -15,12 +15,12 @@
 //!   - Invariant guard: KV precision MUST NOT drop below Q8_0, and K/V precision must be equal.
 //! - Windows Job Object RAII process management with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` preventing orphan zombie processes.
 
+use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
 
 /// KV Cache precision options. Invariant: MUST NOT be lower than Q8_0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -323,7 +323,10 @@ impl WindowsProcessGuard {
         }
     }
 
-    pub fn assign_process(&self, process_handle: windows_sys::Win32::Foundation::HANDLE) -> Result<(), SidecarError> {
+    pub fn assign_process(
+        &self,
+        process_handle: windows_sys::Win32::Foundation::HANDLE,
+    ) -> Result<(), SidecarError> {
         use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
         unsafe {
             let res = AssignProcessToJobObject(self.job_handle, process_handle);
@@ -574,7 +577,11 @@ impl LlamaSidecarClient {
     }
 
     /// Save slot KV cache to disk (`POST /slots/{slot_id}?action=save`)
-    pub async fn save_slot_kv(&self, slot_id: SlotId, filename: &str) -> Result<SlotActionResponse, SidecarError> {
+    pub async fn save_slot_kv(
+        &self,
+        slot_id: SlotId,
+        filename: &str,
+    ) -> Result<SlotActionResponse, SidecarError> {
         if self.is_mock {
             return Ok(SlotActionResponse {
                 success: true,
@@ -586,14 +593,19 @@ impl LlamaSidecarClient {
         let payload = serde_json::json!({ "filepath": filename });
         let resp = self
             .http_client
-            .post(format!("{}/slots/{}?action=save", self.base_url, slot_id as u32))
+            .post(format!(
+                "{}/slots/{}?action=save",
+                self.base_url, slot_id as u32
+            ))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&payload)
             .send()
             .await?;
 
         if !resp.status().is_success() {
-            return Err(SidecarError::SlotActionFailed(resp.text().await.unwrap_or_default()));
+            return Err(SidecarError::SlotActionFailed(
+                resp.text().await.unwrap_or_default(),
+            ));
         }
 
         let res: SlotActionResponse = resp.json().await?;
@@ -601,7 +613,11 @@ impl LlamaSidecarClient {
     }
 
     /// Restore slot KV cache from disk (`POST /slots/{slot_id}?action=restore`)
-    pub async fn restore_slot_kv(&self, slot_id: SlotId, filename: &str) -> Result<SlotActionResponse, SidecarError> {
+    pub async fn restore_slot_kv(
+        &self,
+        slot_id: SlotId,
+        filename: &str,
+    ) -> Result<SlotActionResponse, SidecarError> {
         if self.is_mock {
             return Ok(SlotActionResponse {
                 success: true,
@@ -613,14 +629,19 @@ impl LlamaSidecarClient {
         let payload = serde_json::json!({ "filepath": filename });
         let resp = self
             .http_client
-            .post(format!("{}/slots/{}?action=restore", self.base_url, slot_id as u32))
+            .post(format!(
+                "{}/slots/{}?action=restore",
+                self.base_url, slot_id as u32
+            ))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&payload)
             .send()
             .await?;
 
         if !resp.status().is_success() {
-            return Err(SidecarError::SlotActionFailed(resp.text().await.unwrap_or_default()));
+            return Err(SidecarError::SlotActionFailed(
+                resp.text().await.unwrap_or_default(),
+            ));
         }
 
         let res: SlotActionResponse = resp.json().await?;

@@ -7,13 +7,13 @@
 //! - Session-isolated cooperative cancellation via `Arc<AtomicBool>`.
 //! - State checkpointing and memory eviction on idle timeout.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, oneshot, RwLock};
-use tracing::{debug, info, warn, error};
-use serde::{Deserialize, Serialize};
+use tokio::sync::{RwLock, mpsc, oneshot};
+use tracing::{debug, error, info, warn};
 
 pub use liva_core_types::{
     CommandPrincipal, SessionError, SessionQueueMode, SessionTurnOutput, SessionTurnRequest,
@@ -55,9 +55,7 @@ pub enum SessionMessage {
         responder: oneshot::Sender<SessionSnapshot>,
     },
     /// Graceful shutdown of actor.
-    Shutdown {
-        responder: oneshot::Sender<()>,
-    },
+    Shutdown { responder: oneshot::Sender<()> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,34 +213,49 @@ impl SessionActor {
         // Teardown: flush state and abort pending queues
         self.status = SessionStatus::Closed;
         self.drain_and_reject_queues(SessionError::MailboxClosed);
-        info!("[SessionActor:{}] Actor task terminated cleanly", self.session_id);
+        info!(
+            "[SessionActor:{}] Actor task terminated cleanly",
+            self.session_id
+        );
     }
 
     async fn handle_message(&mut self, message: SessionMessage) -> bool {
         match message {
-            SessionMessage::ExecuteTurn { request, stream_tx, responder } => {
+            SessionMessage::ExecuteTurn {
+                request,
+                stream_tx,
+                responder,
+            } => {
                 match request.queue_mode {
                     SessionQueueMode::Followup => {
-                        self.handle_followup_mode(request, stream_tx, responder).await;
+                        self.handle_followup_mode(request, stream_tx, responder)
+                            .await;
                     }
                     SessionQueueMode::Interrupt => {
-                        self.handle_interrupt_mode(request, stream_tx, responder).await;
+                        self.handle_interrupt_mode(request, stream_tx, responder)
+                            .await;
                     }
                     SessionQueueMode::Steer => {
                         self.handle_steer_mode(request, stream_tx, responder).await;
                     }
                     SessionQueueMode::Collect => {
-                        self.handle_collect_mode(request, stream_tx, responder).await;
+                        self.handle_collect_mode(request, stream_tx, responder)
+                            .await;
                     }
                 }
                 true
             }
-            SessionMessage::Steer { instruction, responder } => {
+            SessionMessage::Steer {
+                instruction,
+                responder,
+            } => {
                 if let Some(ref active) = self.active_turn {
                     let _ = active.steering_tx.try_send(instruction);
                     let _ = responder.send(Ok(()));
                 } else {
-                    let _ = responder.send(Err(SessionError::StateError("No active turn to steer".into())));
+                    let _ = responder.send(Err(SessionError::StateError(
+                        "No active turn to steer".into(),
+                    )));
                 }
                 true
             }
@@ -263,7 +276,10 @@ impl SessionActor {
                 true
             }
             SessionMessage::Shutdown { responder } => {
-                info!("[SessionActor:{}] Graceful shutdown requested", self.session_id);
+                info!(
+                    "[SessionActor:{}] Graceful shutdown requested",
+                    self.session_id
+                );
                 self.checkpoint_state().await;
                 let _ = responder.send(());
                 false // Break loop
@@ -281,11 +297,18 @@ impl SessionActor {
             self.start_turn(request, stream_tx, responder).await;
         } else {
             if self.followup_queue.len() >= MAX_FOLLOWUP_QUEUE_DEPTH {
-                warn!("[SessionActor:{}] Followup queue full ({})", self.session_id, MAX_FOLLOWUP_QUEUE_DEPTH);
+                warn!(
+                    "[SessionActor:{}] Followup queue full ({})",
+                    self.session_id, MAX_FOLLOWUP_QUEUE_DEPTH
+                );
                 let _ = responder.send(Err(SessionError::QueueFull));
                 return;
             }
-            self.followup_queue.push_back(QueuedTurn { request, stream_tx, responder });
+            self.followup_queue.push_back(QueuedTurn {
+                request,
+                stream_tx,
+                responder,
+            });
         }
     }
 
@@ -300,7 +323,11 @@ impl SessionActor {
             // Clear pending followups since conversation context has been preempted
             self.drain_and_reject_queues(SessionError::Interrupted);
             // Push interrupt request to front of queue to run next
-            self.followup_queue.push_front(QueuedTurn { request, stream_tx, responder });
+            self.followup_queue.push_front(QueuedTurn {
+                request,
+                stream_tx,
+                responder,
+            });
         } else {
             self.start_turn(request, stream_tx, responder).await;
         }
@@ -351,7 +378,11 @@ impl SessionActor {
                 }
             }
             if self.followup_queue.len() < MAX_FOLLOWUP_QUEUE_DEPTH {
-                self.followup_queue.push_back(QueuedTurn { request, stream_tx, responder });
+                self.followup_queue.push_back(QueuedTurn {
+                    request,
+                    stream_tx,
+                    responder,
+                });
             } else {
                 let _ = responder.send(Err(SessionError::QueueFull));
             }
@@ -411,13 +442,17 @@ impl SessionActor {
                 }
             });
 
-            self.start_turn(consolidated_req, buf.stream_tx, turn_tx).await;
+            self.start_turn(consolidated_req, buf.stream_tx, turn_tx)
+                .await;
         }
     }
 
     fn trigger_interrupt(&mut self, reason: &str) {
         if let Some(ref active) = self.active_turn {
-            info!("[SessionActor:{}] Interrupting active turn {} (reason: {})", self.session_id, active.turn_id, reason);
+            info!(
+                "[SessionActor:{}] Interrupting active turn {} (reason: {})",
+                self.session_id, active.turn_id, reason
+            );
             active.cancel_token.store(true, Ordering::SeqCst);
         }
     }
@@ -463,7 +498,8 @@ impl SessionActor {
                 cancel_token,
                 steering_rx,
                 &mut current_state,
-            ).await;
+            )
+            .await;
 
             let duration_ms = start.elapsed().as_millis() as u64;
             let (turn_output, new_state) = match exec_result {
@@ -481,11 +517,13 @@ impl SessionActor {
             };
 
             let _ = responder.send(turn_output.clone());
-            let _ = completion_tx.send(TurnCompletionEvent {
-                turn_id,
-                _output: turn_output,
-                new_state,
-            }).await;
+            let _ = completion_tx
+                .send(TurnCompletionEvent {
+                    turn_id,
+                    _output: turn_output,
+                    new_state,
+                })
+                .await;
         });
     }
 
@@ -519,7 +557,9 @@ impl SessionActor {
         // Check for early steering instructions
         let mut steered = false;
         if let Ok(steer) = steering_rx.try_recv() {
-            state.context.insert("steering".into(), serde_json::Value::String(steer));
+            state
+                .context
+                .insert("steering".into(), serde_json::Value::String(steer));
             steered = true;
         }
 
@@ -567,7 +607,8 @@ impl SessionActor {
 
         // Process next turn in followup queue
         if let Some(next_turn) = self.followup_queue.pop_front() {
-            self.start_turn(next_turn.request, next_turn.stream_tx, next_turn.responder).await;
+            self.start_turn(next_turn.request, next_turn.stream_tx, next_turn.responder)
+                .await;
         } else {
             self.status = SessionStatus::Idle;
         }
@@ -576,9 +617,15 @@ impl SessionActor {
     async fn checkpoint_state(&self) {
         if let Some(ref cp) = self.checkpointer {
             if let Err(e) = cp.save_checkpoint(&self.session_id, &self.state).await {
-                error!("[SessionActor:{}] Failed to persist checkpoint: {}", self.session_id, e);
+                error!(
+                    "[SessionActor:{}] Failed to persist checkpoint: {}",
+                    self.session_id, e
+                );
             } else {
-                debug!("[SessionActor:{}] Checkpoint persisted successfully", self.session_id);
+                debug!(
+                    "[SessionActor:{}] Checkpoint persisted successfully",
+                    self.session_id
+                );
             }
         }
     }
@@ -607,7 +654,11 @@ impl SessionActorHandle {
     ) -> Result<SessionTurnOutput, SessionError> {
         let (responder, rx) = oneshot::channel();
         self.sender
-            .send(SessionMessage::ExecuteTurn { request, stream_tx, responder })
+            .send(SessionMessage::ExecuteTurn {
+                request,
+                stream_tx,
+                responder,
+            })
             .await
             .map_err(|_| SessionError::MailboxClosed)?;
         rx.await.map_err(|_| SessionError::MailboxClosed)?
@@ -625,7 +676,10 @@ impl SessionActorHandle {
     pub async fn steer(&self, instruction: String) -> Result<(), SessionError> {
         let (responder, rx) = oneshot::channel();
         self.sender
-            .send(SessionMessage::Steer { instruction, responder })
+            .send(SessionMessage::Steer {
+                instruction,
+                responder,
+            })
             .await
             .map_err(|_| SessionError::MailboxClosed)?;
         rx.await.map_err(|_| SessionError::MailboxClosed)?
@@ -680,7 +734,10 @@ impl SessionManager {
     }
 
     /// Retrieve or spawn a dedicated actor for the requested session ID.
-    pub async fn get_or_create(&self, session_id: &str) -> Result<SessionActorHandle, SessionError> {
+    pub async fn get_or_create(
+        &self,
+        session_id: &str,
+    ) -> Result<SessionActorHandle, SessionError> {
         let mut map = self.sessions.write().await;
         if let Some(handle) = map.get(session_id) {
             if !handle.is_closed() {

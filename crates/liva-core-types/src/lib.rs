@@ -300,8 +300,6 @@ impl Default for SessionTurnRequest {
     }
 }
 
-
-
 // -----------------------------------------------------------------------------
 // RFC 3: SECURITY, RULE-OF-TWO, TAINT & CAPABILITY TYPES (M4: F19-F25)
 // -----------------------------------------------------------------------------
@@ -429,7 +427,9 @@ impl Principal {
             Self::OwnerDevice { .. } => AuthorityTier::OwnerDevice,
             Self::KnownContact { .. } => AuthorityTier::KnownContact,
             Self::UntrustedExternal { .. } | Self::ContentSource { .. } => AuthorityTier::Untrusted,
-            Self::Skill { parent_principal, .. } => parent_principal.authority_tier(),
+            Self::Skill {
+                parent_principal, ..
+            } => parent_principal.authority_tier(),
         }
     }
 
@@ -474,15 +474,43 @@ impl Default for IntegrityLevel {
 /// Nguồn gốc dữ liệu phục vụ truy vết provenance (Feature F20).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DataOrigin {
-    OwnerDirect { channel: String, timestamp: u64 },
-    CompanionSigned { device_id: String, key_id: String },
-    TelegramMessage { chat_id: i64, sender_id: i64, is_owner: bool },
-    ZaloMessage { user_id: String, is_owner: bool },
-    WebScrape { url: String, domain: String, fetched_at: u64 },
-    DesktopOcr { window_title: String, process_name: String },
-    FileAttachment { file_name: String, path: String },
-    McpToolOutput { server_name: String, tool_name: String },
-    AssistantProse { turn_id: String },
+    OwnerDirect {
+        channel: String,
+        timestamp: u64,
+    },
+    CompanionSigned {
+        device_id: String,
+        key_id: String,
+    },
+    TelegramMessage {
+        chat_id: i64,
+        sender_id: i64,
+        is_owner: bool,
+    },
+    ZaloMessage {
+        user_id: String,
+        is_owner: bool,
+    },
+    WebScrape {
+        url: String,
+        domain: String,
+        fetched_at: u64,
+    },
+    DesktopOcr {
+        window_title: String,
+        process_name: String,
+    },
+    FileAttachment {
+        file_name: String,
+        path: String,
+    },
+    McpToolOutput {
+        server_name: String,
+        tool_name: String,
+    },
+    AssistantProse {
+        turn_id: String,
+    },
     Composite(Vec<DataOrigin>),
 }
 
@@ -612,12 +640,17 @@ impl<T> Labeled<T> {
         };
 
         let merged_flags = TaintFlags {
-            untrusted_external: self.taint_flags.untrusted_external || other.taint_flags.untrusted_external,
-            prompt_injection_risk: self.taint_flags.prompt_injection_risk || other.taint_flags.prompt_injection_risk,
+            untrusted_external: self.taint_flags.untrusted_external
+                || other.taint_flags.untrusted_external,
+            prompt_injection_risk: self.taint_flags.prompt_injection_risk
+                || other.taint_flags.prompt_injection_risk,
             contains_urls: self.taint_flags.contains_urls || other.taint_flags.contains_urls,
-            invisible_unicode: self.taint_flags.invisible_unicode || other.taint_flags.invisible_unicode,
-            memghost_attempt: self.taint_flags.memghost_attempt || other.taint_flags.memghost_attempt,
-            sensitive_pii_present: self.taint_flags.sensitive_pii_present || other.taint_flags.sensitive_pii_present,
+            invisible_unicode: self.taint_flags.invisible_unicode
+                || other.taint_flags.invisible_unicode,
+            memghost_attempt: self.taint_flags.memghost_attempt
+                || other.taint_flags.memghost_attempt,
+            sensitive_pii_present: self.taint_flags.sensitive_pii_present
+                || other.taint_flags.sensitive_pii_present,
         };
 
         Labeled {
@@ -679,29 +712,59 @@ pub enum SecurityError {
     /// Bí danh cho Canary tests kiểm tra R4
     R4Forbidden(String),
     /// Bắt buộc phê duyệt HITL đối với hành động bậc R3 (F23)
-    HitlApprovalRequired { token: String, argument_hash: String },
+    HitlApprovalRequired {
+        token: String,
+        argument_hash: String,
+    },
 }
 
 impl std::fmt::Display for SecurityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MutationForbiddenInReaderMode(m) => write!(f, "SecurityError::MutationForbiddenInReaderMode: {m}"),
-            Self::VaultAccessForbiddenInBrowserMode(m) => write!(f, "SecurityError::VaultAccessForbiddenInBrowserMode: {m}"),
+            Self::MutationForbiddenInReaderMode(m) => {
+                write!(f, "SecurityError::MutationForbiddenInReaderMode: {m}")
+            }
+            Self::VaultAccessForbiddenInBrowserMode(m) => {
+                write!(f, "SecurityError::VaultAccessForbiddenInBrowserMode: {m}")
+            }
             Self::RuleOfTwoViolation(m) => write!(f, "SecurityError::RuleOfTwoViolation: {m}"),
-            Self::TaintedDataSinkViolation(m) => write!(f, "SecurityError::TaintedDataSinkViolation: {m}"),
-            Self::InvalidDeclassificationReceipt(m) => write!(f, "SecurityError::InvalidDeclassificationReceipt: {m}"),
+            Self::TaintedDataSinkViolation(m) => {
+                write!(f, "SecurityError::TaintedDataSinkViolation: {m}")
+            }
+            Self::InvalidDeclassificationReceipt(m) => {
+                write!(f, "SecurityError::InvalidDeclassificationReceipt: {m}")
+            }
             Self::TokenExpired(exp) => write!(f, "SecurityError::TokenExpired: {exp}"),
-            Self::TokenExhausted => write!(f, "SecurityError::TokenExhausted: maximum usage count reached"),
-            Self::TokenEpochRevoked(tok, cur) => write!(f, "SecurityError::TokenEpochRevoked: token epoch {tok} revoked by current {cur}"),
-            Self::InvalidSignature => write!(f, "SecurityError::InvalidSignature: cryptographic MAC verification failed"),
-            Self::UnauthorizedPrincipal(m) => write!(f, "SecurityError::UnauthorizedPrincipal: {m}"),
+            Self::TokenExhausted => write!(
+                f,
+                "SecurityError::TokenExhausted: maximum usage count reached"
+            ),
+            Self::TokenEpochRevoked(tok, cur) => write!(
+                f,
+                "SecurityError::TokenEpochRevoked: token epoch {tok} revoked by current {cur}"
+            ),
+            Self::InvalidSignature => write!(
+                f,
+                "SecurityError::InvalidSignature: cryptographic MAC verification failed"
+            ),
+            Self::UnauthorizedPrincipal(m) => {
+                write!(f, "SecurityError::UnauthorizedPrincipal: {m}")
+            }
             Self::PrincipalPruned(m) => write!(f, "SecurityError::PrincipalPruned: {m}"),
-            Self::PrivilegeEscalationDetected(m) => write!(f, "SecurityError::PrivilegeEscalationDetected: {m}"),
+            Self::PrivilegeEscalationDetected(m) => {
+                write!(f, "SecurityError::PrivilegeEscalationDetected: {m}")
+            }
             Self::KillSwitchActivated(m) => write!(f, "SecurityError::KillSwitchActivated: {m}"),
             Self::ForbiddenR4Operation(m) => write!(f, "SecurityError::ForbiddenR4Operation: {m}"),
             Self::R4Forbidden(m) => write!(f, "SecurityError::R4Forbidden: {m}"),
-            Self::HitlApprovalRequired { token, argument_hash } => {
-                write!(f, "SecurityError::HitlApprovalRequired: token={token}, hash={argument_hash}")
+            Self::HitlApprovalRequired {
+                token,
+                argument_hash,
+            } => {
+                write!(
+                    f,
+                    "SecurityError::HitlApprovalRequired: token={token}, hash={argument_hash}"
+                )
             }
         }
     }
@@ -989,9 +1052,15 @@ mod tests {
         }
 
         let err = SessionError::MailboxFull;
-        assert_eq!(format!("{err}"), "Session mailbox is full; backpressure limit exceeded");
+        assert_eq!(
+            format!("{err}"),
+            "Session mailbox is full; backpressure limit exceeded"
+        );
         let err2 = SessionError::Interrupted;
-        assert_eq!(format!("{err2}"), "Turn execution was aborted by an interrupt request");
+        assert_eq!(
+            format!("{err2}"),
+            "Turn execution was aborted by an interrupt request"
+        );
     }
 
     #[test]
@@ -1049,7 +1118,10 @@ mod tests {
         assert!(!untrusted.is_owner());
 
         // From CommandPrincipal
-        assert_eq!(Principal::from(CommandPrincipal::LocalCli), Principal::Owner);
+        assert_eq!(
+            Principal::from(CommandPrincipal::LocalCli),
+            Principal::Owner
+        );
         assert_eq!(Principal::from(CommandPrincipal::Test), Principal::Owner);
         assert!(matches!(
             Principal::from(CommandPrincipal::Telegram),
@@ -1109,4 +1181,3 @@ mod tests {
         assert!(format!("{kill_err}").contains("KillSwitchActivated"));
     }
 }
-

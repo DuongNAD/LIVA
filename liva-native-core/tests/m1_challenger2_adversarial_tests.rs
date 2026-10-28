@@ -6,13 +6,13 @@
 //! 3. TTFT benchmark execution resilience and parameter edge cases.
 
 use liva_native_core::eval::trace::{
-    ExecutionTraceRecord, JsonlTracer, PerTokenBreakdown, TraceChannel, TraceIntegrity,
-    TraceMetrics, TracePrincipal, TraceSessionMode, TraceTelemetry, TraceTrajectoryStep,
-    verify_trace_chain, GENESIS_PREV_HASH,
+    ExecutionTraceRecord, GENESIS_PREV_HASH, JsonlTracer, PerTokenBreakdown, TraceChannel,
+    TraceIntegrity, TraceMetrics, TracePrincipal, TraceSessionMode, TraceTelemetry,
+    TraceTrajectoryStep, verify_trace_chain,
 };
 use liva_native_core::eval::vietnamese_suite::{
-    generate_canary_suite, run_vietnamese_evaluation_suite, CanaryCase, CanaryPillar,
-    VietnameseEvalReport,
+    CanaryCase, CanaryPillar, VietnameseEvalReport, generate_canary_suite,
+    run_vietnamese_evaluation_suite,
 };
 use serde_json::Value;
 use std::fs;
@@ -69,7 +69,10 @@ fn create_dummy_record(turn: u32, query: &str, raw_ttft: u64) -> ExecutionTraceR
 }
 
 fn setup_trace_file(test_name: &str, record_count: u32) -> (PathBuf, Vec<String>) {
-    let temp_dir = std::env::temp_dir().join(format!("liva-challenger-{test_name}-{}", std::process::id()));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "liva-challenger-{test_name}-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&temp_dir);
     let trace_path = temp_dir.join("trace.jsonl");
 
@@ -105,7 +108,10 @@ fn test_adversarial_tamper_1byte_query_payload() {
 
     // Empirical verification
     let res = verify_trace_chain(&trace_path);
-    assert!(res.is_err(), "verify_trace_chain MUST catch 1-byte query modification");
+    assert!(
+        res.is_err(),
+        "verify_trace_chain MUST catch 1-byte query modification"
+    );
     let err_msg = res.unwrap_err();
     assert!(
         err_msg.contains("tamper detected"),
@@ -130,9 +136,15 @@ fn test_adversarial_tamper_1byte_metric_value() {
     fs::write(&trace_path, tampered).expect("write tampered");
 
     let res = verify_trace_chain(&trace_path);
-    assert!(res.is_err(), "verify_trace_chain MUST catch 1-byte numeric metric modification");
+    assert!(
+        res.is_err(),
+        "verify_trace_chain MUST catch 1-byte numeric metric modification"
+    );
     let err_msg = res.unwrap_err();
-    assert!(err_msg.contains("tamper detected"), "expected tamper detected: {err_msg}");
+    assert!(
+        err_msg.contains("tamper detected"),
+        "expected tamper detected: {err_msg}"
+    );
 
     let _ = fs::remove_dir_all(trace_path.parent().unwrap());
 }
@@ -152,7 +164,10 @@ fn test_adversarial_tamper_prev_hash_breaks_chain() {
     fs::write(&trace_path, tampered_content).expect("write tampered");
 
     let res = verify_trace_chain(&trace_path);
-    assert!(res.is_err(), "verify_trace_chain MUST catch broken prev_hash link");
+    assert!(
+        res.is_err(),
+        "verify_trace_chain MUST catch broken prev_hash link"
+    );
     let err_msg = res.unwrap_err();
     assert!(
         err_msg.contains("broken hash chain link"),
@@ -175,7 +190,10 @@ fn test_adversarial_tamper_audit_hash_detected() {
     fs::write(&trace_path, tampered_content).expect("write tampered");
 
     let res = verify_trace_chain(&trace_path);
-    assert!(res.is_err(), "verify_trace_chain MUST catch tampered audit_hash");
+    assert!(
+        res.is_err(),
+        "verify_trace_chain MUST catch tampered audit_hash"
+    );
     let err_msg = res.unwrap_err();
     assert!(err_msg.contains("tamper detected"), "got: {err_msg}");
 
@@ -195,7 +213,10 @@ fn test_adversarial_deletion_of_intermediate_record() {
     fs::write(&trace_path, tampered_content).expect("write tampered");
 
     let res = verify_trace_chain(&trace_path);
-    assert!(res.is_err(), "verify_trace_chain MUST detect record deletion");
+    assert!(
+        res.is_err(),
+        "verify_trace_chain MUST detect record deletion"
+    );
     let err_msg = res.unwrap_err();
     assert!(
         err_msg.contains("broken hash chain link"),
@@ -240,7 +261,10 @@ fn test_adversarial_canary_must_deny_false_fails_gate() {
     }
 
     let canary_gate = canary_passed == suite.len();
-    assert!(!canary_gate, "Canary gate MUST NOT pass if even 1 case has must_deny == false");
+    assert!(
+        !canary_gate,
+        "Canary gate MUST NOT pass if even 1 case has must_deny == false"
+    );
     assert_eq!(canary_passed, 34);
 
     // Verify report reflects REJECT
@@ -266,8 +290,13 @@ fn test_adversarial_canary_must_deny_false_fails_gate() {
     };
 
     let md = report.to_markdown();
-    assert!(md.contains("REJECT"), "Report MUST reject when canary gate is violated");
-    assert!(!md.contains("| **Canary Gate (Mandatory)** | **35 cases** | **100.0%** | **97.1%** | **ACCEPT** |"));
+    assert!(
+        md.contains("REJECT"),
+        "Report MUST reject when canary gate is violated"
+    );
+    assert!(!md.contains(
+        "| **Canary Gate (Mandatory)** | **35 cases** | **100.0%** | **97.1%** | **ACCEPT** |"
+    ));
 }
 
 #[test]
@@ -294,15 +323,39 @@ fn test_adversarial_canary_official_suite_purity() {
     assert_eq!(suite.len(), 35, "Canary suite must have exactly 35 cases");
 
     for case in &suite {
-        assert!(case.must_deny, "Case {} must have must_deny == true", case.id);
-        assert!(!case.expected_security_error.is_empty(), "Case {} must specify security error", case.id);
-        assert!(case.id.starts_with("CANARY-"), "Case {} must have CANARY- prefix", case.id);
+        assert!(
+            case.must_deny,
+            "Case {} must have must_deny == true",
+            case.id
+        );
+        assert!(
+            !case.expected_security_error.is_empty(),
+            "Case {} must specify security error",
+            case.id
+        );
+        assert!(
+            case.id.starts_with("CANARY-"),
+            "Case {} must have CANARY- prefix",
+            case.id
+        );
     }
 
-    let p1_count = suite.iter().filter(|c| c.pillar == CanaryPillar::BlockR4Action).count();
-    let p2_count = suite.iter().filter(|c| c.pillar == CanaryPillar::AttenuationOnlyCapability).count();
-    let p3_count = suite.iter().filter(|c| c.pillar == CanaryPillar::ReaderModeIntegrity).count();
-    let p4_count = suite.iter().filter(|c| c.pillar == CanaryPillar::PrincipalIsolationAndKillSwitch).count();
+    let p1_count = suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::BlockR4Action)
+        .count();
+    let p2_count = suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::AttenuationOnlyCapability)
+        .count();
+    let p3_count = suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::ReaderModeIntegrity)
+        .count();
+    let p4_count = suite
+        .iter()
+        .filter(|c| c.pillar == CanaryPillar::PrincipalIsolationAndKillSwitch)
+        .count();
 
     assert_eq!(p1_count, 10, "Pillar 1 must have 10 cases");
     assert_eq!(p2_count, 10, "Pillar 2 must have 10 cases");

@@ -252,10 +252,7 @@ fn test_m3_tuple_pattern_matching_handles_all_partial_fn_pointer_combinations() 
     ];
 
     for (c, i, d, expected_ok) in test_cases {
-        let matched = match (c, i, d) {
-            (Some(_c), Some(_i), Some(_d)) => true,
-            _ => false,
-        };
+        let matched = matches!((c, i, d), (Some(_c), Some(_i), Some(_d)));
         assert_eq!(
             matched, expected_ok,
             "Tuple match failure for case ({c:?}, {i:?}, {d:?})"

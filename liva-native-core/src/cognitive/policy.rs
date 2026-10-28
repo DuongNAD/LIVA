@@ -17,7 +17,11 @@ pub enum RiskTier {
     #[serde(rename = "r2", alias = "standing_grant")]
     R2 = 2,
     /// R3: Mandatory HITL approval with normalized argument hash verification.
-    #[serde(rename = "r3", alias = "external_side_effect", alias = "physical_or_irreversible")]
+    #[serde(
+        rename = "r3",
+        alias = "external_side_effect",
+        alias = "physical_or_irreversible"
+    )]
     R3 = 3,
     /// R4: Absolute forbidden operations (host destruction, policy bypass, secret export, audit tampering).
     #[serde(rename = "r4", alias = "forbidden")]
@@ -64,10 +68,15 @@ impl RiskTier {
             "r0" | "read_only" | "readonly" | "read" | "0" => Some(Self::R0),
             "r1" | "reversible" | "rev" | "1" => Some(Self::R1),
             "r2" | "standing_grant" | "standing" | "grant" | "batch" | "2" => Some(Self::R2),
-            "r3" | "external_side_effect" | "external" | "side_effect"
-            | "physical_or_irreversible" | "irreversible" | "physical" | "critical" | "3" => {
-                Some(Self::R3)
-            }
+            "r3"
+            | "external_side_effect"
+            | "external"
+            | "side_effect"
+            | "physical_or_irreversible"
+            | "irreversible"
+            | "physical"
+            | "critical"
+            | "3" => Some(Self::R3),
             "r4" | "forbidden" | "denied" | "4" => Some(Self::R4),
             _ => None,
         }
@@ -404,10 +413,7 @@ impl PolicyEngine {
     pub fn evaluate_proposal(proposal: &ActionProposal) -> PolicyDecision {
         // Validation check
         if let Err(err) = proposal.validate() {
-            return PolicyDecision::deny(
-                RiskTier::R0,
-                format!("Invalid action proposal: {err}"),
-            );
+            return PolicyDecision::deny(RiskTier::R0, format!("Invalid action proposal: {err}"));
         }
 
         // Derive intrinsic risk tier
@@ -416,10 +422,9 @@ impl PolicyEngine {
         let effective_tier = std::cmp::max(intrinsic_tier, proposal.risk_tier);
 
         match effective_tier {
-            RiskTier::R0 => PolicyDecision::allow(
-                RiskTier::R0,
-                "Read-only operation permitted automatically",
-            ),
+            RiskTier::R0 => {
+                PolicyDecision::allow(RiskTier::R0, "Read-only operation permitted automatically")
+            }
             RiskTier::R1 => PolicyDecision::allow(
                 RiskTier::R1,
                 "Reversible local action permitted with automatic audit logging",
@@ -477,8 +482,14 @@ mod tests {
 
     #[test]
     fn test_r4_forbidden_tool_classification() {
-        assert_eq!(PolicyEngine::classify_tool("cedar_policy/modify"), RiskTier::R4);
-        assert_eq!(PolicyEngine::classify_tool("export_key/dpapi"), RiskTier::R4);
+        assert_eq!(
+            PolicyEngine::classify_tool("cedar_policy/modify"),
+            RiskTier::R4
+        );
+        assert_eq!(
+            PolicyEngine::classify_tool("export_key/dpapi"),
+            RiskTier::R4
+        );
         assert_eq!(PolicyEngine::classify_tool("disable_audit"), RiskTier::R4);
         assert_eq!(PolicyEngine::classify_tool("escape_sandbox"), RiskTier::R4);
     }

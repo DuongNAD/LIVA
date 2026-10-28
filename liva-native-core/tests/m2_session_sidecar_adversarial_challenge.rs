@@ -4,13 +4,6 @@
 //! Features tested: F07 (SessionActor Mailbox), F08 (Session Queue Modes),
 //! F09 (Llama Sidecar Supervisor & Port Confinement), F10 (VRAM Governor).
 
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio::sync::mpsc;
 use liva_core_types::{
     CommandPrincipal, Principal, SessionError, SessionMode, SessionQueueMode, SessionTurnRequest,
 };
@@ -19,10 +12,16 @@ use liva_native_core::agent::session_actor::{
     SessionManager, SessionMessage,
 };
 use liva_native_core::llm::sidecar::{
-    allocate_ephemeral_port, generate_csprng_key, FallbackAction, KvPrecision,
-    LlamaSidecarClient, LlamaSidecarSupervisor, SidecarConfig, SlotId, VramPressureTier,
-    VramSupervisor,
+    FallbackAction, KvPrecision, LlamaSidecarClient, LlamaSidecarSupervisor, SidecarConfig, SlotId,
+    VramPressureTier, VramSupervisor, allocate_ephemeral_port, generate_csprng_key,
 };
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 
 // ============================================================================
 // CHALLENGE 1: MAILBOX OVERFLOW & BACKPRESSURE STRESS TEST (> 64 MESSAGES)
@@ -156,10 +155,13 @@ async fn challenge_mailbox_mpsc_hard_capacity_64() {
 
     // Now another message can be sent
     let (responder_retry, _) = tokio::sync::oneshot::channel();
-    assert!(tx.try_send(SessionMessage::Steer {
-        instruction: "retry".into(),
-        responder: responder_retry,
-    }).is_ok());
+    assert!(
+        tx.try_send(SessionMessage::Steer {
+            instruction: "retry".into(),
+            responder: responder_retry,
+        })
+        .is_ok()
+    );
 }
 
 // ============================================================================
@@ -183,17 +185,19 @@ async fn challenge_interrupt_bargein_sub_50ms_latency() {
         queue_mode: SessionQueueMode::Followup,
         principal: CommandPrincipal::LocalCli,
         metadata: Default::default(),
-                ..Default::default()
+        ..Default::default()
     };
 
     let handle_clone = handle.clone();
-    let turn_task = tokio::spawn(async move {
-        handle_clone.execute_turn(long_req, Some(stream_tx)).await
-    });
+    let turn_task =
+        tokio::spawn(async move { handle_clone.execute_turn(long_req, Some(stream_tx)).await });
 
     // Wait until at least 1 token is emitted to confirm turn is actively executing
     let first_token = stream_rx.recv().await;
-    assert!(first_token.is_some(), "Active turn must start generating tokens");
+    assert!(
+        first_token.is_some(),
+        "Active turn must start generating tokens"
+    );
 
     // Measure barge-in interruption reaction time
     let interrupt_start = Instant::now();
@@ -204,14 +208,17 @@ async fn challenge_interrupt_bargein_sub_50ms_latency() {
         queue_mode: SessionQueueMode::Interrupt,
         principal: CommandPrincipal::LocalCli,
         metadata: Default::default(),
-                ..Default::default()
+        ..Default::default()
     };
 
     let interrupt_res = handle.execute_turn(interrupt_req, None).await.unwrap();
     let interrupt_latency = interrupt_start.elapsed();
 
     println!("\n=== Barge-in Preemption Benchmark ===");
-    println!("Interrupt Barge-in Latency: {:.2}ms", interrupt_latency.as_secs_f64() * 1000.0);
+    println!(
+        "Interrupt Barge-in Latency: {:.2}ms",
+        interrupt_latency.as_secs_f64() * 1000.0
+    );
     assert_eq!(interrupt_res.turn_id, "interrupt_bargein");
 
     // The long turn must finish and report is_interrupted == true
@@ -223,7 +230,8 @@ async fn challenge_interrupt_bargein_sub_50ms_latency() {
 
     // Verify token stream terminates promptly
     let mut trailing_tokens = 0;
-    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(50), stream_rx.recv()).await {
+    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(50), stream_rx.recv()).await
+    {
         trailing_tokens += 1;
     }
     println!("Trailing tokens after interrupt: {trailing_tokens}");
@@ -253,13 +261,11 @@ async fn challenge_interrupt_purges_stale_followup_queue() {
         queue_mode: SessionQueueMode::Followup,
         principal: CommandPrincipal::LocalCli,
         metadata: Default::default(),
-                ..Default::default()
+        ..Default::default()
     };
 
     let h_active = handle.clone();
-    let active_task = tokio::spawn(async move {
-        h_active.execute_turn(initial_req, None).await
-    });
+    let active_task = tokio::spawn(async move { h_active.execute_turn(initial_req, None).await });
 
     // Wait 10ms so it starts
     tokio::time::sleep(Duration::from_millis(10)).await;
@@ -277,10 +283,11 @@ async fn challenge_interrupt_purges_stale_followup_queue() {
                     queue_mode: SessionQueueMode::Followup,
                     principal: CommandPrincipal::LocalCli,
                     metadata: Default::default(),
-                ..Default::default()
+                    ..Default::default()
                 },
                 None,
-            ).await
+            )
+            .await
         }));
     }
 
@@ -297,7 +304,7 @@ async fn challenge_interrupt_purges_stale_followup_queue() {
         queue_mode: SessionQueueMode::Interrupt,
         principal: CommandPrincipal::LocalCli,
         metadata: Default::default(),
-                ..Default::default()
+        ..Default::default()
     };
 
     let interrupt_out = handle.execute_turn(interrupt_req, None).await.unwrap();
@@ -337,7 +344,7 @@ async fn challenge_rapid_interrupt_churn_stability() {
             queue_mode: SessionQueueMode::Interrupt,
             principal: CommandPrincipal::LocalCli,
             metadata: Default::default(),
-                ..Default::default()
+            ..Default::default()
         };
         let out = handle.execute_turn(req, None).await;
         assert!(out.is_ok(), "Turn {i} must complete without panic or hang");
@@ -362,7 +369,10 @@ async fn challenge_session_actor_zero_tcp_listeners_audit() {
     // Spawn 20 independent session actors
     let mut handles = Vec::new();
     for i in 0..20 {
-        let h = manager.get_or_create(&format!("sess_net_audit_{i}")).await.unwrap();
+        let h = manager
+            .get_or_create(&format!("sess_net_audit_{i}"))
+            .await
+            .unwrap();
         handles.push(h);
     }
 
@@ -399,19 +409,37 @@ fn challenge_sidecar_security_confinement_and_key_entropy() {
     let joined = args.join(" ");
 
     // Verify network confinement
-    assert!(joined.contains("--host 127.0.0.1"), "Must strictly bind to loopback 127.0.0.1");
+    assert!(
+        joined.contains("--host 127.0.0.1"),
+        "Must strictly bind to loopback 127.0.0.1"
+    );
     assert!(!joined.contains("0.0.0.0"), "Must NEVER bind to 0.0.0.0");
-    assert!(!joined.contains("--tools"), "Forbidden --tools flag found in sidecar CLI");
-    assert!(!joined.contains("--agent"), "Forbidden --agent flag found in sidecar CLI");
-    assert!(!joined.contains("--mcp"), "Forbidden MCP flag found in sidecar CLI");
+    assert!(
+        !joined.contains("--tools"),
+        "Forbidden --tools flag found in sidecar CLI"
+    );
+    assert!(
+        !joined.contains("--agent"),
+        "Forbidden --agent flag found in sidecar CLI"
+    );
+    assert!(
+        !joined.contains("--mcp"),
+        "Forbidden MCP flag found in sidecar CLI"
+    );
 
     // Entropy verification: generate 1,000 keys and verify 0 collisions
     let mut keys = HashSet::new();
     for _ in 0..1000 {
         let k = generate_csprng_key();
         assert_eq!(k.len(), 64, "Must be 64-character hex string (256 bits)");
-        assert!(k.chars().all(|c| c.is_ascii_hexdigit()), "Must be valid hex");
-        assert!(keys.insert(k), "Collision detected in CSPRNG key generator!");
+        assert!(
+            k.chars().all(|c| c.is_ascii_hexdigit()),
+            "Must be valid hex"
+        );
+        assert!(
+            keys.insert(k),
+            "Collision detected in CSPRNG key generator!"
+        );
     }
 }
 
@@ -422,7 +450,9 @@ fn challenge_sidecar_security_confinement_and_key_entropy() {
 /// 2. Requests missing or with wrong Bearer token are rejected with HTTP 401 Unauthorized.
 #[tokio::test]
 async fn challenge_sidecar_http_bearer_token_enforcement() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock server");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock server");
     let server_port = listener.local_addr().unwrap().port();
     let valid_token = "valid_secret_token_1234567890abcdef1234567890abcdef";
 
@@ -444,10 +474,9 @@ async fn challenge_sidecar_http_bearer_token_enforcement() {
             let req_str = String::from_utf8_lossy(&buf[..n]);
 
             // Check Authorization header
-            let is_authorized = req_str
-                .lines()
-                .any(|line| line.starts_with("authorization:") || line.starts_with("Authorization:"))
-                && req_str.contains(&expected_auth_header);
+            let is_authorized = req_str.lines().any(|line| {
+                line.starts_with("authorization:") || line.starts_with("Authorization:")
+            }) && req_str.contains(&expected_auth_header);
 
             if is_authorized {
                 let body = serde_json::json!({
@@ -458,7 +487,8 @@ async fn challenge_sidecar_http_bearer_token_enforcement() {
                         "message": { "role": "assistant", "content": "Authenticated response" },
                         "finish_reason": "stop"
                     }]
-                }).to_string();
+                })
+                .to_string();
 
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -483,8 +513,13 @@ async fn challenge_sidecar_http_bearer_token_enforcement() {
     let req_payload = serde_json::json!({
         "messages": [{"role": "user", "content": "Hello"}]
     });
-    let valid_res = valid_client.chat_completion(SlotId::Foreground, &req_payload).await;
-    assert!(valid_res.is_ok(), "Valid bearer token must authenticate successfully");
+    let valid_res = valid_client
+        .chat_completion(SlotId::Foreground, &req_payload)
+        .await;
+    assert!(
+        valid_res.is_ok(),
+        "Valid bearer token must authenticate successfully"
+    );
     let resp_val = valid_res.unwrap();
     assert_eq!(
         resp_val["choices"][0]["message"]["content"],
@@ -493,7 +528,9 @@ async fn challenge_sidecar_http_bearer_token_enforcement() {
 
     // Test 2: Client with INVALID token fails with 401
     let invalid_client = LlamaSidecarClient::new(server_port, "wrong_token_here".to_string());
-    let invalid_res = invalid_client.chat_completion(SlotId::Foreground, &req_payload).await;
+    let invalid_res = invalid_client
+        .chat_completion(SlotId::Foreground, &req_payload)
+        .await;
     assert!(
         invalid_res.is_err(),
         "Client with invalid token must fail authentication"
@@ -526,18 +563,20 @@ async fn challenge_mixed_mode_burst_interleaved_no_deadlock() {
         // Step A: Launch a Followup turn
         let h_follow = handle.clone();
         let follow_task = tokio::spawn(async move {
-            h_follow.execute_turn(
-                SessionTurnRequest {
-                    session_id: "sess_mixed_burst".into(),
-                    turn_id: format!("cycle_{cycle}_follow"),
-                    input_text: format!("Followup turn {cycle}"),
-                    queue_mode: SessionQueueMode::Followup,
-                    principal: CommandPrincipal::LocalCli,
-                    metadata: Default::default(),
-                ..Default::default()
-                },
-                None,
-            ).await
+            h_follow
+                .execute_turn(
+                    SessionTurnRequest {
+                        session_id: "sess_mixed_burst".into(),
+                        turn_id: format!("cycle_{cycle}_follow"),
+                        input_text: format!("Followup turn {cycle}"),
+                        queue_mode: SessionQueueMode::Followup,
+                        principal: CommandPrincipal::LocalCli,
+                        metadata: Default::default(),
+                        ..Default::default()
+                    },
+                    None,
+                )
+                .await
         });
 
         // Step B: Inject Steer into active or queued turn
@@ -551,27 +590,35 @@ async fn challenge_mixed_mode_burst_interleaved_no_deadlock() {
             queue_mode: SessionQueueMode::Interrupt,
             principal: CommandPrincipal::LocalCli,
             metadata: Default::default(),
-                ..Default::default()
+            ..Default::default()
         };
         let interrupt_res = handle.execute_turn(interrupt_req, None).await;
-        assert!(interrupt_res.is_ok(), "Interrupt turn in cycle {cycle} must complete");
+        assert!(
+            interrupt_res.is_ok(),
+            "Interrupt turn in cycle {cycle} must complete"
+        );
 
         // Step D: Fire rapid Collect turns
         let h_collect = handle.clone();
-        let collect_res = h_collect.execute_turn(
-            SessionTurnRequest {
-                session_id: "sess_mixed_burst".into(),
-                turn_id: format!("cycle_{cycle}_collect"),
-                input_text: format!("Collect utterance {cycle}"),
-                queue_mode: SessionQueueMode::Collect,
-                principal: CommandPrincipal::LocalCli,
-                metadata: Default::default(),
-                ..Default::default()
-            },
-            None,
-        ).await;
+        let collect_res = h_collect
+            .execute_turn(
+                SessionTurnRequest {
+                    session_id: "sess_mixed_burst".into(),
+                    turn_id: format!("cycle_{cycle}_collect"),
+                    input_text: format!("Collect utterance {cycle}"),
+                    queue_mode: SessionQueueMode::Collect,
+                    principal: CommandPrincipal::LocalCli,
+                    metadata: Default::default(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await;
         // Collect may succeed directly or merge
-        assert!(collect_res.is_ok(), "Collect turn in cycle {cycle} must resolve");
+        assert!(
+            collect_res.is_ok(),
+            "Collect turn in cycle {cycle} must resolve"
+        );
 
         let _ = follow_task.await;
     }
@@ -583,18 +630,20 @@ async fn challenge_mixed_mode_burst_interleaved_no_deadlock() {
     assert!(snap.is_idle, "Actor must return to idle state after storm");
 
     // Post-burst verification probe
-    let probe_res = handle.execute_turn(
-        SessionTurnRequest {
-            session_id: "sess_mixed_burst".into(),
-            turn_id: "probe_post_burst".into(),
-            input_text: "Verification after storm".into(),
-            queue_mode: SessionQueueMode::Followup,
-            principal: CommandPrincipal::LocalCli,
-            metadata: Default::default(),
+    let probe_res = handle
+        .execute_turn(
+            SessionTurnRequest {
+                session_id: "sess_mixed_burst".into(),
+                turn_id: "probe_post_burst".into(),
+                input_text: "Verification after storm".into(),
+                queue_mode: SessionQueueMode::Followup,
+                principal: CommandPrincipal::LocalCli,
+                metadata: Default::default(),
                 ..Default::default()
-        },
-        None,
-    ).await;
+            },
+            None,
+        )
+        .await;
     assert!(probe_res.is_ok(), "Probe turn after storm must succeed");
     let probe_out = probe_res.unwrap();
     assert!(!probe_out.is_interrupted);
@@ -629,7 +678,8 @@ async fn challenge_collect_debounce_interleaved_with_followup() {
                 ..Default::default()
             },
             None,
-        ).await
+        )
+        .await
     });
 
     // 2. Immediately send Followup turn while Collect is debouncing
@@ -647,12 +697,16 @@ async fn challenge_collect_debounce_interleaved_with_followup() {
                 ..Default::default()
             },
             None,
-        ).await
+        )
+        .await
     });
 
     let (res_collect, res_followup) = tokio::join!(collect_task, followup_task);
     assert!(res_collect.unwrap().is_ok(), "Collect turn should complete");
-    assert!(res_followup.unwrap().is_ok(), "Followup turn should complete");
+    assert!(
+        res_followup.unwrap().is_ok(),
+        "Followup turn should complete"
+    );
 
     // Settle and verify actor is alive and healthy
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -693,7 +747,8 @@ async fn challenge_cross_session_cancellation_strict_isolation() {
                 ..Default::default()
             },
             Some(stream_a_tx),
-        ).await
+        )
+        .await
     });
 
     // Spawn Turn Beta
@@ -710,7 +765,8 @@ async fn challenge_cross_session_cancellation_strict_isolation() {
                 ..Default::default()
             },
             Some(stream_b_tx),
-        ).await
+        )
+        .await
     });
 
     // Wait until both sessions emit at least 1 token
@@ -718,7 +774,9 @@ async fn challenge_cross_session_cancellation_strict_isolation() {
     let _ = stream_b_rx.recv().await;
 
     // Interrupt ONLY Session Alpha
-    let interrupt_res = handle_alpha.interrupt("Testing cancellation isolation".into()).await;
+    let interrupt_res = handle_alpha
+        .interrupt("Testing cancellation isolation".into())
+        .await;
     assert!(interrupt_res.is_ok(), "Interrupt on Alpha must succeed");
 
     // Await both tasks
@@ -746,32 +804,36 @@ async fn challenge_cross_session_cancellation_strict_isolation() {
     );
 
     // Verify both sessions remain functional for subsequent turns
-    let post_a = handle_alpha.execute_turn(
-        SessionTurnRequest {
-            session_id: "sess_iso_alpha".into(),
-            turn_id: "turn_alpha_2".into(),
-            input_text: "Alpha recovery".into(),
-            queue_mode: SessionQueueMode::Followup,
-            principal: CommandPrincipal::LocalCli,
-            metadata: Default::default(),
+    let post_a = handle_alpha
+        .execute_turn(
+            SessionTurnRequest {
+                session_id: "sess_iso_alpha".into(),
+                turn_id: "turn_alpha_2".into(),
+                input_text: "Alpha recovery".into(),
+                queue_mode: SessionQueueMode::Followup,
+                principal: CommandPrincipal::LocalCli,
+                metadata: Default::default(),
                 ..Default::default()
-        },
-        None,
-    ).await;
+            },
+            None,
+        )
+        .await;
     assert!(post_a.is_ok() && !post_a.unwrap().is_interrupted);
 
-    let post_b = handle_beta.execute_turn(
-        SessionTurnRequest {
-            session_id: "sess_iso_beta".into(),
-            turn_id: "turn_beta_2".into(),
-            input_text: "Beta follow".into(),
-            queue_mode: SessionQueueMode::Followup,
-            principal: CommandPrincipal::LocalCli,
-            metadata: Default::default(),
+    let post_b = handle_beta
+        .execute_turn(
+            SessionTurnRequest {
+                session_id: "sess_iso_beta".into(),
+                turn_id: "turn_beta_2".into(),
+                input_text: "Beta follow".into(),
+                queue_mode: SessionQueueMode::Followup,
+                principal: CommandPrincipal::LocalCli,
+                metadata: Default::default(),
                 ..Default::default()
-        },
-        None,
-    ).await;
+            },
+            None,
+        )
+        .await;
     assert!(post_b.is_ok() && !post_b.unwrap().is_interrupted);
 
     handle_alpha.shutdown().await.unwrap();
@@ -789,9 +851,9 @@ async fn challenge_cross_session_cancellation_strict_isolation() {
 #[cfg(windows)]
 #[test]
 fn challenge_win32_job_object_kill_on_close_empirical() {
+    use liva_native_core::llm::sidecar::WindowsProcessGuard;
     use std::os::windows::io::AsRawHandle;
     use std::process::Command;
-    use liva_native_core::llm::sidecar::WindowsProcessGuard;
 
     // 1. Create WindowsProcessGuard
     let guard = WindowsProcessGuard::new().expect("Create JobObject guard");
@@ -807,11 +869,17 @@ fn challenge_win32_job_object_kill_on_close_empirical() {
 
     // 3. Assign child to Job Object
     let assign_res = guard.assign_process(raw_handle as _);
-    assert!(assign_res.is_ok(), "Child process successfully assigned to JobObject");
+    assert!(
+        assign_res.is_ok(),
+        "Child process successfully assigned to JobObject"
+    );
 
     // 4. Verify child is actively running
     let status_before = child.try_wait().expect("try_wait before drop");
-    assert!(status_before.is_none(), "Child process must still be running before JobObject is closed");
+    assert!(
+        status_before.is_none(),
+        "Child process must still be running before JobObject is closed"
+    );
 
     // 5. Drop the JobObject guard (triggers CloseHandle -> JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
     drop(guard);
@@ -821,7 +889,10 @@ fn challenge_win32_job_object_kill_on_close_empirical() {
     let mut terminated = false;
     while start.elapsed() < Duration::from_millis(1000) {
         if let Ok(Some(exit_status)) = child.try_wait() {
-            println!("Child terminated by JobObject with status: {:?}", exit_status);
+            println!(
+                "Child terminated by JobObject with status: {:?}",
+                exit_status
+            );
             terminated = true;
             break;
         }
@@ -907,7 +978,10 @@ fn challenge_vram_exact_boundary_discriminators() {
         "89.90% must remain High (free = {} MB > 1200 MB)",
         free_89_90 / (1024 * 1024)
     );
-    assert_eq!(assess_89_90.action_taken, FallbackAction::OffloadRerankerToCpu);
+    assert_eq!(
+        assess_89_90.action_taken,
+        FallbackAction::OffloadRerankerToCpu
+    );
     assert!(supervisor.is_reranker_on_cpu());
     assert!(!supervisor.is_worker_sleep_idle());
 
@@ -948,22 +1022,34 @@ fn challenge_vram_exact_boundary_discriminators() {
     let free_2047mb = (2048 * 1024 * 1024) - 1;
 
     // At 2048 MB free and 80% usage: not < 2048 MB, ratio not >= 85% -> Elevated
-    let assess_free_2048 = supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_2048mb);
+    let assess_free_2048 =
+        supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_2048mb);
     assert_eq!(assess_free_2048.tier, VramPressureTier::Elevated);
 
     // At 2047 MB free: free < 2048 MB triggers High tier!
-    let assess_free_2047 = supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_2047mb);
-    assert_eq!(assess_free_2047.tier, VramPressureTier::High, "free < 2048MB must trigger High tier");
+    let assess_free_2047 =
+        supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_2047mb);
+    assert_eq!(
+        assess_free_2047.tier,
+        VramPressureTier::High,
+        "free < 2048MB must trigger High tier"
+    );
 
     // Stage 2 free threshold on 10 GB:
     let free_1200mb = 1200 * 1024 * 1024;
     let free_1199mb = (1200 * 1024 * 1024) - 1;
 
-    let assess_free_1200 = supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_1200mb);
+    let assess_free_1200 =
+        supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_1200mb);
     assert_eq!(assess_free_1200.tier, VramPressureTier::High);
 
-    let assess_free_1199 = supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_1199mb);
-    assert_eq!(assess_free_1199.tier, VramPressureTier::Critical, "free < 1200MB must trigger Critical tier");
+    let assess_free_1199 =
+        supervisor.evaluate_pressure_custom(total_10gb, total_10gb - free_1199mb);
+    assert_eq!(
+        assess_free_1199.tier,
+        VramPressureTier::Critical,
+        "free < 1200MB must trigger Critical tier"
+    );
 
     // ---------------------------------------------------------
     // Boundary 4: Hysteresis Recovery Threshold (> 4096 MB free)
@@ -973,13 +1059,21 @@ fn challenge_vram_exact_boundary_discriminators() {
     let free_4096mb = 4096 * 1024 * 1024;
     let assess_rec_4096 = supervisor.evaluate_pressure_custom(total_vram, total_vram - free_4096mb);
     assert_eq!(assess_rec_4096.tier, VramPressureTier::Nominal);
-    assert!(supervisor.is_reranker_on_cpu(), "Flags must not reset at exactly 4096 MB free");
+    assert!(
+        supervisor.is_reranker_on_cpu(),
+        "Flags must not reset at exactly 4096 MB free"
+    );
 
     // When free = 4097 MB (> 4096 MB): flags reset!
     let free_4097mb = (4096 * 1024 * 1024) + 1024 * 1024;
     let assess_rec_4097 = supervisor.evaluate_pressure_custom(total_vram, total_vram - free_4097mb);
     assert_eq!(assess_rec_4097.tier, VramPressureTier::Nominal);
-    assert!(!supervisor.is_reranker_on_cpu(), "Flags reset when free > 4096 MB");
-    assert!(!supervisor.is_worker_sleep_idle(), "Worker sleep-idle resets when free > 4096 MB");
+    assert!(
+        !supervisor.is_reranker_on_cpu(),
+        "Flags reset when free > 4096 MB"
+    );
+    assert!(
+        !supervisor.is_worker_sleep_idle(),
+        "Worker sleep-idle resets when free > 4096 MB"
+    );
 }
-

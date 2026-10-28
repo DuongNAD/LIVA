@@ -218,6 +218,10 @@ fn dashboard_duoc_toan_quyen_cua() {
         "cua:set_mode",
         "cua:get_status",
         "cua:query_audit_logs",
+        "cua:inspect_ui_tree",
+        "cua:execute_som_action",
+        "cua:run_profile",
+        "cua:list_devices",
     ] {
         duoc(CommandPrincipal::TauriDashboard, cmd);
     }
@@ -231,6 +235,10 @@ fn widget_duoc_dieu_khien_cua_nhung_khong_duoc_truy_van_audit_ledger() {
         "cua:emergency_stop",
         "cua:set_mode",
         "cua:get_status",
+        "cua:inspect_ui_tree",
+        "cua:execute_som_action",
+        "cua:run_profile",
+        "cua:list_devices",
     ] {
         duoc(CommandPrincipal::TauriWidget, cmd);
     }
@@ -248,6 +256,10 @@ fn setup_va_telegram_bi_chan_toan_bo_cua() {
         "cua:set_mode",
         "cua:get_status",
         "cua:query_audit_logs",
+        "cua:inspect_ui_tree",
+        "cua:execute_som_action",
+        "cua:run_profile",
+        "cua:list_devices",
     ] {
         bi_chan(CommandPrincipal::TauriSetup, cmd);
         bi_chan(CommandPrincipal::Telegram, cmd);

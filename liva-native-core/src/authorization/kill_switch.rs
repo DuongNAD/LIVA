@@ -1,9 +1,9 @@
 //! Non-Restarting Emergency Kill Switch with Atomic Epoch Escalation (Feature F25).
 
 use liva_core_types::SecurityError;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 #[derive(Debug, Clone)]
 pub struct EmergencyKillSwitch {
@@ -120,7 +120,10 @@ mod tests {
         assert_eq!(escalated_epoch, 2);
         assert_eq!(ks.current_epoch(), 2);
         assert!(ks.is_active());
-        assert!(cancel_token.load(Ordering::SeqCst), "Turn must be cancelled");
+        assert!(
+            cancel_token.load(Ordering::SeqCst),
+            "Turn must be cancelled"
+        );
 
         // When active, any grant fails with KillSwitchActivated
         assert!(matches!(

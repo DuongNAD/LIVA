@@ -150,9 +150,7 @@ fn mot_luot(
     ))
 }
 
-fn mot_luot_mock(
-    nhan: usize,
-) -> (Duration, Option<Duration>, usize, Duration) {
+fn mot_luot_mock(nhan: usize) -> (Duration, Option<Duration>, usize, Duration) {
     let variance_us = (nhan as u64 * 317) % 2500;
     let raw_us = 26_000 + variance_us;
     let visible_us = 72_000 + variance_us * 2;
@@ -193,7 +191,9 @@ where
             "--live" => force_live = true,
             "--iterations" | "-n" => {
                 let val = args.next().ok_or("Thiếu giá trị cho --iterations")?;
-                let n: usize = val.parse().map_err(|_| "Giá trị --iterations phải là số nguyên dương")?;
+                let n: usize = val
+                    .parse()
+                    .map_err(|_| "Giá trị --iterations phải là số nguyên dương")?;
                 if n == 0 {
                     return Err("Giá trị --iterations phải là số nguyên dương lớn hơn 0".into());
                 }
@@ -266,10 +266,14 @@ async fn main() -> Result<(), String> {
 
     if is_mock_mode {
         if cli.force_live {
-            return Err("Yêu cầu chế độ --live nhưng không tìm thấy file model weights hợp lệ.".into());
+            return Err(
+                "Yêu cầu chế độ --live nhưng không tìm thấy file model weights hợp lệ.".into(),
+            );
         }
         println!("[WARN] Live model weights or llama-server not found.");
-        println!("[INFO] Falling back to Fixture Dry-Run Mode (Deterministic Dual-Mode Simulation).\n");
+        println!(
+            "[INFO] Falling back to Fixture Dry-Run Mode (Deterministic Dual-Mode Simulation).\n"
+        );
     }
 
     in_cau_hinh_may(live_model_path, n_ctx, n_gpu_layers, is_mock_mode);
@@ -291,7 +295,8 @@ async fn main() -> Result<(), String> {
         let _ = std::io::stdout().flush();
         let nap_tu = Instant::now();
         let mut llm = LlamaRouterManager::new(n_ctx, n_gpu_layers)?;
-        llm.swap_model(path, Some(n_ctx), Some(n_gpu_layers), Some(false)).await?;
+        llm.swap_model(path, Some(n_ctx), Some(n_gpu_layers), Some(false))
+            .await?;
         println!("xong sau {}.\n", ms(nap_tu.elapsed()));
 
         print!("Lượt làm nóng (bỏ khỏi thống kê)… ");
@@ -445,7 +450,11 @@ async fn main() -> Result<(), String> {
     cac_nhin_thay.sort();
 
     let snapshot_final = process_memory_snapshot().unwrap_or_default();
-    let rss_peak_mb = (snapshot_final.peak_working_set_bytes.max(snapshot_final.working_set_bytes)) as f64 / 1024.0 / 1024.0;
+    let rss_peak_mb = (snapshot_final
+        .peak_working_set_bytes
+        .max(snapshot_final.working_set_bytes)) as f64
+        / 1024.0
+        / 1024.0;
     let commit_mb = snapshot_final.pagefile_bytes as f64 / 1024.0 / 1024.0;
 
     println!("╭─ Kết quả · {so_luot} lượt ───────────────────────────────────");

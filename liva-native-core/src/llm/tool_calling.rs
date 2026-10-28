@@ -34,6 +34,7 @@
 //! biết".
 
 use crate::mcp::protocol::Tool;
+pub use liva_core_types::ToolExecPolicy;
 use serde_json::{Value, json};
 
 /// Tên "server" quy ước cho các tool nội bộ của `mcp::server::NativeMcpServer`.
@@ -47,14 +48,14 @@ const PARAM_PREFIX: &str = "   tham số (* = bắt buộc): ";
 /// Số tool tối đa chèn vào prompt. Xem ràng buộc 1 ở đầu file.
 ///
 /// Lịch sử con số này chính là nợ M10: catalog nội bộ lớn dần (4 → 6 ở U19,
-/// nay là **7** kể cả `get_weather`) trong khi `top_k` đứng yên, và từ lúc
-/// catalog > top_k thì **thứ hạng embedder quyết định tool nào LLM được thấy**
+/// 7 ở M10, nay là **11** sau khi tích hợp 4 CUA tools ở M4) trong khi `top_k` đứng yên,
+/// và từ lúc catalog > top_k thì **thứ hạng embedder quyết định tool nào LLM được thấy**
 /// — tool xếp sau bị loại khỏi prompt ở mọi lượt, triệu chứng là "LIVA không
-/// hiểu lệnh" chứ không phải một lỗi (hỏng im lặng). Nay nâng lên 7 để mọi
+/// hiểu lệnh" chứ không phải một lỗi (hỏng im lặng). Nay nâng lên 11 để mọi
 /// tool nội bộ luôn vào prompt, và test
 /// [`catalog_noi_bo_khong_duoc_dai_hon_top_k`] ở dưới **cưỡng chế** điều đó:
 /// thêm tool mới mà không chủ động reconsider `DEFAULT_TOP_K` thì CI đỏ.
-pub const DEFAULT_TOP_K: usize = 7;
+pub const DEFAULT_TOP_K: usize = 11;
 
 /// Một tool ứng viên, đã phẳng hoá từ mọi nguồn (nội bộ + MCP server ngoài).
 #[derive(Debug, Clone, PartialEq)]
@@ -737,7 +738,34 @@ const NATIVE_AUTOEXEC: &[&str] = &[
     "control_volume",
     "control_media",
     "get_weather",
+    "cua_inspect_ui",
+    "cua_emergency_halt",
 ];
+
+impl From<ToolExecPolicy> for ExecPolicy {
+    fn from(p: ToolExecPolicy) -> Self {
+        match p {
+            ToolExecPolicy::Auto => ExecPolicy::Auto,
+            ToolExecPolicy::ProposeOnly => ExecPolicy::ProposeOnly,
+            ToolExecPolicy::Forbidden => ExecPolicy::Block,
+        }
+    }
+}
+
+impl From<ExecPolicy> for ToolExecPolicy {
+    fn from(p: ExecPolicy) -> Self {
+        match p {
+            ExecPolicy::Auto => ToolExecPolicy::Auto,
+            ExecPolicy::ProposeOnly => ToolExecPolicy::ProposeOnly,
+            ExecPolicy::Block => ToolExecPolicy::Forbidden,
+        }
+    }
+}
+
+/// Helper returning the active `ToolExecPolicy` for a given server and tool name.
+pub fn tool_exec_policy(server: &str, name: &str) -> ToolExecPolicy {
+    ExecPolicy::for_tool(server, name).into()
+}
 
 impl ExecPolicy {
     /// Chuỗi chuẩn hoá gửi xuống JSON config và UI (`"auto"` | `"ask"` | `"block"`).
@@ -773,11 +801,12 @@ impl ExecPolicy {
     pub fn for_tool_from_path(server: &str, name: &str, config_path: &std::path::Path) -> Self {
         let policies = crate::commands::config::load_skill_policies_from(config_path);
         let qualified = format!("{server}/{name}");
-        let explicit = policies.get(&qualified).or_else(|| policies.get(name)).copied();
+        let explicit = policies
+            .get(&qualified)
+            .or_else(|| policies.get(name))
+            .copied();
         let disabled = crate::commands::config::load_disabled_skills_from(config_path);
-        if explicit == Some(Self::Block)
-            || disabled.contains(&qualified)
-            || disabled.contains(name)
+        if explicit == Some(Self::Block) || disabled.contains(&qualified) || disabled.contains(name)
         {
             return Self::Block;
         }
@@ -2031,11 +2060,13 @@ mod tests {
 
         let catalog = build_catalog_from_path(&state, &config_file).await;
 
-        // Khi config lỗi, fallback về không tắt gì cả → đủ cả 7 tool
-        assert_eq!(catalog.tools().len(), 7);
+        // Khi config lỗi, fallback về không tắt gì cả → đủ cả 11 tool nội bộ
+        assert_eq!(catalog.tools().len(), 11);
         assert!(catalog.find(NATIVE_SERVER, "control_volume").is_some());
         assert!(catalog.find(NATIVE_SERVER, "read_markdown").is_some());
         assert!(catalog.find(NATIVE_SERVER, "control_smarthome").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "cua_inspect_ui").is_some());
+        assert!(catalog.find(NATIVE_SERVER, "cua_execute_som").is_some());
     }
 
     #[tokio::test]

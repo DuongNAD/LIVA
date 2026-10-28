@@ -369,7 +369,8 @@ mod tests {
 
     #[test]
     fn test_trace_tamper_detection() {
-        let temp_dir = std::env::temp_dir().join(format!("liva-trace-tamper-{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("liva-trace-tamper-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         let trace_path = temp_dir.join("trace.jsonl");
 
@@ -387,7 +388,10 @@ mod tests {
         let verify_res = verify_trace_chain(&trace_path);
         assert!(verify_res.is_err(), "verification must catch tampering");
         let err = verify_res.unwrap_err();
-        assert!(err.contains("tamper detected"), "expected tamper message: {err}");
+        assert!(
+            err.contains("tamper detected"),
+            "expected tamper message: {err}"
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

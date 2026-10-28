@@ -138,7 +138,16 @@ pub fn epoch_millis_to_date(ms: i64) -> String {
     let month_days = [
         31,
         if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     let mut month = 1;
     for &md in &month_days {
@@ -199,14 +208,22 @@ impl MarkdownSyncManager {
                 if is_valid_date_format(s) {
                     s.to_string()
                 } else {
-                    epoch_millis_to_date(if fact.valid_from > 0 { fact.valid_from } else { fact.recorded_at })
+                    epoch_millis_to_date(if fact.valid_from > 0 {
+                        fact.valid_from
+                    } else {
+                        fact.recorded_at
+                    })
                 }
             } else if fact.scope.starts_with("daily:") {
                 let s = fact.scope.trim_start_matches("daily:").trim();
                 if is_valid_date_format(s) {
                     s.to_string()
                 } else {
-                    epoch_millis_to_date(if fact.valid_from > 0 { fact.valid_from } else { fact.recorded_at })
+                    epoch_millis_to_date(if fact.valid_from > 0 {
+                        fact.valid_from
+                    } else {
+                        fact.recorded_at
+                    })
                 }
             } else {
                 let ts = if fact.valid_from > 0 {
@@ -229,7 +246,8 @@ impl MarkdownSyncManager {
         {
             let slug = if fact.scope.starts_with("project:") {
                 slugify(fact.scope.trim_start_matches("project:"))
-            } else if fact.subject != "user" && fact.subject != "system" && !fact.subject.is_empty() {
+            } else if fact.subject != "user" && fact.subject != "system" && !fact.subject.is_empty()
+            {
                 slugify(&fact.subject)
             } else if let Some(ref cat) = fact.category {
                 if cat == "project" && fact.subject != "user" {
@@ -250,13 +268,17 @@ impl MarkdownSyncManager {
             || fact.scope.starts_with("people:")
             || fact.category.as_deref() == Some("person")
             || fact.category.as_deref() == Some("people")
-            || (fact.subject != "user" && fact.subject != "system" && fact.scope != "personal" && fact.scope != "global")
+            || (fact.subject != "user"
+                && fact.subject != "system"
+                && fact.scope != "personal"
+                && fact.scope != "global")
         {
             let slug = if fact.scope.starts_with("person:") {
                 slugify(fact.scope.trim_start_matches("person:"))
             } else if fact.scope.starts_with("people:") {
                 slugify(fact.scope.trim_start_matches("people:"))
-            } else if fact.subject != "user" && fact.subject != "system" && !fact.subject.is_empty() {
+            } else if fact.subject != "user" && fact.subject != "system" && !fact.subject.is_empty()
+            {
                 slugify(&fact.subject)
             } else {
                 slugify(&fact.predicate)
@@ -274,7 +296,10 @@ impl MarkdownSyncManager {
     }
 
     /// Export all active facts from DB to OpenClaw Markdown files partitioned across subdirectories.
-    pub fn export_all_active_facts(&self, conn: &Connection) -> Result<SyncReport, rusqlite::Error> {
+    pub fn export_all_active_facts(
+        &self,
+        conn: &Connection,
+    ) -> Result<SyncReport, rusqlite::Error> {
         let mut report = SyncReport::default();
         let active_facts = list_active_facts(conn, None)?;
 
@@ -301,7 +326,9 @@ impl MarkdownSyncManager {
         for (dest_path, facts) in partitions {
             let header = file_header_for_path(&dest_path);
             if let Err(e) = self.export_facts_to_file(conn, &dest_path, &header, &facts) {
-                report.errors.push(format!("Export error for {dest_path:?}: {e}"));
+                report
+                    .errors
+                    .push(format!("Export error for {dest_path:?}: {e}"));
             } else {
                 report.files_scanned += 1;
                 report.facts_exported += facts.len();
@@ -343,10 +370,19 @@ impl MarkdownSyncManager {
                     .collect();
                 files.sort();
                 for file_path in files {
-                    let slug = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("person");
+                    let slug = file_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("person");
                     let default_subject = slug;
                     let default_scope = format!("person:{}", slug);
-                    self.ingest_single_file(conn, &file_path, default_subject, &default_scope, &mut report)?;
+                    self.ingest_single_file(
+                        conn,
+                        &file_path,
+                        default_subject,
+                        &default_scope,
+                        &mut report,
+                    )?;
                 }
             }
         }
@@ -362,10 +398,19 @@ impl MarkdownSyncManager {
                     .collect();
                 files.sort();
                 for file_path in files {
-                    let slug = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("project");
+                    let slug = file_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("project");
                     let default_subject = slug;
                     let default_scope = format!("project:{}", slug);
-                    self.ingest_single_file(conn, &file_path, default_subject, &default_scope, &mut report)?;
+                    self.ingest_single_file(
+                        conn,
+                        &file_path,
+                        default_subject,
+                        &default_scope,
+                        &mut report,
+                    )?;
                 }
             }
         }
@@ -381,10 +426,19 @@ impl MarkdownSyncManager {
                     .collect();
                 files.sort();
                 for file_path in files {
-                    let date_str = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("daily");
+                    let date_str = file_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("daily");
                     let default_subject = "user";
                     let default_scope = format!("memory:{}", date_str);
-                    self.ingest_single_file(conn, &file_path, default_subject, &default_scope, &mut report)?;
+                    self.ingest_single_file(
+                        conn,
+                        &file_path,
+                        default_subject,
+                        &default_scope,
+                        &mut report,
+                    )?;
                 }
             }
         }
@@ -493,7 +547,9 @@ impl MarkdownSyncManager {
         let content = match fs::read_to_string(file_path) {
             Ok(c) => c,
             Err(e) => {
-                report.errors.push(format!("Cannot read {file_path:?}: {e}"));
+                report
+                    .errors
+                    .push(format!("Cannot read {file_path:?}: {e}"));
                 return Ok(());
             }
         };
@@ -633,7 +689,10 @@ impl MarkdownSyncManager {
                         }
                     }
                 } else {
-                    let clean_line = trimmed.trim_start_matches('-').trim_start_matches('*').trim();
+                    let clean_line = trimmed
+                        .trim_start_matches('-')
+                        .trim_start_matches('*')
+                        .trim();
                     let (pred, val) = if let Some((k, v)) = clean_line.split_once(':') {
                         let cleaned_k = k.trim().trim_matches('*').to_string();
                         (cleaned_k, v.trim().to_string())
@@ -749,7 +808,10 @@ impl MarkdownSyncManager {
                         report.facts_expired += 1;
                     }
                 }
-                let _ = conn.execute("DELETE FROM markdown_sync_state WHERE file_path = ?1", [&tf]);
+                let _ = conn.execute(
+                    "DELETE FROM markdown_sync_state WHERE file_path = ?1",
+                    [&tf],
+                );
             }
         }
         Ok(())
@@ -778,7 +840,8 @@ mod tests {
     fn setup_test_env() -> (Connection, PathBuf) {
         let conn = Connection::open_in_memory().expect("open memory db");
         init_bitemporal_schema(&conn).expect("init bitemporal schema");
-        let temp_dir = std::env::temp_dir().join(format!("liva_md_sync_test_{}", uuid::Uuid::new_v4()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("liva_md_sync_test_{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
         (conn, temp_dir)
     }
@@ -920,7 +983,9 @@ mod tests {
         insert_active_fact(&conn, &fact_episodic, None).expect("insert fact_episodic");
 
         let manager = MarkdownSyncManager::new(MarkdownSyncConfig::new(&dir));
-        let report = manager.export_all_active_facts(&conn).expect("export facts");
+        let report = manager
+            .export_all_active_facts(&conn)
+            .expect("export facts");
 
         assert_eq!(report.facts_exported, 5);
 
@@ -994,7 +1059,9 @@ mod tests {
         insert_active_fact(&conn, &fact1, None).expect("insert fact1");
 
         let manager = MarkdownSyncManager::new(MarkdownSyncConfig::new(&dir));
-        let _ = manager.export_all_active_facts(&conn).expect("export facts");
+        let _ = manager
+            .export_all_active_facts(&conn)
+            .expect("export facts");
 
         // User edit: change "dark" to "light", and add fresh line "- **editor**: neovim"
         let user_md_path = dir.join("USER.md");
@@ -1004,9 +1071,14 @@ mod tests {
         fs::write(&user_md_path, edited_content).expect("write edited USER.md");
 
         let mut report = SyncReport::default();
-        manager.ingest_markdown_file(&mut conn, &user_md_path, &mut report).expect("ingest");
+        manager
+            .ingest_markdown_file(&mut conn, &user_md_path, &mut report)
+            .expect("ingest");
 
-        assert_eq!(report.facts_updated, 1, "Theme should be superseded/updated");
+        assert_eq!(
+            report.facts_updated, 1,
+            "Theme should be superseded/updated"
+        );
         assert_eq!(report.facts_ingested, 1, "Editor should be newly ingested");
 
         // Verify old fact is superseded
@@ -1023,12 +1095,18 @@ mod tests {
         let active_facts = list_active_facts(&conn, Some("personal")).expect("list active");
         assert_eq!(active_facts.len(), 2);
 
-        let theme_fact = active_facts.iter().find(|f| f.predicate == "theme").expect("find theme");
+        let theme_fact = active_facts
+            .iter()
+            .find(|f| f.predicate == "theme")
+            .expect("find theme");
         assert_eq!(theme_fact.object_value, "light");
         assert_eq!(theme_fact.origin, FactOrigin::UserEdited);
         assert_eq!(theme_fact.confidence, 1.0);
 
-        let editor_fact = active_facts.iter().find(|f| f.predicate == "editor").expect("find editor");
+        let editor_fact = active_facts
+            .iter()
+            .find(|f| f.predicate == "editor")
+            .expect("find editor");
         assert_eq!(editor_fact.object_value, "neovim");
         assert_eq!(editor_fact.origin, FactOrigin::UserEdited);
         assert_eq!(editor_fact.confidence, 1.0);
@@ -1093,7 +1171,9 @@ mod tests {
         insert_active_fact(&conn, &fact2, None).expect("insert fact2");
 
         let manager = MarkdownSyncManager::new(MarkdownSyncConfig::new(&dir));
-        manager.export_all_active_facts(&conn).expect("export facts");
+        manager
+            .export_all_active_facts(&conn)
+            .expect("export facts");
 
         // User deletes `theme` line in Obsidian: only `editor` remains
         let user_md_path = dir.join("USER.md");
@@ -1103,7 +1183,10 @@ mod tests {
 
         // Ingest user edits
         let report = manager.ingest_user_edits(&mut conn).expect("ingest");
-        assert_eq!(report.facts_expired, 1, "Deleted line must trigger soft-invalidation");
+        assert_eq!(
+            report.facts_expired, 1,
+            "Deleted line must trigger soft-invalidation"
+        );
 
         // Verify SQLite state: fact_to_delete is expired with reason 'user_deleted_from_markdown'
         let (valid_to, expired_at, reason): (Option<i64>, Option<i64>, Option<String>) = conn
@@ -1114,8 +1197,14 @@ mod tests {
             )
             .expect("query deleted fact");
 
-        assert!(valid_to.is_some(), "valid_to must be set upon markdown deletion");
-        assert!(expired_at.is_some(), "expired_at must be set upon markdown deletion");
+        assert!(
+            valid_to.is_some(),
+            "valid_to must be set upon markdown deletion"
+        );
+        assert!(
+            expired_at.is_some(),
+            "expired_at must be set upon markdown deletion"
+        );
         assert_eq!(reason.as_deref(), Some("user_deleted_from_markdown"));
 
         // Verify fact_to_keep is still active
@@ -1126,7 +1215,10 @@ mod tests {
         // Re-export and verify Zombie Fact does NOT resurrect in USER.md
         manager.export_all_active_facts(&conn).expect("re-export");
         let exported_content = fs::read_to_string(&user_md_path).expect("read re-exported");
-        assert!(!exported_content.contains("theme"), "Zombie fact must NOT resurrect!");
+        assert!(
+            !exported_content.contains("theme"),
+            "Zombie fact must NOT resurrect!"
+        );
         assert!(exported_content.contains("editor"));
 
         let _ = fs::remove_dir_all(&dir);
@@ -1175,16 +1267,24 @@ mod tests {
 - **city**: Da Nang\n";
         fs::write(&bob_md_path, edited_bob).expect("write edited bob.md");
 
-        let report = manager.ingest_user_edits(&mut conn).expect("ingest user edits");
+        let report = manager
+            .ingest_user_edits(&mut conn)
+            .expect("ingest user edits");
         assert_eq!(report.facts_updated, 1);
         assert_eq!(report.facts_ingested, 1);
 
         let active_facts = list_active_facts(&conn, None).expect("list active");
-        let phone_fact = active_facts.iter().find(|f| f.predicate == "phone").expect("find phone");
+        let phone_fact = active_facts
+            .iter()
+            .find(|f| f.predicate == "phone")
+            .expect("find phone");
         assert_eq!(phone_fact.object_value, "0987654321");
         assert_eq!(phone_fact.origin, FactOrigin::UserEdited);
 
-        let city_fact = active_facts.iter().find(|f| f.predicate == "city").expect("find city");
+        let city_fact = active_facts
+            .iter()
+            .find(|f| f.predicate == "city")
+            .expect("find city");
         assert_eq!(city_fact.object_value, "Da Nang");
         assert_eq!(city_fact.subject, "bob");
         assert_eq!(city_fact.scope, "person:bob");

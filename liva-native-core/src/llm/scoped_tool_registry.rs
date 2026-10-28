@@ -4,7 +4,7 @@
 //! hierarchical scope inheritance, fail-closed CommandPrincipal channel authorization,
 //! RiskTier policy gating, and secret-scrubbed action audit ledger persistence.
 
-use crate::authorization::{authorize_command, ExecutorPolicy, SessionMode};
+use crate::authorization::{ExecutorPolicy, SessionMode, authorize_command};
 use crate::cognitive::{
     ActionAuditRecord, Blake3AuditChain, PolicyEngine, RedactedAuditLedger, RiskTier,
 };

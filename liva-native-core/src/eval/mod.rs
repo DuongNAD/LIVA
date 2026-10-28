@@ -37,8 +37,8 @@ pub use trace::{
     TraceVerificationReport, compute_audit_hash, verify_trace_chain,
 };
 pub use vietnamese_suite::{
-    BitemporalCase, BitemporalOp, CanaryCase, CanaryPillar, PromptInjectionCase,
-    ToolCallingCase, VietnameseEvalReport, generate_bitemporal_suite, generate_canary_suite,
+    BitemporalCase, BitemporalOp, CanaryCase, CanaryPillar, PromptInjectionCase, ToolCallingCase,
+    VietnameseEvalReport, generate_bitemporal_suite, generate_canary_suite,
     generate_prompt_injection_suite, generate_tool_calling_suite, run_vietnamese_evaluation_suite,
 };
 

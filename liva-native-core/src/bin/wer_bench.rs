@@ -4,9 +4,9 @@
 //! Expected input is a JSONL manifest produced by `scripts/prepare-fleurs-vi.py`:
 //! `{"audio":"audio/0000.wav","transcript":"..."}`.
 
-use liva_native_core::eval::normalizer::{calculate_dual_wer, WerResult};
 #[cfg(test)]
-use liva_native_core::eval::normalizer::{align_words, tokenize_words, VietnameseNormalizer};
+use liva_native_core::eval::normalizer::{VietnameseNormalizer, align_words, tokenize_words};
+use liva_native_core::eval::normalizer::{WerResult, calculate_dual_wer};
 use liva_native_core::stt::SttManager;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

@@ -119,28 +119,47 @@ test('citation checker bỏ qua đúng snapshot FREEZE từ document inventory',
   })
   const report = JSON.parse(raw)
 
+  // 1. Vùng đông lạnh / lưu trữ phải được ghi nhận và có danh sách files nhất quán
+  assert.ok(report.dongBang.docs > 0, 'vùng 99-luu-tru phải được ghi nhận trong dongBang')
+  assert.equal(
+    report.dongBang.docs,
+    report.dongBang.files.length,
+    'số lượng dongBang.docs phải khớp với độ dài danh sách dongBang.files',
+  )
+
+  // 2. Các snapshot tài liệu lịch sử đã di trú vào docs/99-luu-tru/ phải nằm trong danh sách đóng băng
   assert.ok(
-    report.frozenDocsSkipped.includes('docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md'),
-    'snapshot khảo sát gốc phải được lấy từ disposition FREEZE',
+    report.dongBang.files.includes('docs/99-luu-tru/bao-cao-lich-su/00-bao-cao-khao-sat-goc-2026-07.md'),
+    'snapshot khảo sát gốc phải nằm trong danh sách tài liệu đóng băng',
   )
   assert.ok(
-    report.frozenDocsSkipped.includes('docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md'),
-    'đề xuất OpenSpace đã FREEZE không được so citation với HEAD',
+    report.dongBang.files.includes('docs/99-luu-tru/bao-cao-lich-su/04-de-xuat-tich-hop-openspace.md'),
+    'đề xuất OpenSpace đã FREEZE không được so citation với HEAD và phải nằm trong dongBang',
   )
   assert.ok(
-    report.frozenDocsSkipped.includes('docs/01-ban-ve/03-duong-ong-thoai.md'),
-    'khảo sát voice cũ đã hoàn tất di trú phải được bỏ qua như snapshot FREEZE',
+    report.dongBang.files.includes('docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/03-duong-ong-thoai.md'),
+    'khảo sát voice cũ đã hoàn tất di trú phải được bỏ qua như snapshot trong dongBang',
   )
   assert.ok(
-    !report.frozenDocsSkipped.includes('docs/03-he-thong-con/voice.md'),
-    'tài liệu voice canonical KEEP phải tiếp tục được quét',
+    report.dongBang.files.includes('docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/05-agent-bo-nho-va-tien-hoa.md'),
+    'khảo sát agent/memory/evolution cũ phải được bỏ qua như snapshot trong dongBang',
+  )
+
+  // 3. Các tài liệu canonical KEEP ở 01-kien-truc, 02-crates, 03-phat-trien-van-hanh KHÔNG được nằm trong dongBang
+  assert.ok(
+    !report.dongBang.files.includes('docs/01-kien-truc/01-tong-quan-va-tam-nhin.md'),
+    'tài liệu kiến trúc canonical KEEP phải tiếp tục được quét (không thuộc dongBang)',
   )
   assert.ok(
-    report.frozenDocsSkipped.includes('docs/01-ban-ve/05-agent-bo-nho-va-tien-hoa.md'),
-    'khảo sát agent/memory/evolution cũ phải được bỏ qua như snapshot FREEZE',
+    !report.dongBang.files.includes('docs/02-crates/01-liva-native-core.md'),
+    'tài liệu crate canonical KEEP phải tiếp tục được quét (không thuộc dongBang)',
   )
   assert.ok(
-    !report.frozenDocsSkipped.includes('docs/03-he-thong-con/agent-tools.md'),
-    'tài liệu agent/tools canonical KEEP phải tiếp tục được quét',
+    !report.dongBang.files.includes('docs/03-phat-trien-van-hanh/01-cau-hinh-va-bien-moi-truong.md'),
+    'tài liệu vận hành canonical KEEP phải tiếp tục được quét (không thuộc dongBang)',
   )
+
+  // 4. Kiểm tra tính toàn vẹn của tập tài liệu sống được quét
+  assert.equal(report.docs, 17, 'phải quét đúng 17 tài liệu sống')
+  assert.deepEqual(report.frozenDocsSkipped, [], 'không còn tài liệu FREEZE nào rải rác ngoài docs/99-luu-tru/')
 })

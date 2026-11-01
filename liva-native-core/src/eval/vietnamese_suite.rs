@@ -917,6 +917,12 @@ impl VietnameseEvalReport {
 
 pub struct DeterministicToolRouter;
 
+impl Default for DeterministicToolRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeterministicToolRouter {
     pub fn new() -> Self {
         Self
@@ -1149,6 +1155,12 @@ pub struct InMemoryBitemporalStore {
     pub clock: u64,
 }
 
+impl Default for InMemoryBitemporalStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryBitemporalStore {
     pub fn new() -> Self {
         Self {
@@ -1251,6 +1263,12 @@ impl InMemoryBitemporalStore {
 
 pub struct SecurityDefenseSimulator;
 
+impl Default for SecurityDefenseSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SecurityDefenseSimulator {
     pub fn new() -> Self {
         Self
@@ -1303,6 +1321,12 @@ impl SecurityDefenseSimulator {
 // ============================================================================
 
 pub struct CanaryPolicyEngine;
+
+impl Default for CanaryPolicyEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CanaryPolicyEngine {
     pub fn new() -> Self {

@@ -73,13 +73,13 @@ pub fn compute_hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     }
 
     let mut inner = Sha256::new();
-    inner.update(&i_key_pad);
+    inner.update(i_key_pad);
     inner.update(message);
     let inner_hash = inner.finalize();
 
     let mut outer = Sha256::new();
-    outer.update(&o_key_pad);
-    outer.update(&inner_hash);
+    outer.update(o_key_pad);
+    outer.update(inner_hash);
     let outer_hash = outer.finalize();
 
     let mut result = [0u8; 32];
@@ -216,15 +216,10 @@ impl ToolInsuranceEngine {
         tools
             .iter()
             .filter(|t| {
-                if !is_owner
-                    && (t.name.contains("dpapi")
-                        || t.name.contains("policy")
-                        || t.name.contains("write_markdown"))
-                {
-                    false
-                } else {
-                    true
-                }
+                is_owner
+                    || (!t.name.contains("dpapi")
+                        && !t.name.contains("policy")
+                        && !t.name.contains("write_markdown"))
             })
             .map(|t| {
                 json!({
@@ -298,6 +293,10 @@ impl ToolInsuranceEngine {
     }
 
     // --- TIER 4: HMAC RECEIPT ISSUANCE & READ-AFTER-WRITE VERIFICATION ---
+    /// Issues a cryptographically signed HMAC receipt for tool execution.
+    ///
+    /// Preserves parameter signature for compatibility across HMAC verification test harnesses.
+    #[allow(clippy::too_many_arguments)]
     pub fn issue_signed_receipt(
         &self,
         session_id: &str,

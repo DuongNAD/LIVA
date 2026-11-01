@@ -91,6 +91,7 @@ impl Blake3AuditChain {
     }
 
     /// Appends a new verified block to the chain.
+    #[allow(clippy::too_many_arguments)]
     pub fn append_entry(
         conn: &Connection,
         principal: &str,

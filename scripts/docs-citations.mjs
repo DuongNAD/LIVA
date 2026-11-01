@@ -395,8 +395,10 @@ const listAll = (dir) =>
     return e.isDirectory() ? listAll(p) : e.name.endsWith('.md') ? [p] : []
   })
 
+const skipped = listSkipped(DOCS)
+const dongBangFiles = skipped.map((abs) => path.relative(ROOT, abs).replace(/\\/g, '/')).sort()
 const dongBang = { docs: 0, trichDan: 0, vuotBien: [] }
-for (const abs of listSkipped(DOCS)) {
+for (const abs of skipped) {
   dongBang.docs++
   const raw = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n')
   const relDoc = path.relative(ROOT, abs).replace(/\\/g, '/')
@@ -440,7 +442,12 @@ if (argv.includes('--json')) {
     frozenDocsSkipped, uncheckedByDoc, uncheckedByFile,
     // Vùng ngoài phạm vi kiểm. Đo để biết cổng KHÔNG thấy gì, không phải hạn
     // ngạch phải hạ — xem khối comment ở chỗ tính `dongBang`.
-    dongBang: { docs: dongBang.docs, trichDan: dongBang.trichDan, vuotBien: dongBang.vuotBien.length },
+    dongBang: {
+      docs: dongBang.docs,
+      trichDan: dongBang.trichDan,
+      vuotBien: dongBang.vuotBien.length,
+      files: dongBangFiles,
+    },
     ...(detailsDoc
       ? { unchecked: khongKiem.filter((item) => item.doc === detailsDoc) }
       : {}),

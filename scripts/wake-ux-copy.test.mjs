@@ -23,10 +23,9 @@ test('trang thử microphone dùng câu bắt đầu bằng Hey Liva và không 
   assert.match(script, /Đang lắng nghe câu bắt đầu bằng “Hey Liva”/u)
 })
 
-test('README beta yêu cầu câu bắt đầu bằng Hey Liva và nói rõ bare phrase chưa đạt', async () => {
+test('README beta cấu hình voice wake mode và pipeline âm thanh', async () => {
   const readme = await readRepoFile('README.md')
 
-  assert.match(readme, /start a complete sentence with “Hey Liva”/iu)
-  assert.match(readme, /“Hey Liva, play some music for me”/u)
-  assert.match(readme, /Bare “Hey Liva” is not reliable with the current model/u)
+  assert.match(readme, /Voice wake mode: "asr_prefix" \(default\) or "wakeword"/u)
+  assert.match(readme, /\$env:LIVA_WAKE_MODE = "asr_prefix"/u)
 })

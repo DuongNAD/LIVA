@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated": "2026-07-31",
-  "canonical_document": "docs/_generated/kiem-ke-tai-lieu.md",
+  "updated": "2026-11-01",
+  "canonical_document": "docs/99-luu-tru/registries-2026-07/kiem-ke-tai-lieu.md",
   "disposition_definitions": {
     "KEEP": "Giữ nguyên trong giai đoạn chuyển tiếp; nội dung vẫn có một vai trò rõ ràng.",
     "SPLIT": "Tách nội dung sang một hoặc nhiều tài liệu subsystem/contract có chủ sở hữu rõ ràng.",
@@ -11,813 +11,921 @@
   },
   "documents": [
     {
-      "path": "docs/README.md",
+      "path": "docs/01-kien-truc/01-tong-quan-va-tam-nhin.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Mục lục chuyển tiếp và điểm vào duy nhất của bộ tài liệu."
+      "rationale": "Tài liệu kiến trúc hệ thống LIVA Native Core và nguyên lý hoạt động."
     },
     {
-      "path": "docs/_generated/kiem-ke-tai-lieu.md",
-      "disposition": "GENERATE",
-      "wave": "B",
-      "targets": [],
-      "rationale": "Báo cáo được sinh từ registry kiểm kê và link Markdown thực tế."
-    },
-    {
-      "path": "docs/_generated/ma-tran-nang-luc.md",
-      "disposition": "GENERATE",
-      "wave": "A",
-      "targets": [],
-      "rationale": "Ma trận được sinh từ capability registry."
-    },
-    {
-      "path": "docs/_meta/ban-do-code-tai-lieu.md",
-      "disposition": "GENERATE",
-      "wave": "D",
-      "targets": [],
-      "rationale": "Bản đồ code và tài liệu phải được sinh từ frontmatter covers."
-    },
-    {
-      "path": "docs/_meta/huong-dan-bao-tri.md",
+      "path": "docs/01-kien-truc/02-nguyen-ly-cognitive-actor.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Runbook bảo trì metadata và kiểm tra tài liệu."
+      "rationale": "Tài liệu kiến trúc hệ thống LIVA Native Core và nguyên lý hoạt động."
     },
     {
-      "path": "docs/_meta/nguon-su-that.md",
+      "path": "docs/01-kien-truc/03-kien-truc-bo-nho-da-tang.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Registry quyền sở hữu nội dung đang được docs-check thực thi."
+      "rationale": "Tài liệu kiến trúc hệ thống LIVA Native Core và nguyên lý hoạt động."
     },
     {
-      "path": "docs/00-san-pham/tam-nhin-jarvis.md",
+      "path": "docs/01-kien-truc/04-giao-thuc-ipc-tauri-v2.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Canonical owner cho tầm nhìn và nguyên tắc sản phẩm."
+      "rationale": "Tài liệu kiến trúc hệ thống LIVA Native Core và nguyên lý hoạt động."
     },
     {
-      "path": "docs/01-ban-ve/00-tong-quan-he-thong.md",
-      "disposition": "MERGE",
-      "wave": "C-foundation",
-      "targets": [
-        "docs/03-he-thong-con/runtime-native.md"
-      ],
-      "rationale": "Tổng quan as-built cần nhập vào subsystem runtime, tránh cạnh tranh với product vision."
-    },
-    {
-      "path": "docs/01-ban-ve/01-kien-truc-tong-the.md",
-      "disposition": "SPLIT",
-      "wave": "C-foundation",
-      "targets": [
-        "docs/01-kien-truc/as-built.md",
-        "docs/03-he-thong-con/runtime-native.md"
-      ],
-      "rationale": "Đang trộn topology as-built, target design và runtime composition."
-    },
-    {
-      "path": "docs/01-ban-ve/02-giao-thuc-ipc-va-websocket.md",
-      "disposition": "SPLIT",
-      "wave": "C-contracts",
-      "targets": [
-        "docs/02-hop-dong/tauri-ipc.md",
-        "docs/02-hop-dong/websocket.md"
-      ],
-      "rationale": "Hai contract có vòng đời và consumer khác nhau."
-    },
-    {
-      "path": "docs/01-ban-ve/03-duong-ong-thoai.md",
-      "disposition": "FREEZE",
-      "wave": "C-voice-complete",
-      "targets": [
-        "docs/03-he-thong-con/voice.md",
-        "docs/05-chat-luong/voice-slo.md"
-      ],
-      "rationale": "Đã tách canonical voice runtime và SLO; giữ khảo sát chi tiết như snapshot lịch sử."
-    },
-    {
-      "path": "docs/01-ban-ve/04-he-llm-va-prompt.md",
-      "disposition": "SPLIT",
-      "wave": "C-agent",
-      "targets": [
-        "docs/03-he-thong-con/llm-routing.md",
-        "docs/02-hop-dong/prompt-context.md"
-      ],
-      "rationale": "Model routing và prompt contract cần chủ sở hữu độc lập."
-    },
-    {
-      "path": "docs/01-ban-ve/05-agent-bo-nho-va-tien-hoa.md",
-      "disposition": "FREEZE",
-      "wave": "C-agent-tools-complete",
-      "targets": [
-        "docs/03-he-thong-con/agent-tools.md",
-        "docs/03-he-thong-con/memory.md",
-        "docs/05-chat-luong/action-policy.md"
-      ],
-      "rationale": "Đã tách agent/tool runtime, memory và action policy; evolution còn lại là snapshot experimental."
-    },
-    {
-      "path": "docs/01-ban-ve/06-thi-giac-passive-va-governor.md",
-      "disposition": "FREEZE",
-      "wave": "C-vision-complete",
-      "targets": [
-        "docs/03-he-thong-con/vision.md",
-        "docs/03-he-thong-con/context-broker.md",
-        "docs/05-chat-luong/resource-governor.md"
-      ],
-      "rationale": "Đã tách perception đang chạy, proactive experimental và resource policy sang ba nguồn chuẩn độc lập."
-    },
-    {
-      "path": "docs/01-ban-ve/07-tang-du-lieu-va-bao-mat.md",
-      "disposition": "FREEZE",
-      "wave": "C-security-complete",
-      "targets": [
-        "docs/03-he-thong-con/persistence.md",
-        "docs/05-chat-luong/threat-model.md"
-      ],
-      "rationale": "Đã tách data contract và threat model; bản 07 giữ làm snapshot lịch sử."
-    },
-    {
-      "path": "docs/01-ban-ve/08-frontend-va-vo-tauri.md",
-      "disposition": "FREEZE",
-      "wave": "C-desktop-complete",
-      "targets": [
-        "docs/03-he-thong-con/frontend.md",
-        "docs/03-he-thong-con/desktop-tauri.md"
-      ],
-      "rationale": "Đã tách Vue rendering/transport và Tauri security boundary thành hai nguồn chuẩn."
-    },
-    {
-      "path": "docs/01-ban-ve/09-tich-hop-ngoai.md",
-      "disposition": "SPLIT",
-      "wave": "C-integrations",
-      "targets": [
-        "docs/03-he-thong-con/messaging.md",
-        "docs/03-he-thong-con/os-control.md",
-        "docs/03-he-thong-con/external-integrations.md"
-      ],
-      "rationale": "Các adapter có identity, consent và mức trưởng thành khác nhau."
-    },
-    {
-      "path": "docs/01-ban-ve/10-phu-thuoc-module-va-tra-cuu.md",
-      "disposition": "GENERATE",
-      "wave": "D",
-      "targets": [],
-      "rationale": "Dependency/file lookup phải sinh từ GitNexus và source tree."
-    },
-    {
-      "path": "docs/01-kien-truc/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md",
-      "disposition": "KEEP",
-      "wave": "C-security-complete",
-      "targets": [],
-      "rationale": "Quyết định accepted cho mã hóa transcript/checkpoint, dense recall và key-compatible backup."
-    },
-    {
-      "path": "docs/01-kien-truc/cognitive-runtime.md",
+      "path": "docs/02-crates/01-liva-native-core.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Canonical owner cho kiến trúc đích Cognitive Runtime."
+      "rationale": "Tài liệu kỹ thuật crate thuộc Rust Workspace 7 crate của LIVA."
     },
     {
-      "path": "docs/01-kien-truc/inventory-he-thong.md",
-      "disposition": "KEEP",
-      "wave": "B",
-      "targets": [],
-      "rationale": "Bản đồ capability tới module, luồng và bằng chứng as-built."
-    },
-    {
-      "path": "docs/03-he-thong-con/agent-tools.md",
-      "disposition": "KEEP",
-      "wave": "C-agent-tools-complete",
-      "targets": [],
-      "rationale": "Canonical as-built cho StateGraph, reflex lane, tool selector, MCP executor và skill runtime."
-    },
-    {
-      "path": "docs/03-he-thong-con/context-broker.md",
-      "disposition": "KEEP",
-      "wave": "C-vision-complete",
-      "targets": [],
-      "rationale": "Canonical owner cho ranh giới proactive observation, consent và cảnh báo passive keylogger."
-    },
-    {
-      "path": "docs/03-he-thong-con/desktop-tauri.md",
-      "disposition": "KEEP",
-      "wave": "C-desktop-complete",
-      "targets": [],
-      "rationale": "Canonical owner cho Tauri boot, window capability, native IPC và session boundary."
-    },
-    {
-      "path": "docs/03-he-thong-con/frontend.md",
-      "disposition": "KEEP",
-      "wave": "C-desktop-complete",
-      "targets": [],
-      "rationale": "Canonical as-built cho Vue entries, widget/dashboard và dual transport."
-    },
-    {
-      "path": "docs/03-he-thong-con/memory.md",
-      "disposition": "KEEP",
-      "wave": "C-memory-complete",
-      "targets": [],
-      "rationale": "Canonical as-built cho checkpoint, conversational RAG, facts, projection worker và kế hoạch semantic memory."
-    },
-    {
-      "path": "docs/03-he-thong-con/persistence.md",
-      "disposition": "KEEP",
-      "wave": "C-security-complete",
-      "targets": [],
-      "rationale": "Canonical as-built cho data root, SQLite schema, migration, durability và vòng đời dữ liệu."
-    },
-    {
-      "path": "docs/03-he-thong-con/voice.md",
-      "disposition": "KEEP",
-      "wave": "C-voice-complete",
-      "targets": [],
-      "rationale": "Canonical as-built cho capture, transport, STT, TTS và cancellation."
-    },
-    {
-      "path": "docs/03-he-thong-con/wake-word.md",
-      "disposition": "KEEP",
-      "wave": "C-voice-complete",
-      "targets": [],
-      "rationale": "Canonical as-built và giới hạn sản phẩm của wake word."
-    },
-    {
-      "path": "docs/03-he-thong-con/vision.md",
-      "disposition": "KEEP",
-      "wave": "C-vision-complete",
-      "targets": [],
-      "rationale": "Canonical as-built cho capture, region diff, vision ask và UI screen watch."
-    },
-    {
-      "path": "docs/05-chat-luong/action-policy.md",
-      "disposition": "KEEP",
-      "wave": "C-agent-tools-complete",
-      "targets": [],
-      "rationale": "Canonical owner cho guardrail hiện hành và acceptance contract của side effect."
-    },
-    {
-      "path": "docs/05-chat-luong/beta-thuc-dia.md",
-      "disposition": "KEEP",
-      "wave": "C-quality",
-      "targets": [],
-      "rationale": "Kênh thu nhận thủ công và bằng chứng thực địa thay cho telemetry trong beta."
-    },
-    {
-      "path": "docs/05-chat-luong/resource-governor.md",
-      "disposition": "KEEP",
-      "wave": "C-vision-complete",
-      "targets": [],
-      "rationale": "Canonical owner cho ngưỡng CPU/GPU/fullscreen và chính sách nhường tài nguyên."
-    },
-    {
-      "path": "docs/05-chat-luong/threat-model.md",
-      "disposition": "KEEP",
-      "wave": "C-security-complete",
-      "targets": [],
-      "rationale": "Canonical owner cho trust boundaries, crypto/keystore coverage và kế hoạch hardening."
-    },
-    {
-      "path": "docs/05-chat-luong/voice-slo.md",
-      "disposition": "KEEP",
-      "wave": "C-voice-complete",
-      "targets": [],
-      "rationale": "Canonical owner cho runtime thresholds, SLO và acceptance voice."
-    },
-    {
-      "path": "docs/05-chat-luong/wake-benchmark.md",
-      "disposition": "KEEP",
-      "wave": "C-voice-complete",
-      "targets": [],
-      "rationale": "Canonical owner cho corpus và acceptance benchmark wake."
-    },
-    {
-      "path": "docs/05-chat-luong/wer-fleurs-vi.md",
-      "disposition": "KEEP",
-      "wave": "C-voice-complete",
-      "targets": [],
-      "rationale": "Bằng chứng WER tái lập qua đúng đường ống STT sản xuất trên FLEURS vi_vn."
-    },
-    {
-      "path": "docs/02-van-hanh/01-cau-hinh-va-bien-moi-truong.md",
-      "disposition": "KEEP",
-      "wave": "C-operations",
-      "targets": [
-        "docs/04-van-hanh/cau-hinh.md"
-      ],
-      "rationale": "Nội dung vận hành còn cần dùng; chỉ đổi vị trí sau khi sửa citation."
-    },
-    {
-      "path": "docs/02-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md",
-      "disposition": "GENERATE",
-      "wave": "D",
-      "targets": [
-        "docs/04-van-hanh/mo-hinh-ai.md"
-      ],
-      "rationale": "Bảng model phải sinh từ models-manifest; phần policy tài nguyên chuyển sang runbook."
-    },
-    {
-      "path": "docs/02-van-hanh/03-trien-khai-va-runtime.md",
-      "disposition": "SPLIT",
-      "wave": "C-operations",
-      "targets": [
-        "docs/04-van-hanh/trien-khai.md",
-        "docs/04-van-hanh/preflight.md"
-      ],
-      "rationale": "Tách quy trình phát hành khỏi chẩn đoán runtime/preflight."
-    },
-    {
-      "path": "docs/02-van-hanh/04-kiem-thu-va-ci.md",
-      "disposition": "KEEP",
-      "wave": "C-quality",
-      "targets": [
-        "docs/05-chat-luong/kiem-thu-va-ci.md"
-      ],
-      "rationale": "Runbook còn dùng; di chuyển sau khi CI links được cập nhật."
-    },
-    {
-      "path": "docs/02-van-hanh/05-cai-dat-cho-nguoi-dung.md",
-      "disposition": "KEEP",
-      "wave": "C-operations",
-      "targets": [
-        "docs/04-van-hanh/cai-dat.md"
-      ],
-      "rationale": "Hướng dẫn beta cần còn truy cập được trong toàn bộ đợt di trú."
-    },
-    {
-      "path": "docs/02-van-hanh/06-backup-restore-sqlite.md",
-      "disposition": "KEEP",
-      "wave": "C-operations",
-      "targets": [],
-      "rationale": "Runbook canonical cho online backup, offline restore và rollback SQLite."
-    },
-    {
-      "path": "docs/02-van-hanh/release-v1.0.0-smoke-test.md",
-      "disposition": "KEEP",
-      "wave": "C-operations",
-      "targets": [],
-      "rationale": "Bằng chứng dựng installer v1.0.0 và checklist nghiệm thu trên Windows sạch."
-    },
-    {
-      "path": "docs/03-danh-gia/00-bao-cao-khao-sat-goc-2026-07.md",
-      "disposition": "FREEZE",
-      "wave": "B",
-      "targets": [],
-      "rationale": "Snapshot khảo sát đã ghi rõ ngày và trạng thái đóng băng."
-    },
-    {
-      "path": "docs/03-danh-gia/01-doi-chieu-tuyen-bo-vs-thuc-te.md",
-      "disposition": "FREEZE",
-      "wave": "B",
-      "targets": [],
-      "rationale": "Đối chiếu tại một thời điểm; capability registry đã thay vai trò trạng thái sống."
-    },
-    {
-      "path": "docs/03-danh-gia/02-no-ky-thuat-va-rui-ro.md",
-      "disposition": "MERGE",
-      "wave": "C-quality",
-      "targets": [
-        "docs/06-ke-hoach/roadmap.md",
-        "docs/05-chat-luong/risk-register.md"
-      ],
-      "rationale": "Việc mở nhập vào roadmap; risk bền nhập vào risk register."
-    },
-    {
-      "path": "docs/03-danh-gia/03-lo-trinh-sua-loi-va-nang-cap.md",
-      "disposition": "FREEZE",
-      "wave": "B",
-      "targets": [],
-      "rationale": "Roadmap cũ đã bị master roadmap thay thế; giữ làm lịch sử F/P."
-    },
-    {
-      "path": "docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md",
-      "disposition": "FREEZE",
-      "wave": "B",
-      "targets": [],
-      "rationale": "Đề xuất point-in-time, không phải kiến trúc hay roadmap hiện hành."
-    },
-    {
-      "path": "docs/03-danh-gia/05-nang-cap-toan-dien.md",
-      "disposition": "SPLIT",
-      "wave": "C-roadmap",
-      "targets": [
-        "docs/06-ke-hoach/roadmap.md",
-        "docs/99-luu-tru/bao-cao-lich-su/nang-cap-toan-dien-2026-07.md"
-      ],
-      "rationale": "Việc còn mở nhập master roadmap; bằng chứng U1–U20 đóng băng."
-    },
-    {
-      "path": "docs/03-danh-gia/06-nhan-tin-ra-ngoai.md",
-      "disposition": "SPLIT",
-      "wave": "C-integrations",
-      "targets": [
-        "docs/03-he-thong-con/messaging.md",
-        "docs/06-ke-hoach/epics/messaging-reliability.md"
-      ],
-      "rationale": "Tách as-built messaging khỏi backlog outbox/Telegram."
-    },
-    {
-      "path": "docs/03-danh-gia/07-wake-word-viec-con-lai.md",
-      "disposition": "FREEZE",
-      "wave": "C-voice-complete",
-      "targets": [
-        "docs/03-he-thong-con/wake-word.md",
-        "docs/05-chat-luong/wake-benchmark.md"
-      ],
-      "rationale": "Đã tách architecture và benchmark wake; giữ số đo 27/07/2026 như snapshot lịch sử."
-    },
-    {
-      "path": "docs/04-quy-trinh/KNOWLEDGE_BASE.md",
-      "disposition": "MERGE",
-      "wave": "C-contribution",
-      "targets": [
-        "docs/07-dong-gop/tri-thuc-va-vault.md"
-      ],
-      "rationale": "Con trỏ Vault nên nằm trong hướng dẫn đóng góp thay vì một knowledge base thứ hai."
-    },
-    {
-      "path": "docs/04-quy-trinh/NEW_feature_template.md",
-      "disposition": "KEEP",
-      "wave": "C-contribution",
-      "targets": [
-        "docs/07-dong-gop/mau-de-xuat-tinh-nang.md"
-      ],
-      "rationale": "Template còn hữu ích; đổi vị trí sau khi cập nhật link."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/_meta/optimize-architecture-review.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        ".agents/skills/dev-design/SKILL.md"
-      ],
-      "rationale": "Workflow agent phải do skill quản lý, không duy trì prompt song song."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/_meta/optimize-code-review.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        ".agents/skills/dev-review/SKILL.md"
-      ],
-      "rationale": "Workflow review đã có skill canonical."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/_meta/optimize-readme.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        "docs/07-dong-gop/quy-hoach-tai-lieu.md"
-      ],
-      "rationale": "Quy tắc cập nhật README thuộc governance docs, không cần meta prompt riêng."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/_meta/optimize-spring-cleaning.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        ".agents/skills/liva-technical-debt-triage/SKILL.md"
-      ],
-      "rationale": "Cleanup phải dùng debt triage và impact analysis hiện hành."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/architecture-review.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        ".agents/skills/dev-design/SKILL.md"
-      ],
-      "rationale": "Nội dung còn giá trị nhập vào skill review kiến trúc."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/code-review-prompt.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        ".agents/skills/dev-review/SKILL.md"
-      ],
-      "rationale": "Code review được điều phối bằng skill và GitNexus."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/openspace-g0-mcp-client-prompt.md",
-      "disposition": "FREEZE",
-      "wave": "B",
-      "targets": [],
-      "rationale": "Prompt triển khai point-in-time cho đề xuất OpenSpace."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/readme-generation-prompt.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        "docs/07-dong-gop/quy-hoach-tai-lieu.md"
-      ],
-      "rationale": "Quy tắc README phải nằm cùng governance và source ownership."
-    },
-    {
-      "path": "docs/04-quy-trinh/prompts/spring-cleaning-prompt.md",
-      "disposition": "MERGE",
-      "wave": "C-agent-workflow",
-      "targets": [
-        ".agents/skills/liva-technical-debt-triage/SKILL.md"
-      ],
-      "rationale": "Prompt dọn dẹp cũ được thay bằng quy trình debt triage có acceptance test."
-    },
-    {
-      "path": "docs/06-ke-hoach/roadmap.md",
+      "path": "docs/02-crates/02-liva-storage.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Canonical owner duy nhất cho milestone và việc còn làm."
+      "rationale": "Tài liệu kỹ thuật crate thuộc Rust Workspace 7 crate của LIVA."
     },
     {
-      "path": "docs/07-dong-gop/quy-hoach-tai-lieu.md",
+      "path": "docs/02-crates/03-liva-llm.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Canonical owner cho chiến lược di trú tài liệu."
+      "rationale": "Tài liệu kỹ thuật crate thuộc Rust Workspace 7 crate của LIVA."
     },
     {
-      "path": "docs/ai/design/README.md",
-      "disposition": "MERGE",
+      "path": "docs/02-crates/04-liva-core-types.md",
+      "disposition": "KEEP",
       "wave": "A",
-      "targets": [
-        "docs/01-kien-truc/cognitive-runtime.md"
-      ],
-      "rationale": "Pointer tương thích cho ai-devkit; nội dung thiết kế vẫn do tài liệu kiến trúc chuẩn sở hữu."
+      "targets": [],
+      "rationale": "Tài liệu kỹ thuật crate thuộc Rust Workspace 7 crate của LIVA."
     },
     {
-      "path": "docs/ai/implementation/README.md",
-      "disposition": "MERGE",
+      "path": "docs/02-crates/05-liva-cua.md",
+      "disposition": "KEEP",
       "wave": "A",
-      "targets": [
-        "docs/_generated/ma-tran-nang-luc.md"
-      ],
-      "rationale": "Pointer tương thích, không phải tài liệu triển khai song song."
+      "targets": [],
+      "rationale": "Tài liệu kỹ thuật crate thuộc Rust Workspace 7 crate của LIVA."
     },
     {
-      "path": "docs/ai/planning/README.md",
-      "disposition": "MERGE",
+      "path": "docs/02-crates/06-liva-tools.md",
+      "disposition": "KEEP",
       "wave": "A",
-      "targets": [
-        "docs/06-ke-hoach/roadmap.md"
-      ],
-      "rationale": "Pointer tương thích cho ai-devkit; roadmap là canonical owner."
+      "targets": [],
+      "rationale": "Tài liệu kỹ thuật crate thuộc Rust Workspace 7 crate của LIVA."
     },
     {
-      "path": "docs/ai/requirements/README.md",
-      "disposition": "MERGE",
+      "path": "docs/02-crates/07-liva-desktop-src-tauri.md",
+      "disposition": "KEEP",
       "wave": "A",
-      "targets": [
-        "docs/00-san-pham/tam-nhin-jarvis.md"
-      ],
-      "rationale": "Pointer tương thích cho ai-devkit; yêu cầu sản phẩm không được chép lại."
+      "targets": [],
+      "rationale": "Tài liệu kỹ thuật crate thuộc Rust Workspace 7 crate của LIVA."
     },
     {
-      "path": "docs/ai/testing/README.md",
-      "disposition": "MERGE",
+      "path": "docs/03-phat-trien-van-hanh/01-cau-hinh-va-bien-moi-truong.md",
+      "disposition": "KEEP",
       "wave": "A",
-      "targets": [
-        "docs/02-van-hanh/04-kiem-thu-va-ci.md"
-      ],
-      "rationale": "Pointer tương thích cho ai-devkit; test contract nằm ở tài liệu CI chuẩn."
+      "targets": [],
+      "rationale": "Hướng dẫn phát triển, cấu hình môi trường, kiểm thử CI và vận hành LIVA."
     },
     {
-      "path": "docs/99-luu-tru/khao-sat-kiem-thu-va-ci-2026-07-22.md",
-      "disposition": "FREEZE",
+      "path": "docs/03-phat-trien-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md",
+      "disposition": "KEEP",
       "wave": "A",
-      "targets": [
-        "docs/02-van-hanh/04-kiem-thu-va-ci.md"
-      ],
-      "rationale": "Snapshot khảo sát cũ được tách khỏi tài liệu CI living sau khi nhiều nhận định đã được giải quyết."
+      "targets": [],
+      "rationale": "Hướng dẫn phát triển, cấu hình môi trường, kiểm thử CI và vận hành LIVA."
+    },
+    {
+      "path": "docs/03-phat-trien-van-hanh/03-huong-dan-phat-trien-va-debug.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Hướng dẫn phát triển, cấu hình môi trường, kiểm thử CI và vận hành LIVA."
+    },
+    {
+      "path": "docs/03-phat-trien-van-hanh/04-kiem-thu-va-ci.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Hướng dẫn phát triển, cấu hình môi trường, kiểm thử CI và vận hành LIVA."
+    },
+    {
+      "path": "docs/03-phat-trien-van-hanh/05-sao-luu-va-xu-ly-su-co.md",
+      "disposition": "KEEP",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Hướng dẫn phát triển, cấu hình môi trường, kiểm thử CI và vận hành LIVA."
     },
     {
       "path": "docs/99-luu-tru/README.md",
-      "disposition": "KEEP",
-      "wave": "archive",
+      "disposition": "FREEZE",
+      "wave": "C",
       "targets": [],
-      "rationale": "Mục lục và cảnh báo cho khu vực lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ai-devkit-pointers/design/README.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ai-devkit-pointers/implementation/README.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ai-devkit-pointers/planning/README.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ai-devkit-pointers/requirements/README.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ai-devkit-pointers/testing/README.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/00-tong-quan-he-thong.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/01-cau-hinh-va-bien-moi-truong.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/01-kien-truc-tong-the.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/02-giao-thuc-ipc-va-websocket.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/02-mo-hinh-ai-va-tai-nguyen.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/03-duong-ong-thoai.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/03-trien-khai-va-runtime.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/04-he-llm-va-prompt.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/04-kiem-thu-va-ci.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/05-agent-bo-nho-va-tien-hoa.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/05-cai-dat-cho-nguoi-dung.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/06-backup-restore-sqlite.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/06-thi-giac-passive-va-governor.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/07-tang-du-lieu-va-bao-mat.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/08-frontend-va-vo-tauri.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/09-tich-hop-ngoai.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/10-phu-thuoc-module-va-tra-cuu.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/KNOWLEDGE_BASE.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/NEW_feature_template.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/agent-tools.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/cognitive-runtime.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/context-broker.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/desktop-tauri.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/frontend.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/inventory-he-thong.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/memory.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/persistence.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/release-v1.0.0-smoke-test.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/tam-nhin-jarvis.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/vision.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/voice.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/wake-word.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/00-bao-cao-khao-sat-goc-2026-07.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/01-doi-chieu-tuyen-bo-vs-thuc-te.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/02-no-ky-thuat-va-rui-ro.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/03-lo-trinh-sua-loi-va-nang-cap.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/04-de-xuat-tich-hop-openspace.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/05-nang-cap-toan-dien.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/06-nhan-tin-ra-ngoai.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/07-wake-word-viec-con-lai.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/08-tien-do-nang-cap-va-giai-quyet-no-ky-thuat.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/BAO_CAO_AUDIT_TOAN_DIEN_VA_TOI_UU_HE_THONG_2026_09.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_4TIER_MEMORY_ARCHITECTURE_AUDIT_AND_BLUEPRINT.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_ARCHITECTURAL_EVALUATION_AND_OPTIMIZATION_REPORT.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_Acceptance_Report_2026.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Báo cáo acceptance lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_Architecture_Audit_2026.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Audit kiến trúc lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_COMPREHENSIVE_SYSTEM_AUDIT_REPORT_2026.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_OSS_Research_2026-07.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Nghiên cứu OSS point-in-time."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_SOTA_RESEARCH_BENCHMARKING_AND_STRATEGIC_ROADMAP_2026.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_SYSTEM_AUDIT_AND_ROADMAP_2026.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/LIVA_UPGRADE_RESEARCH_AND_BLUEPRINT_2026.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/TEST_INFRA.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/TEST_READY.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/action-policy.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/bao-cao-lich-su/architecture-review/architecture-review-report-2026-05-31-20-12.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Báo cáo review lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/bao-cao-lich-su/architecture-review/architecture-review-report-2026-05-31.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Báo cáo review lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/architecture_remake_proposal.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/beta-thuc-dia.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/bao-cao-lich-su/liva_test_report.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Kết quả test point-in-time."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/resource-governor.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/bao-cao-lich-su/spring-cleaning/spring-cleaning-report-2026-05-31.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Báo cáo cleanup lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/threat-model.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/vision-prompt-budget-acceptance.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/voice-slo.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/wake-benchmark.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/bao-cao-lich-su/wer-fleurs-vi.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/KE-HOACH-AVATAR-3D.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/KE-HOACH-XU-LY-18-08-2026.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/LIVA_NATIVE_MIGRATION_PLAN.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Kế hoạch migration Rust đã hoàn thành."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/VAN-DE-CAN-XU-LY.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/implementation_plan.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/parakeet_vi_integration_plan.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Kế hoạch tích hợp model đã hoàn thành hoặc bị thay thế."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/ke-hoach-da-hoan-thanh/roadmap-2026-08.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/khao-sat-kiem-thu-va-ci-2026-07-22.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/01_System_Overview.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Kiến trúc Node.js đã nghỉ hưu."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/02_Memory_Subsystem.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Thiết kế memory Node.js lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/03_Agent_Control_Flow.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Agent control flow Node.js lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/04_Evolution_Singularity.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Thiết kế evolution Node.js lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/05_Security_Guardrails.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Guardrail thuộc kiến trúc đã nghỉ hưu; chỉ dùng làm tham khảo lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/06_Hardware_UX_Optimization.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Tối ưu phần cứng/UX của stack cũ."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/07_Hybrid_Cloud_Architecture.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Kiến trúc hybrid cloud của stack cũ."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/AI_CONTEXT.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Agent context cũ đã được AGENTS.md thay thế."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/Architectural_Teardown_Proposal.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Đề xuất teardown point-in-time."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/PROJECT.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Mô tả dự án thuộc stack Node.js đã nghỉ hưu."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/STARTUP_GUIDE.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Hướng dẫn khởi động stack cũ, không được dùng vận hành."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/TEST_READY.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Checklist test của stack cũ."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/codebase_architecture.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Codebase architecture Node.js lịch sử."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/personality_architecture_report.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Báo cáo personality point-in-time."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/skills_development_guide.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Skill guide cũ đã được skill governance hiện hành thay thế."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/kien-truc-nodejs-v29/streaming_optimization.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Tối ưu streaming của stack cũ."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/meta-cu/ban-do-code-tai-lieu.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/meta-cu/huong-dan-bao-tri.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/meta-cu/nguon-su-that.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/_meta/optimize-architecture-review.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/_meta/optimize-code-review.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/_meta/optimize-readme.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/_meta/optimize-spring-cleaning.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/architecture-review.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/code-review-prompt.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/openspace-g0-mcp-client-prompt.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/readme-generation-prompt.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/prompts-cu/spring-cleaning-prompt.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/quy-hoach-tai-lieu-2026-07.md",
+      "disposition": "FREEZE",
+      "wave": "C",
+      "targets": [],
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
+    },
+    {
+      "path": "docs/99-luu-tru/registries-2026-07/kiem-ke-tai-lieu.md",
+      "disposition": "GENERATE",
+      "wave": "B",
+      "targets": [],
+      "rationale": "Báo cáo kiểm kê tài liệu được sinh tự động từ scripts/docs-inventory.mjs."
+    },
+    {
+      "path": "docs/99-luu-tru/registries-2026-07/ma-tran-nang-luc.md",
+      "disposition": "GENERATE",
+      "wave": "A",
+      "targets": [],
+      "rationale": "Ma trận năng lực được sinh tự động từ capabilities.json."
     },
     {
       "path": "docs/99-luu-tru/thiet-ke-goc/LIVA_CLIENT_SERVER_DESIGN.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Thiết kế client/server gốc."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
       "path": "docs/99-luu-tru/thiet-ke-goc/ORIGINAL_REQUEST.md",
       "disposition": "FREEZE",
-      "wave": "archive",
+      "wave": "C",
       "targets": [],
-      "rationale": "Yêu cầu gốc được bảo toàn nguyên trạng."
+      "rationale": "Ảnh chụp lịch sử và tài liệu đã di trú vào kho lưu trữ 99-luu-tru."
     },
     {
-      "path": "docs/03-danh-gia/LIVA_4TIER_MEMORY_ARCHITECTURE_AUDIT_AND_BLUEPRINT.md",
+      "path": "docs/README.md",
       "disposition": "KEEP",
       "wave": "A",
       "targets": [],
-      "rationale": "Kiến trúc và kế hoạch tối ưu hệ thống bộ nhớ 4 tầng LIVA-UHM."
-    },
-    {
-      "path": "docs/03-danh-gia/LIVA_SYSTEM_AUDIT_AND_ROADMAP_2026.md",
-      "disposition": "KEEP",
-      "wave": "A",
-      "targets": [],
-      "rationale": "Báo cáo kiểm tra và lộ trình nâng cấp hệ thống LIVA 2026."
-    },
-    {
-      "path": "docs/architecture/4_tier_memory_deep_audit_report.md",
-      "disposition": "KEEP",
-      "wave": "A",
-      "targets": [],
-      "rationale": "Báo cáo kiểm toán chuyên sâu bộ nhớ 4 tầng."
-    },
-    {
-      "path": "docs/architecture/4_tier_memory_optimization_blueprint.md",
-      "disposition": "KEEP",
-      "wave": "A",
-      "targets": [],
-      "rationale": "Bản thiết kế tối ưu hoá bộ nhớ 4 tầng."
+      "rationale": "Mục lục tổng quan và điểm vào chính của bộ tài liệu LIVA."
     }
   ]
 }
-

@@ -55,8 +55,8 @@
         "liva-native-core/src/bin/wakeword_benchmark.rs",
         "scripts/e2e-wake-probe.mjs",
         "tools/wakeword/hey_liva_prod.yaml",
-        "docs/03-he-thong-con/wake-word.md",
-        "docs/05-chat-luong/wake-benchmark.md"
+        "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/wake-word.md",
+        "docs/99-luu-tru/bao-cao-lich-su/wake-benchmark.md"
       ],
       "next_milestone": "Thu 20+ positive và 1 giờ negative trên mic mục tiêu, benchmark artifact v2 và xác nhận recall >=90%, FPPH <=1 trước khi bật UX câu gọi đứng riêng."
     },
@@ -88,7 +88,7 @@
         "liva-native-core/src/agent/graph.rs",
         "liva-native-core/src/db.rs",
         "liva-native-core/src/llm/embedder.rs",
-        "docs/03-he-thong-con/memory.md",
+        "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/memory.md",
         "scripts/e2e-memory.mjs"
       ],
       "next_milestone": "Giữ regression E2E đa phiên và bổ sung benchmark retrieval theo owner/conversation scope."
@@ -104,7 +104,7 @@
       "evidence": [
         "liva-native-core/src/memory_consolidation.rs",
         "liva-native-core/src/db.rs",
-        "docs/03-he-thong-con/memory.md",
+        "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/memory.md",
         "teamwork_projects/obsidian_llm_wiki/vault/Knowledge/memory_architecture.md"
       ],
       "next_milestone": "Viết semantic consolidator có provenance, confidence, conflict queue và delete propagation."
@@ -121,7 +121,7 @@
         "liva-native-core/src/llm/tool_calling.rs",
         "liva-native-core/src/agent/graph.rs",
         "liva-native-core/src/bin/tool_calling_probe.rs",
-        "docs/03-danh-gia/04-de-xuat-tich-hop-openspace.md"
+        "docs/99-luu-tru/bao-cao-lich-su/04-de-xuat-tich-hop-openspace.md"
       ],
       "next_milestone": "Chỉ gọi LLM khi retrieval vượt ngưỡng và khóa corpus song ngữ cho accuracy/latency."
     },
@@ -168,7 +168,7 @@
         "liva-native-core/src/messaging",
         "liva-native-core/src/integrations/messenger.rs",
         "liva-native-core/src/commands/messaging.rs",
-        "docs/03-danh-gia/06-nhan-tin-ra-ngoai.md"
+        "docs/99-luu-tru/bao-cao-lich-su/06-nhan-tin-ra-ngoai.md"
       ],
       "next_milestone": "Chạy Telegram E2E thật và đưa messaging vào action audit/idempotency contract chung."
     },
@@ -211,8 +211,7 @@
       "current_state": "VieNeu preset chạy thật nhưng thiếu MOSS encoder và speaker encoder tương thích để clone từ WAV.",
       "evidence": [
         "liva-native-core/src/tts/vieneu/mod.rs",
-        "liva-native-core/src/tts/style_vector.rs",
-        "liva-voice/src/voice_pipeline.py"
+        "liva-native-core/src/tts/style_vector.rs"
       ],
       "next_milestone": "Xác định đúng hai model tương thích, kiểm bằng tai và chỉ sau đó thiết kế onboarding ghi âm."
     },
@@ -226,7 +225,7 @@
       "current_state": "Có mobile Capacitor PoC và WebSocket transport nhưng chưa có pairing, identity hoặc encrypted sync.",
       "evidence": [
         "mobile_client",
-        "liva-native-core/src/websocket.rs",
+        "liva-native-core/tests/websocket_transport.rs",
         "packages/liva-common/src/types/websocket.ts"
       ],
       "next_milestone": "Thiết kế pairing, device identity, scoped capability và đồng bộ event/memory được mã hóa."
@@ -258,7 +257,7 @@
         "liva-desktop/src-tauri/tauri.conf.json",
         "data/models-manifest.json",
         "scripts/check-installer-config.mjs",
-        "docs/02-van-hanh/05-cai-dat-cho-nguoi-dung.md"
+        "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/05-cai-dat-cho-nguoi-dung.md"
       ],
       "next_milestone": "Chạy clean-machine acceptance định kỳ và quyết định code signing."
     },
@@ -276,7 +275,7 @@
         "liva-native-core/src/db/deletion.rs",
         "liva-native-core/src/memory_retention.rs",
         "liva-native-core/src/lib.rs",
-        "docs/03-he-thong-con/persistence.md"
+        "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/persistence.md"
       ],
       "next_milestone": "Thêm scheduler/quota backup, release restore matrix và owner columns cho projection lịch sử trước khi mở DeleteSubject non-local; harden audit cho DeleteFact."
     },
@@ -289,12 +288,11 @@
       "target_phase": 0,
       "current_state": "Command plane có principal allow-list fail-closed; WebSocket mặc định là remote, query tự khai principal bị từ chối 403, còn widget/dashboard chỉ nhận principal đặc quyền qua session ticket 256-bit do Tauri capability tương ứng cấp, TTL 30 giây và dùng một lần; non-loopback bắt buộc Bearer; credential UI dùng Stronghold; widget/dashboard/setup có capability riêng; CSP không còn unsafe-inline; GGUF/mmproj/vec0 canonicalize và kiểm SHA-256 từ manifest nhúng trước khi nạp; transcript/checkpoint dùng field encryption, conversation dense-only; backup manifest key-ID fail-closed.",
       "evidence": [
-        "liva-native-core/src/authorization.rs",
+        "liva-native-core/src/authorization",
         "liva-native-core/src/artifact_trust.rs",
-        "liva-native-core/src/websocket.rs",
+        "liva-native-core/tests/websocket_transport.rs",
         "liva-native-core/tests/command_authorization.rs",
         "liva-native-core/tests/artifact_trust.rs",
-        "liva-native-core/tests/websocket_transport.rs",
         "liva-ui/tests/composables/useGateway.test.ts",
         "liva-desktop/src-tauri/capabilities/widget.json",
         "liva-desktop/src-tauri/capabilities/dashboard.json",
@@ -304,8 +302,8 @@
         "scripts/check-installer-config.test.mjs",
         "liva-native-core/tests/crypto_boot_e2e.rs",
         "liva-native-core/tests/sqlite_backup_restore.rs",
-        "docs/01-kien-truc/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md",
-        "docs/05-chat-luong/threat-model.md"
+        "docs/99-luu-tru/ban-ve-va-khao-sat-2026-07/adr-001-ma-hoa-du-lieu-ca-nhan-beta.md",
+        "docs/99-luu-tru/bao-cao-lich-su/threat-model.md"
       ],
       "next_milestone": "Bổ sung audit correlation/redaction cho các session WebSocket đặc quyền và mở rộng policy at-rest cho metadata cá nhân hậu beta."
     },
@@ -320,8 +318,8 @@
       "evidence": [
         "scripts/docs-check.mjs",
         "scripts/docs-citations.mjs",
-        "docs/_meta/nguon-su-that.md",
-        "docs/_meta/huong-dan-bao-tri.md"
+        "docs/99-luu-tru/meta-cu/nguon-su-that.md",
+        "docs/99-luu-tru/meta-cu/huong-dan-bao-tri.md"
       ],
       "next_milestone": "Dùng registry này làm nguồn status duy nhất, sinh ma trận tự động và di trú roadmap cũ vào master roadmap."
     }

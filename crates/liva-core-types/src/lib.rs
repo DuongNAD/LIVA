@@ -217,12 +217,13 @@ pub trait ScopedTool: Send + Sync {
 // -----------------------------------------------------------------------------
 
 /// 4 session turn queue modes governing concurrency and execution order (Feature F08).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionQueueMode {
     /// Injects steering guidance into the currently executing turn without restarting it.
     Steer,
     /// Enqueues the turn in a FIFO backlog for sequential execution after the current turn ends.
+    #[default]
     Followup,
     /// Coalesces rapid sequential messages within a debounce window into a single batch turn.
     Collect,
@@ -279,12 +280,6 @@ impl SessionTurnRequest {
     }
 }
 
-impl Default for SessionQueueMode {
-    fn default() -> Self {
-        Self::Followup
-    }
-}
-
 impl Default for SessionTurnRequest {
     fn default() -> Self {
         Self {
@@ -305,7 +300,7 @@ impl Default for SessionTurnRequest {
 // -----------------------------------------------------------------------------
 
 /// 3 chế độ phiên hội thoại tuân thủ nguyên tắc Rule-of-Two (Feature F19).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMode {
     /// Reader (A + B): Xử lý đầu vào không tin cậy + Đọc dữ liệu nhạy cảm/vault.
@@ -313,16 +308,11 @@ pub enum SessionMode {
     Reader,
     /// Actor (B + C): Đọc dữ liệu nhạy cảm + Đột biến trạng thái/giao tiếp ngoài.
     /// Dành riêng cho lượt tin cậy của Owner; nghiêm cấm đầu vào không tin cậy trong ngữ cảnh (Vertex A = 0).
+    #[default]
     Actor,
     /// Browser (A + C): Xử lý đầu vào không tin cậy + Hành động trên web công khai.
     /// Cách ly hoàn toàn khỏi kho vault cá nhân, bộ nhớ SQLite và bí mật hệ thống (Vertex B = 0).
     Browser,
-}
-
-impl Default for SessionMode {
-    fn default() -> Self {
-        Self::Actor
-    }
 }
 
 /// 3 đỉnh an ninh trong Meta's Rule of Two.
@@ -377,10 +367,11 @@ pub enum AuthorityTier {
 }
 
 /// Định danh chi tiết của thực thể bắt đầu lượt hội thoại (Feature F21).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Principal {
     /// Người dùng trực tiếp tại máy trạm
+    #[default]
     Owner,
     /// Thiết bị đồng hành đã ghép nối và xác thực chữ ký (Noise IK / Ed25519)
     OwnerDevice {
@@ -412,12 +403,6 @@ pub enum Principal {
         skill_id: String,
         parent_principal: Box<Principal>,
     },
-}
-
-impl Default for Principal {
-    fn default() -> Self {
-        Self::Owner
-    }
 }
 
 impl Principal {
@@ -456,19 +441,16 @@ impl From<CommandPrincipal> for Principal {
 }
 
 /// Mức độ toàn vẹn của dữ liệu trong hệ thống (Feature F20).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum IntegrityLevel {
+    #[default]
     Trusted = 0,
     SemiTrusted = 1,
     Untrusted = 2,
     Quarantined = 3,
-}
-
-impl Default for IntegrityLevel {
-    fn default() -> Self {
-        Self::Trusted
-    }
 }
 
 /// Nguồn gốc dữ liệu phục vụ truy vết provenance (Feature F20).
@@ -673,6 +655,14 @@ impl<T> Labeled<T> {
     }
 
     /// Giải nén không an toàn (chỉ dùng trong module nội bộ đã qua kiểm toán).
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the inner value has been audited or validated
+    /// according to Rule-of-Two constraints. Specifically:
+    /// 1. Tainted data must not be extracted and passed into sensitive sinks without prior sanitization.
+    /// 2. Bypassing formal declassification receipts should only occur in strictly isolated, audited internal modules.
+    /// 3. The caller assumes full responsibility for maintaining integrity and secrecy invariants.
     pub unsafe fn unwrap_unchecked(self) -> T {
         self.inner
     }

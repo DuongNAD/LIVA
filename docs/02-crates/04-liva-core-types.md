@@ -1,7 +1,7 @@
 ---
 title: "Tài liệu Kỹ thuật Crate: liva-core-types"
-updated: 2026-09-29
-commit: 25e4229
+updated: 2026-11-01
+commit: eadb605b
 status: living
 covers:
   - crates/liva-core-types/Cargo.toml

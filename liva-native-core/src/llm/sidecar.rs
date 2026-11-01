@@ -170,34 +170,32 @@ impl SidecarConfig {
     /// - Requires CSPRNG API key.
     /// - Strictly omits `--tools`, `-ag`, `--agent`, `--mcp-servers-*`.
     pub fn build_cli_args(&self, port: u16, api_key: &str) -> Vec<String> {
-        let mut args = Vec::new();
-
-        // 1. Network & Auth Confinement
-        args.push("--host".to_string());
-        args.push("127.0.0.1".to_string());
-        args.push("--port".to_string());
-        args.push(port.to_string());
-        args.push("--api-key".to_string());
-        args.push(api_key.to_string());
-
-        // 2. Multi-Model Router Mode
-        args.push("--models-dir".to_string());
-        args.push(self.models_dir.to_string_lossy().to_string());
-        args.push("-m".to_string());
         let router_full_path = self.models_dir.join(&self.router_model_name);
-        args.push(router_full_path.to_string_lossy().to_string());
+        let mut args = vec![
+            // 1. Network & Auth Confinement
+            "--host".to_string(),
+            "127.0.0.1".to_string(),
+            "--port".to_string(),
+            port.to_string(),
+            "--api-key".to_string(),
+            api_key.to_string(),
+            // 2. Multi-Model Router Mode
+            "--models-dir".to_string(),
+            self.models_dir.to_string_lossy().to_string(),
+            "-m".to_string(),
+            router_full_path.to_string_lossy().to_string(),
+            // 3. Slot Concurrency & Context Allocation
+            "-np".to_string(),
+            self.parallel_slots.to_string(),
+            "-c".to_string(),
+            self.ctx_size_per_slot.to_string(),
+            // 4. KV Cache Invariant & FlashAttention
+            "--cache-type-k".to_string(),
+            self.cache_type_k.as_str().to_string(),
+            "--cache-type-v".to_string(),
+            self.cache_type_v.as_str().to_string(),
+        ];
 
-        // 3. Slot Concurrency & Context Allocation
-        args.push("-np".to_string());
-        args.push(self.parallel_slots.to_string());
-        args.push("-c".to_string());
-        args.push(self.ctx_size_per_slot.to_string());
-
-        // 4. KV Cache Invariant & FlashAttention
-        args.push("--cache-type-k".to_string());
-        args.push(self.cache_type_k.as_str().to_string());
-        args.push("--cache-type-v".to_string());
-        args.push(self.cache_type_v.as_str().to_string());
         if self.flash_attn {
             args.push("-fa".to_string());
         }
@@ -285,15 +283,24 @@ impl From<reqwest::Error> for SidecarError {
     }
 }
 
-/// Windows Job Object RAII guard to guarantee subprocess termination when parent exits.
+/// Default job object memory limit: 512 MB (536,870,912 bytes).
+pub const DEFAULT_JOB_MEMORY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
+
+/// Windows Job Object RAII guard to guarantee subprocess termination when parent exits
+/// and enforce hard process/job memory limits (512MB).
 #[cfg(windows)]
 pub struct WindowsProcessGuard {
     job_handle: windows_sys::Win32::Foundation::HANDLE,
+    memory_limit_bytes: usize,
 }
 
 #[cfg(windows)]
 impl WindowsProcessGuard {
     pub fn new() -> Result<Self, SidecarError> {
+        Self::with_memory_limit(DEFAULT_JOB_MEMORY_LIMIT_BYTES)
+    }
+
+    pub fn with_memory_limit(memory_limit_bytes: usize) -> Result<Self, SidecarError> {
         use windows_sys::Win32::System::JobObjects::*;
         unsafe {
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
@@ -304,7 +311,11 @@ impl WindowsProcessGuard {
             }
 
             let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                | JOB_OBJECT_LIMIT_JOB_MEMORY
+                | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            info.JobMemoryLimit = memory_limit_bytes;
+            info.ProcessMemoryLimit = memory_limit_bytes;
 
             let res = SetInformationJobObject(
                 job,
@@ -319,8 +330,19 @@ impl WindowsProcessGuard {
                 ));
             }
 
-            Ok(Self { job_handle: job })
+            Ok(Self {
+                job_handle: job,
+                memory_limit_bytes,
+            })
         }
+    }
+
+    pub fn job_handle(&self) -> windows_sys::Win32::Foundation::HANDLE {
+        self.job_handle
+    }
+
+    pub fn memory_limit_bytes(&self) -> usize {
+        self.memory_limit_bytes
     }
 
     pub fn assign_process(
@@ -352,12 +374,22 @@ impl Drop for WindowsProcessGuard {
 }
 
 #[cfg(not(windows))]
-pub struct WindowsProcessGuard;
+pub struct WindowsProcessGuard {
+    memory_limit_bytes: usize,
+}
 
 #[cfg(not(windows))]
 impl WindowsProcessGuard {
     pub fn new() -> Result<Self, SidecarError> {
-        Ok(Self)
+        Self::with_memory_limit(DEFAULT_JOB_MEMORY_LIMIT_BYTES)
+    }
+
+    pub fn with_memory_limit(memory_limit_bytes: usize) -> Result<Self, SidecarError> {
+        Ok(Self { memory_limit_bytes })
+    }
+
+    pub fn memory_limit_bytes(&self) -> usize {
+        self.memory_limit_bytes
     }
 }
 
@@ -366,6 +398,12 @@ pub struct VramSupervisor {
     pub total_vram_bytes: u64,
     pub reranker_on_cpu: AtomicBool,
     pub worker_sleep_idle_active: AtomicBool,
+}
+
+impl Default for VramSupervisor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VramSupervisor {
@@ -695,5 +733,25 @@ impl LlamaSidecarSupervisor {
 
     pub fn set_process_guard(&mut self, guard: WindowsProcessGuard) {
         self.process_guard = Some(guard);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_process_guard_limits() {
+        let guard = WindowsProcessGuard::new().expect("Should create WindowsProcessGuard");
+        assert_ne!(guard.job_handle(), 0);
+        assert_eq!(guard.memory_limit_bytes(), 512 * 1024 * 1024);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_non_windows_process_guard_limits() {
+        let guard = WindowsProcessGuard::new().expect("Should create WindowsProcessGuard");
+        assert_eq!(guard.memory_limit_bytes(), 512 * 1024 * 1024);
     }
 }

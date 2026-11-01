@@ -7,7 +7,7 @@ tags:
   - liva/native-rust
   - liva/knowledge
 author: "Lead Technical Architect"
-last_update: "2026-09-25T10:45:00+07:00"
+last_update: "2026-11-01T04:10:00+07:00"
 status: "APPROVED"
 aliases:
   - SOTA 2026 Blueprint
@@ -282,23 +282,38 @@ To establish an unassailable engineering guarantee, LIVA distinguishes between *
 └───────────────────────────────┴─────────────────────────────────┴────────────────────────────────┘
 ```
 
-### Sprint Backlog Cross-Reference
-- `TICKET-01`: Static C-FFI linkage of `sqlite-vec.c` into `crates/liva-storage`. Eliminates `vec0.dll`.
-- `TICKET-02`: Refactor `AppState.embedder` to lock-free `Arc<EmbeddingEngine>`. 3.5x throughput boost.
-- `TICKET-03`: Lock-free double-buffered `ArcSwap<CsrGraph>` with single-writer `DbActor` serialization and micro-batching ($N \le 50$, $\Delta t \le 100\text{ ms}$). Sub-8ms PPR reads, zero lost updates, eliminates $818\text{ \mu s}$ heap cloning churn.
-- `TICKET-04`: Decoupled Full-Duplex Voice Latency Engine: Two-stage active turn gate ($T_{\text{gate}} \le 225\text{ ms}$), speculative context pre-flushing at 140ms, sub-clause acoustic feedback at $\approx 380\text{ ms}$, and E2E voice turnaround ($520 - 780\text{ ms}$ GPU / $1.05 - 1.8\text{ s}$ CPU).
-- `TICKET-05`: Complete retirement of `websocket.rs` in favor of Tauri v2 IPC Channels.
-- `TICKET-06`: Two-Tier Asynchronous Swarm Orchestration Engine: L1 Strategic Workflow DAG (`petgraph` + `dagrs`) managing high-level task dependencies and L2 Autonomous Worker ReAct loops for local execution and recovery. Saves ~100k tokens per workflow.
-- `TICKET-07`: Mem0 two-phase reconciliation (`ADD`, `UPDATE`, `DELETE`, `NOOP`) + dynamic Ebbinghaus decay.
-- `TICKET-08`: Background Obsidian Vault watcher (`notify`) + AST parser (`pulldown-cmark`) mapping `wikilinks`.
-- `TICKET-09`: Decouple Three-VRM avatar kinematics to OffscreenCanvas Web Worker. 60 FPS lock.
-- `TICKET-10`: Stage-2 Cross-Encoder reranker (`bge-reranker-small` ONNX via `ort`). $+18\%$ NDCG@10.
-- `TICKET-11`: Atomic Windows NT Job Object containment via `STARTUPINFOEXW` / `PROC_THREAD_ATTRIBUTE_JOB_LIST` and `CREATE_SUSPENDED` fallback (`KILL_ON_JOB_CLOSE`, 512MB RAM cap), integrated into a 3-tier security boundary.
-- `TICKET-12`: WebAssembly WASI 0.2 capability sandbox with fuel metering via `wasmtime`.
-- `TICKET-13`: Reflexion verbal critique loop (max 3 retries) and poison-pill `tasks_dlq` isolation.
-- `TICKET-14`: Multi-Agent Debate with Borda count voting consensus for critical system actions.
-- `TICKET-15`: ShowUI Spatial ROI Bounding Box Cropping ($448 \times 448 \to 256$ tokens, 80.2% drop) and Co-Scale Fallback ($960 \times 540$) on upstream `llama-cpp-2 mtmd`, requiring zero C++ patches.
-- `TICKET-16`: Pure Rust `crates/liva-sanitizer` for Decree 13/2023 compliance ($<1.5\text{ ms}$, $<5\text{ MB RAM}$).
+### Sprint Backlog Cross-Reference & Production Delivery Status
+
+All foundational SOTA 2026 sprint tickets have been implemented, hardened, and verified across production milestones M1–M4:
+
+| Ticket | Scope & Focus | Milestone | Production Status |
+|---|---|---|---|
+| `TICKET-01` | Static C-FFI linkage of `sqlite-vec.c` into `crates/liva-storage`. Eliminates `vec0.dll`. | M1/M2 | **DONE** (Zero runtime DLL dependency) |
+| `TICKET-02` | Refactor `AppState.embedder` to lock-free `Arc<EmbeddingEngine>`. 3.5x throughput boost. | M2 | **DONE** (Unchoked parallel inference) |
+| `TICKET-03` | Lock-free double-buffered `ArcSwap<CsrGraph>` with single-writer `DbActor` serialization. | M2 | **DONE** (Sub-8ms PPR, 0 lost updates) |
+| `TICKET-04` | Decoupled Full-Duplex Voice Latency Engine: Two-stage active turn gate ($T_{\text{gate}} \le 225\text{ ms}$). | M1/M2 | **DONE** (Smart Turn v3.2 active in-process) |
+| `TICKET-05` | Complete retirement of `websocket.rs` in favor of Tauri v2 IPC Channels. | M1 | **DONE** (Zero loopback ports) |
+| `TICKET-06` | Two-Tier Asynchronous Swarm Orchestration Engine (`petgraph` + `dagrs`). | M2 | **DONE** (Bounded context, Reflexion loops) |
+| `TICKET-07` | Mem0 two-phase reconciliation (`ADD`, `UPDATE`, `DELETE`, `NOOP`) + dynamic Ebbinghaus decay. | M2 | **DONE** (Deterministic bitemporal storage) |
+| `TICKET-08` | Background Obsidian Vault watcher (`notify`) + AST parser (`pulldown-cmark`). | M2/M4 | **DONE** (Live wikilink graph sync) |
+| `TICKET-09` | Decouple Three-VRM avatar kinematics to OffscreenCanvas Web Worker (60 FPS lock). | M1 | **DONE** (Zero UI main-thread jank) |
+| `TICKET-10` | Stage-2 Cross-Encoder reranker (`bge-reranker-small` ONNX via `ort`). $+18\%$ NDCG@10. | M2 | **DONE** (Two-stage RRF + reranking) |
+| `TICKET-11` | Atomic Windows NT Job Object containment (`CREATE_SUSPENDED`, 512MB RAM cap). | M2 | **DONE** (`WindowsProcessGuard` fail-closed) |
+| `TICKET-12` | WebAssembly WASI 0.2 capability sandbox with fuel metering via `wasmtime`. | M2 | **DONE** (Capability attenuation enclaves) |
+| `TICKET-13` | Reflexion verbal critique loop (max 3 retries) and poison-pill `tasks_dlq` isolation. | M2 | **DONE** (Actor self-healing & DLQ) |
+| `TICKET-14` | Multi-Agent Debate with Borda count voting consensus for critical system actions. | M2 | **DONE** (Consensus gating $\ge 67\%$) |
+| `TICKET-15` | ShowUI Spatial ROI Bounding Box Cropping ($448 \times 448 \to 256$ tokens) & Co-Scale Fallback. | M2 | **DONE** (80.2% token prune, upstream llama) |
+| `TICKET-16` | Pure Rust `crates/liva-sanitizer` for Decree 13/2023 compliance ($<1.5\text{ ms}$, $<5\text{ MB RAM}$). | M2 | **DONE** (CCCD, bank, API token scrub) |
+
+### Production Milestone Completion Summary
+
+| Milestone | Key Deliverables & Hardening Areas | Verification Gate | Status |
+|---|---|---|---|
+| **M1: Desktop Shell, UI & IPC** | TS6133 fix in `SkillsView.vue`, Widget IPC routing (`chat:completion`, `voice_interrupt`), maintenance tests path sync (`docs-citations`, `check-installer-config`, `wake-ux-copy`). | `npm test -w liva-ui`, `npm run build:ui`, `npm run check:installer`, `npm run test:installer` | **DONE** |
+| **M2: Rust Native Core & Security** | Win32 Job Object 512MB limits with `CREATE_SUSPENDED`, prompt delimiter injection sanitizer, agent dispatcher stub cleanup, boxed session actor enum variant footprint, abandoned crate cleanup. | `cargo check -j 2`, security adversarial test suite | **DONE** |
+| **M3: Code Quality & Clippy Linters** | Clippy zero-warning gate (`cargo clippy -j 2`), `liva-core-types` derivable impls & safety comments, `liva-native-core` constructor refactors, storage tests deprecation fixes. | `cargo clippy -j 2` 0 warnings, storage test suites | **DONE** |
+| **M4: Documentation, Architecture & Vault Sync** | Full living docs sync (`docs/01-kien-truc/`, `docs/02-crates/`, `docs/03-phat-trien-van-hanh/`), Obsidian Vault blueprint & testing guidelines sync, tech debt ledger score 100 with zero violations. | `npm run docs:check`, `npm run test:skills`, `scripts/audit-liva-skills.mjs` | **DONE** |
+| **M5: Final Acceptance Verification & Victory Gate** | Comprehensive workspace verification, empirical challenges, and forensic audit. | `cargo check -j 2`, `cargo test -j 2 -- --test-threads 2` across all 7 crates | **IN_PROGRESS** |
 
 ---
 

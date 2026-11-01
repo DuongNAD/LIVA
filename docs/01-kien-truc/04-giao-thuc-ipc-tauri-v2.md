@@ -1,7 +1,7 @@
 ---
 title: "Giao thức Giao tiếp Nội trình Tauri v2 IPC"
-updated: 2026-09-29
-commit: 25e4229
+updated: 2026-11-01
+commit: eadb605b
 status: living
 covers:
   - liva-desktop/src-tauri/src/lib.rs
@@ -78,6 +78,11 @@ Khi người dùng gửi câu hỏi cần câu trả lời dài dạng streaming
   await invoke('voice_subscribe', { channel });
   ```
 - Phía Rust lưu trữ `Channel` và bắn trực tiếp các sự kiện từ đường ống WebRTC/TTS vào UI mà không cần qua hàng đợi trung gian.
+
+### 2.4. Điều hướng Lệnh Widget Chuẩn hóa (`chat:completion` & `voice_interrupt`)
+Nhằm loại bỏ các lệnh IPC chung chung gây rủi ro bảo mật hoặc lỗi phân quyền:
+- **Nhập liệu văn bản từ Widget**: Cửa sổ widget gửi tin nhắn văn bản thông qua lệnh được định tuyến chuẩn xác `chat:completion` với payload `{ text: String, session_id: String }`, được xác thực thẩm quyền `CommandPrincipal::TauriWidget`.
+- **Ngắt lời thoại tức thì (`voice_interrupt`)**: Nút dừng âm thanh trên Widget gọi trực tiếp lệnh chuyên biệt `voice_interrupt` với payload `{ epoch_id: u32 }`, cho phép Native Core hủy ngay tiến trình TTS, xóa bộ đệm âm thanh và cập nhật trạng thái Avatar về IDLE trong dưới 10ms.
 
 ---
 

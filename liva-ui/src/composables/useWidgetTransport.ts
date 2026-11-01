@@ -91,21 +91,48 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
     const isTauri = options.platform?.platformName === 'tauri';
 
     if (isTauri) {
+      if (event === 'interrupt') {
+        const invokeArgs = { epoch_id: (payload.epoch_id as number) ?? 0 };
+        if (options.platform?.invokeBackend) {
+          options.platform
+            .invokeBackend('voice_interrupt', invokeArgs)
+            .catch((err) => {
+              logger.warn('[WidgetTransport]', 'Failed to invoke voice_interrupt:', err);
+            });
+        } else {
+          invoke('voice_interrupt', invokeArgs).catch((err) => {
+            logger.warn('[WidgetTransport]', 'Failed to invoke voice_interrupt:', err);
+          });
+        }
+        return;
+      }
+
+      let command = event;
+      let callPayload = payload;
+      if (event === 'user_voice_command') {
+        command = 'chat:completion';
+        callPayload = {
+          text: payload.text ?? '',
+          session_id: (payload.session_id as string) ?? 'default',
+          ...payload,
+        };
+      }
+
       if (options.platform?.invokeBackend) {
         options.platform
           .invokeBackend('native_ipc_call', {
-            command: event,
-            payload,
+            command,
+            payload: callPayload,
           })
           .catch((err) => {
-            logger.warn('[WidgetTransport]', `Failed to send IPC message ${event}:`, err);
+            logger.warn('[WidgetTransport]', `Failed to send IPC message ${command}:`, err);
           });
       } else {
         invoke('native_ipc_call', {
-          command: event,
-          payload,
+          command,
+          payload: callPayload,
         }).catch((err) => {
-          logger.warn('[WidgetTransport]', `Failed to send IPC message ${event}:`, err);
+          logger.warn('[WidgetTransport]', `Failed to send IPC message ${command}:`, err);
         });
       }
       return;
@@ -114,6 +141,10 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
     if (ws.value && typeof (ws.value as { send?: (d: string) => void }).send === 'function') {
       (ws.value as { send: (d: string) => void }).send(JSON.stringify({ event, payload }));
     }
+  };
+
+  const interrupt = (epochId = 0) => {
+    sendMsg('interrupt', { epoch_id: epochId });
   };
 
   const refreshPendingDraft = () => sendMsg('message:pending');
@@ -359,6 +390,7 @@ export function useWidgetTransport(options: UseWidgetTransportOptions) {
     draftBusy,
     generateMsgId,
     sendMsg,
+    interrupt,
     refreshPendingDraft,
     confirmDraft,
     cancelDraft,

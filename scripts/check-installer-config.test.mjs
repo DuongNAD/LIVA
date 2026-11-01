@@ -255,7 +255,7 @@ test('bao cao WER ghi dung sha256 graph Parakeet trong manifest', () => {
     fs.readFileSync(path.join(REPO, 'data/models-manifest.json'), 'utf8'),
   )
   const report = JSON.parse(
-    fs.readFileSync(path.join(REPO, 'docs/05-chat-luong/wer-fleurs-vi.json'), 'utf8'),
+    fs.readFileSync(path.join(REPO, 'docs/99-luu-tru/bao-cao-lich-su/wer-fleurs-vi.json'), 'utf8'),
   )
   const graph = manifest.files.find((file) => file.dest === 'models/parakeet_vi.onnx')
 

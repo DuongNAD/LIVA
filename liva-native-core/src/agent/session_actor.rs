@@ -36,7 +36,7 @@ pub const DEFAULT_COLLECT_DEBOUNCE: Duration = Duration::from_millis(350);
 pub enum SessionMessage {
     /// Execute a turn with queue mode semantics.
     ExecuteTurn {
-        request: SessionTurnRequest,
+        request: Box<SessionTurnRequest>,
         stream_tx: Option<mpsc::Sender<String>>,
         responder: oneshot::Sender<Result<SessionTurnOutput, SessionError>>,
     },
@@ -226,6 +226,7 @@ impl SessionActor {
                 stream_tx,
                 responder,
             } => {
+                let request = *request;
                 match request.queue_mode {
                     SessionQueueMode::Followup => {
                         self.handle_followup_mode(request, stream_tx, responder)
@@ -655,7 +656,7 @@ impl SessionActorHandle {
         let (responder, rx) = oneshot::channel();
         self.sender
             .send(SessionMessage::ExecuteTurn {
-                request,
+                request: Box::new(request),
                 stream_tx,
                 responder,
             })
@@ -776,5 +777,20 @@ impl SessionManager {
     pub async fn prune_closed_sessions(&self) {
         let mut map = self.sessions.write().await;
         map.retain(|_, handle| !handle.is_closed());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_message_footprint_is_bounded() {
+        let size = std::mem::size_of::<SessionMessage>();
+        assert!(
+            size <= 48,
+            "SessionMessage size is {} bytes, which exceeds the 48 bytes limit (reduced from 280+ bytes)",
+            size
+        );
     }
 }

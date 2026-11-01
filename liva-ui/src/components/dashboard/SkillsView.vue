@@ -322,11 +322,6 @@ const setSkillPolicy = (name: string, policy: SkillPolicy) => {
   gateway.sendMsg("get_skills_list");
 };
 
-// Legacy boolean toggle helper
-const toggleSkill = (name: string, currentEnabled: boolean) => {
-  setSkillPolicy(name, currentEnabled ? "block" : inferDefaultPolicy(name));
-};
-
 // Apply a specialized Agent Profile preset
 const applyAgentProfile = (profile: AgentProfilePreset) => {
   activeProfileId.value = profile.id;

@@ -285,7 +285,7 @@ impl CompactPromptAssembler {
         let mut turn_accumulator = Vec::new();
         for (i, msg) in conversation_turns.iter().enumerate().rev() {
             let is_mandatory = Some(i) == latest_user_idx;
-            let sanitized_content = if msg.role == "tool" || msg.role == "system" {
+            let sanitized_content = if msg.role != "assistant" && msg.role != "model" {
                 sanitize_untrusted(&msg.content)
             } else {
                 msg.content.clone()

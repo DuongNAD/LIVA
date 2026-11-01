@@ -741,6 +741,7 @@ const {
   draftBusy,
   generateMsgId,
   sendMsg,
+  interrupt: transportInterrupt,
   refreshPendingDraft,
   confirmDraft,
   cancelDraft,
@@ -1023,7 +1024,7 @@ const toggleVoice = () => {
 const interruptLIVA = () => {
   speaker.stop();
   voice.interrupt();
-  sendMsg('interrupt');
+  transportInterrupt(0);
 };
 
 // ═══════════════════════════════════════════════════════

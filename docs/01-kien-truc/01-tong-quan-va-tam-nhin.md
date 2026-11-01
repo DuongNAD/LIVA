@@ -1,7 +1,7 @@
 ---
 title: "Tổng quan Kiến trúc và Tầm nhìn Hệ thống LIVA"
-updated: 2026-09-29
-commit: 25e4229
+updated: 2026-11-01
+commit: eadb605b
 status: living
 covers:
   - Cargo.toml
@@ -82,3 +82,5 @@ Nhằm ngăn ngừa hiện tượng cạn kiệt bộ nhớ (OOM) hoặc gián �
 Mọi hành động có khả năng tác động đến hệ thống tệp, gửi tin nhắn ra bên ngoài hoặc điều khiển chuột bàn phím đều tuân thủ chính sách:
 - **Xác nhận hai pha (Two-Phase Confirmation / HITL)**: Hành động nhạy cảm được đưa vào trạng thái chờ duyệt (Pending Action) trên giao diện Tauri, người dùng phải chủ động nhấn xác nhận trước khi bộ điều phối chuyển lệnh cho động cơ thực thi.
 - **Sổ cái kiểm toán bất biến (Action Audit Ledger)**: Mỗi thao tác can thiệp hệ điều hành hoặc truy cập dữ liệu đều được ghi lại vào bảng `action_audit_ledger` trong SQLite WAL thông qua `DbActor`, có gắn mốc thời gian và mã định danh phiên.
+- **Cô lập Tiến trình Windows Job Object (Win32 Job Object Containment)**: Mọi tiến trình con hoặc sidecar thực thi ngoài (`WindowsProcessGuard` trong `sidecar.rs`) được khởi tạo với cờ `CREATE_SUSPENDED`, gán vào Win32 Job Object với cờ an toàn `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` và trần bộ nhớ nghiêm ngặt `JobMemoryLimit = 512MB` trước khi resume luồng chính. Đảm bảo triệt để việc triệt tiêu tiến trình con khi cha thoát và ngăn chặn tràn RAM máy chủ.
+- **Chống Tiêm nhiễm Phân cách Prompt (Prompt Delimiter Sanitizer)**: Bộ biên dịch prompt (`liva-native-core/src/llm/prompt/mod.rs`) tự động lọc và khử các token điều khiển nhạy cảm của ChatML/Gemma (`<|im_start|>`, `<|im_end|>`, `<start_of_turn>`, `<end_of_turn>`) từ dữ liệu người dùng trước khi nạp vào ngữ cảnh suy luận, vô hiệu hóa hoàn toàn nguy cơ jailbreak hoặc tấn công prompt injection.

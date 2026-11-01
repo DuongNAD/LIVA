@@ -366,7 +366,7 @@ impl MarkdownSyncManager {
                 let mut files: Vec<PathBuf> = entries
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
-                    .filter(|p| p.is_file() && p.extension().map_or(false, |ext| ext == "md"))
+                    .filter(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "md"))
                     .collect();
                 files.sort();
                 for file_path in files {
@@ -394,7 +394,7 @@ impl MarkdownSyncManager {
                 let mut files: Vec<PathBuf> = entries
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
-                    .filter(|p| p.is_file() && p.extension().map_or(false, |ext| ext == "md"))
+                    .filter(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "md"))
                     .collect();
                 files.sort();
                 for file_path in files {
@@ -422,7 +422,7 @@ impl MarkdownSyncManager {
                 let mut files: Vec<PathBuf> = entries
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
-                    .filter(|p| p.is_file() && p.extension().map_or(false, |ext| ext == "md"))
+                    .filter(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "md"))
                     .collect();
                 files.sort();
                 for file_path in files {

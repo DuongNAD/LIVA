@@ -1,7 +1,7 @@
 ---
 title: "Kiến trúc Bộ nhớ Đa tầng và Truy xuất Hỗn hợp (Hybrid RAG)"
-updated: 2026-09-29
-commit: 25e4229
+updated: 2026-11-01
+commit: eadb605b
 status: living
 covers:
   - crates/liva-storage/src/lib.rs
@@ -12,9 +12,18 @@ covers:
 
 # Kiến trúc Bộ nhớ Đa tầng và Truy xuất Hỗn hợp (Hybrid RAG)
 
-## 1. Phân tầng Bộ nhớ 4 Cấp (L0 - L3)
+## 1. Phân tầng Bộ nhớ Chuẩn Sản xuất (Working Core, Recall SQLite, Archival Vector)
 
-Hệ thống bộ nhớ của LIVA được thiết kế theo 4 tầng phân cấp tối ưu hóa tài nguyên phần cứng, cân bằng giữa tốc độ phản hồi tức thì và chiều sâu ngữ cảnh:
+Hệ thống bộ nhớ của LIVA được tổ chức thành 3 tầng sản xuất chủ đạo (tương ứng 4 cấp độ kỹ thuật L0 - L3), tối ưu hóa tài nguyên phần cứng, cân bằng giữa tốc độ phản hồi tức thì và chiều sâu ngữ cảnh:
+
+1. **Working Core (Bộ nhớ Làm việc Trực tiếp — L0/L3 RAM)**:
+   - Cây tiền tố Radix Trie `FactTrie` và `ActiveRecallManager` (< 0.1 ms) đánh chặn đối khớp từ khóa tức thì với chi phí 0 token LLM.
+   - Đồ thị tri thức HippoRAG `CsrGraph` nén CSR đọc phi khóa qua `ArcSwap` (~1.12 ms) thực thi thuật toán Personalized PageRank (PPR) 3 vòng SpMV.
+2. **Recall SQLite (Bộ nhớ Truy hồi Bền vững — L1 Transactional WAL)**:
+   - Nhóm kết nối SQLite WAL (1 writer qua `DbActor` vi lô 5ms/50 lệnh, 4 readers) quản lý toàn vẹn giao dịch và lịch sử bitemporal.
+   - Mã hóa đối xứng AES-256-GCM v2 kết hợp Argon2id và Tauri Stronghold Vault bảo vệ dữ liệu cá nhân.
+3. **Archival Vector (Bộ nhớ Lưu trữ Ngữ nghĩa Sâu — L2 Hybrid ANN/FTS5)**:
+   - Bảng ảo vector biên dịch tĩnh `sqlite-vec` (AVX2/FMA C-FFI tĩnh) kết hợp FTS5 tiếng Việt và Cross-Encoder reranker (`bge-reranker-small`) xếp hạng RRF.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐

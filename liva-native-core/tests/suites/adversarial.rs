@@ -37,3 +37,6 @@ pub mod m4_artemis_cua_mcp_adversarial_challenge;
 pub mod m4_challenger1_rule_of_two_adversarial;
 #[path = "../m4_challenger2_security_adversarial_challenge.rs"]
 pub mod m4_challenger2_security_adversarial_challenge;
+
+#[path = "../m2_challenger_prod_adversarial_suite.rs"]
+pub mod m2_challenger_prod_adversarial_suite;

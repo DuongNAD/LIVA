@@ -1,45 +1,41 @@
-# Project: LIVA SOTA Architecture Upgrade & Strategic Technology Roadmap
+# Project: LIVA Production-Ready System Upgrade
 
 ## Architecture Overview
 LIVA (**Local Intelligent Virtual Assistant**) is a privacy-first, desktop-native personal AI assistant operating on Windows 10/11 x64. The architecture is centered around a unified high-performance Rust core (`liva-native-core`), connected via native in-process IPC (`tauri::ipc::Channel`) to a Tauri v2 desktop shell (`liva-desktop`) and a Vue 3 / Three.js user interface (`liva-ui`).
 
 ### Core Architectural Pillars
-1. **Pillar 1: Multi-Agent Orchestration & Planning**: Asynchronous DAG planning (`petgraph`, `dagrs`), hierarchical reasoning (RouteLLM), Reflexion verbal self-healing, Multi-Agent Debate voting consensus, and poison-pill Dead Letter Queues (DLQ).
-2. **Pillar 2: Local Memory & Hybrid Retrieval**: Hierarchical memory (Working Core, Recall SQLite, Archival Vector), Mem0 two-phase fact extraction & reconciliation, Lock-free double-buffered HippoRAG (`ArcSwap<CsrGraph>`), dynamic Ebbinghaus decay, two-stage hybrid search (`sqlite-vec` + FTS5 + Cross-Encoder reranker), and live Obsidian PKM graph integration.
-3. **Pillar 3: Multimodal & Real-time Duplex**: Edge-optimized visual GUI grounding (ShowUI UVTS token pruning on Qwen2.5-VL-2B), SIMD screen diffing with co-scale fallback, two-stage adaptive voice turn-taking (`Smart Turn v3.2` active gate < 300ms), Sonora AEC3 + GTCRN + Silero VAD + Kokoro/Piper TTS, and multi-threaded OffscreenCanvas Three-VRM avatar kinematics.
-4. **Pillar 4: Sandboxed System Automation & Security**: Dual-layer process containment (Windows Job Objects + AppContainer for Win32 tools; Wasmtime WASI 0.2 for untrusted agent plugins), high-throughput native Rust PII scrubbing (`liva-sanitizer`, Decree 13/2023 compliant), and tiered authorization with two-phase human-in-the-loop confirmation.
+1. **Pillar 1: Multi-Agent Orchestration & Planning**: Asynchronous DAG planning (`petgraph`), hierarchical complexity routing, Reflexion self-healing, and execution integrity.
+2. **Pillar 2: Local Memory & Hybrid Retrieval**: Hierarchical memory (Working Core, Recall SQLite, Archival Vector), Mem0 bitemporal reconciliation, lock-free HippoRAG CSR matrix, dynamic Ebbinghaus decay, and two-stage hybrid search (`sqlite-vec` + FTS5 Vietnamese normalization + Cross-Encoder).
+3. **Pillar 3: Multimodal & Real-time Duplex**: Edge-optimized visual GUI grounding with SIMD diffing, two-stage adaptive voice turn-taking (`Smart Turn v3.2` active gate < 225ms), Sonora AEC3 + GTCRN + Silero VAD + VieNeu/Piper TTS, and OffscreenCanvas Three-VRM avatar kinematics.
+4. **Pillar 4: Sandboxed System Automation & Security**: Dual-layer process containment (Windows Job Objects with memory caps; fail-closed capability attenuation with BLAKE3 HMAC tokens), prompt delimiter injection sanitization, and tiered authorization with two-phase human-in-the-loop confirmation.
 
 ---
 
 ## Feature Inventory
-Every surveyed capability and optimization is indexed below with its assigned milestone.
+Every capability, hardening requirement, and bug fix from the Survey phase is indexed below with its assigned milestone.
 
 | # | Feature Key | Description | Milestone | Source |
 |---|---|---|---|---|
-| F01 | `dag-task-engine` | Asynchronous DAG task scheduler using `petgraph` & Tokio, supporting parallel fork/join execution | M1 | SOTA Survey (LangGraph, dagrs) |
-| F02 | `hierarchical-router` | RouteLLM semantic complexity routing between local SLM (3B/7B) and Cloud LLMs | M1 | SOTA Survey (RouteLLM, Stanford) |
-| F03 | `reflexion-self-healing` | Episodic verbal feedback reflection loop for automated tool retry and error recovery | M1 | SOTA Survey (Reflexion NeurIPS) |
-| F04 | `voting-consensus` | Swarm deliberation panel with Borda count / majority voting consensus for critical actions | M1 | SOTA Survey (Multiagent Debate) |
-| F05 | `task-dlq-quarantine` | Task-level Dead Letter Queue isolating poisoned tool executions into SQLite `tasks_dlq` | M1 | SOTA Survey (Temporal/Actor DLQ) |
-| F06 | `mem0-two-phase` | Two-phase cognitive extraction & deterministic reconciliation engine (ADD, UPDATE, DELETE, NOOP) | M2 | SOTA Survey (Mem0, Letta) |
-| F07 | `reflection-daemon` | Autonomous background triples extraction daemon running during system idle periods | M2 | SOTA Survey (Letta, Cognee) |
-| F08 | `ebbinghaus-dynamic-decay` | Continuous time-based memory forgetting curve discounting in RRF scoring | M2 | SOTA Survey (Generative Agents) |
-| F09 | `lock-free-csr-graph` | Lock-free double-buffered HippoRAG matrix via `ArcSwap<CsrGraph>` for non-blocking PPR | M2 | SOTA Survey (HippoRAG NeurIPS) |
-| F10 | `two-stage-hybrid-rerank` | Hybrid search (sqlite-vec + FTS5, K=60 RRF) + Stage-2 ONNX Cross-Encoder (`bge-reranker-small`) | M2 | SOTA Survey (Qdrant, ColBERT) |
-| F11 | `obsidian-pkm-sync` | Live Obsidian Vault watcher (`notify`) + AST parser (`pulldown-cmark`) mapping `[[wikilinks]]` to L3 | M2 | SOTA Survey (Obsidian Native) |
-| F12 | `sqlite-vec-static` | Static C/Rust linkage of `sqlite-vec` directly into binary, eliminating runtime `vec0.dll` dependency | M2 | LIVA Codebase Gap Analysis |
-| F13 | `showui-token-pruning` | Lightweight 2B VLM visual UI grounding with UI-Guided Visual Token Selection (UVTS 70-80% pruning) | M3 | SOTA Survey (ShowUI, UI-TARS) |
-| F14 | `simd-roi-co-scale` | SIMD screen frame diffing with dynamic bounding-box cropping and 720p/1080p fallback scaling | M3 | LIVA Codebase Gap Analysis |
-| F15 | `adaptive-turn-gate` | Two-stage adaptive voice turn-taking gate (`Smart Turn v3.2`), cutting conversational latency <300ms | M3 | SOTA Survey (Kyutai Moshi, LIVA) |
-| F16 | `full-duplex-voice` | Full-duplex audio pipeline with Sonora AEC3, GTCRN denoiser, Silero VAD, and Kokoro/Piper TTS | M3 | SOTA Survey (LiveKit, sherpa-onnx)|
-| F17 | `offscreen-avatar-worker`| Decoupled Three-VRM kinematics on OffscreenCanvas Web Worker, locking 60 FPS | M3 | SOTA Survey (Three-VRM, LIVA UI) |
-| F18 | `windows-job-sandbox` | Native Win32 Job Object containment with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` & 512MB RAM cap | M4 | SOTA Survey (Windows OS Security)|
-| F19 | `wasmtime-wasi-sandbox` | WebAssembly / WASI 0.2 capability sandboxing for untrusted agent plugins with fuel metering | M4 | SOTA Survey (Wasmtime, Bytecode) |
-| F20 | `native-pii-sanitizer` | High-throughput pure Rust PII scrubber (`liva-sanitizer`, <1.5ms, Decree 13/2023 compliant) | M4 | SOTA Survey (Presidio, LLM Guard)|
-| F21 | `tiered-hitl-auth` | Window-scoped `CommandPrincipal` tiered authorization with interactive two-phase confirmation | M4 | LIVA Codebase Audit |
-| F22 | `retire-websocket` | Complete retirement of internal loopback `websocket.rs` in favor of native Tauri v2 IPC channels | M5 | LIVA Codebase Gap Analysis |
-| F23 | `ram-guardrails-4gb` | Comprehensive hardware governor ensuring steady-state RAM < 4.0GB and VRAM < 6.0GB on Windows | M5 | System Resource Requirement |
-| F24 | `oss-license-guardrails`| Strict `deny.toml` open-source license audit (MIT/Apache-2.0 pass, copyleft isolation, eSpeak removal)| M5 | System Legal Compliance |
+| F01 | `desktop-ts-build-fix` | Fix TS6133 unused `toggleSkill` in `SkillsView.vue:326` to unblock `vue-tsc -b` and packaging | M1 | Desktop Survey |
+| F02 | `widget-text-ipc-routing` | Remap widget message input from rejected `user_voice_command` to authorized `chat:completion` | M1 | Desktop Survey |
+| F03 | `widget-interrupt-ipc` | Remap widget voice stop button from failing generic IPC to dedicated `voice_interrupt` Tauri command | M1 | Desktop Survey |
+| F04 | `script-test-path-sync` | Fix documentation path drifts in maintenance tests (`docs-citations`, `check-installer-config`, `wake-ux-copy`) | M1 | Test Survey |
+| F05 | `desktop-packaging-verify` | Verify `npm test -w liva-ui`, `npm run build:ui`, `npm run check:installer`, `npm run test:installer` 100% pass | M1 | Desktop/Test Survey |
+| F06 | `jobobject-security-hardening`| Harden `WindowsProcessGuard` in `sidecar.rs` with `CREATE_SUSPENDED` and memory caps | M2 | Core Survey |
+| F07 | `prompt-delimiter-sanitizer` | Sanitize ChatML/Gemma control tokens in prompt compilation to prevent delimiter injection | M2 | Core Survey |
+| F08 | `agent-stub-cleanup` | Eliminate mock stub in `agent/dispatcher.rs` and cleanly integrate production pipeline | M2 | Core Survey |
+| F09 | `session-actor-boxing` | Box `SessionTurnRequest` in `SessionMessage::ExecuteTurn` to reduce enum variant footprint and channel churn | M2 | Core/Test Survey |
+| F10 | `abandoned-crate-cleanup` | Remove abandoned empty directory `crates/liva-voice/` and clean unlinked artifacts | M2 | Core Survey |
+| F11 | `core-types-clippy-polish` | Fix `clippy::derivable_impls` and add `# Safety` doc comment to `unwrap_unchecked` in `liva-core-types` | M3 | Test Survey |
+| F12 | `native-core-clippy-polish`| Fix `clippy::new_without_default`, `too_many_arguments`, and `needless_bool` across `liva-native-core` | M3 | Test Survey |
+| F13 | `storage-deprecation-cleanup`| Update deprecated `ActiveRecallManager` imports in `crates/liva-storage/tests` to use canonical path | M3 | Core/Test Survey |
+| F14 | `zero-warning-clippy-gate` | Ensure `cargo clippy -j 2` exits with 0 warnings across the entire workspace | M3 | System Requirement R3 |
+| F15 | `doc-architecture-sync` | Synchronize `docs/01-kien-truc/`, `docs/02-crates/`, and `docs/03-phat-trien-van-hanh/` with production code | M4 | System Requirement R4 |
+| F16 | `obsidian-vault-sync` | Update Obsidian Vault (`teamwork_projects/obsidian_llm_wiki/vault/`) architecture blueprints and testing guide | M4 | System Requirement R4 |
+| F17 | `tech-debt-ledger-sync` | Update `tech-debt-ledger.json` and historical logs reflecting resolved debt items | M4 | System Requirement R4 |
+| F18 | `full-workspace-check` | Comprehensive verification: `cargo check -j 2` and `cargo test -j 2 -- --test-threads 2` across all 7 crates | M5 | Acceptance Criteria |
+| F19 | `e2e-quality-assurance` | Independent QA and empirical challenge across desktop shell, IPC, memory, voice, and sandbox | M5 | Acceptance Criteria |
+| F20 | `forensic-integrity-audit` | Independent Forensic Auditor verification enforcing zero-cheating benchmark integrity | M5 | Acceptance Criteria |
 
 ---
 
@@ -47,52 +43,45 @@ Every surveyed capability and optimization is indexed below with its assigned mi
 
 | # | Name | Scope & Deliverable Focus | Dependencies | Status |
 |---|---|---|---|---|
-| M1 | Multi-Agent Orchestration & Planning | Technical architecture and design for dynamic DAGs, RouteLLM, Reflexion loops, voting consensus, and DLQ (F01–F05) | Survey complete | DONE |
-| M2 | Local Memory, Hybrid Retrieval & PKM | Architecture and specs for static `sqlite-vec`, Mem0 reconciliation, Lock-free `CsrGraph`, Dynamic Ebbinghaus, Cross-Encoder, and Obsidian sync (F06–F12) | Survey complete | DONE |
-| M3 | Multimodal, Duplex Voice & 3D Avatar | Architecture and design for ShowUI token pruning, Smart Turn active gate, full-duplex voice pipeline, and OffscreenCanvas avatar (F13–F17) | Survey complete | DONE |
-| M4 | Sandboxed Automation, PII & Security | Architecture and specs for Windows Job Objects, Wasmtime WASI sandbox, `liva-sanitizer`, and tiered HITL authorization (F18–F21) | Survey complete | DONE |
-| M5 | Master Technical Report & Strategic Roadmap | Authoritative technical deliverables in `docs/` and Obsidian Vault, Mermaid diagrams, Feature & Performance Matrix, Phased Implementation Roadmap, and Backlog items (F22–F24, all pillars synthesized) | M1, M2, M3, M4 | DONE |
+| M1 | Desktop Shell, UI & IPC Production Readiness | Fix build blockers (`SkillsView.vue`), fix Widget IPC routing (`chat:completion`, `voice_interrupt`), fix script tests, unblock desktop packaging (F01–F05) | Survey complete | DONE |
+| M2 | Rust Native Core & Security Hardening | Harden Windows JobObject, sanitize prompt delimiters, eliminate agent stubs, box session actor enum, clean abandoned directories (F06–F10) | Survey complete | DONE |
+| M3 | Code Quality, Clippy Linters & Tech Debt | Fix Clippy warnings in `liva-core-types` and `liva-native-core`, fix storage test deprecation warnings, achieve 0 warnings (F11–F14) | M1, M2 | DONE |
+| M4 | Documentation, Architecture & Vault Sync | Synchronize technical documentation in `docs/` and Obsidian Vault, update tech debt ledger and testing guidelines (F15–F17) | M1, M2, M3 | DONE |
+| M5 | Final Acceptance Verification & Victory Gate | Comprehensive workspace check, test execution across all crates, independent review, empirical challenge, and forensic audit (F18–F20) | M1, M2, M3, M4 | DONE |
 
 ---
 
 ## Interface Contracts
 
-### 1. Swarm Orchestrator ↔ Specialized Agent Worker
-- **Channel**: Async MPSC `tokio::sync::mpsc::channel(32)`
-- **Request**: `TaskExecutionRequest { task_id: Uuid, parent_task_id: Option<Uuid>, prompt: String, allowed_tools: Vec<ToolDefinition>, timeout_ms: u64 }`
-- **Response**: `TaskExecutionResult { task_id: Uuid, status: TaskStatus, output_artifacts: Vec<Artifact>, error: Option<TaskError>, execution_trace: ExecutionTrace }`
-- **Error Handling**: On failure, retry with `ReflexionCritique`. If max retries ($N=3$) exceeded, push to `DeadLetterQueue` and mark dependent nodes as `Blocked`.
+### 1. Desktop UI (Widget) ↔ Tauri Native IPC Channel
+- **Contract**:
+  - Text Prompt Input: Must invoke `chat:completion` with payload `{ text: String, session_id: String }` instead of unmapped `user_voice_command`.
+  - Voice Interrupt: Must invoke `voice_interrupt` with payload `{ epoch_id: u32 }` instead of generic `native_ipc_call('interrupt')`.
+- **Security**: Must pass `authorize_tauri_principal` under `CommandPrincipal::TauriWidget`.
 
-### 2. Retrieval Engine ↔ SQLite Storage Actor
-- **Channel**: Actor command channel with `tokio::sync::oneshot::channel()`
-- **Request**: `StorageQuery::HybridSearch { query: String, dense_vector: Vec<f32>, top_k: usize, rrf_k: f32, decay_alpha: f32 }`
-- **Response**: `Vec<ScoredDocument { id: String, content: String, score: f32, metadata: serde_json::Value }`
-- **Concurrency**: Lock-free reads via SQLite WAL; single-writer actor for mutations with micro-batching.
+### 2. LLM Engine ↔ Process Sandbox Boundary
+- **Contract**:
+  - `WindowsProcessGuard`: Must spawn sub-processes with `CREATE_SUSPENDED`, assign to Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and `JobMemoryLimit = 512MB`, before resuming main thread.
+  - Prompt Template Compiler: Must escape or strip delimiter tokens (`<|im_start|>`, `<|im_end|>`, `<start_of_turn>`, `<end_of_turn>`) from user-supplied message strings before interpolating into prompt strings.
 
-### 3. Voice Pipeline ↔ Tauri Desktop Shell
-- **Channel**: `tauri::ipc::Channel<VoiceIpcEvent>`
-- **Events**:
-  - `VoiceIpcEvent::UserSpeechStarted { timestamp_ms: u64 }`
-  - `VoiceIpcEvent::VisemeChunk { viseme_id: u8, duration_ms: u32, blendshapes: [f32; 52] }`
-  - `VoiceIpcEvent::BargeInInterrupt { epoch_id: u32 }`
-- **Guarantees**: Binary stream over memory buffer; latency < 20ms; dropped frames handled via epoch tracking.
-
-### 4. Sandboxed Tool Execution ↔ Host OS Driver
-- **Channel**: Isolated WASI or Job Object boundary
-- **Contract**: `SandboxRunner::execute(wasm_bytes: &[u8], fuel_limit: u64, memory_limit_bytes: usize, stdin: &[u8]) -> Result<ExecutionResult, SandboxViolation>`
-- **Guarantees**: Memory cap strictly enforced (64MB for Wasm, 512MB for Win32 process); child processes killed immediately on close.
+### 3. Session Actor Channel Contract
+- **Contract**:
+  - Channel: `tokio::sync::mpsc::channel<SessionMessage>(32)`
+  - Message: `SessionMessage::ExecuteTurn(Box<SessionTurnRequest>)` ensuring size of variant $\le 32$ bytes.
 
 ---
 
 ## Code Layout
 - `liva-native-core/`: Core Rust engine (daemon, pipeline, db, webrtc, stt, tts, cua, authorization)
-  - `src/agent/`: Swarm DAG orchestrator, state machine, reflection, consensus
+  - `src/agent/`: Swarm DAG orchestrator, state machine, reflection, session actor
   - `src/db/`: Micro-batched SQLite WAL connection pool, `CsrGraph` HippoRAG, hybrid search
   - `src/webrtc/`: Sonora AEC3, GTCRN denoiser, Silero VAD, Smart Turn v3.2
-  - `src/evolution/`: Wasmtime WASI sandbox and automated tool verification
+  - `src/llm/`: Llama/sidecar process runner, tool insurance, prompt compilation
+- `crates/liva-core-types/`: Core domain types, capabilities, error definitions
 - `crates/liva-storage/`: Unified transactional storage, schema migrations, and embedded vector virtual tables
 - `crates/liva-cua/`: Computer-Use Agent Win32 driver, SIMD frame diffing, kill-switch
 - `crates/liva-tools/`: Operating system tools, web tools, and sandboxed runner
+- `crates/liva-llm/`: LLM actor and prompt engineering utilities
 - `liva-desktop/src-tauri/`: Tauri v2 desktop application, window management, native IPC channels
 - `liva-ui/`: Vue 3 + Three.js frontend, OffscreenCanvas 3D avatar worker, audio capture worklet
 - `docs/`: Master architectural specifications, benchmarking reports, and implementation roadmaps

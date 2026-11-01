@@ -1,7 +1,7 @@
 ---
 title: "Tài liệu Kỹ thuật Crate: liva-native-core"
-updated: 2026-09-29
-commit: 25e4229
+updated: 2026-11-01
+commit: eadb605b
 status: living
 covers:
   - liva-native-core/Cargo.toml
@@ -87,3 +87,15 @@ Hàm `handle_command_as` tiếp nhận lệnh từ tầng IPC hoặc CLI, xác t
 4. **Cổng ngắt lượt thích ứng (Smart Turn v3.2)**: Phân loại trạng thái ngập ngừng hay dứt câu để quyết định thời điểm trợ lý phản hồi ($T_{\text{gate}} \le 225\text{ ms}$).
 5. **Nhận dạng giọng nói (Parakeet STT)**: Chuyển đổi âm thanh thành văn bản thời gian thực.
 6. **Tổng hợp âm thanh (VieNeu / Piper TTS)**: Sinh sóng âm và xuất kèm luồng viseme đồng bộ khẩu hình 3D avatar.
+
+---
+
+## 6. Bảo mật Tiến trình và Tối ưu Hóa Kênh Truyền (Security & Actor Hardening)
+
+1. **Cách ly Tiến trình Phụ bằng Win32 Job Object (`sidecar.rs`)**:
+   - Mọi tiến trình phụ (sidecar runner, tiến trình con) được bọc trong `WindowsProcessGuard`.
+   - Tiến trình được spawn với cờ `CREATE_SUSPENDED`, gán ngay lập tức vào Win32 Job Object cấu hình `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` và trần bộ nhớ tối đa `JobMemoryLimit = 512MB` trước khi resume luồng chính. Đảm bảo loại bỏ hoàn toàn race window và ngăn ngừa rò rỉ tiến trình zombie.
+2. **Khử Phân cách Điều khiển Prompt (`llm/prompt/mod.rs`)**:
+   - Trình biên dịch prompt lọc bỏ các delimiter đặc biệt (`<|im_start|>`, `<|im_end|>`, `<start_of_turn>`, `<end_of_turn>`) trước khi nội dung do người dùng cung cấp được ráp vào mẫu prompt ChatML hoặc Gemma.
+3. **Đóng gói Thông điệp Session Actor (`agent/session_actor.rs`)**:
+   - Biến thể `SessionMessage::ExecuteTurn(Box<SessionTurnRequest>)` được đóng gói trong `Box` nhằm giảm kích thước footprint của enum xuống $\le 32$ bytes, tối ưu hóa lưu lượng truyền tải trên kênh `tokio::sync::mpsc::channel(32)`.

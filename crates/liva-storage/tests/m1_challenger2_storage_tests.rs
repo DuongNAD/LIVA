@@ -7,6 +7,8 @@
 //! 2. register_sqlite_vec: Concurrency stress across multiple threads with OnceLock;
 //!    ensure no double initialization, data races, or memory leaks occur.
 
+#![allow(deprecated)]
+
 use liva_storage::{
     ActiveRecallManager, FactChallenge, register_connection_sqlite_vec, register_sqlite_vec,
 };

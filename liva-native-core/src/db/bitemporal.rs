@@ -38,6 +38,7 @@ impl FactOrigin {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "explicit" => Self::Explicit,
@@ -66,6 +67,7 @@ impl FactScope {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "personal" => Self::Personal,
@@ -150,6 +152,7 @@ impl FactSensitivity {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "public" => Self::Public,
@@ -213,12 +216,12 @@ impl BitemporalFact {
 
     /// Evaluates if this fact was valid in the real world at timestamp `t_world`.
     pub fn is_valid_at_world_time(&self, t_world: i64) -> bool {
-        self.valid_from <= t_world && self.valid_to.map_or(true, |end| t_world < end)
+        self.valid_from <= t_world && self.valid_to.is_none_or(|end| t_world < end)
     }
 
     /// Evaluates if this fact was known to the system at transaction timestamp `t_sys`.
     pub fn is_active_at_system_time(&self, t_sys: i64) -> bool {
-        self.recorded_at <= t_sys && self.expired_at.map_or(true, |exp| t_sys < exp)
+        self.recorded_at <= t_sys && self.expired_at.is_none_or(|exp| t_sys < exp)
     }
 }
 
@@ -385,6 +388,7 @@ pub fn init_bitemporal_schema(conn: &Connection) -> SqlResult<()> {
 // ============================================================================
 
 /// Ingests a raw evidence string into `evidence_log` with NFC normalization and BLAKE3 content-addressing.
+#[allow(clippy::too_many_arguments)]
 pub fn ingest_evidence(
     conn: &Connection,
     raw_text: &str,
@@ -849,6 +853,7 @@ pub fn insert_active_fact(
 /// 2. If `old_fact_id` does not exist or is already closed, an error is returned before any mutations.
 /// 3. Maintains the singleton invariant: exactly one active fact exists for `(subject, predicate, scope)`.
 /// 4. Lineage: old fact's `superseded_by` points to `new_fact_id`, and `fact_evidence` is linked if provided.
+#[allow(clippy::too_many_arguments)]
 pub fn atomic_supersede_fact(
     conn: &Connection,
     old_fact_id: &str,

@@ -1,7 +1,7 @@
 ---
 title: "Quy trình Sao lưu và Sổ tay Xử lý Sự cố"
-updated: 2026-09-29
-commit: 25e4229
+updated: 2026-11-01
+commit: eadb605b
 status: living
 covers:
   - liva-native-core/src/persistence_backup.rs

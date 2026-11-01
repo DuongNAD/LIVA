@@ -3,17 +3,26 @@ title: "testing_guidelines"
 tags:
   - liva/knowledge
 author: "worker"
-last_update: "2026-07-28T00:00:00+07:00"
+last_update: "2026-11-01T04:10:00+07:00"
 ---
 
 # Knowledge: Testing Guidelines
 
-## Test layers
+## Test layers & Canonical Commands
 
-- Rust native core: `cargo test` for unit and integration behavior; run `cargo check --all-targets` and Clippy for compile/lint gates.
-- Vue/TypeScript UI: Vitest for units, TypeScript type-checking, ESLint, and Playwright for user-visible end-to-end flows.
-- Obsidian MCP and Node maintenance scripts: Node's test runner or the package's existing Vitest suite.
-- Python voice training utilities: Pytest with local fixtures for offline utilities (`liva-voice`); never call paid or live external APIs.
+- **Rust Workspace (7 crates)**:
+  - Canonical test runner: `cargo test -j 2 -- --test-threads 2` across all workspace crates (`liva-native-core`, `liva-desktop`, `liva-core-types`, `liva-storage`, `liva-llm`, `liva-cua`, `liva-tools`).
+  - Strict compile gate: `cargo check --workspace -j 2`.
+  - Zero-warning linter gate: `cargo clippy -j 2` (must exit with 0 warnings across all crates).
+- **Vue 3 / TypeScript UI (`liva-ui`)**:
+  - Unit & composable tests: `npm test -w liva-ui` (Vitest suite).
+  - TypeScript build verification: `npm run build:ui` (`vue-tsc -b` and Vite bundle).
+- **Desktop Shell & Installer (`liva-desktop`)**:
+  - Installer verification: `npm run check:installer` and `npm run test:installer`.
+- **Documentation & Maintenance Tools**:
+  - Documentation integrity: `npm run docs:check`.
+  - Skills & governance audit: `node scripts/audit-liva-skills.mjs` and `npm run test:skills`.
+  - Note: All legacy Python `liva-voice` services have been completely retired; all voice DSP and wake-word logic runs natively in the Rust binary.
 
 Use the command already declared by the owning workspace instead of inventing a parallel test harness.
 

@@ -6,6 +6,10 @@ All notable changes to LIVA are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Licence: LIVA is now dual-licensed under MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`). It replaces the Personal & Internal Use License. Forks and Pull Requests are accepted.
+
 ## [1.0.0] - 2026-08-03
 
 ### Added

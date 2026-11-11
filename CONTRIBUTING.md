@@ -1,13 +1,15 @@
 # Contributing to LIVA
 
-Feedback and issue reports are welcome.
+Feedback, issue reports and Pull Requests are welcome.
 
-LIVA is currently distributed under a [Personal & Internal Use License](LICENSE). It permits private modification for personal or internal use and prohibits redistribution of original or modified source code. For that reason, public forks or Pull Requests are not accepted under the current license.
+LIVA's source code and documentation are dual-licensed under the [MIT License](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your option. Forks are allowed under either licence.
 
 You may:
 
 - open an Issue describing a reproducible bug;
-- propose a feature or performance improvement without attaching redistributed LIVA source code;
-- modify your own copy within the scope granted by the license.
+- propose a feature or performance improvement;
+- open a Pull Request from a fork.
 
-Do not publish or share original or modified LIVA source code with an Issue. If the licensing policy changes, this file will be updated before code contributions are accepted.
+Unless you state otherwise, any contribution you intentionally submit for inclusion in LIVA is dual-licensed as above, without additional terms or conditions.
+
+Do not add third-party model weights, voices, avatars or datasets to a Pull Request. They keep the licence of their publisher and are downloaded separately (see [`models/README.md`](models/README.md)).

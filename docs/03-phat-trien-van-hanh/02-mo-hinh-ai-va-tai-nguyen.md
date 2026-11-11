@@ -1,6 +1,6 @@
 ---
 title: "Quản lý Mô hình AI và Kiểm định Tài nguyên"
-updated: 2026-11-01
+updated: 2026-11-11
 commit: eadb605b
 status: living
 covers:
@@ -18,8 +18,9 @@ LIVA sử dụng sự kết hợp giữa các mô hình ngôn ngữ lớn (GGUF 
 │                     HỆ THỐNG MÔ HÌNH AI                     │
 ├─────────────────────────────────────────────────────────────┤
 │ 1. MÔ HÌNH NGÔN NGỮ LỚN & THỊ GIÁC (GGUF / llama.cpp)       │
-│    - Chat / Lập luận: Qwen2.5-7B-Instruct (Q4_K_M, ~4.5 GB) │
-│    - Thị giác máy tính: Qwen3-VL-2B (Q4_K_M, ~1.5 GB)       │
+│    - Chat: gemma-4-E4B-it-qat (UD-Q4_K_XL, 4.2 GB)          │
+│    - Thị giác: mmproj-F16 của gemma-4-E4B (0.99 GB)         │
+│    - Thay thế: Qwen3-VL-2B-Instruct (Q4_K_M, 1.1 GB)        │
 │    - Lưu trữ tại: Thư mục mô hình ngoài (ví dụ E:\AI_Models) │
 ├─────────────────────────────────────────────────────────────┤
 │ 2. MÔ HÌNH XỬ LÝ TÍN HIỆU & EMBEDDING (ONNX Runtime)        │

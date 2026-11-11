@@ -11,7 +11,7 @@
   [![RAM Ceiling](https://img.shields.io/badge/RAM%20Ceiling-%E2%89%A4%204.0%20GB-brightgreen.svg)](docs/03-phat-trien-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md)
   [![VRAM Ceiling](https://img.shields.io/badge/VRAM%20Ceiling-%E2%89%A4%205.1%20GB-brightgreen.svg)](docs/03-phat-trien-van-hanh/02-mo-hinh-ai-va-tai-nguyen.md)
   [![CI/CD](https://img.shields.io/badge/CI%2FCD-4--Job%20Parallel%20DAG-brightgreen.svg)](.github/workflows/test.yml)
-  [![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE)
+  [![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-blue.svg)](#licensing--usage-terms)
 
 </div>
 
@@ -223,7 +223,7 @@ $env:LIVA_LLM_N_GPU_LAYERS = "99"
 # Context window token budget (default: 4096)
 $env:LIVA_LLM_N_CTX = "4096"
 
-# Voice wake mode: "asr_prefix" (default) or "wakeword"
+# Voice wake mode: "off" (default), "asr_prefix", "trained_model" or "hybrid"
 $env:LIVA_WAKE_MODE = "asr_prefix"
 
 # Optional: Number of SQLite read connections in the pool (default: 4)
@@ -294,6 +294,8 @@ npx tauri build -- --features cuda
 
 Forensic audit comparison between LIVA's legacy monolithic prototype and the modern Multi-Crate Workspace architecture:
 
+> **Source.** Figures such as 94.34 GB and 106 binaries appear in the archived proposal [`architecture_remake_proposal.md`](docs/99-luu-tru/bao-cao-lich-su/architecture_remake_proposal.md) of 2026-09-19. This README links no measurement record for the "Multi-Crate Architecture" column.
+
 | Metric | Legacy Monolith | Multi-Crate Architecture | Measured Improvement |
 |---|---|---|---|
 | **Local `target/` Build Cache** | **94.34 GB** (9,772 artifacts) | **$< 12.0\text{ GB}$** | **87.3% disk reduction** |
@@ -316,6 +318,7 @@ LIVA maintains comprehensive, living documentation organized into clean function
 | Tier | Directory / File | Description |
 |---|---|---|
 | 📑 **Master Index** | [`docs/README.md`](docs/README.md) | Central entry point and navigation directory for all technical documentation. |
+| 🧭 **Goals & Roadmap** | [`ROADMAP.md`](ROADMAP.md) | Purpose, direction, technology choices and the roadmap (draft, in Vietnamese). |
 | 🏛️ **Architecture & Principles** | [`docs/01-kien-truc/`](docs/01-kien-truc/) | High-level system architecture, cognitive design, memory, and communication. |
 | ↳ *System Overview & Vision* | [`docs/01-kien-truc/01-tong-quan-va-tam-nhin.md`](docs/01-kien-truc/01-tong-quan-va-tam-nhin.md) | Vision, local-first philosophy, and multi-crate workspace structure. |
 | ↳ *Cognitive Actor Principles* | [`docs/01-kien-truc/02-nguyen-ly-cognitive-actor.md`](docs/01-kien-truc/02-nguyen-ly-cognitive-actor.md) | Native Actor Concurrency, Perception $\to$ Policy $\to$ Action cycle, and HITL safety. |
@@ -368,8 +371,9 @@ Lead Architect & Developer of LIVA
 
 ### Licensing & Usage Terms
 
-- **Workspace Crates**: The core architectural library crates (`crates/liva-core-types`, `crates/liva-storage`, `crates/liva-llm`, `crates/liva-tools`, `crates/liva-cua`) are licensed under either the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0) or the [MIT License](http://opensource.org/licenses/MIT) at your option.
-- **Application Distribution**: The compiled desktop application binary and user interface are protected under the **Personal & Internal Use License**. You are permitted to download, build, and use LIVA for personal and internal research. Commercial SaaS hosting, public redistribution, and unlicensed resale are strictly prohibited. Refer to [`LICENSE`](LICENSE) for complete legal terms.
+- **Source code and documentation**: Everything in this repository that the LIVA author wrote is dual-licensed under the [MIT License](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your option. You may use, modify and redistribute it under either licence.
+- **Third-party models and assets**: Model weights, voices, avatars and datasets are not covered by these licences. Weights are downloaded separately (see [`models/README.md`](models/README.md)). A few third-party assets are stored in this repository, for example the Live2D runtime (`liva-ui/public/assets/live2d.min.js`) and the `pio` Live2D model (`liva-ui/public/assets/models/pio/`). Each keeps the terms of its publisher.
+- **Contributions**: Forks and Pull Requests are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: "Cấu hình Hệ thống và Danh mục Biến Môi trường"
-updated: 2026-11-01
+updated: 2026-11-11
 commit: eadb605b
 status: living
 covers:
@@ -50,7 +50,7 @@ covers:
 
 | Tên biến | Kiểu giá trị | Mặc định | Ý nghĩa & Hướng dẫn |
 |---|---|---|---|
-| `LIVA_WAKE_MODE` | `none`, `vi`, `en`| `vi` | Chế độ nhận diện từ khóa kích hoạt: `vi` ("LIVA ơi"), `en` ("Hey LIVA") hoặc `none` (chỉ bấm mic). |
+| `LIVA_WAKE_MODE` | `off`, `asr_prefix`, `trained_model`, `hybrid` | `off` | Chế độ đánh thức bằng giọng nói: `asr_prefix` (so cụm từ đánh thức qua nhận dạng giọng nói), `trained_model` (bộ phân loại wake-word, cần `LIVA_WAKE_MODEL_PATHS`), `hybrid` (cả hai) hoặc `off` (chỉ bấm mic). |
 | `LIVA_VAD_THRESHOLD` | Float `0.0 - 1.0` | `0.5` | Ngưỡng xác suất phát hiện tiếng nói của Silero VAD. |
 | `LIVA_SMART_TURN_GATE` | Số nguyên (ms) | `225` | Trần độ trễ quyết định ngắt lượt của cổng `Smart Turn v3.2`. |
 
@@ -63,7 +63,7 @@ covers:
 # Thiết lập biến môi trường cục bộ trong phiên PowerShell hiện tại
 $env:LIVA_DB_PATH = "$PWD\data\liva_dev.db"
 $env:LIVA_LLM_N_GPU_LAYERS = "28"
-$env:LIVA_WAKE_MODE = "vi"
+$env:LIVA_WAKE_MODE = "asr_prefix"
 $env:RUST_LOG = "info,liva_native_core=debug,liva_storage=debug"
 
 # Khởi động ứng dụng kiểm tra

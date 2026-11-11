@@ -6,7 +6,13 @@ All notable changes to LIVA are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Licence: LIVA is now dual-licensed under MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`). It replaces the Personal & Internal Use License. Forks and Pull Requests are accepted.
+
 ## [1.0.0] - 2026-08-03
+
+No `v1.0.0` tag or GitHub release has been published. The only tag in the repository is `demo-2026-07`.
 
 ### Added
 
@@ -29,5 +35,4 @@ All notable changes to LIVA are documented in this file. The format follows
 - The Windows installer is not yet code-signed, so Windows may display a
   publisher/reputation warning.
 
-[Unreleased]: https://github.com/DuongNAD/LIVA/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/DuongNAD/LIVA/releases/tag/v1.0.0
+[Unreleased]: https://github.com/DuongNAD/LIVA/commits/main

@@ -68,5 +68,6 @@ docs/
 ## 3. Nguồn Sự thật Duy nhất (Single Source of Truth)
 
 Ngoài hệ thống tài liệu Markdown kỹ thuật trong thư mục `docs/`, các hướng dẫn chi tiết về tiêu chuẩn viết mã, quy tắc an toàn git và kho tri thức ngữ nghĩa của các Agent được đồng bộ tại:
+- **Kế hoạch đang hiệu lực**: [`ROADMAP.md`](../ROADMAP.md) ở gốc kho mã: mục đích, hướng đi, công nghệ và lộ trình KH-1 tới KH-10.
 - **Obsidian Vault**: `teamwork_projects/obsidian_llm_wiki/vault`
 - **Tài liệu tham khảo lịch sử**: Toàn bộ các kế hoạch đã hoàn thành và tài liệu thời kỳ kiến trúc cũ được cô lập tại [docs/99-luu-tru/README.md](99-luu-tru/README.md).

@@ -318,6 +318,7 @@ LIVA maintains comprehensive, living documentation organized into clean function
 | Tier | Directory / File | Description |
 |---|---|---|
 | 📑 **Master Index** | [`docs/README.md`](docs/README.md) | Central entry point and navigation directory for all technical documentation. |
+| 🧭 **Goals & Roadmap** | [`ROADMAP.md`](ROADMAP.md) | Purpose, direction, technology choices and the roadmap (draft, in Vietnamese). |
 | 🏛️ **Architecture & Principles** | [`docs/01-kien-truc/`](docs/01-kien-truc/) | High-level system architecture, cognitive design, memory, and communication. |
 | ↳ *System Overview & Vision* | [`docs/01-kien-truc/01-tong-quan-va-tam-nhin.md`](docs/01-kien-truc/01-tong-quan-va-tam-nhin.md) | Vision, local-first philosophy, and multi-crate workspace structure. |
 | ↳ *Cognitive Actor Principles* | [`docs/01-kien-truc/02-nguyen-ly-cognitive-actor.md`](docs/01-kien-truc/02-nguyen-ly-cognitive-actor.md) | Native Actor Concurrency, Perception $\to$ Policy $\to$ Action cycle, and HITL safety. |

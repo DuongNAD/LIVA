@@ -223,7 +223,7 @@ $env:LIVA_LLM_N_GPU_LAYERS = "99"
 # Context window token budget (default: 4096)
 $env:LIVA_LLM_N_CTX = "4096"
 
-# Voice wake mode: "asr_prefix" (default) or "wakeword"
+# Voice wake mode: "off" (default), "asr_prefix", "trained_model" or "hybrid"
 $env:LIVA_WAKE_MODE = "asr_prefix"
 
 # Optional: Number of SQLite read connections in the pool (default: 4)
@@ -293,6 +293,8 @@ npx tauri build -- --features cuda
 ## Quantitative Architectural Benchmarks
 
 Forensic audit comparison between LIVA's legacy monolithic prototype and the modern Multi-Crate Workspace architecture:
+
+> **Source.** Figures such as 94.34 GB and 106 binaries appear in the archived proposal [`architecture_remake_proposal.md`](docs/99-luu-tru/bao-cao-lich-su/architecture_remake_proposal.md) of 2026-09-19. This README links no measurement record for the "Multi-Crate Architecture" column.
 
 | Metric | Legacy Monolith | Multi-Crate Architecture | Measured Improvement |
 |---|---|---|---|

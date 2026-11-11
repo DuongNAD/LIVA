@@ -1,6 +1,6 @@
 ---
 title: "Mục lục Tổng quan Hệ thống Tài liệu Kỹ thuật LIVA"
-updated: 2026-09-29
+updated: 2026-11-11
 commit: 25e4229
 status: index
 covers:
@@ -11,7 +11,7 @@ covers:
 
 Chào mừng bạn đến với hệ thống tài liệu kỹ thuật chính thức của dự án **LIVA (Local Intelligent Virtual Assistant)**.
 
-Hệ thống tài liệu được tổ chức theo mô hình **4 Tầng Chuẩn hóa (4-Tier Documentation Structure)** bằng tiếng Việt kỹ thuật chuẩn, phản ánh chính xác 100% hiện trạng mã nguồn thực tế của kiến trúc Rust Native Multi-Crate Workspace và vỏ ứng dụng máy tính Tauri v2.
+Hệ thống tài liệu được tổ chức theo mô hình **4 Tầng Chuẩn hóa (4-Tier Documentation Structure)** bằng tiếng Việt kỹ thuật chuẩn, mô tả hiện trạng mã nguồn của kiến trúc Rust Native Multi-Crate Workspace và vỏ ứng dụng máy tính Tauri v2.
 
 ---
 

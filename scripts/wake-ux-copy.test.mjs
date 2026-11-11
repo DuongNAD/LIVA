@@ -26,6 +26,10 @@ test('trang thử microphone dùng câu bắt đầu bằng Hey Liva và không 
 test('README beta cấu hình voice wake mode và pipeline âm thanh', async () => {
   const readme = await readRepoFile('README.md')
 
-  assert.match(readme, /Voice wake mode: "asr_prefix" \(default\) or "wakeword"/u)
+  // Các giá trị và mặc định theo `liva-native-core/src/wake.rs` (WakeGate::from_env).
+  assert.match(
+    readme,
+    /Voice wake mode: "off" \(default\), "asr_prefix", "trained_model" or "hybrid"/u,
+  )
   assert.match(readme, /\$env:LIVA_WAKE_MODE = "asr_prefix"/u)
 })
